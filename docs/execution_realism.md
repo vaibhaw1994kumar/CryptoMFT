@@ -340,6 +340,15 @@ reserved / available base and quote):
   `PRE_FUNDED_INVENTORY_NO_REBALANCING`: there are no inter-venue transfers,
   so one-directional trading eventually exhausts a venue's base.
 
+`config/research.json` and `config/paper_watch.json` use `pre_funded` with
+0.05 BTC per venue plus the 10,000 USDT `initial_capital_by_venue`. On the
+recorded cycles 0006-0010 this refuses nothing (the 0.001 BTC basis
+mean-reversion trades alternate direction; base drifts by <= 0.007 BTC per
+30-minute cycle), so results match the unconstrained runs. A persistently
+one-directional cross-venue arb (0.010 BTC) drains a venue after five
+packages, after which every later package needing to sell there is refused,
+including other strategies' exits sharing the account.
+
 Known gaps: quote reservation excludes fees; risk-reducing unwind orders are
 not blocked by inventory; a package's reservation is held until the plan
 closes, so balances are briefly double-counted between fill and close

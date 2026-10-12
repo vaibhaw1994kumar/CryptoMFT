@@ -106,9 +106,41 @@ class LedgerDrivenBalanceTests(unittest.TestCase):
         self.assertEqual(risk.held_base("BYBIT"), Decimal("0.01"))
 
 
+class SharedInventoryTests(unittest.TestCase):
+    def test_one_directional_arb_drains_a_venue_shared_with_mean_reversion(self):
+        from crypto_stat_arb.benchmark import synthetic_book_events
+        from crypto_stat_arb.models import MarketEvent
+        from crypto_stat_arb.replay import deterministic_order
+        from crypto_stat_arb.session import TradingSession
+
+        cfg, _ = load_config(ROOT / "config" / "paper_watch.json")
+        self.assertEqual(cfg.inventory_policy.model, InventoryModel.PRE_FUNDED)
+        session = TradingSession(cfg)
+        for event in deterministic_order(
+            [MarketEvent.from_dict(row) for row in synthetic_book_events(6_000, seed=11)]
+        ):
+            session.on_event(event)
+        session.drain()
+        venues = session.risk.inventory_snapshot()["venues"]
+        # Base only moves between the two venues; it never goes negative.
+        self.assertGreaterEqual(Decimal(venues["BYBIT"]["held_base"]), 0)
+        self.assertGreaterEqual(Decimal(venues["BINANCE"]["held_base"]), 0)
+        self.assertEqual(
+            Decimal(venues["BYBIT"]["held_base"]) + Decimal(venues["BINANCE"]["held_base"]),
+            Decimal("0.10"),
+        )
+        refusals = [
+            row["reason"] for row in session.ledger.events
+            if row["event_type"] == "PACKAGE_RISK_REJECTED"
+        ]
+        self.assertTrue(refusals)
+        self.assertTrue(all(reason == "insufficient base inventory: BYBIT" for reason in refusals))
+
+
 class ConfigTests(unittest.TestCase):
     def write(self, inventory: dict | None) -> Path:
         raw = json.loads((ROOT / "config" / "research.json").read_text())
+        raw["risk"].pop("inventory", None)
         if inventory is not None:
             raw["risk"]["inventory"] = inventory
         directory = Path(tempfile.mkdtemp())

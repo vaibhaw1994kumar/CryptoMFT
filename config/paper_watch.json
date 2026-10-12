@@ -88,6 +88,13 @@
         "maintenance_margin_rate": "0",
         "liquidation_buffer_rate": "0.25"
       }
+    },
+    "inventory": {
+      "model": "pre_funded",
+      "initial_base_by_venue": {
+        "BINANCE": "0.05",
+        "BYBIT": "0.05"
+      }
     }
   },
   "oms": {

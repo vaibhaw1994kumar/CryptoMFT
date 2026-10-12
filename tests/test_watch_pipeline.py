@@ -1,6 +1,7 @@
 """Mean reversion, multi-strategy session, sim_engine maker model, session audit."""
 
 import asyncio
+from dataclasses import replace
 from decimal import Decimal
 import json
 from pathlib import Path
@@ -14,6 +15,7 @@ from crypto_stat_arb.maker_sim import maker_simulator_from_config, simulate_reco
 from crypto_stat_arb.models import MarketEvent, PlanState, TradeEvent
 from crypto_stat_arb.paper_live import LivePaperSession
 from crypto_stat_arb.replay import deterministic_order
+from crypto_stat_arb.risk import InventoryPolicy
 from crypto_stat_arb.session import TradingSession
 from crypto_stat_arb.session_audit import audit_session
 from test_live_feed import FakeConnector, FakeWebSocket, StepClock
@@ -23,9 +25,21 @@ ROOT = Path(__file__).parents[1]
 WATCH_CONFIG = ROOT / "config" / "paper_watch.json"
 
 
+def unconstrained_watch_config():
+    """paper_watch with unconstrained inventory.
+
+    The synthetic stream keeps the cross-venue arb one-directional (180 arbs
+    buying BINANCE / selling BYBIT), which drains the pre-funded 0.05 BTC on
+    BYBIT within five packages; these tests exercise multi-strategy plumbing,
+    so inventory is lifted (it is covered by test_spot_inventory).
+    """
+    cfg, raw = load_config(WATCH_CONFIG)
+    return replace(cfg, inventory_policy=InventoryPolicy()), raw
+
+
 class MultiStrategySessionTests(unittest.TestCase):
     def test_arb_and_mean_reversion_trade_the_same_books_and_close(self):
-        cfg, _ = load_config(WATCH_CONFIG)
+        cfg, _ = unconstrained_watch_config()
         events = deterministic_order([
             MarketEvent.from_dict(row) for row in synthetic_book_events(6_000, seed=11)
         ])
@@ -48,7 +62,7 @@ class MultiStrategySessionTests(unittest.TestCase):
         self.assertEqual(mean_reversion["summary"]["pending_plans"], 0)
 
     def test_flatten_blocks_entries_and_closes_open_stance(self):
-        cfg, _ = load_config(WATCH_CONFIG)
+        cfg, _ = unconstrained_watch_config()
         events = deterministic_order([
             MarketEvent.from_dict(row) for row in synthetic_book_events(6_000, seed=11)
         ])
