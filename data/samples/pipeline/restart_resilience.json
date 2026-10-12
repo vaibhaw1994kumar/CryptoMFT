@@ -1,0 +1,40 @@
+{
+  "checkpoints": [
+    {
+      "raw_ref": "canonical/live/part-0001.jsonl#91",
+      "sequence": 91,
+      "stream_id": "canonical-events",
+      "updated_ts_ns": 100
+    }
+  ],
+  "connectors": [
+    {
+      "last_error": null,
+      "next_reconnect_ts_ns": null,
+      "reconnect_attempts": 0,
+      "state": "CONNECTED",
+      "updated_ts_ns": 112,
+      "venue": "BINANCE"
+    },
+    {
+      "last_error": null,
+      "next_reconnect_ts_ns": null,
+      "reconnect_attempts": 0,
+      "state": "CONNECTED",
+      "updated_ts_ns": 113,
+      "venue": "BYBIT"
+    }
+  ],
+  "schema_version": "1.0.0",
+  "session": {
+    "fencing_token": 2,
+    "heartbeat_ts_ns": 111,
+    "last_reconciliation_id": "reconciliation-restart-1",
+    "lease_expires_ts_ns": 131,
+    "owner_id": "paper-process-b",
+    "reconciliation_required": 0,
+    "session_id": "paper-btc",
+    "state": "READY",
+    "updated_ts_ns": 121
+  }
+}

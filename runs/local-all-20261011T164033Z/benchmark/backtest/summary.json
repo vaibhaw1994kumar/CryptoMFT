@@ -1,0 +1,544 @@
+{
+  "account_state": {
+    "positions": 2,
+    "report": "account_state.json",
+    "venues": 2
+  },
+  "book_hashes": {
+    "BINANCE:BTC-USDT-SPOT": "148fdf3c78b22945ab76732aae661f6e1238c5bef1abb1c6ebbf0e6b50cb8055",
+    "BYBIT:BTC-USDT-SPOT": "ff07c1913ba0e84684163fa10559abc5cba90ff897c3868366bc2cfc535b9ec5"
+  },
+  "book_integrity_gate": {
+    "cancel_requests": 0,
+    "cancelled_orders": 0,
+    "reason": "",
+    "resume_count": 1,
+    "suspend_count": 0,
+    "suspended": false,
+    "venue_transitions": 3,
+    "venues": {
+      "BINANCE": "ACTIVE",
+      "BYBIT": "ACTIVE"
+    }
+  },
+  "canonical_events_delivered": 5000,
+  "closed_plans": 150,
+  "cross_venue_alignment": {
+    "blocked_evaluations": 0,
+    "eligible_evaluations": 5149,
+    "evaluations": 5149,
+    "policy": "cross-venue-eligibility-v1",
+    "routing_rejections": 0
+  },
+  "data_quality": {
+    "checksum_failures": 0,
+    "confirmed_price_moves": 0,
+    "crossed_or_locked": 0,
+    "duplicates": 0,
+    "events": 5000,
+    "gaps": 0,
+    "invalid_books": 0,
+    "invalid_levels": 0,
+    "out_of_order": 0,
+    "price_jumps": 0,
+    "resyncs": 0,
+    "silent_feeds": [],
+    "stale_transitions": 0,
+    "wide_spreads": 0
+  },
+  "data_quality_approval": {
+    "active_flag_codes": [],
+    "decision": "APPROVED",
+    "defect_count": 0,
+    "health": "HEALTHY"
+  },
+  "execution_api": {
+    "arrivals": 16,
+    "callbacks": 32,
+    "dispatch": {
+      "callbacks_observed": 0,
+      "children_dispatched": 16,
+      "max_dispatch_duration_ns": 1,
+      "measurements": [
+        {
+          "callback_count": 0,
+          "dispatch_completed_ts_ns": 1700000000151352333,
+          "dispatch_duration_ns": 1,
+          "dispatch_started_ts_ns": 1700000000151352332,
+          "first_callback_observed_ts_ns": null,
+          "last_callback_observed_ts_ns": null,
+          "leg_index": 0,
+          "order_id": "fe28b02c-df4a-54cd-bcb8-ec2a46e12cf1",
+          "parent_order_id": "09b2ae6f-905a-57c7-aa4d-95f543d81390",
+          "venue": "BINANCE"
+        },
+        {
+          "callback_count": 0,
+          "dispatch_completed_ts_ns": 1700000000151352335,
+          "dispatch_duration_ns": 1,
+          "dispatch_started_ts_ns": 1700000000151352334,
+          "first_callback_observed_ts_ns": null,
+          "last_callback_observed_ts_ns": null,
+          "leg_index": 1,
+          "order_id": "1f300942-a6d6-5106-88d5-43abd61b8be3",
+          "parent_order_id": "09b2ae6f-905a-57c7-aa4d-95f543d81390",
+          "venue": "BYBIT"
+        },
+        {
+          "callback_count": 0,
+          "dispatch_completed_ts_ns": 1700000000201330599,
+          "dispatch_duration_ns": 1,
+          "dispatch_started_ts_ns": 1700000000201330598,
+          "first_callback_observed_ts_ns": null,
+          "last_callback_observed_ts_ns": null,
+          "leg_index": 0,
+          "order_id": "994687af-88fa-5cb4-924b-2d21022c246d",
+          "parent_order_id": "7c9e0ac1-157e-5b32-be8e-c201f2a8ebca",
+          "venue": "BINANCE"
+        },
+        {
+          "callback_count": 0,
+          "dispatch_completed_ts_ns": 1700000000201330601,
+          "dispatch_duration_ns": 1,
+          "dispatch_started_ts_ns": 1700000000201330600,
+          "first_callback_observed_ts_ns": null,
+          "last_callback_observed_ts_ns": null,
+          "leg_index": 1,
+          "order_id": "a7a4a1ea-81b2-5451-8dd2-40f348a05059",
+          "parent_order_id": "7c9e0ac1-157e-5b32-be8e-c201f2a8ebca",
+          "venue": "BYBIT"
+        },
+        {
+          "callback_count": 0,
+          "dispatch_completed_ts_ns": 1700000000251370590,
+          "dispatch_duration_ns": 1,
+          "dispatch_started_ts_ns": 1700000000251370589,
+          "first_callback_observed_ts_ns": null,
+          "last_callback_observed_ts_ns": null,
+          "leg_index": 0,
+          "order_id": "87aef0e3-d828-54af-95e6-9a9fc66cb8cb",
+          "parent_order_id": "16a71364-5743-56ec-b74c-21bd7fa57575",
+          "venue": "BINANCE"
+        },
+        {
+          "callback_count": 0,
+          "dispatch_completed_ts_ns": 1700000000251370592,
+          "dispatch_duration_ns": 1,
+          "dispatch_started_ts_ns": 1700000000251370591,
+          "first_callback_observed_ts_ns": null,
+          "last_callback_observed_ts_ns": null,
+          "leg_index": 1,
+          "order_id": "c421cd6b-8607-5445-950e-f344bf47d228",
+          "parent_order_id": "16a71364-5743-56ec-b74c-21bd7fa57575",
+          "venue": "BYBIT"
+        },
+        {
+          "callback_count": 0,
+          "dispatch_completed_ts_ns": 1700000000301336436,
+          "dispatch_duration_ns": 1,
+          "dispatch_started_ts_ns": 1700000000301336435,
+          "first_callback_observed_ts_ns": null,
+          "last_callback_observed_ts_ns": null,
+          "leg_index": 0,
+          "order_id": "1afbcf0e-6341-5a27-b3a0-74e5832f311d",
+          "parent_order_id": "bc3e3cbd-a9c1-5210-9cef-848a27203244",
+          "venue": "BINANCE"
+        },
+        {
+          "callback_count": 0,
+          "dispatch_completed_ts_ns": 1700000000301336438,
+          "dispatch_duration_ns": 1,
+          "dispatch_started_ts_ns": 1700000000301336437,
+          "first_callback_observed_ts_ns": null,
+          "last_callback_observed_ts_ns": null,
+          "leg_index": 1,
+          "order_id": "1fd0be73-d19a-5fa4-b8a6-361c99b21700",
+          "parent_order_id": "bc3e3cbd-a9c1-5210-9cef-848a27203244",
+          "venue": "BYBIT"
+        },
+        {
+          "callback_count": 0,
+          "dispatch_completed_ts_ns": 1700000000351416741,
+          "dispatch_duration_ns": 1,
+          "dispatch_started_ts_ns": 1700000000351416740,
+          "first_callback_observed_ts_ns": null,
+          "last_callback_observed_ts_ns": null,
+          "leg_index": 0,
+          "order_id": "fabcc0ea-0ade-53b8-befa-1a8384738da1",
+          "parent_order_id": "53f0bdac-b59d-5222-97fa-53680df1500b",
+          "venue": "BINANCE"
+        },
+        {
+          "callback_count": 0,
+          "dispatch_completed_ts_ns": 1700000000351416743,
+          "dispatch_duration_ns": 1,
+          "dispatch_started_ts_ns": 1700000000351416742,
+          "first_callback_observed_ts_ns": null,
+          "last_callback_observed_ts_ns": null,
+          "leg_index": 1,
+          "order_id": "ce8b7fc6-911b-5bee-ae7d-e15f9b7a1f8b",
+          "parent_order_id": "53f0bdac-b59d-5222-97fa-53680df1500b",
+          "venue": "BYBIT"
+        },
+        {
+          "callback_count": 0,
+          "dispatch_completed_ts_ns": 1700000000401397717,
+          "dispatch_duration_ns": 1,
+          "dispatch_started_ts_ns": 1700000000401397716,
+          "first_callback_observed_ts_ns": null,
+          "last_callback_observed_ts_ns": null,
+          "leg_index": 0,
+          "order_id": "aa8ffb0f-79cd-5f17-9b5d-e6587ef96aa8",
+          "parent_order_id": "3bcbf4d7-17fd-54b1-b09a-0b54f35a7c30",
+          "venue": "BINANCE"
+        },
+        {
+          "callback_count": 0,
+          "dispatch_completed_ts_ns": 1700000000401397719,
+          "dispatch_duration_ns": 1,
+          "dispatch_started_ts_ns": 1700000000401397718,
+          "first_callback_observed_ts_ns": null,
+          "last_callback_observed_ts_ns": null,
+          "leg_index": 1,
+          "order_id": "0ff6be1c-72f8-58f7-b8ce-37f606c2ebfe",
+          "parent_order_id": "3bcbf4d7-17fd-54b1-b09a-0b54f35a7c30",
+          "venue": "BYBIT"
+        },
+        {
+          "callback_count": 0,
+          "dispatch_completed_ts_ns": 1700000010151337360,
+          "dispatch_duration_ns": 1,
+          "dispatch_started_ts_ns": 1700000010151337359,
+          "first_callback_observed_ts_ns": null,
+          "last_callback_observed_ts_ns": null,
+          "leg_index": 0,
+          "order_id": "8ffbbf8c-aa06-5f7a-a46e-5d1194ed786a",
+          "parent_order_id": "08879dd0-a649-5885-a5c3-86574d181816",
+          "venue": "BINANCE"
+        },
+        {
+          "callback_count": 0,
+          "dispatch_completed_ts_ns": 1700000010151337362,
+          "dispatch_duration_ns": 1,
+          "dispatch_started_ts_ns": 1700000010151337361,
+          "first_callback_observed_ts_ns": null,
+          "last_callback_observed_ts_ns": null,
+          "leg_index": 1,
+          "order_id": "2bf900a5-d788-5b6e-822a-f298450a7f5f",
+          "parent_order_id": "08879dd0-a649-5885-a5c3-86574d181816",
+          "venue": "BYBIT"
+        },
+        {
+          "callback_count": 0,
+          "dispatch_completed_ts_ns": 1700000010201349027,
+          "dispatch_duration_ns": 1,
+          "dispatch_started_ts_ns": 1700000010201349026,
+          "first_callback_observed_ts_ns": null,
+          "last_callback_observed_ts_ns": null,
+          "leg_index": 0,
+          "order_id": "bb80e5ee-1bdc-5723-9164-9c9a419bda41",
+          "parent_order_id": "6256b968-4163-576a-a53f-bb3bb81b3ea0",
+          "venue": "BINANCE"
+        },
+        {
+          "callback_count": 0,
+          "dispatch_completed_ts_ns": 1700000010201349029,
+          "dispatch_duration_ns": 1,
+          "dispatch_started_ts_ns": 1700000010201349028,
+          "first_callback_observed_ts_ns": null,
+          "last_callback_observed_ts_ns": null,
+          "leg_index": 1,
+          "order_id": "b67a063e-9ecd-50c8-b5a0-ac91bcf514f6",
+          "parent_order_id": "6256b968-4163-576a-a53f-bb3bb81b3ea0",
+          "venue": "BYBIT"
+        }
+      ],
+      "min_dispatch_duration_ns": 1,
+      "policy": "DETERMINISTIC_SEQUENTIAL"
+    },
+    "duplicates_suppressed": 0,
+    "in_flight_sent": 16,
+    "latency_model": "preset:singapore",
+    "liquidity_consumption_events": 16,
+    "rate_limit_delayed": 0,
+    "rate_limit_queued": 0,
+    "rate_limit_rejections": 0,
+    "rate_limit_released": 0,
+    "rate_limits": {
+      "in_flight_requests": 0,
+      "pending_requests": 0,
+      "schema_version": "1.0.0",
+      "undelivered_reports": 0,
+      "venues": {
+        "BINANCE": {
+          "capacity": 1000,
+          "delayed": 0,
+          "headroom": 998,
+          "in_flight": 0,
+          "next_release_ts_ns": null,
+          "next_window_ts_ns": 1700000011000000000,
+          "policy": "REJECT",
+          "queue_depth": 0,
+          "queued": 0,
+          "throttle_delay_ns": 0,
+          "used": 2,
+          "window_start_ts_ns": 1700000010000000000
+        },
+        "BYBIT": {
+          "capacity": 1000,
+          "delayed": 0,
+          "headroom": 998,
+          "in_flight": 0,
+          "next_release_ts_ns": null,
+          "next_window_ts_ns": 1700000011000000000,
+          "policy": "REJECT",
+          "queue_depth": 0,
+          "queued": 0,
+          "throttle_delay_ns": 0,
+          "used": 2,
+          "window_start_ts_ns": 1700000010000000000
+        }
+      }
+    },
+    "reports_delivered": 32,
+    "route_decisions": 16,
+    "route_overrides": 0,
+    "route_rejections": 0,
+    "schema_version": "1.0.0",
+    "state_machine": {
+      "closed_plans": 150,
+      "duplicates_suppressed": 0,
+      "order_updates": 32,
+      "plans": 150,
+      "schema_version": "1.0.0",
+      "terminal_conflicts_resolved": 0,
+      "terminal_outcomes": {
+        "FILLED": 8,
+        "REJECTED": 142
+      },
+      "terminal_parent_state": "CLOSED",
+      "updates_by_source": {
+        "ADAPTER_CALLBACK": 32,
+        "INTERNAL": 0,
+        "PRIVATE_STREAM": 0,
+        "REST_QUERY": 0,
+        "TIMER": 0
+      }
+    },
+    "trace": {
+      "path": "order_trace.jsonl",
+      "records": 128
+    },
+    "trace_records": 128,
+    "unique_requests": 16,
+    "venue_queries": 0
+  },
+  "execution_mode": "INTERNAL_SIMULATION",
+  "execution_realism": {
+    "close_deferrals": 0,
+    "in_flight_or_undelivered": false,
+    "latency_model": "preset:singapore",
+    "new_risk_held_residual_breach": 0,
+    "open_plan_states": [],
+    "open_plans": 0,
+    "open_report_deadlines": 0,
+    "order_timeout_policy": {
+      "kill_on_unresolved": true,
+      "max_queries": 3,
+      "query_interval_ns": 500000000,
+      "report_timeout_ns": 2000000000
+    },
+    "rejected_cancels_requeried": 0,
+    "residual_breach_kill_escalations": 0,
+    "residual_breaches_open": [],
+    "resolved_by_query": 0,
+    "resting_fill_reports": 0,
+    "schema_version": "1.0.0",
+    "unknown_state_orders": 0,
+    "unresolved_after_queries": 0,
+    "venue_queries": 0
+  },
+  "exposure_limits": {
+    "binding_event_count": 0,
+    "report": "exposure_utilization.json",
+    "state": "NORMAL",
+    "transition_count": 0
+  },
+  "fees": "3.8426820",
+  "gross_pnl": "6.70300",
+  "instrument_status_changes_applied": 0,
+  "kill_switch": {
+    "reason": "",
+    "reconciliation_required_before_resume": false,
+    "report": "kill_switch_status.json",
+    "risk_reducing_orders_allowed": true,
+    "state": "INACTIVE"
+  },
+  "latency": {
+    "model_source": "preset:singapore",
+    "order_timestamps": "order_timestamps.jsonl",
+    "report": "latency_report.json",
+    "seed": 7
+  },
+  "margin_collateral": {
+    "alert_count": 0,
+    "report": "margin_status.json",
+    "state": "NOT_APPLICABLE"
+  },
+  "net_pnl": "2.8603180",
+  "opportunities": 150,
+  "pipeline_monitoring": {
+    "alert_count": 0,
+    "health": "HEALTHY",
+    "prometheus_metrics": "pipeline_metrics.prom",
+    "report": "pipeline_monitoring.json",
+    "strategy_execution": {
+      "net_pnl": "2.8603180",
+      "opportunities": 150,
+      "orders": 300
+    }
+  },
+  "pretrade_validation": {
+    "decision": "REJECTED",
+    "failure_codes": [
+      "STRATEGY_GROSS_EXPOSURE",
+      "INSTRUMENT_GROSS_EXPOSURE",
+      "VENUE_GROSS_EXPOSURE",
+      "VENUE_GROSS_EXPOSURE"
+    ],
+    "report": "pretrade_validation.json"
+  },
+  "recorded_event_timing_used": 0,
+  "residual_risk": {
+    "legging_control_overrides": 0,
+    "legging_limit_bindings": 8,
+    "limit_breaches": 0,
+    "open_residual_base": "0",
+    "open_residual_plans": 0,
+    "policy": {
+      "allow_risk_reducing_under_stop": true,
+      "hedge_venue_priority": [
+        "BINANCE",
+        "BYBIT"
+      ],
+      "max_one_sided_notional": "1000",
+      "max_residual_age_ns": 5000000000,
+      "max_residual_base": "0.002",
+      "max_unwind_attempts": 2,
+      "unwind_price_slippage_bps": "10",
+      "unwind_urgency": "NORMAL"
+    },
+    "schema_version": "1.0.0",
+    "unwind_children": 0
+  },
+  "risk_reservation": {
+    "active_reservations": 0,
+    "exposure_binding_events": [],
+    "exposure_control_state": "NORMAL",
+    "exposure_transition_count": 0,
+    "kill_switch_active": false,
+    "pretrade_decision": "REJECTED",
+    "pretrade_failure_codes": [
+      "STRATEGY_GROSS_EXPOSURE",
+      "INSTRUMENT_GROSS_EXPOSURE",
+      "VENUE_GROSS_EXPOSURE",
+      "VENUE_GROSS_EXPOSURE"
+    ],
+    "reconciliation_decision": "APPROVED",
+    "reserved_cash": {
+      "BINANCE": "0"
+    },
+    "reserved_gross": "0",
+    "reserved_margin": {
+      "BINANCE": "0",
+      "BYBIT": "0"
+    },
+    "reserved_messages": {
+      "BINANCE": 0,
+      "BYBIT": 0
+    },
+    "reserved_position": {
+      "BINANCE": "0.000",
+      "BYBIT": "0.000"
+    },
+    "reserved_residual": "0",
+    "suspended_venues": {}
+  },
+  "rms_reconciliation": {
+    "decision": "APPROVED",
+    "issue_count": 0,
+    "reconciliation_id": "7052ea99-5081-5bc0-8ff1-bafb6b5a5470",
+    "report": "rms_reconciliation_report.json"
+  },
+  "strategies": {
+    "flattening": false,
+    "strategies": {
+      "cross_venue_btc_v1": {
+        "closed_plans": 150,
+        "fees": "3.8426820",
+        "gross_pnl": "6.70300",
+        "net_pnl": "2.8603180",
+        "opportunities": 150,
+        "outcomes": {
+          "FILLED": 8,
+          "REJECTED": 142
+        },
+        "plans": 150,
+        "summary": {
+          "type": "CrossVenueSpreadStrategy"
+        },
+        "type": "CrossVenueSpreadStrategy"
+      }
+    }
+  },
+  "structured_logs": {
+    "components": {
+      "EXECUTION_CONNECTOR": 128,
+      "MARKET_DATA": 5000,
+      "PAPER_HOST": 2227,
+      "STRATEGY": 150
+    },
+    "database": "structured_logs.sqlite",
+    "failed_opportunities": 142,
+    "failed_trace_count": 142,
+    "failed_traces": "failed_opportunity_traces.jsonl",
+    "jsonl": "structured_logs.jsonl",
+    "levels": {
+      "ERROR": 568,
+      "INFO": 6928,
+      "WARNING": 9
+    },
+    "records": 7505,
+    "schema_version": "1.0.0",
+    "searchable_fields": [
+      "correlation_id",
+      "component",
+      "level",
+      "event_type",
+      "venue",
+      "source_event_id",
+      "feature_state_id",
+      "opportunity_id",
+      "risk_decision_id",
+      "parent_plan_id",
+      "child_order_id",
+      "request_id"
+    ]
+  },
+  "tca": {
+    "daily_reports": [
+      "tca_daily/2023-11-14.json"
+    ],
+    "fees": "3.8426820",
+    "fills": 16,
+    "missed_opportunities": 142,
+    "report": "tca_report.json",
+    "weighted_slippage_bps": "0"
+  },
+  "time_integrity": {
+    "blocked_events": 0,
+    "cross_venue_skew_breaches": 0,
+    "events": 5000,
+    "host_clock_state": "SYNCED"
+  }
+}

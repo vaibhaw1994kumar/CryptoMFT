@@ -1,0 +1,41 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://papertowninsights.org/schemas/account-state-1.0.0.json",
+  "title": "Ledger-derived position and balance state",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "positions", "venues"],
+  "properties": {
+    "schema_version": {"const": "1.0.0"},
+    "positions": {"type": "object", "additionalProperties": {"$ref": "#/$defs/position"}},
+    "venues": {"type": "object", "additionalProperties": {"$ref": "#/$defs/venue"}}
+  },
+  "$defs": {
+    "decimal": {"type": "string", "pattern": "^-?[0-9]+(?:\\.[0-9]+)?$"},
+    "position": {
+      "type": "object", "additionalProperties": false,
+      "required": ["venue", "instrument_id", "quantity", "average_price", "realized_pnl", "unrealized_pnl", "mark_price", "fees", "gross_traded_notional"],
+      "properties": {
+        "venue": {"type": "string"}, "instrument_id": {"type": "string"},
+        "quantity": {"$ref": "#/$defs/decimal"}, "average_price": {"$ref": "#/$defs/decimal"},
+        "realized_pnl": {"$ref": "#/$defs/decimal"}, "unrealized_pnl": {"$ref": "#/$defs/decimal"},
+        "mark_price": {"$ref": "#/$defs/decimal"}, "fees": {"$ref": "#/$defs/decimal"},
+        "gross_traded_notional": {"$ref": "#/$defs/decimal"}
+      }
+    },
+    "venue": {
+      "type": "object", "additionalProperties": false,
+      "required": ["venue", "initial_capital", "cash_delta", "cash_balance", "realized_pnl", "unrealized_pnl", "fees", "equity", "reserved_cash", "reserved_margin", "reserved_gross_notional", "reserved_position", "reserved_messages", "available_cash", "available_capital"],
+      "properties": {
+        "venue": {"type": "string"}, "initial_capital": {"$ref": "#/$defs/decimal"},
+        "cash_delta": {"$ref": "#/$defs/decimal"}, "cash_balance": {"$ref": "#/$defs/decimal"},
+        "realized_pnl": {"$ref": "#/$defs/decimal"}, "unrealized_pnl": {"$ref": "#/$defs/decimal"},
+        "fees": {"$ref": "#/$defs/decimal"}, "equity": {"$ref": "#/$defs/decimal"},
+        "reserved_cash": {"$ref": "#/$defs/decimal"}, "reserved_margin": {"$ref": "#/$defs/decimal"},
+        "reserved_gross_notional": {"$ref": "#/$defs/decimal"}, "reserved_position": {"$ref": "#/$defs/decimal"},
+        "reserved_messages": {"type": "integer", "minimum": 0},
+        "available_cash": {"$ref": "#/$defs/decimal"}, "available_capital": {"$ref": "#/$defs/decimal"}
+      }
+    }
+  }
+}

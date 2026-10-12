@@ -1,0 +1,78 @@
+{
+  "closed_ts_ns": 1640000000,
+  "directory": "/Users/vaibhav/Documents/Newproject/crypto_MFT_arb_platform/reports/evidence/20261011T191621Z/3_live_replay_parity/session/parity/part-000001",
+  "files": {
+    "canonical": {
+      "path": "/Users/vaibhav/Documents/Newproject/crypto_MFT_arb_platform/reports/evidence/20261011T191621Z/3_live_replay_parity/session/parity/part-000001/canonical.jsonl",
+      "sha256": "39a3a01f3e6158bb6537081687cea4fd6d896024fceb83b2114471ed5e367d7d"
+    },
+    "quarantine": {
+      "path": "/Users/vaibhav/Documents/Newproject/crypto_MFT_arb_platform/reports/evidence/20261011T191621Z/3_live_replay_parity/session/parity/part-000001/quarantine.jsonl",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "raw": {
+      "path": "/Users/vaibhav/Documents/Newproject/crypto_MFT_arb_platform/reports/evidence/20261011T191621Z/3_live_replay_parity/session/parity/part-000001/raw.jsonl",
+      "sha256": "d8e2a0c5332508f4ffe0f2acf27603d312bc16e631811a1c37ba39753ab28b64"
+    },
+    "trace": {
+      "path": "/Users/vaibhav/Documents/Newproject/crypto_MFT_arb_platform/reports/evidence/20261011T191621Z/3_live_replay_parity/session/parity/part-000001/trace.jsonl",
+      "sha256": "c1dadd65991eeb9ad1ebb93db97db1b9a4cb239f9acc350d5bb62a09384119d9"
+    },
+    "trades": {
+      "path": "/Users/vaibhav/Documents/Newproject/crypto_MFT_arb_platform/reports/evidence/20261011T191621Z/3_live_replay_parity/session/parity/part-000001/trades.jsonl",
+      "sha256": "84db441ede4739a9679f0259ef798cc854c6fb9377c1267f727075071a97a10d"
+    },
+    "wire": {
+      "path": "/Users/vaibhav/Documents/Newproject/crypto_MFT_arb_platform/reports/evidence/20261011T191621Z/3_live_replay_parity/session/parity/part-000001/wire.jsonl",
+      "sha256": "fe904fe05dde8502ffde835157a77e2b84a0cc119ebba3840e5f35f65b45358b"
+    }
+  },
+  "part": 1,
+  "raw_manifest": {
+    "closed_at_utc": "2026-10-11T19:17:09.766372+00:00",
+    "first_raw_ref": "96475fc6-08d5-5b5f-b826-2c5f3338e045",
+    "first_receive_ts_ns": 1015000000,
+    "last_raw_ref": "3a0667e6-d810-53e3-904e-47c88314e65e",
+    "last_receive_ts_ns": 1637000000,
+    "raw_file": "/Users/vaibhav/Documents/Newproject/crypto_MFT_arb_platform/reports/evidence/20261011T191621Z/3_live_replay_parity/session/parity/part-000001/raw.jsonl",
+    "raw_file_sha256": "d8e2a0c5332508f4ffe0f2acf27603d312bc16e631811a1c37ba39753ab28b64",
+    "raw_schema_version": "1.0.0",
+    "record_count": 178,
+    "session_id": "parity/part-000001",
+    "sources": [
+      {
+        "channel": "depth@100ms",
+        "host": "stream.binance.com:9443",
+        "vendor": "BINANCE",
+        "venue": "BINANCE"
+      },
+      {
+        "channel": "rest-depth-snapshot",
+        "host": "api.binance.com",
+        "vendor": "BINANCE",
+        "venue": "BINANCE"
+      },
+      {
+        "channel": "trade",
+        "host": "stream.binance.com:9443",
+        "vendor": "BINANCE",
+        "venue": "BINANCE"
+      },
+      {
+        "channel": "orderbook.50.BTCUSDT",
+        "host": "stream.bybit.com",
+        "vendor": "BYBIT",
+        "venue": "BYBIT"
+      },
+      {
+        "channel": "publicTrade.BTCUSDT",
+        "host": "stream.bybit.com",
+        "vendor": "BYBIT",
+        "venue": "BYBIT"
+      }
+    ],
+    "terminal_record_hash": "5de50230ae92ab445ab9727980bf042c2b05130efe3f2e68cf71969316b256cc"
+  },
+  "started_ts_ns": 1015000000,
+  "terminal_wire_record_hash": "3e1aeb2967a5f26fd41db9776297130b6b696c75517406b3f17bfc0e7fe79f97"
+}

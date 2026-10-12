@@ -1,0 +1,31 @@
+{
+  "schema_version": "1.0.0",
+  "message_type": "ORDERBOOK",
+  "publisher_sequence": 101,
+  "published_ts_ns": 1788566400123456789,
+  "payload": {
+    "venue": "BINANCE",
+    "instrument_id": "BTC-USDT-SPOT",
+    "state": "VALID",
+    "tradable": true,
+    "invalid_reason": "",
+    "event_id": "sample-binance-event-101",
+    "event_type": "BOOK_DELTA",
+    "exchange_ts_ns": 1788566400123000000,
+    "source_ts_ns": 1788566400123000000,
+    "receive_ts_ns": 1788566400123450000,
+    "sequence_start": 50001,
+    "sequence": 50003,
+    "raw_ref": "sample-binance-raw-101",
+    "event_schema_version": "1.2.0",
+    "adapter_version": "binance-depth-v1",
+    "quality_flags": [],
+    "best_bid": "59999.90",
+    "best_ask": "60000.10",
+    "midpoint": "60000.00",
+    "bids": [["59999.90", "1.250"], ["59999.80", "0.800"]],
+    "asks": [["60000.10", "1.100"], ["60000.20", "0.950"]],
+    "depth": 20,
+    "book_sha256": "d5fced4c5a2f36b47bd98a0367cf747452e07589f34dc7d396267d1ed65cebd3"
+  }
+}

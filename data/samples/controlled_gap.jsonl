@@ -1,0 +1,4 @@
+{"event_type":"BOOK_SNAPSHOT","venue":"BINANCE","instrument_id":"BTC-USDT-SPOT","source_ts_ns":1,"exchange_ts_ns":1,"receive_ts_ns":1,"sequence_start":10,"sequence":10,"bids":[["99","1"]],"asks":[["100","1"]]}
+{"event_type":"BOOK_SNAPSHOT","venue":"BYBIT","instrument_id":"BTC-USDT-SPOT","source_ts_ns":2,"exchange_ts_ns":2,"receive_ts_ns":2,"sequence_start":20,"sequence":20,"bids":[["99","1"]],"asks":[["100","1"]]}
+{"event_type":"BOOK_DELTA","venue":"BINANCE","instrument_id":"BTC-USDT-SPOT","source_ts_ns":3,"exchange_ts_ns":3,"receive_ts_ns":3,"sequence_start":12,"sequence":12,"bids":[["110","1"]],"asks":[]}
+{"event_type":"BOOK_DELTA","venue":"BYBIT","instrument_id":"BTC-USDT-SPOT","source_ts_ns":4,"exchange_ts_ns":4,"receive_ts_ns":4,"sequence_start":21,"sequence":21,"bids":[["120","1"]],"asks":[]}

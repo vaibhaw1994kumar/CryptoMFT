@@ -1,0 +1,23 @@
+{
+  "schema_version": "1.0.0",
+  "sdk_version": "1.2.0",
+  "strategy_id": "cross_venue_btc_v1",
+  "strategy_class": "CrossVenueSDKStrategy",
+  "canonical_event_count": 4,
+  "modes": ["PAPER", "TESTNET"],
+  "opportunity_count_by_mode": {"PAPER": 1, "TESTNET": 1},
+  "canonical_order_requests_by_mode": {"PAPER": 2, "TESTNET": 2},
+  "acceptance": {
+    "same_strategy_logic": true,
+    "same_replay_order": true,
+    "same_opportunity_and_plan_ids": true,
+    "same_canonical_order_requests": true,
+    "same_portfolio_state": true,
+    "all_plans_closed": true,
+    "advanced_backtest_offline_only": true
+  },
+  "interfaces": [
+    "canonical_data", "replay", "features", "portfolio", "risk", "oms_ems",
+    "advanced_backtest"
+  ]
+}

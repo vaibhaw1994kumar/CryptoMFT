@@ -1,0 +1,106 @@
+{
+  "decision": "PASS",
+  "module": "/Users/vaibhav/Documents/Newproject/crypto_MFT_arb_platform/src/crypto_stat_arb/sim_engine/mm_matching_engine.cpython-312-darwin.so",
+  "scenarios": [
+    {
+      "expected": {
+        "fills": [],
+        "queue_ahead": 3.0
+      },
+      "observed": {
+        "fills": [],
+        "queue_ahead": 3.0
+      },
+      "pass": true,
+      "scenario": "print + its book delta, trade first",
+      "setup": "level 10, our bid 2; print 4; then print 3 and level 10->3"
+    },
+    {
+      "expected": {
+        "fills": [],
+        "queue_ahead": 3.0
+      },
+      "observed": {
+        "fills": [],
+        "queue_ahead": 3.0
+      },
+      "pass": true,
+      "scenario": "print + its book delta, book first",
+      "setup": "level 10, our bid 2; print 4; then print 3 and level 10->3"
+    },
+    {
+      "expected": {
+        "fills": [
+          [
+            1,
+            1.0
+          ],
+          [
+            2,
+            0.5
+          ]
+        ]
+      },
+      "observed": {
+        "fills": [
+          [
+            1,
+            1.0
+          ],
+          [
+            2,
+            0.5
+          ]
+        ]
+      },
+      "pass": true,
+      "scenario": "two own orders share one print (FIFO)",
+      "setup": "level 5, orders a=1 then b=1, print 6.5"
+    },
+    {
+      "expected": {
+        "level_100_our_orders": 1,
+        "order_b_active": true
+      },
+      "observed": {
+        "level_100_our_orders": 1,
+        "order_b_active": true
+      },
+      "pass": true,
+      "scenario": "level updated to size 0 keeps our resting order",
+      "setup": "after previous scenario, level 100 -> 0"
+    },
+    {
+      "expected": {
+        "fills": [
+          [
+            2,
+            0.5
+          ]
+        ]
+      },
+      "observed": {
+        "fills": [
+          [
+            2,
+            0.5
+          ]
+        ]
+      },
+      "pass": true,
+      "scenario": "print through our price fills the remainder",
+      "setup": "order b remaining 0.5 at 100, SELL print 0.1 at 99"
+    },
+    {
+      "expected": {
+        "queue_ahead": 7.0
+      },
+      "observed": {
+        "queue_ahead": 7.0
+      },
+      "pass": true,
+      "scenario": "queue_position_frac = 0.7",
+      "setup": "level 10, place bid"
+    }
+  ]
+}

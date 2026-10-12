@@ -1,0 +1,34 @@
+{
+  "schema_version": "1.0.0",
+  "state": "INACTIVE",
+  "reason": "",
+  "source": "",
+  "activated_ts_ns": null,
+  "strategy_new_risk_allowed": true,
+  "cancel_all_on_activation": true,
+  "risk_reducing_orders_allowed": true,
+  "reconciliation_required_before_resume": false,
+  "last_reset_reconciliation_id": "approved-reconciliation-example",
+  "events": [
+    {
+      "event_id": "kill-activation-example",
+      "ts_ns": 1700000000000000000,
+      "previous_state": "INACTIVE",
+      "state": "ACTIVE",
+      "action": "ACTIVATED",
+      "reason": "PM emergency stop",
+      "source": "PM",
+      "operator_id": "pm-001",
+      "reconciliation_required_before_resume": true
+    },
+    {
+      "event_id": "kill-reset-example",
+      "ts_ns": 1700000001000000000,
+      "previous_state": "ACTIVE",
+      "state": "INACTIVE",
+      "action": "RESET",
+      "reason": "approved reconciliation",
+      "source": "PM",
+      "operator_id": "pm-001",
+      "reconciliation_id": "approved-reconciliation-example",
+      "reconc

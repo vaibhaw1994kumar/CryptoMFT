@@ -1,0 +1,12 @@
+{
+  "action": "DEPLOY",
+  "activated_ts_ns": 1789309680214525000,
+  "approval_owner": "portfolio-manager",
+  "build_version": "0.1.0",
+  "deployment_id": "9508626e-487e-5887-b70f-f5dfa01c0327",
+  "deployment_owner": "paper-operator",
+  "environment": "paper-local",
+  "manifest_sha256": "ea17a984c74bef133845e3a5aae11dac311f577153c22685cab89c84a351e3f4",
+  "release_id": "bfbcab66-0a5c-5bd8-aac9-30de0830ab3f",
+  "schema_version": "1.0.0"
+}

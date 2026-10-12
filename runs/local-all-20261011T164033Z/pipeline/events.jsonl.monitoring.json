@@ -1,0 +1,209 @@
+{
+  "alert_ownership": {
+    "coverage_statement": "Research-hours coverage; 24/7 staffing is not required. Every paper alert has a named owner and response target.",
+    "policies": [
+      {
+        "alert_type": "FAILED_INGESTION",
+        "coverage": "RESEARCH_HOURS",
+        "owner": "market-data-owner",
+        "response_expectation": "Stop dependent paper strategies, preserve the failed partition and restart or backfill after diagnosis.",
+        "response_target_minutes": 30,
+        "severity": "CRITICAL"
+      },
+      {
+        "alert_type": "INVALID_BOOK",
+        "coverage": "RESEARCH_HOURS",
+        "owner": "market-data-owner",
+        "response_expectation": "Confirm automatic strategy gating, cancel ordinary orders on the venue and force a clean snapshot resync.",
+        "response_target_minutes": 15,
+        "severity": "CRITICAL"
+      },
+      {
+        "alert_type": "REPLAY_FAILURE",
+        "coverage": "RESEARCH_HOURS",
+        "owner": "research-infrastructure-owner",
+        "response_expectation": "Quarantine the run, retain its checkpoint and raw lineage, then resume only after a deterministic replay check.",
+        "response_target_minutes": 240,
+        "severity": "HIGH"
+      },
+      {
+        "alert_type": "RISK_BREACH",
+        "coverage": "RESEARCH_HOURS",
+        "owner": "paper-risk-owner",
+        "response_expectation": "Confirm the kill state, cancel new-risk orders, permit only approved risk reduction and reconcile before resume.",
+        "response_target_minutes": 15,
+        "severity": "CRITICAL"
+      },
+      {
+        "alert_type": "PIPELINE_THRESHOLD",
+        "coverage": "RESEARCH_HOURS",
+        "owner": "research-infrastructure-owner",
+        "response_expectation": "Inspect the breached pipeline threshold and record disposition before the next paper session.",
+        "response_target_minutes": 240,
+        "severity": "WARNING"
+      },
+      {
+        "alert_type": "EXECUTION_THRESHOLD",
+        "coverage": "RESEARCH_HOURS",
+        "owner": "paper-trading-owner",
+        "response_expectation": "Inspect the execution threshold, residual and connector state; suspend new risk if safety is uncertain.",
+        "response_target_minutes": 30,
+        "severity": "HIGH"
+      }
+    ],
+    "schema_version": "1.0.0"
+  },
+  "alerts": [],
+  "books": {},
+  "correlation_id": "local-acceptance/20261011T164033Z",
+  "data": {
+    "event_count": 2,
+    "latest_receive_ts_ns": 1000300000,
+    "schema_exceptions": 0
+  },
+  "generated_ts_ns": 1791736846313606000,
+  "health": "HEALTHY",
+  "job": {
+    "job_id": "local-acceptance",
+    "mode": "BATCH",
+    "state": "COMPLETE"
+  },
+  "live": {
+    "persistence_lag_ns": 0,
+    "reconnects": 0,
+    "stale_disconnects": 0,
+    "unpersisted_bytes": 0
+  },
+  "metrics": [
+    {
+      "breached": false,
+      "comparator": "<=",
+      "health_on_breach": "CRITICAL",
+      "name": "data_age_ns",
+      "scope": "PIPELINE",
+      "threshold": 1000000000,
+      "unit": "nanoseconds",
+      "value": 0
+    },
+    {
+      "breached": false,
+      "comparator": ">=",
+      "health_on_breach": "CRITICAL",
+      "name": "partition_completeness",
+      "scope": "PIPELINE",
+      "threshold": 1.0,
+      "unit": "ratio",
+      "value": 1.0
+    },
+    {
+      "breached": false,
+      "comparator": "<=",
+      "health_on_breach": "CRITICAL",
+      "name": "sequence_gaps",
+      "scope": "PIPELINE",
+      "threshold": 0,
+      "unit": "count",
+      "value": 0
+    },
+    {
+      "breached": false,
+      "comparator": "<=",
+      "health_on_breach": "CRITICAL",
+      "name": "invalid_books",
+      "scope": "PIPELINE",
+      "threshold": 0,
+      "unit": "count",
+      "value": 0
+    },
+    {
+      "breached": false,
+      "comparator": "<=",
+      "health_on_breach": "CRITICAL",
+      "name": "schema_mismatches",
+      "scope": "PIPELINE",
+      "threshold": 0,
+      "unit": "count",
+      "value": 0
+    },
+    {
+      "breached": false,
+      "comparator": "<=",
+      "health_on_breach": "DEGRADED",
+      "name": "reconnects",
+      "scope": "PIPELINE",
+      "threshold": 5,
+      "unit": "count",
+      "value": 0
+    },
+    {
+      "breached": false,
+      "comparator": "<=",
+      "health_on_breach": "CRITICAL",
+      "name": "stale_disconnects",
+      "scope": "PIPELINE",
+      "threshold": 0,
+      "unit": "count",
+      "value": 0
+    },
+    {
+      "breached": false,
+      "comparator": "<=",
+      "health_on_breach": "DEGRADED",
+      "name": "persistence_lag_ns",
+      "scope": "PIPELINE",
+      "threshold": 5000000000,
+      "unit": "nanoseconds",
+      "value": 0
+    }
+  ],
+  "mode": "BATCH",
+  "partitions": {
+    "complete": 1,
+    "completeness": 1.0,
+    "rejected": 0,
+    "states": {
+      "20261011T164033Z": "COMPLETE"
+    },
+    "total": 1
+  },
+  "performance": {
+    "replay_events_per_second": 0
+  },
+  "restart_resilience": {},
+  "schema_version": "1.0.0",
+  "strategy_execution": {},
+  "structured_logs": {},
+  "tca": {},
+  "thresholds": {
+    "max_active_kill_switches": 0,
+    "max_data_age_ns": 1000000000,
+    "max_dispatch_latency_ns": 10000000,
+    "max_gaps": 0,
+    "max_invalid_books": 0,
+    "max_open_residual_base": 0.002,
+    "max_order_rejects": 0,
+    "max_persistence_lag_ns": 5000000000,
+    "max_rate_limit_utilization": 0.9,
+    "max_reconnects": 5,
+    "max_schema_mismatches": 0,
+    "max_stale_disconnects": 0,
+    "max_unhealthy_connectors": 0,
+    "min_partition_completeness": 1.0,
+    "min_replay_events_per_second": 1.0
+  },
+  "versions": {
+    "canonical_schema_expected": "1.2.0",
+    "canonical_schema_observed": [
+      "1.2.0"
+    ],
+    "instrument_master": {
+      "content_sha256": "66839e9854f36adaa42dda6a681ee6ee54401f56d2af85e1c19c6530623c5b53",
+      "fee_rule_count": 2,
+      "instrument_count": 2,
+      "schema_version": "1.1.0",
+      "status_event_count": 0,
+      "version_count": 2
+    },
+    "schema_mismatches": 0
+  }
+}

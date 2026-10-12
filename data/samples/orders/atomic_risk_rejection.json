@@ -1,0 +1,18 @@
+{
+  "opportunity_id": "opportunity-1",
+  "intended_package": [
+    {"venue": "BINANCE", "side": "BUY", "quantity": "0.010", "messages": 1},
+    {"venue": "BYBIT", "side": "SELL", "quantity": "0.010", "messages": 1}
+  ],
+  "account_capacity": {
+    "BINANCE": {"message_capacity": 10, "message_used": 0},
+    "BYBIT": {"message_capacity": 0, "message_used": 0}
+  },
+  "result": {
+    "admitted": false,
+    "reason": "message capacity exceeded: BYBIT",
+    "binance_adapter_calls": 0,
+    "bybit_adapter_calls": 0,
+    "reservation_state_changed": false
+  }
+}

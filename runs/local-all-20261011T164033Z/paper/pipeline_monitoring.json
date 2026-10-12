@@ -1,0 +1,720 @@
+{
+  "alert_ownership": {
+    "coverage_statement": "Research-hours coverage; 24/7 staffing is not required. Every paper alert has a named owner and response target.",
+    "policies": [
+      {
+        "alert_type": "FAILED_INGESTION",
+        "coverage": "RESEARCH_HOURS",
+        "owner": "market-data-owner",
+        "response_expectation": "Stop dependent paper strategies, preserve the failed partition and restart or backfill after diagnosis.",
+        "response_target_minutes": 30,
+        "severity": "CRITICAL"
+      },
+      {
+        "alert_type": "INVALID_BOOK",
+        "coverage": "RESEARCH_HOURS",
+        "owner": "market-data-owner",
+        "response_expectation": "Confirm automatic strategy gating, cancel ordinary orders on the venue and force a clean snapshot resync.",
+        "response_target_minutes": 15,
+        "severity": "CRITICAL"
+      },
+      {
+        "alert_type": "REPLAY_FAILURE",
+        "coverage": "RESEARCH_HOURS",
+        "owner": "research-infrastructure-owner",
+        "response_expectation": "Quarantine the run, retain its checkpoint and raw lineage, then resume only after a deterministic replay check.",
+        "response_target_minutes": 240,
+        "severity": "HIGH"
+      },
+      {
+        "alert_type": "RISK_BREACH",
+        "coverage": "RESEARCH_HOURS",
+        "owner": "paper-risk-owner",
+        "response_expectation": "Confirm the kill state, cancel new-risk orders, permit only approved risk reduction and reconcile before resume.",
+        "response_target_minutes": 15,
+        "severity": "CRITICAL"
+      },
+      {
+        "alert_type": "PIPELINE_THRESHOLD",
+        "coverage": "RESEARCH_HOURS",
+        "owner": "research-infrastructure-owner",
+        "response_expectation": "Inspect the breached pipeline threshold and record disposition before the next paper session.",
+        "response_target_minutes": 240,
+        "severity": "WARNING"
+      },
+      {
+        "alert_type": "EXECUTION_THRESHOLD",
+        "coverage": "RESEARCH_HOURS",
+        "owner": "paper-trading-owner",
+        "response_expectation": "Inspect the execution threshold, residual and connector state; suspend new risk if safety is uncertain.",
+        "response_target_minutes": 30,
+        "severity": "HIGH"
+      }
+    ],
+    "schema_version": "1.0.0"
+  },
+  "alerts": [],
+  "books": {
+    "BINANCE": {
+      "age_ns": 200000,
+      "checksum_failures": 0,
+      "duplicates": 0,
+      "gaps": 0,
+      "instrument_id": "BTC-USDT-SPOT",
+      "out_of_order": 0,
+      "sequence": 101,
+      "state": "VALID"
+    },
+    "BYBIT": {
+      "age_ns": 0,
+      "checksum_failures": 0,
+      "duplicates": 0,
+      "gaps": 0,
+      "instrument_id": "BTC-USDT-SPOT",
+      "out_of_order": 0,
+      "sequence": 901,
+      "state": "VALID"
+    }
+  },
+  "correlation_id": "two_venue_books.jsonl",
+  "data": {
+    "clock": "RECORDED_RECEIVE_TIME",
+    "event_count": 4,
+    "latest_receive_ts_ns": 1100300000
+  },
+  "generated_ts_ns": 1100300000,
+  "health": "HEALTHY",
+  "job": {
+    "mode": "BACKTEST",
+    "state": "COMPLETE"
+  },
+  "live": {
+    "persistence_lag_ns": 0,
+    "reconnects": 0,
+    "stale_disconnects": 0
+  },
+  "metrics": [
+    {
+      "breached": false,
+      "comparator": "<=",
+      "health_on_breach": "CRITICAL",
+      "name": "data_age_ns",
+      "scope": "PIPELINE",
+      "threshold": 1000000000,
+      "unit": "nanoseconds",
+      "value": 200000
+    },
+    {
+      "breached": false,
+      "comparator": ">=",
+      "health_on_breach": "CRITICAL",
+      "name": "partition_completeness",
+      "scope": "PIPELINE",
+      "threshold": 1.0,
+      "unit": "ratio",
+      "value": 1.0
+    },
+    {
+      "breached": false,
+      "comparator": "<=",
+      "health_on_breach": "CRITICAL",
+      "name": "sequence_gaps",
+      "scope": "PIPELINE",
+      "threshold": 0,
+      "unit": "count",
+      "value": 0
+    },
+    {
+      "breached": false,
+      "comparator": "<=",
+      "health_on_breach": "CRITICAL",
+      "name": "invalid_books",
+      "scope": "PIPELINE",
+      "threshold": 0,
+      "unit": "count",
+      "value": 0
+    },
+    {
+      "breached": false,
+      "comparator": "<=",
+      "health_on_breach": "CRITICAL",
+      "name": "schema_mismatches",
+      "scope": "PIPELINE",
+      "threshold": 0,
+      "unit": "count",
+      "value": 0
+    },
+    {
+      "breached": false,
+      "comparator": ">=",
+      "health_on_breach": "DEGRADED",
+      "name": "replay_events_per_second",
+      "scope": "PIPELINE",
+      "threshold": 1.0,
+      "unit": "events_per_second",
+      "value": 1679.4373884748609
+    },
+    {
+      "breached": false,
+      "comparator": "<=",
+      "health_on_breach": "DEGRADED",
+      "name": "reconnects",
+      "scope": "PIPELINE",
+      "threshold": 5,
+      "unit": "count",
+      "value": 0
+    },
+    {
+      "breached": false,
+      "comparator": "<=",
+      "health_on_breach": "CRITICAL",
+      "name": "stale_disconnects",
+      "scope": "PIPELINE",
+      "threshold": 0,
+      "unit": "count",
+      "value": 0
+    },
+    {
+      "breached": false,
+      "comparator": "<=",
+      "health_on_breach": "DEGRADED",
+      "name": "persistence_lag_ns",
+      "scope": "PIPELINE",
+      "threshold": 5000000000,
+      "unit": "nanoseconds",
+      "value": 0
+    },
+    {
+      "breached": false,
+      "comparator": "<=",
+      "health_on_breach": "CRITICAL",
+      "name": "order_rejects",
+      "scope": "STRATEGY_EXECUTION",
+      "threshold": 0,
+      "unit": "count",
+      "value": 0
+    },
+    {
+      "breached": false,
+      "comparator": "<=",
+      "health_on_breach": "CRITICAL",
+      "name": "open_residual_base",
+      "scope": "STRATEGY_EXECUTION",
+      "threshold": 0.002,
+      "unit": "base_quantity",
+      "value": 0.0
+    },
+    {
+      "breached": false,
+      "comparator": "<=",
+      "health_on_breach": "DEGRADED",
+      "name": "max_dispatch_latency_ns",
+      "scope": "STRATEGY_EXECUTION",
+      "threshold": 10000000,
+      "unit": "nanoseconds",
+      "value": 1
+    },
+    {
+      "breached": false,
+      "comparator": "<=",
+      "health_on_breach": "DEGRADED",
+      "name": "rate_limit_utilization",
+      "scope": "STRATEGY_EXECUTION",
+      "threshold": 0.9,
+      "unit": "ratio",
+      "value": 0.001
+    },
+    {
+      "breached": false,
+      "comparator": "<=",
+      "health_on_breach": "CRITICAL",
+      "name": "unhealthy_connectors",
+      "scope": "STRATEGY_EXECUTION",
+      "threshold": 0,
+      "unit": "count",
+      "value": 0
+    },
+    {
+      "breached": false,
+      "comparator": "<=",
+      "health_on_breach": "CRITICAL",
+      "name": "active_kill_switches",
+      "scope": "STRATEGY_EXECUTION",
+      "threshold": 0,
+      "unit": "count",
+      "value": 0
+    }
+  ],
+  "mode": "REPLAY",
+  "partitions": {
+    "complete": 1,
+    "completeness": 1.0,
+    "rejected": 0,
+    "total": 1
+  },
+  "performance": {
+    "replay_duration_ns": 2381750,
+    "replay_events_per_second": 1679.4373884748609
+  },
+  "restart_resilience": {},
+  "schema_version": "1.0.0",
+  "strategy_execution": {
+    "account": {
+      "positions": {
+        "BINANCE:BTC-USDT-SPOT": {
+          "average_price": "60000.00",
+          "fees": "0.24000",
+          "gross_traded_notional": "600.00000",
+          "instrument_id": "BTC-USDT-SPOT",
+          "mark_price": "60009.95",
+          "quantity": "0.010",
+          "realized_pnl": "0",
+          "unrealized_pnl": "0.09950",
+          "venue": "BINANCE"
+        },
+        "BYBIT:BTC-USDT-SPOT": {
+          "average_price": "60060.00",
+          "fees": "0.24024",
+          "gross_traded_notional": "600.60000",
+          "instrument_id": "BTC-USDT-SPOT",
+          "mark_price": "60009.95",
+          "quantity": "-0.010",
+          "realized_pnl": "0",
+          "unrealized_pnl": "0.50050",
+          "venue": "BYBIT"
+        }
+      },
+      "schema_version": "1.0.0",
+      "venues": {
+        "BINANCE": {
+          "available_capital": "9999.85950",
+          "available_cash": "9399.76000",
+          "cash_balance": "9399.76000",
+          "cash_delta": "-600.24000",
+          "equity": "9999.85950",
+          "fees": "0.24000",
+          "initial_capital": "10000",
+          "realized_pnl": "0",
+          "reserved_cash": "0",
+          "reserved_gross_notional": "0",
+          "reserved_margin": "0",
+          "reserved_messages": 0,
+          "reserved_position": "0.000",
+          "unrealized_pnl": "0.09950",
+          "venue": "BINANCE"
+        },
+        "BYBIT": {
+          "available_capital": "10000.26026",
+          "available_cash": "10600.35976",
+          "cash_balance": "10600.35976",
+          "cash_delta": "600.35976",
+          "equity": "10000.26026",
+          "fees": "0.24024",
+          "initial_capital": "10000",
+          "realized_pnl": "0",
+          "reserved_cash": "0",
+          "reserved_gross_notional": "0",
+          "reserved_margin": "0",
+          "reserved_messages": 0,
+          "reserved_position": "0.000",
+          "unrealized_pnl": "0.50050",
+          "venue": "BYBIT"
+        }
+      }
+    },
+    "connectors": {
+      "unhealthy": 0,
+      "venues": {
+        "BINANCE": {
+          "account_enabled": true,
+          "healthy": true,
+          "supported_order_types": [
+            "LIMIT",
+            "MARKET"
+          ],
+          "supports_post_only": true,
+          "supports_reduce_only": true,
+          "venue_enabled": true
+        },
+        "BYBIT": {
+          "account_enabled": true,
+          "healthy": true,
+          "supported_order_types": [
+            "LIMIT",
+            "MARKET"
+          ],
+          "supports_post_only": true,
+          "supports_reduce_only": true,
+          "venue_enabled": true
+        }
+      }
+    },
+    "kill_switch": {
+      "activated_ts_ns": null,
+      "cancel_all_on_activation": true,
+      "events": [],
+      "last_reset_reconciliation_id": "",
+      "reason": "",
+      "reconciliation_required_before_resume": false,
+      "risk_reducing_orders_allowed": true,
+      "schema_version": "1.0.0",
+      "source": "",
+      "state": "INACTIVE",
+      "strategy_new_risk_allowed": true
+    },
+    "latency": {
+      "callbacks_observed": 0,
+      "children_dispatched": 2,
+      "max_dispatch_duration_ns": 1,
+      "max_first_callback_latency_ns": 0,
+      "measurements": [
+        {
+          "callback_count": 0,
+          "dispatch_completed_ts_ns": 1000652333,
+          "dispatch_duration_ns": 1,
+          "dispatch_started_ts_ns": 1000652332,
+          "first_callback_observed_ts_ns": null,
+          "last_callback_observed_ts_ns": null,
+          "leg_index": 0,
+          "order_id": "a1eebfbe-5aba-55de-8cf1-b9b70ad399f2",
+          "parent_order_id": "214fce2d-b11b-50d6-b7ad-518029a282fd",
+          "venue": "BINANCE"
+        },
+        {
+          "callback_count": 0,
+          "dispatch_completed_ts_ns": 1000652335,
+          "dispatch_duration_ns": 1,
+          "dispatch_started_ts_ns": 1000652334,
+          "first_callback_observed_ts_ns": null,
+          "last_callback_observed_ts_ns": null,
+          "leg_index": 1,
+          "order_id": "65a85b97-8ab3-5ab0-9c5f-e50c77bf13ca",
+          "parent_order_id": "214fce2d-b11b-50d6-b7ad-518029a282fd",
+          "venue": "BYBIT"
+        }
+      ],
+      "min_dispatch_duration_ns": 1,
+      "min_first_callback_latency_ns": 0,
+      "policy": "DETERMINISTIC_SEQUENTIAL"
+    },
+    "margin": {
+      "alerts": [],
+      "report_id": "ee65c6e8-c04f-554a-8ad8-acca2c704093",
+      "schema_version": "1.0.0",
+      "state": "NOT_APPLICABLE",
+      "ts_ns": 1100300000,
+      "venues": {
+        "BINANCE": {
+          "alert_codes": [],
+          "effective_margin_balance": "9999.85950",
+          "gross_notional": "0",
+          "initial_margin_required": "0",
+          "liquidation_buffer": "9999.85950",
+          "maintenance_margin_required": "0",
+          "maintenance_margin_utilization": "0E+5",
+          "margin_balance": "9999.85950",
+          "margin_enabled": false,
+          "required_liquidation_buffer": "0.00",
+          "state": "NOT_APPLICABLE",
+          "venue": "BINANCE",
+          "venue_reported_margin_balance": null
+        },
+        "BYBIT": {
+          "alert_codes": [],
+          "effective_margin_balance": "10000.26026",
+          "gross_notional": "0",
+          "initial_margin_required": "0",
+          "liquidation_buffer": "10000.26026",
+          "maintenance_margin_required": "0",
+          "maintenance_margin_utilization": "0E+5",
+          "margin_balance": "10000.26026",
+          "margin_enabled": false,
+          "required_liquidation_buffer": "0.00",
+          "state": "NOT_APPLICABLE",
+          "venue": "BYBIT",
+          "venue_reported_margin_balance": null
+        }
+      }
+    },
+    "opportunities": {
+      "count": 1,
+      "expected_net_edge_bps": {
+        "average": "2.000",
+        "maximum": "2.000",
+        "minimum": "2.000"
+      }
+    },
+    "orders": {
+      "cancels": 0,
+      "fills": 2,
+      "rejects": 0,
+      "states": {
+        "FILLED": 2
+      },
+      "total": 2
+    },
+    "pnl": {
+      "fees": "0.48024",
+      "gross": "0.60000",
+      "net": "0.11976"
+    },
+    "rate_limits": {
+      "in_flight_requests": 0,
+      "max_utilization": 0.001,
+      "pending_requests": 0,
+      "schema_version": "1.0.0",
+      "undelivered_reports": 0,
+      "utilization_by_venue": {
+        "BINANCE": 0.001,
+        "BYBIT": 0.001
+      },
+      "venues": {
+        "BINANCE": {
+          "capacity": 1000,
+          "delayed": 0,
+          "headroom": 999,
+          "in_flight": 0,
+          "next_release_ts_ns": null,
+          "next_window_ts_ns": 2000000000,
+          "policy": "REJECT",
+          "queue_depth": 0,
+          "queued": 0,
+          "throttle_delay_ns": 0,
+          "used": 1,
+          "window_start_ts_ns": 1000000000
+        },
+        "BYBIT": {
+          "capacity": 1000,
+          "delayed": 0,
+          "headroom": 999,
+          "in_flight": 0,
+          "next_release_ts_ns": null,
+          "next_window_ts_ns": 2000000000,
+          "policy": "REJECT",
+          "queue_depth": 0,
+          "queued": 0,
+          "throttle_delay_ns": 0,
+          "used": 1,
+          "window_start_ts_ns": 1000000000
+        }
+      }
+    },
+    "residual": {
+      "legging_control_overrides": 0,
+      "legging_limit_bindings": 1,
+      "limit_breaches": 0,
+      "open_residual_base": "0",
+      "open_residual_plans": 0,
+      "policy": {
+        "allow_risk_reducing_under_stop": true,
+        "hedge_venue_priority": [
+          "BINANCE",
+          "BYBIT"
+        ],
+        "max_one_sided_notional": "1000",
+        "max_residual_age_ns": 5000000000,
+        "max_residual_base": "0.002",
+        "max_unwind_attempts": 2,
+        "unwind_price_slippage_bps": "10",
+        "unwind_urgency": "NORMAL"
+      },
+      "schema_version": "1.0.0",
+      "unwind_children": 0
+    },
+    "routing": {
+      "route_decisions": 2,
+      "route_overrides": 0,
+      "route_rejections": 0,
+      "routes_by_venue": {
+        "BINANCE": 1,
+        "BYBIT": 1
+      }
+    },
+    "schema_version": "1.0.0",
+    "session_mode": "PAPER_SIMULATION"
+  },
+  "structured_logs": {
+    "components": {
+      "EXECUTION_CONNECTOR": 16,
+      "MARKET_DATA": 4,
+      "PAPER_HOST": 52,
+      "STRATEGY": 1
+    },
+    "database": "structured_logs.sqlite",
+    "failed_opportunities": 0,
+    "failed_trace_count": 0,
+    "failed_traces": "failed_opportunity_traces.jsonl",
+    "jsonl": "structured_logs.jsonl",
+    "levels": {
+      "INFO": 71,
+      "WARNING": 2
+    },
+    "records": 73,
+    "schema_version": "1.0.0",
+    "searchable_fields": [
+      "correlation_id",
+      "component",
+      "level",
+      "event_type",
+      "venue",
+      "source_event_id",
+      "feature_state_id",
+      "opportunity_id",
+      "risk_decision_id",
+      "parent_plan_id",
+      "child_order_id",
+      "request_id"
+    ]
+  },
+  "tca": {
+    "calculation": {
+      "benchmark": "child decision/limit price at dispatch",
+      "buy_slippage_quote": "(average_fill_price - benchmark_price) * filled_quantity",
+      "missed_opportunity": "not all primary children filled or residual outside approved bound",
+      "sell_slippage_quote": "(benchmark_price - average_fill_price) * filled_quantity",
+      "sign": "positive is adverse; negative is price improvement",
+      "weighted_slippage_bps": "sum(slippage_quote) / sum(filled_quantity * benchmark_price) * 10000"
+    },
+    "calculation_version": "basic-tca-v1",
+    "correlation_id": "two_venue_books.jsonl",
+    "groups": [
+      {
+        "benchmark_notional": "600.00000",
+        "cancels": 0,
+        "fees": "0.24000",
+        "filled_notional": "600.00000",
+        "filled_quantity": "0.010",
+        "fills": 1,
+        "instrument_id": "BTC-USDT-SPOT",
+        "missed_opportunities": 0,
+        "order_type": "LIMIT",
+        "orders": 1,
+        "partials": 0,
+        "rejects": 0,
+        "slippage_quote": "0.00000",
+        "timeouts": 0,
+        "unwind_fills": 0,
+        "unwind_orders": 0,
+        "venue": "BINANCE",
+        "weighted_slippage_bps": "0"
+      },
+      {
+        "benchmark_notional": "600.60000",
+        "cancels": 0,
+        "fees": "0.24024",
+        "filled_notional": "600.60000",
+        "filled_quantity": "0.010",
+        "fills": 1,
+        "instrument_id": "BTC-USDT-SPOT",
+        "missed_opportunities": 0,
+        "order_type": "LIMIT",
+        "orders": 1,
+        "partials": 0,
+        "rejects": 0,
+        "slippage_quote": "0.00000",
+        "timeouts": 0,
+        "unwind_fills": 0,
+        "unwind_orders": 0,
+        "venue": "BYBIT",
+        "weighted_slippage_bps": "0"
+      }
+    ],
+    "lineage": {
+      "canonical_source_path": "data/samples/two_venue_books.jsonl",
+      "canonical_source_sha256": "bf76072a30b2c2612810db0c702d97f03851a85c90205a18b9bbfcf3fe643c74",
+      "raw_reference_coverage": 0.0,
+      "raw_refs": [],
+      "source_event_ids": [
+        "35e2824a-105e-58df-92e9-0dc61cb4a182",
+        "8f7eae8a-97f8-51c2-9015-31779c1f36af"
+      ],
+      "source_event_raw_refs": {
+        "35e2824a-105e-58df-92e9-0dc61cb4a182": null,
+        "8f7eae8a-97f8-51c2-9015-31779c1f36af": null
+      }
+    },
+    "opportunities": [
+      {
+        "executed": true,
+        "expected_net_edge_bps": "2.000",
+        "missed": false,
+        "missed_reason": "",
+        "observed_ts_ns": 1000300000,
+        "opportunity_id": "429760e2-1b6f-5a38-bbae-5ffec8b4d4eb",
+        "parent_id": "214fce2d-b11b-50d6-b7ad-518029a282fd",
+        "raw_refs": [],
+        "residual_base": "0.000",
+        "source_event_ids": [
+          "8f7eae8a-97f8-51c2-9015-31779c1f36af",
+          "35e2824a-105e-58df-92e9-0dc61cb4a182"
+        ],
+        "terminal_outcome": "FILLED"
+      }
+    ],
+    "period": {
+      "date_utc": null,
+      "end_ts_ns": 1100300000,
+      "start_ts_ns": 1000100000
+    },
+    "report_id": "cfb06f31-dea5-5cac-bc2a-54106821d394",
+    "schema_version": "1.0.0",
+    "scope": "RUN",
+    "summary": {
+      "benchmark_notional": "1200.60000",
+      "cancels": 0,
+      "fees": "0.48024",
+      "filled_notional": "1200.60000",
+      "filled_quantity": "0.020",
+      "fills": 2,
+      "missed_opportunities": 0,
+      "net_pnl": "0.11976",
+      "open_residual_base": "0",
+      "opportunities_detected": 1,
+      "opportunities_executed": 1,
+      "orders": 2,
+      "partials": 0,
+      "rejects": 0,
+      "slippage_quote": "0.00000",
+      "timeouts": 0,
+      "unwind_cost": "0",
+      "unwind_fills": 0,
+      "unwind_orders": 0,
+      "weighted_slippage_bps": "0"
+    }
+  },
+  "thresholds": {
+    "max_active_kill_switches": 0,
+    "max_data_age_ns": 1000000000,
+    "max_dispatch_latency_ns": 10000000,
+    "max_gaps": 0,
+    "max_invalid_books": 0,
+    "max_open_residual_base": 0.002,
+    "max_order_rejects": 0,
+    "max_persistence_lag_ns": 5000000000,
+    "max_rate_limit_utilization": 0.9,
+    "max_reconnects": 5,
+    "max_schema_mismatches": 0,
+    "max_stale_disconnects": 0,
+    "max_unhealthy_connectors": 0,
+    "min_partition_completeness": 1.0,
+    "min_replay_events_per_second": 1.0
+  },
+  "versions": {
+    "adapter_versions": [
+      "legacy-jsonl-v1"
+    ],
+    "canonical_schema_expected": "1.2.0",
+    "canonical_schema_observed": [
+      "1.2.0"
+    ],
+    "instrument_master": {
+      "content_sha256": "66839e9854f36adaa42dda6a681ee6ee54401f56d2af85e1c19c6530623c5b53",
+      "fee_rule_count": 2,
+      "instrument_count": 2,
+      "schema_version": "1.1.0",
+      "status_event_count": 0,
+      "version_count": 2
+    },
+    "schema_mismatches": 0
+  }
+}

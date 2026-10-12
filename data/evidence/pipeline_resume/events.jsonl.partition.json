@@ -1,0 +1,19 @@
+{
+  "attempts": 2,
+  "checkpoint_line": 2,
+  "checkpoint_offset": 2010,
+  "committed_records": 2,
+  "job_id": "representative-resume-quality",
+  "last_error": null,
+  "last_receive_ts_ns": 1000300000,
+  "late_records": 0,
+  "output_path": "data/evidence/pipeline_resume/events.jsonl",
+  "partition_id": "2026-09-04T10",
+  "persistence_lag_ns": 1788550764401619335,
+  "rejected_records": 0,
+  "source_path": "data/evidence/raw/representative-session-v2/raw.jsonl",
+  "source_size": 2010,
+  "status": "COMPLETE",
+  "unpersisted_bytes": 0,
+  "updated_ts_ns": 1788550765401402355
+}

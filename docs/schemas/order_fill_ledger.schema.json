@@ -1,0 +1,49 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://papertowninsights.org/schemas/order-fill-ledger-1.0.0.json",
+  "title": "Canonical OMS order and fill ledger event",
+  "type": "object",
+  "additionalProperties": true,
+  "required": ["ledger_event_id", "event_type", "ts_ns"],
+  "properties": {
+    "ledger_event_id": {"type": "string", "format": "uuid"},
+    "event_type": {
+      "enum": [
+        "ORDER_LIFECYCLE", "FILL", "FEE_ADJUSTMENT",
+        "FILL_NOTIONAL_ADJUSTMENT", "ORDER_UPDATE_DUPLICATE_SUPPRESSED",
+        "ORDER_TERMINAL_CONFLICT_RESOLVED", "ORPHAN_ORDER_UPDATE_REJECTED",
+        "RMS_INTERNAL_RECONCILIATION",
+        "RMS_RECONCILIATION", "EXPOSURE_LIMIT_STATE_TRANSITION",
+        "LEGGING_LIMIT_BOUND", "LEGGING_CONTROL_OVERRIDE",
+        "LEGGING_LIMIT_CLEARED", "FEED_CONTROL_STATE_TRANSITION",
+        "FEED_CONTROL_VENUE_CANCEL", "KILL_SWITCH_STATE_TRANSITION",
+        "KILL_SWITCH_CANCEL_ALL_COMPLETE"
+      ]
+    },
+    "ts_ns": {"type": "integer", "minimum": 0},
+    "lifecycle_event": {
+      "enum": [
+        "SUBMIT", "CANCEL", "REPLACE", "ACKNOWLEDGED", "PARTIAL",
+        "FILLED", "REJECTED", "CANCELLED", "TIMED_OUT"
+      ]
+    },
+    "source": {
+      "enum": [
+        "OMS", "ADAPTER_CALLBACK", "PRIVATE_STREAM", "REST_QUERY",
+        "TIMER", "INTERNAL"
+      ]
+    },
+    "parent_id": {"type": "string"},
+    "opportunity_id": {"type": "string"},
+    "order_id": {"type": "string"},
+    "request_id": {"type": "string"},
+    "update_id": {"type": "string"},
+    "fill_id": {"type": "string"},
+    "venue": {"type": "string"},
+    "instrument_id": {"type": "string"},
+    "fill_quantity": {"type": "string"},
+    "cumulative_filled_quantity": {"type": "string"},
+    "average_price": {"type": "string"},
+    "fee": {"type": "string"}
+  }
+}

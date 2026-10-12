@@ -1,0 +1,928 @@
+{
+  "audit_duration_seconds": 91.082,
+  "components": {
+    "backtest_replay": {
+      "checks": [
+        {
+          "check": "replay_plans_all_closed",
+          "detail": "[]",
+          "status": "OK"
+        },
+        {
+          "check": "replay_used_recorded_live_timing",
+          "detail": "79365 of 79365 events replayed at their actual live processing time rather than an idealized zero-latency clock",
+          "status": "OK"
+        },
+        {
+          "check": "replay_consistent_with_forward_test",
+          "detail": "BINANCE.risk.p50_ns,BINANCE.risk.p99_ns,BINANCE.strategy.p50_ns,BINANCE.strategy.p99_ns,BYBIT.risk.p50_ns,BYBIT.risk.p99_ns,BYBIT.strategy.p50_ns,BYBIT.strategy.p99_ns,BYBIT.submit_ack.p99_ns,closed_plans,fees,fill_ratio,fills,missed_opportunities,net_pnl,opportunities,rejects",
+          "status": "FAIL"
+        },
+        {
+          "check": "forward_sample_sufficient",
+          "detail": "87 forward opportunities (< 30): accuracy not yet measurable",
+          "status": "OK"
+        }
+      ],
+      "metrics": {
+        "comparison": {
+          "decision": "DIVERGED",
+          "diverged": [
+            "BINANCE.risk.p50_ns",
+            "BINANCE.risk.p99_ns",
+            "BINANCE.strategy.p50_ns",
+            "BINANCE.strategy.p99_ns",
+            "BYBIT.risk.p50_ns",
+            "BYBIT.risk.p99_ns",
+            "BYBIT.strategy.p50_ns",
+            "BYBIT.strategy.p99_ns",
+            "BYBIT.submit_ack.p99_ns",
+            "closed_plans",
+            "fees",
+            "fill_ratio",
+            "fills",
+            "missed_opportunities",
+            "net_pnl",
+            "opportunities",
+            "rejects"
+          ],
+          "metrics": {
+            "cancels": {
+              "paper": 0.0,
+              "replay": 0.0
+            },
+            "closed_plans": {
+              "paper": 87.0,
+              "replay": 19.0
+            },
+            "fees": {
+              "paper": 4.433947848,
+              "replay": 0.909916368
+            },
+            "fill_ratio": {
+              "paper": 0.8218390804597702,
+              "replay": 0.7631578947368421
+            },
+            "fills": {
+              "paper": 143.0,
+              "replay": 29.0
+            },
+            "missed_opportunities": {
+              "paper": 31.0,
+              "replay": 9.0
+            },
+            "net_pnl": {
+              "paper": 231.735112152,
+              "replay": -79.330536368
+            },
+            "opportunities": {
+              "paper": 87.0,
+              "replay": 19.0
+            },
+            "rejects": {
+              "paper": 31.0,
+              "replay": 9.0
+            },
+            "weighted_slippage_bps": {
+              "paper": -0.017591515610938288,
+              "replay": 0.0
+            }
+          }
+        },
+        "instrument_status_changes_applied": 2,
+        "recorded_event_timing_used": 79365,
+        "replay": {
+          "closed_plans": 19,
+          "execution_mode": "INTERNAL_SIMULATION",
+          "net_pnl": "-79.33053636800000",
+          "opportunities": 19,
+          "quality_gate": "REJECTED",
+          "strategies": {
+            "basis_mean_reversion_v1": {
+              "closed_plans": 19,
+              "net_pnl": "-79.33053636800000",
+              "opportunities": 19,
+              "plans": 19
+            },
+            "cross_venue_btc_v1": {
+              "closed_plans": 0,
+              "net_pnl": "0",
+              "opportunities": 0,
+              "plans": 0
+            }
+          }
+        }
+      },
+      "status": "FAIL"
+    },
+    "dry_run": {
+      "checks": [
+        {
+          "check": "paper_summary_present",
+          "detail": "no paper_summary.json",
+          "status": "OK"
+        },
+        {
+          "check": "execution_mode_labelled_paper",
+          "detail": "INTERNAL_PAPER",
+          "status": "OK"
+        },
+        {
+          "check": "no_open_plans_after_drain",
+          "detail": "[]",
+          "status": "OK"
+        },
+        {
+          "check": "no_unresolved_order_states",
+          "detail": "0 unresolved",
+          "status": "OK"
+        },
+        {
+          "check": "no_open_residual_breach",
+          "detail": "[]",
+          "status": "OK"
+        },
+        {
+          "check": "no_open_residual",
+          "detail": "0",
+          "status": "OK"
+        },
+        {
+          "check": "kill_switch_inactive",
+          "detail": "INACTIVE: ",
+          "status": "OK"
+        },
+        {
+          "check": "rms_reconciliation_not_rejected",
+          "detail": "0",
+          "status": "OK"
+        },
+        {
+          "check": "no_failed_opportunity_traces",
+          "detail": "31 failed traces",
+          "status": "WARN"
+        },
+        {
+          "check": "maker_dry_run_fills_sane",
+          "detail": "0 violations",
+          "status": "OK"
+        }
+      ],
+      "metrics": {
+        "closed_plans": 87,
+        "execution_mode": "INTERNAL_PAPER",
+        "fees": "4.4339478480000000",
+        "fills": 143,
+        "flatten_started": false,
+        "gross_pnl": "236.1690600000000000",
+        "kill_reason": "",
+        "kill_switch": "INACTIVE",
+        "latency_model": "preset:singapore",
+        "maker_dry_run": {
+          "BINANCE": {
+            "fills": 888,
+            "inventory": 0.0060000000000000175,
+            "mark_to_market_pnl_quote": -7.434970587999134,
+            "quotes": 2743
+          },
+          "BYBIT": {
+            "fills": 836,
+            "inventory": 0.006,
+            "mark_to_market_pnl_quote": -8.429700109005797,
+            "quotes": 3079
+          }
+        },
+        "net_pnl": "231.7351121520000000",
+        "open_residual_base": "0",
+        "opportunities": 87,
+        "rms_reconciliation": "APPROVED",
+        "unknown_state_orders": 0,
+        "venue_queries": 0,
+        "weighted_slippage_bps": "-0.01759151561093828965607190485"
+      },
+      "status": "WARN"
+    },
+    "errors": {
+      "checks": [
+        {
+          "check": "no_unexpected_structured_log_errors",
+          "detail": "0 unexpected ERROR records (of 62 total; the rest are normal rejected-leg outcomes correctly unwound): ",
+          "status": "OK"
+        },
+        {
+          "check": "no_structured_log_errors",
+          "detail": "62 ERROR records, all normal rejected-leg outcomes",
+          "status": "WARN"
+        },
+        {
+          "check": "no_process_errors",
+          "detail": "",
+          "status": "OK"
+        },
+        {
+          "check": "no_process_warnings",
+          "detail": "2026-09-14 19:57:46,831 WARNING crypto_stat_arb.live_feed BINANCE feed disconnected: URLError: <urlopen error timed out>",
+          "status": "WARN"
+        }
+      ],
+      "metrics": {
+        "stderr_errors": 0,
+        "stderr_samples": [
+          "2026-09-14 19:57:46,831 WARNING crypto_stat_arb.live_feed BINANCE feed disconnected: URLError: <urlopen error timed out>",
+          "2026-09-14 19:58:10,691 WARNING crypto_stat_arb.live_feed BINANCE resynchronization required: market_data_stale",
+          "2026-09-14 20:05:27,334 WARNING crypto_stat_arb.live_feed BYBIT resynchronization required: market_data_stale",
+          "2026-09-14 20:05:27,574 WARNING crypto_stat_arb.live_feed BINANCE resynchronization required: market_data_stale",
+          "2026-09-14 20:05:47,313 WARNING crypto_stat_arb.live_feed BINANCE feed disconnected: URLError: <urlopen error timed out>"
+        ],
+        "stderr_warnings": 5,
+        "structured_log_error_event_types": [
+          "OPPORTUNITY_OUTCOME",
+          "PLAN_STATE_TRANSITION"
+        ],
+        "structured_log_levels": {
+          "ERROR": 62,
+          "INFO": 84508,
+          "WARNING": 94
+        }
+      },
+      "status": "WARN"
+    },
+    "feed": {
+      "checks": [
+        {
+          "check": "live_manifest_present",
+          "detail": "session did not finalize its manifest",
+          "status": "OK"
+        },
+        {
+          "check": "public_market_data_only",
+          "detail": "mode=PUBLIC_MARKET_DATA_ONLY live_order_routing=False",
+          "status": "OK"
+        },
+        {
+          "check": "canonical_events_recorded",
+          "detail": "79365 events",
+          "status": "OK"
+        },
+        {
+          "check": "no_rejected_frames",
+          "detail": "0 rejected frames",
+          "status": "OK"
+        },
+        {
+          "check": "BINANCE_book_events",
+          "detail": "17683 events",
+          "status": "OK"
+        },
+        {
+          "check": "BINANCE_trade_feed",
+          "detail": "131342 trades",
+          "status": "OK"
+        },
+        {
+          "check": "BINANCE_no_parse_errors",
+          "detail": "0 parse/normalize errors",
+          "status": "OK"
+        },
+        {
+          "check": "BINANCE_stable_connection",
+          "detail": "6 reconnects/stale disconnects; last_error=URLError: <urlopen error timed out>",
+          "status": "WARN"
+        },
+        {
+          "check": "BINANCE_trade_prints_valid",
+          "detail": "0 invalid prints rejected",
+          "status": "OK"
+        },
+        {
+          "check": "BYBIT_book_events",
+          "detail": "61682 events",
+          "status": "OK"
+        },
+        {
+          "check": "BYBIT_trade_feed",
+          "detail": "20101 trades",
+          "status": "OK"
+        },
+        {
+          "check": "BYBIT_no_parse_errors",
+          "detail": "0 parse/normalize errors",
+          "status": "OK"
+        },
+        {
+          "check": "BYBIT_stable_connection",
+          "detail": "2 reconnects/stale disconnects; last_error=market_data_stale",
+          "status": "WARN"
+        },
+        {
+          "check": "BYBIT_trade_prints_valid",
+          "detail": "0 invalid prints rejected",
+          "status": "OK"
+        }
+      ],
+      "metrics": {
+        "BINANCE": {
+          "canonical_events": 17683,
+          "invalid_trades": 0,
+          "last_error": "URLError: <urlopen error timed out>",
+          "normalization_errors": 0,
+          "parse_errors": 0,
+          "raw_frames": 17683,
+          "reconnects": 4,
+          "resyncs": 2,
+          "stale_disconnects": 2,
+          "trade_normalization_errors": 0,
+          "trade_parse_errors": 0,
+          "trade_reconnects": 0,
+          "trade_stale_disconnects": 0,
+          "trade_ticks": 131342
+        },
+        "BYBIT": {
+          "canonical_events": 61682,
+          "invalid_trades": 0,
+          "last_error": "market_data_stale",
+          "normalization_errors": 0,
+          "parse_errors": 0,
+          "raw_frames": 61684,
+          "reconnects": 1,
+          "resyncs": 1,
+          "stale_disconnects": 1,
+          "trade_normalization_errors": 0,
+          "trade_parse_errors": 0,
+          "trade_reconnects": 0,
+          "trade_stale_disconnects": 0,
+          "trade_ticks": 20101
+        }
+      },
+      "status": "WARN"
+    },
+    "historical_storage": {
+      "checks": [
+        {
+          "check": "partitions_present",
+          "detail": "no part-* directories",
+          "status": "OK"
+        },
+        {
+          "check": "part-000001_manifest",
+          "detail": "missing live_part_manifest.json",
+          "status": "OK"
+        },
+        {
+          "check": "part-000001_file_sha256",
+          "detail": "all files match",
+          "status": "OK"
+        },
+        {
+          "check": "part-000001_wire_hash_chain",
+          "detail": "{\"valid\": true, \"record_count\": 76358, \"first_wire_ref\": \"d10355891fed07181e2b1c494dcb516fd1d639a1cbd2bf77bbcd7a1a72f8f6bc\", \"last_wire_ref\": \"89095607c4d785ac7ca7de460d2f97121c2734282d63e5ac5110055d9",
+          "status": "OK"
+        },
+        {
+          "check": "part-000001_raw_hash_chain",
+          "detail": "{\"valid\": true, \"record_count\": 76358, \"first_raw_ref\": \"f0392c91-4c20-5612-9c18-2a5e9d76ad81\", \"last_raw_ref\": \"ceb28e8f-4729-5dff-b1c4-09d703d937eb\", \"terminal_record_hash\": \"6b3ee18dd2c6256f0a57885",
+          "status": "OK"
+        },
+        {
+          "check": "part-000002_manifest",
+          "detail": "missing live_part_manifest.json",
+          "status": "OK"
+        },
+        {
+          "check": "part-000002_file_sha256",
+          "detail": "all files match",
+          "status": "OK"
+        },
+        {
+          "check": "part-000002_wire_hash_chain",
+          "detail": "{\"valid\": true, \"record_count\": 75018, \"first_wire_ref\": \"eddcf88566863b8fbe9fb34ae6becfd1bc42d9fb7d5430250bc5394c6ea74654\", \"last_wire_ref\": \"9b3e4b15b0a59734720a31e3487cda2bf04900ce7f7867cedfec6ef9d",
+          "status": "OK"
+        },
+        {
+          "check": "part-000002_raw_hash_chain",
+          "detail": "{\"valid\": true, \"record_count\": 75018, \"first_raw_ref\": \"e5e21173-03cc-5afe-b990-e2d147fcfb36\", \"last_raw_ref\": \"a72a6325-f6ed-5d12-90ab-e486357c6605\", \"terminal_record_hash\": \"b5331efb1a8abfa3fb88a56",
+          "status": "OK"
+        },
+        {
+          "check": "part-000003_manifest",
+          "detail": "missing live_part_manifest.json",
+          "status": "OK"
+        },
+        {
+          "check": "part-000003_file_sha256",
+          "detail": "all files match",
+          "status": "OK"
+        },
+        {
+          "check": "part-000003_wire_hash_chain",
+          "detail": "{\"valid\": true, \"record_count\": 67047, \"first_wire_ref\": \"95796b6607a3e0d91fb4f1b3315a540b944281d5c74168ec14fc7e9e9c3902fe\", \"last_wire_ref\": \"3c6d6c6bf97c3d9107d12071b4cd95cf1b463c1a88c7e1ee593bc15ee",
+          "status": "OK"
+        },
+        {
+          "check": "part-000003_raw_hash_chain",
+          "detail": "{\"valid\": true, \"record_count\": 67047, \"first_raw_ref\": \"23cd5961-76e6-5f8b-b3fe-1ea34819dfff\", \"last_raw_ref\": \"52c0f836-ae49-5d22-9743-eb1ca2ee32fd\", \"terminal_record_hash\": \"9e44838b7b02d96ed1169a9",
+          "status": "OK"
+        },
+        {
+          "check": "canonical_count_matches_manifest",
+          "detail": "79365 stored vs 79365 in manifest",
+          "status": "OK"
+        },
+        {
+          "check": "no_quarantined_frames",
+          "detail": "0 quarantined",
+          "status": "OK"
+        },
+        {
+          "check": "persistence_lag_under_5s",
+          "detail": "873.6 ms",
+          "status": "OK"
+        }
+      ],
+      "metrics": {
+        "canonical_events": 79365,
+        "max_persistence_lag_ms": 873.622,
+        "parts": 3,
+        "quarantined": 0,
+        "trades": 151443
+      },
+      "status": "OK"
+    },
+    "order_books": {
+      "checks": [
+        {
+          "check": "books_reported",
+          "detail": "no book state in manifest",
+          "status": "OK"
+        },
+        {
+          "check": "BINANCE_snapshot_received",
+          "detail": "3 snapshots",
+          "status": "OK"
+        },
+        {
+          "check": "BINANCE_no_crossed_books",
+          "detail": "0 crossed/locked",
+          "status": "OK"
+        },
+        {
+          "check": "BINANCE_no_checksum_failures",
+          "detail": "0 failures",
+          "status": "OK"
+        },
+        {
+          "check": "BINANCE_no_invalid_levels",
+          "detail": "0 malformed levels",
+          "status": "OK"
+        },
+        {
+          "check": "BINANCE_no_sequence_gaps",
+          "detail": "0 gaps, 3 resyncs",
+          "status": "OK"
+        },
+        {
+          "check": "BINANCE_no_price_jumps",
+          "detail": "0 jumps",
+          "status": "OK"
+        },
+        {
+          "check": "BINANCE_no_wide_spreads",
+          "detail": "0 wide spreads",
+          "status": "OK"
+        },
+        {
+          "check": "BINANCE_duplicates_out_of_order",
+          "detail": "0 dup / 0 ooo",
+          "status": "OK"
+        },
+        {
+          "check": "BYBIT_snapshot_received",
+          "detail": "2 snapshots",
+          "status": "OK"
+        },
+        {
+          "check": "BYBIT_no_crossed_books",
+          "detail": "0 crossed/locked",
+          "status": "OK"
+        },
+        {
+          "check": "BYBIT_no_checksum_failures",
+          "detail": "0 failures",
+          "status": "OK"
+        },
+        {
+          "check": "BYBIT_no_invalid_levels",
+          "detail": "0 malformed levels",
+          "status": "OK"
+        },
+        {
+          "check": "BYBIT_no_sequence_gaps",
+          "detail": "0 gaps, 1 resyncs",
+          "status": "OK"
+        },
+        {
+          "check": "BYBIT_no_price_jumps",
+          "detail": "0 jumps",
+          "status": "OK"
+        },
+        {
+          "check": "BYBIT_no_wide_spreads",
+          "detail": "0 wide spreads",
+          "status": "OK"
+        },
+        {
+          "check": "BYBIT_duplicates_out_of_order",
+          "detail": "0 dup / 0 ooo",
+          "status": "OK"
+        },
+        {
+          "check": "quality_gate_approved",
+          "detail": "APPROVED",
+          "status": "OK"
+        }
+      ],
+      "metrics": {
+        "BINANCE": {
+          "buffered_deltas": 226,
+          "checksum_failures": 0,
+          "confirmed_price_moves": 0,
+          "crossed_or_locked": 0,
+          "deltas_applied": 17457,
+          "duplicates": 0,
+          "gaps": 0,
+          "invalid_levels": 0,
+          "out_of_order": 0,
+          "price_jumps": 0,
+          "resyncs": 3,
+          "sequence": 100104611851,
+          "snapshots": 3,
+          "stale_transitions": 4,
+          "state": "VALID",
+          "wide_spreads": 0
+        },
+        "BYBIT": {
+          "buffered_deltas": 0,
+          "checksum_failures": 0,
+          "confirmed_price_moves": 0,
+          "crossed_or_locked": 0,
+          "deltas_applied": 61680,
+          "duplicates": 0,
+          "gaps": 0,
+          "invalid_levels": 0,
+          "out_of_order": 0,
+          "price_jumps": 0,
+          "resyncs": 1,
+          "sequence": 262519167,
+          "snapshots": 2,
+          "stale_transitions": 2,
+          "state": "VALID",
+          "wide_spreads": 0
+        },
+        "quality_gate": {
+          "active_flag_codes": [],
+          "decision": "APPROVED",
+          "defect_count": 0,
+          "health": "HEALTHY"
+        }
+      },
+      "status": "OK"
+    },
+    "orderbook_replay": {
+      "checks": [
+        {
+          "check": "BINANCE_processing_order_rebuilds_live_book",
+          "detail": "replayed seq 100104611851 vs live 100104611851",
+          "status": "OK"
+        },
+        {
+          "check": "BYBIT_processing_order_rebuilds_live_book",
+          "detail": "replayed seq 262519167 vs live 262519167",
+          "status": "OK"
+        },
+        {
+          "check": "BINANCE_receive_time_order_rebuilds_live_book",
+          "detail": "replayed seq 100104611851 vs live 100104611851",
+          "status": "OK"
+        },
+        {
+          "check": "BYBIT_receive_time_order_rebuilds_live_book",
+          "detail": "replayed seq 262519167 vs live 262519167",
+          "status": "OK"
+        },
+        {
+          "check": "paper_session_saw_every_stored_event",
+          "detail": "79365 paper vs 79365 stored",
+          "status": "OK"
+        }
+      ],
+      "metrics": {
+        "events": 79365
+      },
+      "status": "OK"
+    },
+    "security_master": {
+      "checks": [
+        {
+          "check": "instrument_status_polled",
+          "detail": "no public instrument-status poll ran this cycle",
+          "status": "OK"
+        },
+        {
+          "check": "instrument_status_polls_succeeded",
+          "detail": "4 polls failed: ['URLError: <urlopen error timed out>']",
+          "status": "WARN"
+        }
+      ],
+      "metrics": {
+        "poll_failure_samples": [
+          "URLError: <urlopen error timed out>"
+        ],
+        "poll_failures": 4,
+        "status_changes_applied": [
+          {
+            "changes": {
+              "min_quantity": "0.00001000",
+              "quantity_step": "0.00001000",
+              "tick_size": "0.01000000"
+            },
+            "venue": "BINANCE"
+          },
+          {
+            "changes": {
+              "min_quantity": "0.000001",
+              "quantity_step": "0.000001"
+            },
+            "venue": "BYBIT"
+          }
+        ]
+      },
+      "status": "WARN"
+    },
+    "simulation": {
+      "checks": [
+        {
+          "check": "cpp_matching_engine_loaded",
+          "detail": "compiled mm_matching_engine not importable on this Python/arch; sim_engine's Python queue-position model was used",
+          "status": "WARN"
+        },
+        {
+          "check": "BINANCE_quotes_placed",
+          "detail": "2739 quotes",
+          "status": "OK"
+        },
+        {
+          "check": "BINANCE_trades_replayed",
+          "detail": "131342 trades",
+          "status": "OK"
+        },
+        {
+          "check": "BINANCE_simulated_fills_sane",
+          "detail": "",
+          "status": "OK"
+        },
+        {
+          "check": "BYBIT_quotes_placed",
+          "detail": "3088 quotes",
+          "status": "OK"
+        },
+        {
+          "check": "BYBIT_trades_replayed",
+          "detail": "20101 trades",
+          "status": "OK"
+        },
+        {
+          "check": "BYBIT_simulated_fills_sane",
+          "detail": "",
+          "status": "OK"
+        }
+      ],
+      "metrics": {
+        "engine": "python_queue_model",
+        "replay": {
+          "book_events": 79365,
+          "trades": 151443
+        },
+        "venues": {
+          "BINANCE": {
+            "fees": 3.3331000310109964,
+            "fill_ratio": 0.3176341730558598,
+            "fills": 870,
+            "inventory": 0.006782000000000029,
+            "mark_to_market_pnl_quote": -7.190570921009009,
+            "quotes": 2739,
+            "sanity_violation_count": 0,
+            "trades_seen": 131342
+          },
+          "BYBIT": {
+            "fees": 3.4427492189405005,
+            "fill_ratio": 0.2665155440414508,
+            "fills": 823,
+            "inventory": 0.004917500000000004,
+            "mark_to_market_pnl_quote": -8.168119903940076,
+            "quotes": 3088,
+            "sanity_violation_count": 0,
+            "trades_seen": 20101
+          }
+        }
+      },
+      "status": "WARN"
+    },
+    "strategies": {
+      "checks": [
+        {
+          "check": "strategies_reported",
+          "detail": "no strategy report in summary",
+          "status": "OK"
+        },
+        {
+          "check": "basis_mean_reversion_v1_plans_closed",
+          "detail": "87/87 closed",
+          "status": "OK"
+        },
+        {
+          "check": "basis_mean_reversion_v1_warmed_up",
+          "detail": "1709 samples",
+          "status": "OK"
+        },
+        {
+          "check": "basis_mean_reversion_v1_zscore_finite",
+          "detail": "0.7334882414522241",
+          "status": "OK"
+        },
+        {
+          "check": "basis_mean_reversion_v1_flat_at_cycle_end",
+          "detail": "stance FLAT left open",
+          "status": "OK"
+        },
+        {
+          "check": "cross_venue_btc_v1_plans_closed",
+          "detail": "0/0 closed",
+          "status": "OK"
+        }
+      ],
+      "metrics": {
+        "basis_mean_reversion_v1": {
+          "actions": {
+            "enter_long_basis": 29,
+            "enter_short_basis": 30,
+            "exit_long_basis_reversion": 15,
+            "exit_short_basis_reversion": 13
+          },
+          "basis_mean_bps": 0.2342737034187037,
+          "basis_stdev_bps": 0.45474046187283,
+          "closed_plans": 87,
+          "last_zscore": 0.7334882414522241,
+          "max_abs_zscore": 9.707077365533737,
+          "net_pnl": "231.7351121520000000",
+          "opportunities": 87,
+          "outcomes": {
+            "FILLED": 56,
+            "REJECTED": 31
+          },
+          "plans": 87,
+          "samples_taken": 1709,
+          "skipped": {
+            "cooldown": 38826,
+            "plan_working": 472,
+            "warmup": 2822
+          },
+          "stance": "FLAT",
+          "stance_reverts": 31,
+          "type": "CROSS_VENUE_BASIS_MEAN_REVERSION",
+          "warmed_up": true
+        },
+        "cross_venue_btc_v1": {
+          "closed_plans": 0,
+          "net_pnl": "0",
+          "opportunities": 0,
+          "outcomes": {},
+          "plans": 0,
+          "type": "CrossVenueSpreadStrategy"
+        }
+      },
+      "status": "OK"
+    },
+    "time_integrity": {
+      "checks": [
+        {
+          "check": "events_time_checked",
+          "detail": "79365 events",
+          "status": "OK"
+        },
+        {
+          "check": "blocked_share_below_5pct",
+          "detail": "7/79365 blocked",
+          "status": "OK"
+        },
+        {
+          "check": "blocking_limited_to_warmup",
+          "detail": "7 blocked (warm-up budget 40)",
+          "status": "OK"
+        },
+        {
+          "check": "host_clock_offset_within_policy",
+          "detail": "host clock -152.8 ms vs exchanges; enable NTP sync",
+          "status": "WARN"
+        },
+        {
+          "check": "no_impossible_latency",
+          "detail": "0 events",
+          "status": "OK"
+        },
+        {
+          "check": "cross_venue_skew_within_policy",
+          "detail": "1057 breaches",
+          "status": "WARN"
+        }
+      ],
+      "metrics": {
+        "blocked_events": 7,
+        "blocked_share": 8.82000882000882e-05,
+        "clock_offset_estimate_ms": -152.797,
+        "cross_venue_skew_breaches": 1057,
+        "events": 79365,
+        "venues": {
+          "BINANCE": {
+            "latency_p50_ms": -60.052,
+            "latency_p95_ms": 4.902,
+            "negative_blocked": 0,
+            "negative_corrected": 16729
+          },
+          "BYBIT": {
+            "latency_p50_ms": -87.585,
+            "latency_p95_ms": -21.928,
+            "negative_blocked": 7,
+            "negative_corrected": 59147
+          }
+        }
+      },
+      "status": "WARN"
+    }
+  },
+  "generated_at": "2026-09-14T15:35:15.237685+00:00",
+  "issues": [
+    {
+      "check": "BINANCE_stable_connection",
+      "component": "feed",
+      "detail": "6 reconnects/stale disconnects; last_error=URLError: <urlopen error timed out>",
+      "status": "WARN"
+    },
+    {
+      "check": "BYBIT_stable_connection",
+      "component": "feed",
+      "detail": "2 reconnects/stale disconnects; last_error=market_data_stale",
+      "status": "WARN"
+    },
+    {
+      "check": "host_clock_offset_within_policy",
+      "component": "time_integrity",
+      "detail": "host clock -152.8 ms vs exchanges; enable NTP sync",
+      "status": "WARN"
+    },
+    {
+      "check": "cross_venue_skew_within_policy",
+      "component": "time_integrity",
+      "detail": "1057 breaches",
+      "status": "WARN"
+    },
+    {
+      "check": "replay_consistent_with_forward_test",
+      "component": "backtest_replay",
+      "detail": "BINANCE.risk.p50_ns,BINANCE.risk.p99_ns,BINANCE.strategy.p50_ns,BINANCE.strategy.p99_ns,BYBIT.risk.p50_ns,BYBIT.risk.p99_ns,BYBIT.strategy.p50_ns,BYBIT.strategy.p99_ns,BYBIT.submit_ack.p99_ns,closed_plans,fees,fill_ratio,fills,missed_opportunities,net_pnl,opportunities,rejects",
+      "status": "FAIL"
+    },
+    {
+      "check": "cpp_matching_engine_loaded",
+      "component": "simulation",
+      "detail": "compiled mm_matching_engine not importable on this Python/arch; sim_engine's Python queue-position model was used",
+      "status": "WARN"
+    },
+    {
+      "check": "no_failed_opportunity_traces",
+      "component": "dry_run",
+      "detail": "31 failed traces",
+      "status": "WARN"
+    },
+    {
+      "check": "instrument_status_polls_succeeded",
+      "component": "security_master",
+      "detail": "4 polls failed: ['URLError: <urlopen error timed out>']",
+      "status": "WARN"
+    },
+    {
+      "check": "no_structured_log_errors",
+      "component": "errors",
+      "detail": "62 ERROR records, all normal rejected-leg outcomes",
+      "status": "WARN"
+    },
+    {
+      "check": "no_process_warnings",
+      "component": "errors",
+      "detail": "2026-09-14 19:57:46,831 WARNING crypto_stat_arb.live_feed BINANCE feed disconnected: URLError: <urlopen error timed out>",
+      "status": "WARN"
+    }
+  ],
+  "overall_status": "FAIL",
+  "schema_version": "1.0.0",
+  "session_dir": "runs/paper_watch/live/cycle-0006-20260914T142731Z"
+}

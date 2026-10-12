@@ -1,0 +1,37 @@
+{
+  "schema_version": "1.0.0",
+  "ts_ns": 1700000000000000000,
+  "state": "BREACHED",
+  "strategies": {
+    "cross_venue_btc_v1": {
+      "gross_notional": "1200.60",
+      "net_notional": "-0.60",
+      "gross_limit": "1200.00",
+      "net_limit": "100.00",
+      "gross_utilization": "1.0005",
+      "net_utilization": "0.006",
+      "binding_codes": ["STRATEGY_GROSS_EXPOSURE"]
+    }
+  },
+  "instruments": {},
+  "venues": {},
+  "binding_events": [
+    {
+      "code": "STRATEGY_GROSS_EXPOSURE",
+      "scope": "STRATEGY",
+      "key": "cross_venue_btc_v1",
+      "observed": "1200.60",
+      "limit": "1200.00",
+      "utilization": "1.0005"
+    }
+  ],
+  "transitions": [
+    {
+      "transition_id": "example-transition",
+      "ts_ns": 1700000000000000000,
+      "previous_state": "NORMAL",
+      "state": "BREACHED",
+      "binding_codes": ["STRATEGY_GROSS_EXPOSURE"]
+    }
+  ]
+}

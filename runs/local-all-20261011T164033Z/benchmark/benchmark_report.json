@@ -1,0 +1,116 @@
+{
+  "checks": [
+    {
+      "check": "replay_events_per_second",
+      "limit": 2000.0,
+      "observed": 16043.984030306034,
+      "status": "PASS"
+    },
+    {
+      "check": "feed_to_strategy_p99_ms",
+      "limit": 5.0,
+      "observed": 0.026042,
+      "status": "PASS"
+    },
+    {
+      "check": "route_decision_p99_ms",
+      "limit": 10.0,
+      "observed": 1.250333,
+      "status": "PASS"
+    },
+    {
+      "check": "paper_frame_overhead_p99_ms",
+      "limit": 20.0,
+      "observed": 1.106208,
+      "status": "PASS"
+    }
+  ],
+  "decision": "PASS",
+  "end_to_end_backtest": {
+    "duration_ns": 1143654167,
+    "events_per_second": 4371.951018301147,
+    "note": "includes ledger, TCA, structured-log and report writing",
+    "opportunities": 150
+  },
+  "events": 5000,
+  "events_source": "/Users/vaibhav/Documents/Newproject/crypto_MFT_arb_platform/runs/local-all-20261011T164033Z/benchmark/benchmark_events.jsonl",
+  "host": {
+    "platform": "darwin",
+    "python": "3.12.0"
+  },
+  "limitations": [
+    "Paper frame overhead excludes websocket receive, TLS and recorder fsync; live-paper sessions report paper_frame_overhead_ns from real frames.",
+    "Single-process CPython measurement on the host above; not a production latency claim."
+  ],
+  "paper": {
+    "execution_mode": "INTERNAL_PAPER",
+    "opportunities": 150,
+    "stages": {
+      "feed_to_strategy_ns": {
+        "count": 4999,
+        "max_ns": 1035458,
+        "mean_ns": 17469,
+        "p50_ns": 16208,
+        "p95_ns": 19709,
+        "p99_ns": 24375
+      },
+      "paper_frame_overhead_ns": {
+        "count": 5000,
+        "max_ns": 1753042,
+        "mean_ns": 76166,
+        "p50_ns": 46291,
+        "p95_ns": 59208,
+        "p99_ns": 1106208
+      },
+      "route_decision_ns": {
+        "count": 150,
+        "max_ns": 1392208,
+        "mean_ns": 915564,
+        "p50_ns": 930666,
+        "p95_ns": 1183250,
+        "p99_ns": 1295583
+      },
+      "strategy_eval_ns": {
+        "count": 4999,
+        "max_ns": 314625,
+        "mean_ns": 18590,
+        "p50_ns": 17750,
+        "p95_ns": 23167,
+        "p99_ns": 32333
+      }
+    }
+  },
+  "peak_rss_bytes": 120881152,
+  "replay": {
+    "duration_ns": 311643292,
+    "events_per_second": 16043.984030306034,
+    "opportunities": 150,
+    "stages": {
+      "feed_to_strategy_ns": {
+        "count": 4999,
+        "max_ns": 1035250,
+        "mean_ns": 16074,
+        "p50_ns": 14750,
+        "p95_ns": 18792,
+        "p99_ns": 26042
+      },
+      "route_decision_ns": {
+        "count": 150,
+        "max_ns": 1507750,
+        "mean_ns": 926269,
+        "p50_ns": 933333,
+        "p95_ns": 1181125,
+        "p99_ns": 1250333
+      },
+      "strategy_eval_ns": {
+        "count": 4999,
+        "max_ns": 197459,
+        "mean_ns": 17568,
+        "p50_ns": 16708,
+        "p95_ns": 21209,
+        "p99_ns": 32750
+      }
+    }
+  },
+  "schema_version": "1.0.0"
+}

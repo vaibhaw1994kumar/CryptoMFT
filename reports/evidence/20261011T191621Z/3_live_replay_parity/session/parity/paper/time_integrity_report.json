@@ -1,0 +1,90 @@
+{
+  "blocked_events": 0,
+  "created_at": "2026-10-11T19:17:09.771909+00:00",
+  "cross_venue_alignment": {
+    "breaches": 0,
+    "maximum_skew_ns": 47000000,
+    "rule": "compare latest local receive timestamps; do not rewrite venue clocks",
+    "samples": 87,
+    "threshold_ns": 1000000000
+  },
+  "events": 90,
+  "host_clock": {
+    "last_observed_ts_ns": null,
+    "latest_drift_ppm": null,
+    "latest_offset_ns": null,
+    "max_abs_drift_ppm": 0.0,
+    "max_abs_offset_ns": 0,
+    "max_drift_ppm": 500.0,
+    "max_offset_ns": 100000000,
+    "samples": 0,
+    "source": "UNOBSERVED",
+    "state": "UNKNOWN"
+  },
+  "host_offset_correction": {
+    "aligner": {
+      "accepted_samples": 90.0,
+      "host_minus_exchange_ms": 308.00000000000006,
+      "negative_raw_drift_share": 0.0,
+      "rejected_backlogged": 0.0,
+      "reseeds": 0.0,
+      "warmup_records": 20.0
+    },
+    "clock_offset_estimate_ns": 0,
+    "enabled": true,
+    "quantile": 0.01,
+    "tolerance_ns": 5000000,
+    "window_samples": 90
+  },
+  "ordering_rule": [
+    "receive_ts_ns",
+    "exchange_ts_ns",
+    "source_ts_ns",
+    "venue",
+    "sequence_start",
+    "sequence",
+    "event_id"
+  ],
+  "policy": {
+    "correct_host_offset": true,
+    "host_offset_min_samples": 20,
+    "host_offset_quantile": 0.01,
+    "host_offset_window": 2000,
+    "max_cross_venue_skew_ns": 1000000000,
+    "max_event_latency_ns": 60000000000,
+    "max_feed_age_ns": 1000000000,
+    "max_host_drift_ppm": 500.0,
+    "max_host_offset_ns": 100000000,
+    "negative_latency_tolerance_ns": 5000000
+  },
+  "schema_version": "1.0.0",
+  "timestamp_unit": "nanoseconds_since_unix_epoch_utc",
+  "venues": {
+    "BINANCE": {
+      "corrected_negative_latency_events": 0,
+      "events": 41,
+      "feed_age_ns_max": 25000000,
+      "impossible_latency_events": 0,
+      "latency_ns_max": 547000000,
+      "latency_ns_mean": 291829268,
+      "latency_ns_min": 0,
+      "latency_ns_p50": 293000000,
+      "latency_ns_p95": 525000000,
+      "negative_latency_events": 0,
+      "stale_feed_events": 0
+    },
+    "BYBIT": {
+      "corrected_negative_latency_events": 0,
+      "events": 49,
+      "feed_age_ns_max": 3000000,
+      "impossible_latency_events": 0,
+      "latency_ns_max": 585000000,
+      "latency_ns_mean": 317122448,
+      "latency_ns_min": 15000000,
+      "latency_ns_p50": 321000000,
+      "latency_ns_p95": 567000000,
+      "negative_latency_events": 0,
+      "stale_feed_events": 0
+    }
+  }
+}

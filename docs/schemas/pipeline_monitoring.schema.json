@@ -1,0 +1,158 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://papertowninsights.org/schemas/pipeline-monitoring-1.0.0.json",
+  "title": "Pipeline monitoring envelope",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version", "generated_ts_ns", "correlation_id", "mode", "health",
+    "job", "data", "partitions", "books", "versions", "performance", "live",
+    "strategy_execution", "tca", "structured_logs", "restart_resilience", "alert_ownership",
+    "thresholds", "metrics", "alerts"
+  ],
+  "properties": {
+    "schema_version": {"const": "1.0.0"},
+    "generated_ts_ns": {"type": "integer", "minimum": 0},
+    "correlation_id": {"type": "string", "minLength": 1},
+    "mode": {"enum": ["REPLAY", "LIVE", "BATCH", "BACKFILL", "CONTINUOUS"]},
+    "health": {"enum": ["HEALTHY", "DEGRADED", "CRITICAL"]},
+    "job": {"type": "object"},
+    "data": {"type": "object"},
+    "partitions": {
+      "type": "object",
+      "required": ["total", "complete", "completeness", "rejected"],
+      "properties": {
+        "total": {"type": "integer", "minimum": 0},
+        "complete": {"type": "integer", "minimum": 0},
+        "completeness": {"type": "number", "minimum": 0, "maximum": 1},
+        "rejected": {"type": "integer", "minimum": 0}
+      }
+    },
+    "books": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "object",
+        "required": ["state", "age_ns", "gaps"],
+        "properties": {
+          "state": {"enum": ["SYNCING", "VALID", "STALE", "GAP_DETECTED", "CHECKSUM_FAILED"]},
+          "age_ns": {"type": "integer", "minimum": 0},
+          "gaps": {"type": "integer", "minimum": 0}
+        }
+      }
+    },
+    "versions": {"type": "object"},
+    "performance": {"type": "object"},
+    "live": {"type": "object"},
+    "strategy_execution": {
+      "type": "object",
+      "description": "Empty for market-data-only sessions; otherwise the correlated paper/backtest strategy and execution state.",
+      "properties": {
+        "schema_version": {"const": "1.0.0"},
+        "session_mode": {"type": "string"},
+        "opportunities": {"type": "object"},
+        "routing": {"type": "object"},
+        "orders": {"type": "object"},
+        "residual": {"type": "object"},
+        "latency": {"type": "object"},
+        "pnl": {"type": "object"},
+        "rate_limits": {"type": "object"},
+        "connectors": {"type": "object"},
+        "account": {"type": "object"},
+        "margin": {"type": "object"},
+        "kill_switch": {"type": "object"}
+      }
+    },
+    "tca": {
+      "type": "object",
+      "description": "Empty for market-data-only sessions; otherwise the reproducible Basic TCA report."
+    },
+    "structured_logs": {
+      "type": "object",
+      "description": "Indexed central connector/paper-host log status and failed-opportunity count."
+    },
+    "restart_resilience": {
+      "type": "object",
+      "description": "Fenced owner, heartbeat, connector, checkpoint and reconcile-before-resume state; empty when not attached."
+    },
+    "alert_ownership": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schema_version", "coverage_statement", "policies"],
+      "properties": {
+        "schema_version": {"const": "1.0.0"},
+        "coverage_statement": {"type": "string", "minLength": 1},
+        "policies": {
+          "type": "array",
+          "minItems": 6,
+          "items": {"$ref": "#/$defs/alertPolicy"}
+        }
+      }
+    },
+    "thresholds": {"type": "object"},
+    "metrics": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "name", "value", "unit", "comparator", "threshold",
+          "health_on_breach", "breached", "scope"
+        ],
+        "properties": {
+          "name": {"type": "string"},
+          "value": {"type": "number"},
+          "unit": {"type": "string"},
+          "comparator": {"enum": ["<=", ">="]},
+          "threshold": {"type": "number"},
+          "health_on_breach": {"enum": ["DEGRADED", "CRITICAL"]},
+          "breached": {"type": "boolean"},
+          "scope": {"type": "string"}
+        }
+      }
+    },
+    "alerts": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "code", "health", "observed", "comparator", "threshold", "scope",
+          "alert_type", "owner", "severity", "response_target_minutes",
+          "response_expectation", "coverage", "forced_test"
+        ],
+        "properties": {
+          "alert_type": {"$ref": "#/$defs/alertType"},
+          "owner": {"type": "string", "minLength": 1},
+          "severity": {"enum": ["WARNING", "HIGH", "CRITICAL"]},
+          "response_target_minutes": {"type": "integer", "minimum": 1},
+          "response_expectation": {"type": "string", "minLength": 1},
+          "coverage": {"const": "RESEARCH_HOURS"},
+          "forced_test": {"type": "boolean"}
+        }
+      }
+    }
+  },
+  "$defs": {
+    "alertType": {
+      "enum": [
+        "FAILED_INGESTION", "INVALID_BOOK", "REPLAY_FAILURE", "RISK_BREACH",
+        "PIPELINE_THRESHOLD", "EXECUTION_THRESHOLD"
+      ]
+    },
+    "alertPolicy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "alert_type", "owner", "severity", "response_target_minutes",
+        "response_expectation", "coverage"
+      ],
+      "properties": {
+        "alert_type": {"$ref": "#/$defs/alertType"},
+        "owner": {"type": "string", "minLength": 1},
+        "severity": {"enum": ["WARNING", "HIGH", "CRITICAL"]},
+        "response_target_minutes": {"type": "integer", "minimum": 1},
+        "response_expectation": {"type": "string", "minLength": 1},
+        "coverage": {"const": "RESEARCH_HOURS"}
+      }
+    }
+  }
+}

@@ -1,0 +1,48 @@
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+dist/
+build/
+*.egg-info/
+runs/
+data/raw/
+data/canonical/
+credential_metadata.json
+credential_audit.jsonl
+.secrets/
+# Python-generated files
+*.py[oc]
+wheels/
+*.egg-info
+
+# Virtual environments
+.venv
+
+# POC runtime data. data/ is ignored except the committed crypto_stat_arb
+# samples, evidence bundles and contract-master sample the stat_arb tests read.
+data/*
+!data/samples/
+!data/evidence/
+!data/contract_master/
+reports/
+*.log
+.tardis-cache/
+
+# Word copies generated from the Markdown sources by scripts/build_client_doc.py.
+# Markdown is the source of truth; a tracked .docx silently goes stale.
+*.docx
+
+# Superseded local draft
+PCOC.MD
+
+# Opportunity ledger written by demos and local runs
+*.db
+*.db-wal
+*.db-shm
+
+# crypto_stat_arb run outputs
+
+# Compiled mm_matching_engine (built per Python/arch, see docs/execution_realism.md).
+src/crypto_stat_arb/sim_engine/*.so
+src/crypto_stat_arb/sim_engine/*.pyd

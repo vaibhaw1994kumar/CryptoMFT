@@ -1,0 +1,237 @@
+{
+  "canonical_events": 90,
+  "closed_at_utc": "2026-10-11T19:17:09.767495+00:00",
+  "control_frames": 0,
+  "parts": [
+    {
+      "files": {
+        "canonical": {
+          "path": "/Users/vaibhav/Documents/Newproject/crypto_MFT_arb_platform/reports/evidence/20261011T191621Z/3_live_replay_parity/session/parity/part-000001/canonical.jsonl",
+          "sha256": "39a3a01f3e6158bb6537081687cea4fd6d896024fceb83b2114471ed5e367d7d"
+        },
+        "quarantine": {
+          "path": "/Users/vaibhav/Documents/Newproject/crypto_MFT_arb_platform/reports/evidence/20261011T191621Z/3_live_replay_parity/session/parity/part-000001/quarantine.jsonl",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        "raw": {
+          "path": "/Users/vaibhav/Documents/Newproject/crypto_MFT_arb_platform/reports/evidence/20261011T191621Z/3_live_replay_parity/session/parity/part-000001/raw.jsonl",
+          "sha256": "d8e2a0c5332508f4ffe0f2acf27603d312bc16e631811a1c37ba39753ab28b64"
+        },
+        "trace": {
+          "path": "/Users/vaibhav/Documents/Newproject/crypto_MFT_arb_platform/reports/evidence/20261011T191621Z/3_live_replay_parity/session/parity/part-000001/trace.jsonl",
+          "sha256": "c1dadd65991eeb9ad1ebb93db97db1b9a4cb239f9acc350d5bb62a09384119d9"
+        },
+        "trades": {
+          "path": "/Users/vaibhav/Documents/Newproject/crypto_MFT_arb_platform/reports/evidence/20261011T191621Z/3_live_replay_parity/session/parity/part-000001/trades.jsonl",
+          "sha256": "84db441ede4739a9679f0259ef798cc854c6fb9377c1267f727075071a97a10d"
+        },
+        "wire": {
+          "path": "/Users/vaibhav/Documents/Newproject/crypto_MFT_arb_platform/reports/evidence/20261011T191621Z/3_live_replay_parity/session/parity/part-000001/wire.jsonl",
+          "sha256": "fe904fe05dde8502ffde835157a77e2b84a0cc119ebba3840e5f35f65b45358b"
+        }
+      },
+      "part": 1,
+      "terminal_raw_record_hash": "5de50230ae92ab445ab9727980bf042c2b05130efe3f2e68cf71969316b256cc",
+      "terminal_wire_record_hash": "3e1aeb2967a5f26fd41db9776297130b6b696c75517406b3f17bfc0e7fe79f97"
+    }
+  ],
+  "rejected_frames": 0,
+  "schema_version": "1.0.0",
+  "service": {
+    "books": {
+      "BINANCE": {
+        "invalid_reason": "",
+        "last_event_id": "5f127141-e0eb-537b-bafe-6bffcb2d690e",
+        "last_receive_ts_ns": 1586000000,
+        "sequence": 140,
+        "snapshot_sha256": "c6216b82a63fa569100bc1513bbe62dea6bd959db4acc8a3bf1680ea01f8fdbe",
+        "state": "VALID",
+        "stats": {
+          "buffered_deltas": 1,
+          "checksum_failures": 0,
+          "confirmed_price_moves": 0,
+          "crossed_or_locked": 0,
+          "deltas_applied": 40,
+          "duplicates": 0,
+          "gaps": 0,
+          "invalid_levels": 0,
+          "out_of_order": 0,
+          "price_jumps": 0,
+          "resyncs": 1,
+          "snapshots": 1,
+          "stale_transitions": 0,
+          "wide_spreads": 0
+        }
+      },
+      "BYBIT": {
+        "invalid_reason": "",
+        "last_event_id": "3d56425c-b70e-54a6-b1e6-73043e67336f",
+        "last_receive_ts_ns": 1633000000,
+        "sequence": 49,
+        "snapshot_sha256": "d46225cfbc492f02f44ae2b2ee6c7430cfaa7f33cd9c2611afe853865849e5c7",
+        "state": "VALID",
+        "stats": {
+          "buffered_deltas": 0,
+          "checksum_failures": 0,
+          "confirmed_price_moves": 0,
+          "crossed_or_locked": 0,
+          "deltas_applied": 48,
+          "duplicates": 0,
+          "gaps": 0,
+          "invalid_levels": 0,
+          "out_of_order": 0,
+          "price_jumps": 0,
+          "resyncs": 0,
+          "snapshots": 1,
+          "stale_transitions": 0,
+          "wide_spreads": 0
+        }
+      }
+    },
+    "duration_ns": 637000000,
+    "events_seen": 90,
+    "instrument_id": "BTC-USDT-SPOT",
+    "live_order_routing": false,
+    "ltp_ohlc": {
+      "artifact": {
+        "path": "/Users/vaibhav/Documents/Newproject/crypto_MFT_arb_platform/reports/evidence/20261011T191621Z/3_live_replay_parity/session/parity/ltp_ohlc_1m.csv",
+        "rows": 2,
+        "sha256": "8ee3aa55bf41c3b5a402b81b20c6fad40abec301918288956b7ef4bc07f23d54"
+      },
+      "clock": "LOCAL_RECEIVE_TIME",
+      "completed_bars": 0,
+      "interval": "1m",
+      "late_trades": 0,
+      "open_bars": 0,
+      "partial_bars": 2,
+      "price_source": "PUBLIC_TRADE_LTP",
+      "trades": 88
+    },
+    "max_book_age_ns": 1000000000,
+    "mode": "PUBLIC_MARKET_DATA_ONLY",
+    "ohlc": {
+      "artifact": {
+        "path": "/Users/vaibhav/Documents/Newproject/crypto_MFT_arb_platform/reports/evidence/20261011T191621Z/3_live_replay_parity/session/parity/ohlc_1m.csv",
+        "rows": 2,
+        "sha256": "45b0b14c11fdde4442540bdb5e1d0690a29a5ace857a61e7980a6ab305d0b54e"
+      },
+      "completed_bars": 0,
+      "ignored_event_samples": 0,
+      "interval": "1m",
+      "invalid_book_samples": 0,
+      "late_samples": 0,
+      "open_bars": 0,
+      "partial_bars": 2,
+      "samples": 89
+    },
+    "pipeline_monitoring": {
+      "max_persistence_lag_ns": 23000000,
+      "prometheus_metrics": "pipeline_metrics.prom",
+      "refresh_interval_seconds": 1.0,
+      "report": "pipeline_monitoring.json"
+    },
+    "started_ts_ns": 1002000000,
+    "stopped_ts_ns": 1639000000,
+    "strategy_gate": {
+      "cancel_requests": 0,
+      "cancelled_orders": 0,
+      "reason": "",
+      "resume_count": 1,
+      "suspend_count": 0,
+      "suspended": false,
+      "venue_transitions": 4,
+      "venues": {
+        "BINANCE": "ACTIVE",
+        "BYBIT": "ACTIVE"
+      }
+    },
+    "structured_logs": {
+      "components": {
+        "CONNECTOR": 99
+      },
+      "database": "structured_logs.sqlite",
+      "failed_opportunities": 0,
+      "jsonl": "structured_logs.jsonl",
+      "levels": {
+        "INFO": 99
+      },
+      "records": 99,
+      "schema_version": "1.0.0",
+      "searchable_fields": [
+        "correlation_id",
+        "component",
+        "level",
+        "event_type",
+        "venue",
+        "source_event_id",
+        "feature_state_id",
+        "opportunity_id",
+        "risk_decision_id",
+        "parent_plan_id",
+        "child_order_id",
+        "request_id"
+      ]
+    },
+    "symbols": {
+      "BINANCE": "BTCUSDT",
+      "BYBIT": "BTCUSDT"
+    },
+    "udp": {
+      "enabled": false
+    },
+    "venues": {
+      "BINANCE": {
+        "canonical_events": 41,
+        "connection_attempts": 1,
+        "connections": 1,
+        "control_frames": 0,
+        "disconnects": 0,
+        "invalid_trades": 0,
+        "last_error": "",
+        "normalization_errors": 0,
+        "parse_errors": 0,
+        "raw_frames": 41,
+        "reconnects": 0,
+        "resyncs": 0,
+        "stale_disconnects": 0,
+        "trade_connection_attempts": 1,
+        "trade_connections": 1,
+        "trade_disconnects": 0,
+        "trade_normalization_errors": 0,
+        "trade_parse_errors": 0,
+        "trade_raw_frames": 39,
+        "trade_reconnects": 0,
+        "trade_stale_disconnects": 0,
+        "trade_ticks": 39
+      },
+      "BYBIT": {
+        "canonical_events": 49,
+        "connection_attempts": 1,
+        "connections": 1,
+        "control_frames": 0,
+        "disconnects": 1,
+        "invalid_trades": 0,
+        "last_error": "",
+        "normalization_errors": 0,
+        "parse_errors": 0,
+        "raw_frames": 49,
+        "reconnects": 0,
+        "resyncs": 0,
+        "stale_disconnects": 0,
+        "trade_connection_attempts": 1,
+        "trade_connections": 1,
+        "trade_disconnects": 1,
+        "trade_normalization_errors": 0,
+        "trade_parse_errors": 0,
+        "trade_raw_frames": 49,
+        "trade_reconnects": 0,
+        "trade_stale_disconnects": 0,
+        "trade_ticks": 49
+      }
+    }
+  },
+  "session_id": "parity",
+  "session_sha256": "9411809244222be0f5c0464d9edae3a821440fcd4348f18480839e91d41ca8aa",
+  "trade_ticks": 88,
+  "wire_records": 178
+}

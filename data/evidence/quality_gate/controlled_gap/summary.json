@@ -1,0 +1,46 @@
+{
+  "book_hashes": {
+    "BINANCE:BTC-USDT-SPOT": "ca183baafd5a57fa3bdd4a2a3e963b31927327688a31bff5ee81f2aaa1fdb9d1",
+    "BYBIT:BTC-USDT-SPOT": "b65a27788b9c63de82a9aeae43e76c32879999668387358222d3bc5edb5be130"
+  },
+  "book_integrity_gate": {
+    "cancel_requests": 1,
+    "cancelled_orders": 0,
+    "reason": "BINANCE:GAP_DETECTED:sequence_gap:10->12-12;BYBIT:CHECKSUM_FAILED:crossed_or_locked_book",
+    "resume_count": 1,
+    "suspend_count": 1,
+    "suspended": true
+  },
+  "canonical_events_delivered": 4,
+  "closed_plans": 0,
+  "data_quality": {
+    "checksum_failures": 0,
+    "crossed_or_locked": 1,
+    "duplicates": 0,
+    "events": 4,
+    "gaps": 1,
+    "invalid_books": 1,
+    "out_of_order": 0,
+    "resyncs": 0,
+    "stale_transitions": 0
+  },
+  "data_quality_approval": {
+    "active_flag_codes": [
+      "SEQUENCE_GAPS",
+      "CROSSED_BOOKS"
+    ],
+    "decision": "REJECTED",
+    "defect_count": 2,
+    "health": "CRITICAL"
+  },
+  "fees": "0",
+  "gross_pnl": "0",
+  "net_pnl": "0",
+  "opportunities": 0,
+  "time_integrity": {
+    "blocked_events": 0,
+    "cross_venue_skew_breaches": 0,
+    "events": 4,
+    "host_clock_state": "UNKNOWN"
+  }
+}

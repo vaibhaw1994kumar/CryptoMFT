@@ -1,0 +1,40 @@
+{
+  "binding_events": [],
+  "instruments": {
+    "BTC-USDT-SPOT": {
+      "binding_codes": [],
+      "gross_notional": "9598.44000",
+      "limit": "10000",
+      "utilization": "0.959844"
+    }
+  },
+  "schema_version": "1.0.0",
+  "state": "NORMAL",
+  "strategies": {
+    "cross_venue_btc_v1": {
+      "binding_codes": [],
+      "gross_limit": "10000",
+      "gross_notional": "9598.44000",
+      "gross_utilization": "0.959844",
+      "net_limit": "2000",
+      "net_notional": "0.00800",
+      "net_utilization": "0.000004"
+    }
+  },
+  "transitions": [],
+  "ts_ns": 1700000249951000000,
+  "venues": {
+    "BINANCE": {
+      "binding_codes": [],
+      "gross_notional": "4799.22400",
+      "limit": "5000",
+      "utilization": "0.9598448"
+    },
+    "BYBIT": {
+      "binding_codes": [],
+      "gross_notional": "4799.21600",
+      "limit": "5000",
+      "utilization": "0.9598432"
+    }
+  }
+}

@@ -1,0 +1,169 @@
+[project]
+name = "hft-platform-kit"
+version = "0.3.0"
+description = "Typed Python SDK and CLI for deterministic HFT market data, replay, risk, OMS, and paper execution, plus the crypto stat-arb platform and cross-venue arb backtester"
+readme = "README.md"
+authors = [
+    { name = "Ankur" }
+]
+requires-python = ">=3.12"
+license = "MIT"
+license-files = ["LICENSE"]
+keywords = [
+    "algorithmic-trading",
+    "backtesting",
+    "binance",
+    "hft",
+    "market-data",
+    "order-book",
+    "paper-trading",
+]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Financial and Insurance Industry",
+    "Operating System :: MacOS",
+    "Operating System :: Microsoft :: Windows",
+    "Operating System :: POSIX :: Linux",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Typing :: Typed",
+]
+dependencies = [
+    "aiohttp>=3.14.3",
+    "fastapi>=0.141.1",
+    "hftbacktest>=2.4.4",
+    "msgspec>=0.21.1",
+    "numba>=0.66.0",
+    "numpy>=2.2.6",
+    "prometheus-client>=0.26.0",
+    "pyarrow>=25.0.0",
+    "pydantic-settings>=2.14.2",
+    "pyyaml>=6.0.3",
+    "structlog>=26.1.0",
+    "tardis-dev>=4.2.1",
+    "uvicorn[standard]>=0.52.0",
+    "uvloop>=0.22.1; sys_platform != 'win32'",
+    # crypto_stat_arb live feeds (constraint carried over from crypto-stat-arb-platform)
+    "websockets>=12,<17",
+    # crypto_stat_arb contract-master / testnet REST (from crypto-stat-arb-platform)
+    "requests>=2.31,<3",
+    "winloop>=0.6.3; sys_platform == 'win32'",
+]
+
+[project.scripts]
+trading-platform-poc = "trading_platform_poc.cli:main"
+hft-platform-kit = "hft_platform_kit.cli:main"
+crypto-stat-arb = "crypto_stat_arb.cli:main"
+
+[project.optional-dependencies]
+# new_backtest.fetch_tardis downloads Tardis data over HTTP
+backtest = ["requests>=2.31"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+markers = [
+    "binance_testnet: credential-gated Binance Spot Testnet smoke tests",
+    "concurrency: starts real threads and can observe a missing lock",
+    "slow: minutes-long end-to-end suites such as the full acceptance run",
+]
+
+[build-system]
+requires = [
+    "scikit-build-core>=1.0.3",
+    "pybind11>=3.0.4",
+]
+build-backend = "scikit_build_core.build"
+
+[tool.scikit-build]
+minimum-version = "build-system.requires"
+build-dir = "build/{wheel_tag}"
+wheel.packages = [
+    "src/hft_platform_kit",
+    "src/trading_platform_poc",
+    "src/crypto_stat_arb",
+    "src/new_backtest",
+]
+sdist.include = [
+    "/BUILD_STATUS.md",
+    "/CHANGELOG.md",
+    "/CLIENT_POC_OVERVIEW.md",
+    "/CLIENT_DEMO_RUNBOOK.md",
+    "/CMakeLists.txt",
+    "/cpp/**",
+    "/HFT_VERIFICATION_MATRIX.md",
+    "/MULTI_EXCHANGE.md",
+    "/PUBLISHING.md",
+    "/POC_FINDINGS.md",
+    "/README.md",
+    "/SDK_API.md",
+    "/config*.yaml",
+    "/examples/**",
+    "/INTEGRATION.md",
+    "/README_CRYPTO_STAT_ARB.md",
+    "/config/**",
+    "/docs/**",
+]
+sdist.exclude = [
+    "/.venv/**",
+    "/build/**",
+    "/data/**",
+    "/dist/**",
+    "/reports/**",
+    "/wheels/**",
+    "/.tardis-cache/**",
+    "/.pytest_cache/**",
+    "/.mypy_cache/**",
+    "/.ruff_cache/**",
+    "/.tox/**",
+    "/.nox/**",
+    "/.idea/**",
+    "/.vscode/**",
+    "/htmlcov/**",
+    "/PCOC.MD",
+    "**/__pycache__/**",
+    "**/*.egg-info/**",
+    "**/*.log",
+    "**/*.py[cod]",
+    "**/.coverage",
+    "**/.DS_Store",
+    "**/.env",
+    "**/.env.*",
+    "**/~$*",
+]
+cmake.build-type = "Release"
+
+[dependency-groups]
+dev = [
+    "cmake>=4.4.0",
+    "httpx2>=2.9.1",
+    "ninja>=1.13.0",
+    "pybind11>=3.0.4",
+    "pytest>=9.1.1",
+    "pytest-asyncio>=1.4.0",
+    "scikit-build-core>=1.0.3",
+]
+
+[tool.cibuildwheel]
+# requires-python is >=3.12; 3.14 is excluded because upstream numpy pins
+# block the dependency set on that version.
+build = ["cp312-*", "cp313-*"]
+# 32-bit targets are skipped: pyarrow and hftbacktest publish no 32-bit wheels.
+# musllinux (Alpine) is skipped because hftbacktest depends on numba/llvmlite,
+# which publish no musllinux wheels, so installing the built wheel would have
+# to compile LLVM from source.
+# PyPy needs no skip: cibuildwheel v4 does not enable it by default, and
+# `build` already restricts this to CPython. Listing "pp*" here raised
+# "Invalid skip selector" on every wheel job.
+# macOS x86_64 is skipped for the same reason as musllinux: llvmlite
+# publishes no macosx_x86_64 wheels at all (0 of 24 wheels in 0.48.0), so
+# installing the built wheel on an Intel Mac has to compile LLVM from
+# source. The wheel builds fine; it is the install that cannot succeed, so
+# shipping one would mean publishing an artifact nobody can install.
+skip = ["*-win32", "*_i686", "*musllinux*", "*macosx_x86_64*"]
+build-frontend = "build"
+test-command = [
+    "python -c \"import hft_platform_kit, hft_platform_kit._ems as ems; print(hft_platform_kit.__version__, ems)\"",
+]

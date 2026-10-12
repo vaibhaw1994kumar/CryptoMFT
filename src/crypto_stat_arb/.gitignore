@@ -1,0 +1,3 @@
+sim_engine/*.so
+sim_engine/*.pyd
+__pycache__/

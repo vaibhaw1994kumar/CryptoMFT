@@ -1,0 +1,38 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.invalid/schemas/exposure_utilization.schema.json",
+  "title": "RMS Exposure Utilization",
+  "type": "object",
+  "required": ["schema_version", "ts_ns", "state", "strategies", "instruments", "venues", "binding_events", "transitions"],
+  "properties": {
+    "schema_version": {"const": "1.0.0"},
+    "ts_ns": {"type": "integer", "minimum": 0},
+    "state": {"enum": ["NORMAL", "BREACHED"]},
+    "strategies": {"type": "object", "additionalProperties": {"$ref": "#/$defs/strategy"}},
+    "instruments": {"type": "object", "additionalProperties": {"$ref": "#/$defs/gross"}},
+    "venues": {"type": "object", "additionalProperties": {"$ref": "#/$defs/gross"}},
+    "binding_events": {"type": "array", "items": {"$ref": "#/$defs/binding"}},
+    "transitions": {"type": "array", "items": {"$ref": "#/$defs/transition"}}
+  },
+  "$defs": {
+    "strategy": {
+      "type": "object",
+      "required": ["gross_notional", "net_notional", "gross_limit", "net_limit", "gross_utilization", "net_utilization", "binding_codes"]
+    },
+    "gross": {
+      "type": "object",
+      "required": ["gross_notional", "limit", "utilization", "binding_codes"]
+    },
+    "binding": {
+      "type": "object",
+      "required": ["code", "scope", "key", "observed", "limit", "utilization"],
+      "properties": {
+        "scope": {"enum": ["STRATEGY", "INSTRUMENT", "VENUE"]}
+      }
+    },
+    "transition": {
+      "type": "object",
+      "required": ["transition_id", "ts_ns", "previous_state", "state", "binding_codes"]
+    }
+  }
+}

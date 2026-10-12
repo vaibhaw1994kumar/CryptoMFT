@@ -1,0 +1,107 @@
+{
+  "schema_version": "1.0.0",
+  "generated_ts_ns": 1789250400000000000,
+  "correlation_id": "btc-two-venue-001",
+  "mode": "LIVE",
+  "health": "HEALTHY",
+  "job": {"state": "RUNNING", "mode": "CONTINUOUS"},
+  "data": {
+    "event_count": 245000,
+    "wire_records": 245010,
+    "canonical_events": 245000,
+    "trade_ticks": 180300,
+    "latest_persisted_receive_ts_ns": 1789250399998000000,
+    "clock": "LOCAL_RECEIVE_TIME"
+  },
+  "partitions": {
+    "total": 3,
+    "complete": 2,
+    "active": 1,
+    "completeness": 1.0,
+    "rejected": 0
+  },
+  "books": {
+    "BINANCE": {
+      "instrument_id": "BTC-USDT-SPOT",
+      "state": "VALID",
+      "age_ns": 2000000,
+      "sequence": 991001,
+      "gaps": 0,
+      "duplicates": 0,
+      "out_of_order": 0,
+      "checksum_failures": 0
+    },
+    "BYBIT": {
+      "instrument_id": "BTC-USDT-SPOT",
+      "state": "VALID",
+      "age_ns": 3000000,
+      "sequence": 881001,
+      "gaps": 0,
+      "duplicates": 1,
+      "out_of_order": 0,
+      "checksum_failures": 0
+    }
+  },
+  "versions": {
+    "canonical_schema_expected": "1.2.0",
+    "canonical_schema_observed": ["1.2.0"],
+    "wire_schema_version": "1.0.0",
+    "schema_mismatches": 0,
+    "instrument_master": {
+      "schema_version": "1.0.0",
+      "instrument_count": 2,
+      "content_sha256": "4dc8f57338c68f457f3cdbd93d246e3887bd673fbd08810808a7e75b1258f597"
+    }
+  },
+  "performance": {"replay_events_per_second": 0},
+  "live": {
+    "reconnects": 1,
+    "stale_disconnects": 0,
+    "persistence_lag_ns": 4000000,
+    "durable_fsync": true
+  },
+  "strategy_execution": {},
+  "tca": {},
+  "structured_logs": {},
+  "restart_resilience": {},
+  "alert_ownership": {
+    "schema_version": "1.0.0",
+    "coverage_statement": "Research-hours coverage; 24/7 staffing is not required. Every paper alert has a named owner and response target.",
+    "policies": [
+      {"alert_type": "FAILED_INGESTION", "owner": "market-data-owner", "severity": "CRITICAL", "response_target_minutes": 30, "response_expectation": "Stop dependent paper strategies, preserve the failed partition and restart or backfill after diagnosis.", "coverage": "RESEARCH_HOURS"},
+      {"alert_type": "INVALID_BOOK", "owner": "market-data-owner", "severity": "CRITICAL", "response_target_minutes": 15, "response_expectation": "Confirm automatic strategy gating, cancel ordinary orders on the venue and force a clean snapshot resync.", "coverage": "RESEARCH_HOURS"},
+      {"alert_type": "REPLAY_FAILURE", "owner": "research-infrastructure-owner", "severity": "HIGH", "response_target_minutes": 240, "response_expectation": "Quarantine the run, retain its checkpoint and raw lineage, then resume only after a deterministic replay check.", "coverage": "RESEARCH_HOURS"},
+      {"alert_type": "RISK_BREACH", "owner": "paper-risk-owner", "severity": "CRITICAL", "response_target_minutes": 15, "response_expectation": "Confirm the kill state, cancel new-risk orders, permit only approved risk reduction and reconcile before resume.", "coverage": "RESEARCH_HOURS"},
+      {"alert_type": "PIPELINE_THRESHOLD", "owner": "research-infrastructure-owner", "severity": "WARNING", "response_target_minutes": 240, "response_expectation": "Inspect the breached pipeline threshold and record disposition before the next paper session.", "coverage": "RESEARCH_HOURS"},
+      {"alert_type": "EXECUTION_THRESHOLD", "owner": "paper-trading-owner", "severity": "HIGH", "response_target_minutes": 30, "response_expectation": "Inspect the execution threshold, residual and connector state; suspend new risk if safety is uncertain.", "coverage": "RESEARCH_HOURS"}
+    ]
+  },
+  "thresholds": {
+    "max_data_age_ns": 1000000000,
+    "min_partition_completeness": 1.0,
+    "max_gaps": 0,
+    "max_invalid_books": 0,
+    "max_schema_mismatches": 0,
+    "min_replay_events_per_second": 1.0,
+    "max_reconnects": 5,
+    "max_stale_disconnects": 0,
+    "max_persistence_lag_ns": 5000000000,
+    "max_order_rejects": 0,
+    "max_open_residual_base": 0.002,
+    "max_dispatch_latency_ns": 10000000,
+    "max_rate_limit_utilization": 0.9,
+    "max_unhealthy_connectors": 0,
+    "max_active_kill_switches": 0
+  },
+  "metrics": [
+    {"name": "data_age_ns", "value": 3000000, "unit": "nanoseconds", "comparator": "<=", "threshold": 1000000000, "health_on_breach": "CRITICAL", "breached": false, "scope": "PIPELINE"},
+    {"name": "partition_completeness", "value": 1.0, "unit": "ratio", "comparator": ">=", "threshold": 1.0, "health_on_breach": "CRITICAL", "breached": false, "scope": "PIPELINE"},
+    {"name": "sequence_gaps", "value": 0, "unit": "count", "comparator": "<=", "threshold": 0, "health_on_breach": "CRITICAL", "breached": false, "scope": "PIPELINE"},
+    {"name": "invalid_books", "value": 0, "unit": "count", "comparator": "<=", "threshold": 0, "health_on_breach": "CRITICAL", "breached": false, "scope": "PIPELINE"},
+    {"name": "schema_mismatches", "value": 0, "unit": "count", "comparator": "<=", "threshold": 0, "health_on_breach": "CRITICAL", "breached": false, "scope": "PIPELINE"},
+    {"name": "reconnects", "value": 1, "unit": "count", "comparator": "<=", "threshold": 5, "health_on_breach": "DEGRADED", "breached": false, "scope": "PIPELINE"},
+    {"name": "stale_disconnects", "value": 0, "unit": "count", "comparator": "<=", "threshold": 0, "health_on_breach": "CRITICAL", "breached": false, "scope": "PIPELINE"},
+    {"name": "persistence_lag_ns", "value": 4000000, "unit": "nanoseconds", "comparator": "<=", "threshold": 5000000000, "health_on_breach": "DEGRADED", "breached": false, "scope": "PIPELINE"}
+  ],
+  "alerts": []
+}

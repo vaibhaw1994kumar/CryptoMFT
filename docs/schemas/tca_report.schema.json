@@ -1,0 +1,57 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://papertowninsights.org/schemas/basic-tca-report-1.0.0.json",
+  "title": "Basic transaction-cost analysis report",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version", "calculation_version", "report_id", "scope",
+    "correlation_id", "period", "summary", "groups", "opportunities",
+    "lineage", "calculation"
+  ],
+  "properties": {
+    "schema_version": {"const": "1.0.0"},
+    "calculation_version": {"const": "basic-tca-v1"},
+    "report_id": {"type": "string", "minLength": 1},
+    "scope": {"enum": ["RUN", "DAILY_PAPER"]},
+    "correlation_id": {"type": "string", "minLength": 1},
+    "period": {
+      "type": "object",
+      "required": ["date_utc", "start_ts_ns", "end_ts_ns"],
+      "properties": {
+        "date_utc": {"type": ["string", "null"], "format": "date"},
+        "start_ts_ns": {"type": "integer", "minimum": 0},
+        "end_ts_ns": {"type": "integer", "minimum": 0}
+      }
+    },
+    "summary": {
+      "type": "object",
+      "required": [
+        "opportunities_detected", "opportunities_executed", "missed_opportunities",
+        "orders", "fills", "rejects", "cancels", "partials", "timeouts",
+        "unwind_orders", "unwind_fills", "open_residual_base",
+        "weighted_slippage_bps", "fees", "net_pnl"
+      ]
+    },
+    "groups": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "venue", "instrument_id", "order_type", "fills", "rejects",
+          "cancels", "unwind_orders", "missed_opportunities",
+          "weighted_slippage_bps", "fees"
+        ]
+      }
+    },
+    "opportunities": {"type": "array"},
+    "lineage": {
+      "type": "object",
+      "required": [
+        "canonical_source_path", "canonical_source_sha256", "source_event_ids",
+        "raw_refs", "source_event_raw_refs", "raw_reference_coverage"
+      ]
+    },
+    "calculation": {"type": "object"}
+  }
+}

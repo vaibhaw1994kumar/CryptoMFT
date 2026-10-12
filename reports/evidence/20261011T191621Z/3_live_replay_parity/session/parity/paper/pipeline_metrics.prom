@@ -1,0 +1,89 @@
+# HELP crypto_pipeline_monitor_health Pipeline health by level.
+# TYPE crypto_pipeline_monitor_health gauge
+crypto_pipeline_monitor_health{level="HEALTHY"} 1
+crypto_pipeline_monitor_health{level="DEGRADED"} 0
+crypto_pipeline_monitor_health{level="CRITICAL"} 0
+# TYPE crypto_pipeline_data_age_ns gauge
+crypto_pipeline_data_age_ns{mode="LIVE"} 47000000
+# TYPE crypto_pipeline_partition_completeness gauge
+crypto_pipeline_partition_completeness{mode="LIVE"} 1.0
+# TYPE crypto_pipeline_sequence_gaps gauge
+crypto_pipeline_sequence_gaps{mode="LIVE"} 0
+# TYPE crypto_pipeline_invalid_books gauge
+crypto_pipeline_invalid_books{mode="LIVE"} 0
+# TYPE crypto_pipeline_schema_mismatches gauge
+crypto_pipeline_schema_mismatches{mode="LIVE"} 0
+# TYPE crypto_pipeline_reconnects gauge
+crypto_pipeline_reconnects{mode="LIVE"} 0
+# TYPE crypto_pipeline_stale_disconnects gauge
+crypto_pipeline_stale_disconnects{mode="LIVE"} 0
+# TYPE crypto_pipeline_persistence_lag_ns gauge
+crypto_pipeline_persistence_lag_ns{mode="LIVE"} 23000000
+# TYPE crypto_pipeline_order_rejects gauge
+crypto_pipeline_order_rejects{mode="LIVE"} 0
+# TYPE crypto_pipeline_open_residual_base gauge
+crypto_pipeline_open_residual_base{mode="LIVE"} 0.0
+# TYPE crypto_pipeline_max_dispatch_latency_ns gauge
+crypto_pipeline_max_dispatch_latency_ns{mode="LIVE"} 0
+# TYPE crypto_pipeline_rate_limit_utilization gauge
+crypto_pipeline_rate_limit_utilization{mode="LIVE"} 0.0
+# TYPE crypto_pipeline_unhealthy_connectors gauge
+crypto_pipeline_unhealthy_connectors{mode="LIVE"} 0
+# TYPE crypto_pipeline_active_kill_switches gauge
+crypto_pipeline_active_kill_switches{mode="LIVE"} 0
+# TYPE crypto_pipeline_alerts gauge
+crypto_pipeline_alerts{mode="LIVE"} 0
+# TYPE crypto_strategy_opportunity_count gauge
+crypto_strategy_opportunity_count{mode="LIVE"} 0
+# TYPE crypto_strategy_expected_net_edge_bps_average gauge
+crypto_strategy_expected_net_edge_bps_average{mode="LIVE"} 0
+# TYPE crypto_strategy_route_decisions gauge
+crypto_strategy_route_decisions{mode="LIVE"} 0
+# TYPE crypto_strategy_route_rejections gauge
+crypto_strategy_route_rejections{mode="LIVE"} 0
+# TYPE crypto_strategy_route_overrides gauge
+crypto_strategy_route_overrides{mode="LIVE"} 0
+# TYPE crypto_strategy_order_count gauge
+crypto_strategy_order_count{mode="LIVE"} 0
+# TYPE crypto_strategy_order_fills gauge
+crypto_strategy_order_fills{mode="LIVE"} 0
+# TYPE crypto_strategy_order_cancels gauge
+crypto_strategy_order_cancels{mode="LIVE"} 0
+# TYPE crypto_strategy_gross_pnl gauge
+crypto_strategy_gross_pnl{mode="LIVE"} 0
+# TYPE crypto_strategy_fees gauge
+crypto_strategy_fees{mode="LIVE"} 0
+# TYPE crypto_strategy_net_pnl gauge
+crypto_strategy_net_pnl{mode="LIVE"} 0
+# TYPE crypto_strategy_position_count gauge
+crypto_strategy_position_count{mode="LIVE"} 0
+# TYPE crypto_tca_opportunities_detected gauge
+crypto_tca_opportunities_detected{scope="RUN"} 0
+# TYPE crypto_tca_opportunities_executed gauge
+crypto_tca_opportunities_executed{scope="RUN"} 0
+# TYPE crypto_tca_missed_opportunities gauge
+crypto_tca_missed_opportunities{scope="RUN"} 0
+# TYPE crypto_tca_fills gauge
+crypto_tca_fills{scope="RUN"} 0
+# TYPE crypto_tca_rejects gauge
+crypto_tca_rejects{scope="RUN"} 0
+# TYPE crypto_tca_cancels gauge
+crypto_tca_cancels{scope="RUN"} 0
+# TYPE crypto_tca_unwind_orders gauge
+crypto_tca_unwind_orders{scope="RUN"} 0
+# TYPE crypto_tca_open_residual_base gauge
+crypto_tca_open_residual_base{scope="RUN"} 0
+# TYPE crypto_tca_weighted_slippage_bps gauge
+crypto_tca_weighted_slippage_bps{scope="RUN"} 0
+# TYPE crypto_tca_fees gauge
+crypto_tca_fees{scope="RUN"} 0
+# TYPE crypto_tca_net_pnl gauge
+crypto_tca_net_pnl{scope="RUN"} 0
+# TYPE crypto_structured_logs_records gauge
+crypto_structured_logs_records{mode="LIVE"} 97
+# TYPE crypto_structured_logs_errors gauge
+crypto_structured_logs_errors{mode="LIVE"} 0
+# TYPE crypto_structured_logs_warnings gauge
+crypto_structured_logs_warnings{mode="LIVE"} 2
+# TYPE crypto_structured_logs_failed_opportunities gauge
+crypto_structured_logs_failed_opportunities{mode="LIVE"} 0

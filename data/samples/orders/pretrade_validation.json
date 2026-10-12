@@ -1,0 +1,41 @@
+{
+  "schema_version": "1.0.0",
+  "validation_id": "64a80f52-43f0-5c74-a005-b1c423f8cbdd",
+  "ts_ns": 2,
+  "opportunity_id": "pretrade-opportunity",
+  "strategy_id": "strategy-1",
+  "decision": "APPROVED",
+  "failure_codes": [],
+  "checks": [
+    {
+      "code": "STRATEGY_PACKAGE_NOTIONAL",
+      "scope": "STRATEGY",
+      "passed": true,
+      "venue": "",
+      "instrument_id": "",
+      "observed": "1200.60000",
+      "limit": "10000",
+      "detail": ""
+    },
+    {
+      "code": "LIVE_DATA_AGE",
+      "scope": "MARKET_DATA",
+      "passed": true,
+      "venue": "BINANCE",
+      "instrument_id": "BTC-USDT-SPOT",
+      "observed": "1",
+      "limit": "1000000000",
+      "detail": ""
+    },
+    {
+      "code": "AVAILABLE_MARGIN",
+      "scope": "ACCOUNT",
+      "passed": true,
+      "venue": "BYBIT",
+      "instrument_id": "BTC-USDT-SPOT",
+      "observed": "0.00000",
+      "limit": "Infinity",
+      "detail": ""
+    }
+  ]
+}

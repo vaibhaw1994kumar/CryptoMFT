@@ -1,0 +1,27 @@
+{
+  "closed_at_utc": "2026-10-11T16:40:45.850110+00:00",
+  "first_raw_ref": "12cb0484-f734-52f7-b494-0e10be08c311",
+  "first_receive_ts_ns": 1000100000,
+  "last_raw_ref": "df56814f-f15b-5f4a-9c20-b98fccb59fb6",
+  "last_receive_ts_ns": 1000300000,
+  "raw_file": "/Users/vaibhav/Documents/Newproject/crypto_MFT_arb_platform/runs/local-all-20261011T164033Z/raw/local-acceptance/raw.jsonl",
+  "raw_file_sha256": "bec6a505ae711b79aa3a00a2d04d12b486f10c12f3f4eebda5feceb83a996b40",
+  "raw_schema_version": "1.0.0",
+  "record_count": 2,
+  "session_id": "local-acceptance",
+  "sources": [
+    {
+      "channel": "btcusdt@depth",
+      "host": "fstream.binance.com",
+      "vendor": "BINANCE",
+      "venue": "BINANCE"
+    },
+    {
+      "channel": "orderbook.50.BTCUSDT",
+      "host": "stream.bybit.com",
+      "vendor": "BYBIT",
+      "venue": "BYBIT"
+    }
+  ],
+  "terminal_record_hash": "39e4ab0b43702c26f844ffc2c247cdfbaeda8ffe173c7cc10f203f3fc3874148"
+}

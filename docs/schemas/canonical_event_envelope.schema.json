@@ -1,0 +1,46 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://crypto-stat-arb.local/schemas/canonical-event-envelope-1.2.0.json",
+  "title": "Canonical Market Event Envelope",
+  "description": "Immutable market event delivered unchanged to strategy and recorder sinks.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "event_id", "event_type", "venue", "instrument_id", "source_ts_ns",
+    "exchange_ts_ns", "receive_ts_ns", "sequence_start", "sequence", "quality_flags",
+    "raw_ref", "schema_version", "adapter_version", "bids", "asks", "native"
+  ],
+  "properties": {
+    "event_id": {"type": "string", "minLength": 1},
+    "event_type": {"enum": ["BOOK_SNAPSHOT", "BOOK_DELTA", "CONTROL"]},
+    "venue": {"enum": ["BINANCE", "BYBIT"]},
+    "instrument_id": {"type": "string", "minLength": 1},
+    "source_ts_ns": {"type": "integer", "minimum": 0, "description": "Source transaction or matching-engine timestamp."},
+    "exchange_ts_ns": {"type": "integer", "minimum": 0, "description": "Exchange publication timestamp."},
+    "receive_ts_ns": {"type": "integer", "minimum": 0, "description": "Local frame receive timestamp."},
+    "sequence": {"type": "integer", "minimum": 0},
+    "sequence_start": {"type": "integer", "minimum": 0, "description": "First update ID covered by a ranged venue packet."},
+    "quality_flags": {"type": "array", "items": {"type": "string"}, "uniqueItems": true},
+    "raw_ref": {"type": "string", "minLength": 1},
+    "schema_version": {"const": "1.2.0"},
+    "adapter_version": {"type": "string", "minLength": 1},
+    "checksum": {"type": "string", "description": "Venue checksum when published; empty otherwise."},
+    "bids": {"$ref": "#/$defs/levels"},
+    "asks": {"$ref": "#/$defs/levels"},
+    "native": {"type": "object"}
+  },
+  "$defs": {
+    "levels": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["price", "quantity"],
+        "properties": {
+          "price": {"type": "string"},
+          "quantity": {"type": "string"}
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,3 @@
+schema_version,venue,instrument_id,interval,open_ts_ns,close_ts_ns,open_ts_utc,close_ts_utc,is_final,trade_count,first_trade_event_id,last_trade_event_id,open,high,low,close,base_volume,quote_volume
+1.0.0,BINANCE,BTC-USDT-SPOT,1m,0,60000000000,1970-01-01T00:00:00+00:00,1970-01-01T00:01:00+00:00,False,39,c4bd3829-2195-5e16-95d4-a29712751c8b,03c515eb-7936-59e7-bece-78d2dc049bcc,59999.90,60000.00,59999.90,59999.90,78,4679996.00
+1.0.0,BYBIT,BTC-USDT-SPOT,1m,0,60000000000,1970-01-01T00:00:00+00:00,1970-01-01T00:01:00+00:00,False,49,adb08495-d4fd-5aa9-bbf2-f2d8d3dd24d1,03145243-24b5-54f4-9bfe-1c4144176443,60000.00,60000.10,60000.00,60000.00,73.5,4410003.600

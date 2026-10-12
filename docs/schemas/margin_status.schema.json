@@ -1,0 +1,65 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://papertowninsights.org/schemas/margin-status-1.0.0.json",
+  "title": "Derivative margin and collateral status",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "report_id", "ts_ns", "state", "alerts", "venues"],
+  "properties": {
+    "schema_version": {"const": "1.0.0"},
+    "report_id": {"type": "string", "minLength": 1},
+    "ts_ns": {"type": "integer", "minimum": 0},
+    "state": {"enum": ["NOT_APPLICABLE", "HEALTHY", "WARNING", "BREACH"]},
+    "alerts": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["venue", "code"],
+        "properties": {
+          "venue": {"type": "string"},
+          "code": {"enum": ["LIQUIDATION_BUFFER_LOW", "MARGIN_BELOW_MAINTENANCE"]}
+        }
+      }
+    },
+    "venues": {
+      "type": "object",
+      "additionalProperties": {"$ref": "#/$defs/venueMargin"}
+    }
+  },
+  "$defs": {
+    "decimal": {"type": "string", "pattern": "^-?(?:[0-9]+(?:\\.[0-9]+)?|Infinity)$"},
+    "venueMargin": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "venue", "state", "margin_enabled", "gross_notional",
+        "margin_balance", "venue_reported_margin_balance",
+        "effective_margin_balance", "initial_margin_required",
+        "maintenance_margin_required", "liquidation_buffer",
+        "required_liquidation_buffer", "maintenance_margin_utilization",
+        "alert_codes"
+      ],
+      "properties": {
+        "venue": {"type": "string"},
+        "state": {"enum": ["NOT_APPLICABLE", "HEALTHY", "WARNING", "BREACH"]},
+        "margin_enabled": {"type": "boolean"},
+        "gross_notional": {"$ref": "#/$defs/decimal"},
+        "margin_balance": {"$ref": "#/$defs/decimal"},
+        "venue_reported_margin_balance": {
+          "oneOf": [{"$ref": "#/$defs/decimal"}, {"type": "null"}]
+        },
+        "effective_margin_balance": {"$ref": "#/$defs/decimal"},
+        "initial_margin_required": {"$ref": "#/$defs/decimal"},
+        "maintenance_margin_required": {"$ref": "#/$defs/decimal"},
+        "liquidation_buffer": {"$ref": "#/$defs/decimal"},
+        "required_liquidation_buffer": {"$ref": "#/$defs/decimal"},
+        "maintenance_margin_utilization": {"$ref": "#/$defs/decimal"},
+        "alert_codes": {
+          "type": "array",
+          "items": {"enum": ["LIQUIDATION_BUFFER_LOW", "MARGIN_BELOW_MAINTENANCE"]}
+        }
+      }
+    }
+  }
+}

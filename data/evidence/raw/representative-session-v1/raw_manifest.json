@@ -1,0 +1,27 @@
+{
+  "closed_at_utc": "2026-09-04T18:58:13.046459+00:00",
+  "first_raw_ref": "6bd9f092-b590-5ca2-ac53-d55ded27839f",
+  "first_receive_ts_ns": 1000100000,
+  "last_raw_ref": "f07becb2-2b11-53b3-b5d2-272ce61d91a6",
+  "last_receive_ts_ns": 1000300000,
+  "raw_file": "data/evidence/raw/representative-session-v1/raw.jsonl",
+  "raw_file_sha256": "54a5eeab7a20bba999798c1fb15679ee38446b3fb7d60e43950199351a2b1ad7",
+  "raw_schema_version": "1.0.0",
+  "record_count": 2,
+  "session_id": "representative-session-v1",
+  "sources": [
+    {
+      "channel": "btcusdt@depth",
+      "host": "fstream.binance.com",
+      "vendor": "BINANCE",
+      "venue": "BINANCE"
+    },
+    {
+      "channel": "orderbook.50.BTCUSDT",
+      "host": "stream.bybit.com",
+      "vendor": "BYBIT",
+      "venue": "BYBIT"
+    }
+  ],
+  "terminal_record_hash": "efe7d737b715fdfaaa40068b18c87283f2d5df1b92477264d97316845cb2e00f"
+}

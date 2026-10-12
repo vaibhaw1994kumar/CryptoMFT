@@ -1,0 +1,26 @@
+{
+  "before_restart": {
+    "parent_id": "parent-1",
+    "state": "DISPATCHED",
+    "durable_event": "DISPATCH_INTENT",
+    "children": [
+      {"order_id": "child-buy-1", "venue": "BINANCE", "state": "CREATED"},
+      {"order_id": "child-sell-1", "venue": "BYBIT", "state": "CREATED"}
+    ]
+  },
+  "restart_action": {
+    "restore_nonterminal_plan": true,
+    "resubmit_children": false,
+    "query_venue_by_deterministic_order_id": true
+  },
+  "venue_reconciliation": [
+    {"order_id": "child-buy-1", "venue": "BINANCE", "state": "FILLED", "filled_quantity": "0.010", "average_price": "60000.00"},
+    {"order_id": "child-sell-1", "venue": "BYBIT", "state": "FILLED", "filled_quantity": "0.010", "average_price": "60060.00"}
+  ],
+  "after_reconciliation": {
+    "state": "CLOSED",
+    "terminal_outcome": "FILLED",
+    "residual_base": "0.000",
+    "duplicate_submissions": 0
+  }
+}

@@ -1,0 +1,12 @@
+{
+  "schema_version": "1.0.0",
+  "test_name": "forced-alert-control-test",
+  "correlation_id": "forced-alert-test",
+  "result": "PASS",
+  "alerts": [
+    {"alert_type": "FAILED_INGESTION", "owner": "market-data-owner", "severity": "CRITICAL", "response_target_minutes": 30, "forced_test": true},
+    {"alert_type": "INVALID_BOOK", "owner": "market-data-owner", "severity": "CRITICAL", "response_target_minutes": 15, "forced_test": true},
+    {"alert_type": "REPLAY_FAILURE", "owner": "research-infrastructure-owner", "severity": "HIGH", "response_target_minutes": 240, "forced_test": true},
+    {"alert_type": "RISK_BREACH", "owner": "paper-risk-owner", "severity": "CRITICAL", "response_target_minutes": 15, "forced_test": true}
+  ]
+}

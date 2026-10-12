@@ -1,0 +1,76 @@
+{
+  "approval_required": true,
+  "artifacts": [
+    {
+      "kind": "DATA_MANIFEST",
+      "name": "two_venue_sample",
+      "sha256": "3ce8bac51cd25a3a77603fce57c52762dfe9dbeb8a190e68ef28413324a8ec1e",
+      "size_bytes": 329,
+      "snapshot_path": "artifacts/data_manifest/00-two_venue_sample_v1.json",
+      "source_path": "data/manifests/two_venue_sample_v1.json",
+      "version": "1.0.0"
+    },
+    {
+      "kind": "FEATURE_DEFINITION",
+      "name": "top_of_book",
+      "sha256": "ce53fa96d419a1d256223b52a6eca2818140b6d7aa1f0e0e9cea3ca6d74a3125",
+      "size_bytes": 444,
+      "snapshot_path": "artifacts/feature_definition/01-cross_venue_features_v1.json",
+      "source_path": "config/releases/cross_venue_features_v1.json",
+      "version": "1.0.0"
+    },
+    {
+      "kind": "MODEL",
+      "name": "cross_venue_rules",
+      "sha256": "852706b0c5c38e718b8f1c8bbca2ac255d2ea5e1281dff97665a488cb7f9a09d",
+      "size_bytes": 246,
+      "snapshot_path": "artifacts/model/02-rules_model_v1.json",
+      "source_path": "config/releases/rules_model_v1.json",
+      "version": "1.0.0"
+    },
+    {
+      "kind": "PARAMETERS",
+      "name": "cross_venue_parameters",
+      "sha256": "2df24a93b5b68913cb868a9c0f4b56fc7cee3b2c8f10bf70c50f1f1e0bf52fa1",
+      "size_bytes": 190,
+      "snapshot_path": "artifacts/parameters/03-cross_venue_parameters_v1.json",
+      "source_path": "config/releases/cross_venue_parameters_v1.json",
+      "version": "1.0.0"
+    },
+    {
+      "kind": "SIMULATOR_CONFIG",
+      "name": "paper_simulator",
+      "sha256": "7a0fe27e147236d56411dee6db9dc3bdb769abbe65c558000554e23bb8652411",
+      "size_bytes": 5362,
+      "snapshot_path": "artifacts/simulator_config/04-research.json",
+      "source_path": "config/research.json",
+      "version": "1.0.0"
+    },
+    {
+      "kind": "STRATEGY_CODE",
+      "name": "cross_venue_strategy",
+      "sha256": "a4e438edf8b7ac2066006ddfb6802fa6e0048e156727bcd1b6c7a30d3cca56fd",
+      "size_bytes": 3459,
+      "snapshot_path": "artifacts/strategy_code/05-strategy.py",
+      "source_path": "src/crypto_stat_arb/strategy.py",
+      "version": "1.0.0"
+    }
+  ],
+  "build": {
+    "version": "0.1.0"
+  },
+  "created_ts_ns": 1789309679965925000,
+  "created_ts_utc": "2026-09-13T14:27:59.965925+00:00",
+  "environment": {
+    "executable": "python3.12",
+    "implementation": "CPython",
+    "name": "paper-local",
+    "platform": "macOS-15.3.1-arm64-arm-64bit",
+    "python": "3.12.0"
+  },
+  "identity_sha256": "2bec9d29bb01352465d646bcf803b6edd1bb74b3f8a9d7e1be7a2a532ac6017a",
+  "manifest_sha256": "ea17a984c74bef133845e3a5aae11dac311f577153c22685cab89c84a351e3f4",
+  "release_id": "bfbcab66-0a5c-5bd8-aac9-30de0830ab3f",
+  "schema_version": "1.0.0",
+  "strategy_id": "cross_venue_btc_v1"
+}

@@ -1,0 +1,39 @@
+{
+  "blocked_evaluations": 1,
+  "created_at": "2026-09-04T20:01:58.893657+00:00",
+  "deterministic_alignment_sha256": "47f30858bb681ab460b60d58598429bc44b4cfa09eba3f964b9295284f40526e",
+  "eligibility_trace": "data/evidence/alignment/merged.jsonl.eligibility.jsonl",
+  "eligibility_trace_sha256": "eb62d3b25669d1498a6e29736839c88b2592c188d77400c82d35411b11e0e7c1",
+  "eligible_evaluations": 3,
+  "input_counts": {
+    "BINANCE": 2,
+    "BYBIT": 2
+  },
+  "input_sha256": {
+    "BINANCE": "c074a5fa2e2fa3d6da9ff057a00be3036cd7f2e4d93b144a14a184e4a66c42f9",
+    "BYBIT": "2261d9a5824426cecdc6ceb7b84f9cc989ded9f8f8dd064c76a86d859cea16ba"
+  },
+  "inputs": {
+    "BINANCE": "data/evidence/alignment/input/binance.jsonl",
+    "BYBIT": "data/evidence/alignment/input/bybit.jsonl"
+  },
+  "native_state_hashes": {
+    "35e2824a-105e-58df-92e9-0dc61cb4a182": "69f42304c3e9136720ee812e40b628175922827c9273a3adf8d1b7a37156b671",
+    "506906f6-01be-5e3d-ae29-52e3cbeffdf2": "936a35adcee32be3999aa07393b886e6adcc675139ac4e0ca94bc9a5e7d4cb4d",
+    "8f7eae8a-97f8-51c2-9015-31779c1f36af": "4e93b3fd85ba29161fdaa7b4199061d9704d89c95d65f71342ad9ac2d9f4c34f",
+    "ce835167-aa53-5628-8f4c-39b2ede9778b": "0d146c7ab802e5684896bb7cdf92782c3a5a9aa595fbe5217a206df63b6bfba4"
+  },
+  "ordering_rule": [
+    "receive_ts_ns",
+    "exchange_ts_ns",
+    "source_ts_ns",
+    "venue",
+    "sequence_start",
+    "sequence",
+    "event_id"
+  ],
+  "output": "data/evidence/alignment/merged.jsonl",
+  "output_count": 4,
+  "output_sha256": "517d477e8da5c7fd0f07c58d49c1506d349997663e4726dba197d7b817bc9297",
+  "schema_version": "1.0.0"
+}

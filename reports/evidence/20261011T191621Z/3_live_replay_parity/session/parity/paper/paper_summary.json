@@ -1,0 +1,972 @@
+{
+  "account_state": {
+    "positions": 0,
+    "report": "account_state.json",
+    "venues": 2
+  },
+  "book_hashes": {
+    "BINANCE:BTC-USDT-SPOT": "c6216b82a63fa569100bc1513bbe62dea6bd959db4acc8a3bf1680ea01f8fdbe",
+    "BYBIT:BTC-USDT-SPOT": "d46225cfbc492f02f44ae2b2ee6c7430cfaa7f33cd9c2611afe853865849e5c7"
+  },
+  "book_integrity_gate": {
+    "cancel_requests": 0,
+    "cancelled_orders": 0,
+    "reason": "INITIAL_SYNC",
+    "resume_count": 0,
+    "suspend_count": 0,
+    "suspended": true,
+    "venue_transitions": 0,
+    "venues": {
+      "BINANCE": "RISK_REDUCING_ONLY",
+      "BYBIT": "RISK_REDUCING_ONLY"
+    }
+  },
+  "canonical_events_delivered": 90,
+  "closed_plans": 0,
+  "cross_venue_alignment": {
+    "blocked_evaluations": 0,
+    "eligible_evaluations": 172,
+    "evaluations": 172,
+    "policy": "cross-venue-eligibility-v1",
+    "routing_rejections": 0
+  },
+  "data_quality": {
+    "checksum_failures": 0,
+    "confirmed_price_moves": 0,
+    "crossed_or_locked": 0,
+    "duplicates": 0,
+    "events": 90,
+    "gaps": 0,
+    "invalid_books": 0,
+    "invalid_levels": 0,
+    "out_of_order": 0,
+    "price_jumps": 0,
+    "resyncs": 1,
+    "silent_feeds": [],
+    "stale_transitions": 0,
+    "wide_spreads": 0
+  },
+  "data_quality_approval": {
+    "active_flag_codes": [],
+    "decision": "APPROVED",
+    "defect_count": 0,
+    "health": "HEALTHY"
+  },
+  "events_dropped_from_memory": 0,
+  "execution_api": {
+    "arrivals": 0,
+    "callbacks": 0,
+    "dispatch": {
+      "callbacks_observed": 0,
+      "children_dispatched": 0,
+      "max_dispatch_duration_ns": 0,
+      "measurements": [],
+      "min_dispatch_duration_ns": 0,
+      "policy": "DETERMINISTIC_SEQUENTIAL"
+    },
+    "duplicates_suppressed": 0,
+    "in_flight_sent": 0,
+    "latency_model": "preset:singapore",
+    "liquidity_consumption_events": 0,
+    "rate_limit_delayed": 0,
+    "rate_limit_queued": 0,
+    "rate_limit_rejections": 0,
+    "rate_limit_released": 0,
+    "rate_limits": {
+      "in_flight_requests": 0,
+      "pending_requests": 0,
+      "schema_version": "1.0.0",
+      "undelivered_reports": 0,
+      "venues": {
+        "BINANCE": {
+          "capacity": 1000,
+          "delayed": 0,
+          "headroom": 1000,
+          "in_flight": 0,
+          "next_release_ts_ns": null,
+          "next_window_ts_ns": 1000000000,
+          "policy": "REJECT",
+          "queue_depth": 0,
+          "queued": 0,
+          "throttle_delay_ns": 0,
+          "used": 0,
+          "window_start_ts_ns": 0
+        },
+        "BYBIT": {
+          "capacity": 1000,
+          "delayed": 0,
+          "headroom": 1000,
+          "in_flight": 0,
+          "next_release_ts_ns": null,
+          "next_window_ts_ns": 1000000000,
+          "policy": "REJECT",
+          "queue_depth": 0,
+          "queued": 0,
+          "throttle_delay_ns": 0,
+          "used": 0,
+          "window_start_ts_ns": 0
+        }
+      }
+    },
+    "reports_delivered": 0,
+    "route_decisions": 0,
+    "route_overrides": 0,
+    "route_rejections": 0,
+    "schema_version": "1.0.0",
+    "state_machine": {
+      "closed_plans": 0,
+      "duplicates_suppressed": 0,
+      "order_updates": 0,
+      "plans": 0,
+      "schema_version": "1.0.0",
+      "terminal_conflicts_resolved": 0,
+      "terminal_outcomes": {},
+      "terminal_parent_state": "CLOSED",
+      "updates_by_source": {
+        "ADAPTER_CALLBACK": 0,
+        "INTERNAL": 0,
+        "PRIVATE_STREAM": 0,
+        "REST_QUERY": 0,
+        "TIMER": 0
+      }
+    },
+    "trace": {
+      "path": "order_trace.jsonl",
+      "records": 0
+    },
+    "trace_records": 0,
+    "unique_requests": 0,
+    "venue_queries": 0
+  },
+  "execution_mode": "INTERNAL_PAPER",
+  "execution_realism": {
+    "close_deferrals": 0,
+    "in_flight_or_undelivered": false,
+    "latency_model": "preset:singapore",
+    "new_risk_held_residual_breach": 0,
+    "open_plan_states": [],
+    "open_plans": 0,
+    "open_report_deadlines": 0,
+    "order_timeout_policy": {
+      "kill_on_unresolved": true,
+      "max_queries": 3,
+      "query_interval_ns": 500000000,
+      "report_timeout_ns": 2000000000
+    },
+    "rejected_cancels_requeried": 0,
+    "residual_breach_kill_escalations": 0,
+    "residual_breaches_open": [],
+    "resolved_by_query": 0,
+    "resting_fill_reports": 0,
+    "schema_version": "1.0.0",
+    "unknown_state_orders": 0,
+    "unresolved_after_queries": 0,
+    "venue_queries": 0
+  },
+  "exposure_limits": {
+    "binding_event_count": 0,
+    "report": "exposure_utilization.json",
+    "state": "NORMAL",
+    "transition_count": 0
+  },
+  "fees": "0",
+  "flatten_started": false,
+  "gross_pnl": "0",
+  "instrument_status_changes_applied": 0,
+  "kill_switch": {
+    "reason": "",
+    "reconciliation_required_before_resume": false,
+    "report": "kill_switch_status.json",
+    "risk_reducing_orders_allowed": true,
+    "state": "INACTIVE"
+  },
+  "latency": {
+    "model_source": "preset:singapore",
+    "order_timestamps": "order_timestamps.jsonl",
+    "report": "latency_report.json",
+    "seed": 7
+  },
+  "live_feed": {
+    "canonical_events": 90,
+    "closed_at_utc": "2026-10-11T19:17:09.767495+00:00",
+    "control_frames": 0,
+    "manifest_path": "/Users/vaibhav/Documents/Newproject/crypto_MFT_arb_platform/reports/evidence/20261011T191621Z/3_live_replay_parity/session/parity/live_manifest.json",
+    "parts": [
+      {
+        "files": {
+          "canonical": {
+            "path": "/Users/vaibhav/Documents/Newproject/crypto_MFT_arb_platform/reports/evidence/20261011T191621Z/3_live_replay_parity/session/parity/part-000001/canonical.jsonl",
+            "sha256": "39a3a01f3e6158bb6537081687cea4fd6d896024fceb83b2114471ed5e367d7d"
+          },
+          "quarantine": {
+            "path": "/Users/vaibhav/Documents/Newproject/crypto_MFT_arb_platform/reports/evidence/20261011T191621Z/3_live_replay_parity/session/parity/part-000001/quarantine.jsonl",
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          "raw": {
+            "path": "/Users/vaibhav/Documents/Newproject/crypto_MFT_arb_platform/reports/evidence/20261011T191621Z/3_live_replay_parity/session/parity/part-000001/raw.jsonl",
+            "sha256": "d8e2a0c5332508f4ffe0f2acf27603d312bc16e631811a1c37ba39753ab28b64"
+          },
+          "trace": {
+            "path": "/Users/vaibhav/Documents/Newproject/crypto_MFT_arb_platform/reports/evidence/20261011T191621Z/3_live_replay_parity/session/parity/part-000001/trace.jsonl",
+            "sha256": "c1dadd65991eeb9ad1ebb93db97db1b9a4cb239f9acc350d5bb62a09384119d9"
+          },
+          "trades": {
+            "path": "/Users/vaibhav/Documents/Newproject/crypto_MFT_arb_platform/reports/evidence/20261011T191621Z/3_live_replay_parity/session/parity/part-000001/trades.jsonl",
+            "sha256": "84db441ede4739a9679f0259ef798cc854c6fb9377c1267f727075071a97a10d"
+          },
+          "wire": {
+            "path": "/Users/vaibhav/Documents/Newproject/crypto_MFT_arb_platform/reports/evidence/20261011T191621Z/3_live_replay_parity/session/parity/part-000001/wire.jsonl",
+            "sha256": "fe904fe05dde8502ffde835157a77e2b84a0cc119ebba3840e5f35f65b45358b"
+          }
+        },
+        "part": 1,
+        "terminal_raw_record_hash": "5de50230ae92ab445ab9727980bf042c2b05130efe3f2e68cf71969316b256cc",
+        "terminal_wire_record_hash": "3e1aeb2967a5f26fd41db9776297130b6b696c75517406b3f17bfc0e7fe79f97"
+      }
+    ],
+    "rejected_frames": 0,
+    "schema_version": "1.0.0",
+    "service": {
+      "books": {
+        "BINANCE": {
+          "invalid_reason": "",
+          "last_event_id": "5f127141-e0eb-537b-bafe-6bffcb2d690e",
+          "last_receive_ts_ns": 1586000000,
+          "sequence": 140,
+          "snapshot_sha256": "c6216b82a63fa569100bc1513bbe62dea6bd959db4acc8a3bf1680ea01f8fdbe",
+          "state": "VALID",
+          "stats": {
+            "buffered_deltas": 1,
+            "checksum_failures": 0,
+            "confirmed_price_moves": 0,
+            "crossed_or_locked": 0,
+            "deltas_applied": 40,
+            "duplicates": 0,
+            "gaps": 0,
+            "invalid_levels": 0,
+            "out_of_order": 0,
+            "price_jumps": 0,
+            "resyncs": 1,
+            "snapshots": 1,
+            "stale_transitions": 0,
+            "wide_spreads": 0
+          }
+        },
+        "BYBIT": {
+          "invalid_reason": "",
+          "last_event_id": "3d56425c-b70e-54a6-b1e6-73043e67336f",
+          "last_receive_ts_ns": 1633000000,
+          "sequence": 49,
+          "snapshot_sha256": "d46225cfbc492f02f44ae2b2ee6c7430cfaa7f33cd9c2611afe853865849e5c7",
+          "state": "VALID",
+          "stats": {
+            "buffered_deltas": 0,
+            "checksum_failures": 0,
+            "confirmed_price_moves": 0,
+            "crossed_or_locked": 0,
+            "deltas_applied": 48,
+            "duplicates": 0,
+            "gaps": 0,
+            "invalid_levels": 0,
+            "out_of_order": 0,
+            "price_jumps": 0,
+            "resyncs": 0,
+            "snapshots": 1,
+            "stale_transitions": 0,
+            "wide_spreads": 0
+          }
+        }
+      },
+      "duration_ns": 637000000,
+      "events_seen": 90,
+      "instrument_id": "BTC-USDT-SPOT",
+      "live_order_routing": false,
+      "ltp_ohlc": {
+        "artifact": {
+          "path": "/Users/vaibhav/Documents/Newproject/crypto_MFT_arb_platform/reports/evidence/20261011T191621Z/3_live_replay_parity/session/parity/ltp_ohlc_1m.csv",
+          "rows": 2,
+          "sha256": "8ee3aa55bf41c3b5a402b81b20c6fad40abec301918288956b7ef4bc07f23d54"
+        },
+        "clock": "LOCAL_RECEIVE_TIME",
+        "completed_bars": 0,
+        "interval": "1m",
+        "late_trades": 0,
+        "open_bars": 0,
+        "partial_bars": 2,
+        "price_source": "PUBLIC_TRADE_LTP",
+        "trades": 88
+      },
+      "max_book_age_ns": 1000000000,
+      "mode": "PUBLIC_MARKET_DATA_ONLY",
+      "ohlc": {
+        "artifact": {
+          "path": "/Users/vaibhav/Documents/Newproject/crypto_MFT_arb_platform/reports/evidence/20261011T191621Z/3_live_replay_parity/session/parity/ohlc_1m.csv",
+          "rows": 2,
+          "sha256": "45b0b14c11fdde4442540bdb5e1d0690a29a5ace857a61e7980a6ab305d0b54e"
+        },
+        "completed_bars": 0,
+        "ignored_event_samples": 0,
+        "interval": "1m",
+        "invalid_book_samples": 0,
+        "late_samples": 0,
+        "open_bars": 0,
+        "partial_bars": 2,
+        "samples": 89
+      },
+      "pipeline_monitoring": {
+        "max_persistence_lag_ns": 23000000,
+        "prometheus_metrics": "pipeline_metrics.prom",
+        "refresh_interval_seconds": 1.0,
+        "report": "pipeline_monitoring.json"
+      },
+      "started_ts_ns": 1002000000,
+      "stopped_ts_ns": 1639000000,
+      "strategy_gate": {
+        "cancel_requests": 0,
+        "cancelled_orders": 0,
+        "reason": "",
+        "resume_count": 1,
+        "suspend_count": 0,
+        "suspended": false,
+        "venue_transitions": 4,
+        "venues": {
+          "BINANCE": "ACTIVE",
+          "BYBIT": "ACTIVE"
+        }
+      },
+      "structured_logs": {
+        "components": {
+          "CONNECTOR": 99
+        },
+        "database": "structured_logs.sqlite",
+        "failed_opportunities": 0,
+        "jsonl": "structured_logs.jsonl",
+        "levels": {
+          "INFO": 99
+        },
+        "records": 99,
+        "schema_version": "1.0.0",
+        "searchable_fields": [
+          "correlation_id",
+          "component",
+          "level",
+          "event_type",
+          "venue",
+          "source_event_id",
+          "feature_state_id",
+          "opportunity_id",
+          "risk_decision_id",
+          "parent_plan_id",
+          "child_order_id",
+          "request_id"
+        ]
+      },
+      "symbols": {
+        "BINANCE": "BTCUSDT",
+        "BYBIT": "BTCUSDT"
+      },
+      "udp": {
+        "enabled": false
+      },
+      "venues": {
+        "BINANCE": {
+          "canonical_events": 41,
+          "connection_attempts": 1,
+          "connections": 1,
+          "control_frames": 0,
+          "disconnects": 0,
+          "invalid_trades": 0,
+          "last_error": "",
+          "normalization_errors": 0,
+          "parse_errors": 0,
+          "raw_frames": 41,
+          "reconnects": 0,
+          "resyncs": 0,
+          "stale_disconnects": 0,
+          "trade_connection_attempts": 1,
+          "trade_connections": 1,
+          "trade_disconnects": 0,
+          "trade_normalization_errors": 0,
+          "trade_parse_errors": 0,
+          "trade_raw_frames": 39,
+          "trade_reconnects": 0,
+          "trade_stale_disconnects": 0,
+          "trade_ticks": 39
+        },
+        "BYBIT": {
+          "canonical_events": 49,
+          "connection_attempts": 1,
+          "connections": 1,
+          "control_frames": 0,
+          "disconnects": 1,
+          "invalid_trades": 0,
+          "last_error": "",
+          "normalization_errors": 0,
+          "parse_errors": 0,
+          "raw_frames": 49,
+          "reconnects": 0,
+          "resyncs": 0,
+          "stale_disconnects": 0,
+          "trade_connection_attempts": 1,
+          "trade_connections": 1,
+          "trade_disconnects": 1,
+          "trade_normalization_errors": 0,
+          "trade_parse_errors": 0,
+          "trade_raw_frames": 49,
+          "trade_reconnects": 0,
+          "trade_stale_disconnects": 0,
+          "trade_ticks": 49
+        }
+      }
+    },
+    "session_id": "parity",
+    "session_sha256": "9411809244222be0f5c0464d9edae3a821440fcd4348f18480839e91d41ca8aa",
+    "trade_ticks": 88,
+    "wire_records": 178
+  },
+  "maker_dry_run": {
+    "engine": "cpp_mm_matching_engine",
+    "feed_lag_ns": 0,
+    "fill_records": 4,
+    "fill_records_dropped": 0,
+    "fills_path": "maker_dry_run_fills.jsonl",
+    "initial_inventory": 0.005,
+    "instrument_id": "BTC-USDT-SPOT",
+    "latency": {
+      "defaulted_venues": [],
+      "profiles": {
+        "BINANCE": {
+          "cancel": {
+            "base_ns": 40000000,
+            "jitter_ns": 0,
+            "max_ns": 2000000000,
+            "min_ns": 300000,
+            "model": "lognormal",
+            "std_ns": 8000000,
+            "tail_ns": 0,
+            "tail_probability": 0.0
+          },
+          "entry": {
+            "base_ns": 40000000,
+            "jitter_ns": 0,
+            "max_ns": 2000000000,
+            "min_ns": 300000,
+            "model": "lognormal",
+            "std_ns": 8000000,
+            "tail_ns": 0,
+            "tail_probability": 0.0
+          },
+          "fill": {
+            "base_ns": 36000000,
+            "jitter_ns": 0,
+            "max_ns": 2000000000,
+            "min_ns": 300000,
+            "model": "lognormal",
+            "std_ns": 8000000,
+            "tail_ns": 0,
+            "tail_probability": 0.0
+          },
+          "market_data": {
+            "base_ns": 36000000,
+            "jitter_ns": 0,
+            "max_ns": 2000000000,
+            "min_ns": 300000,
+            "model": "lognormal",
+            "std_ns": 8000000,
+            "tail_ns": 0,
+            "tail_probability": 0.0
+          },
+          "risk": {
+            "base_ns": 100000,
+            "jitter_ns": 50000,
+            "max_ns": 0,
+            "min_ns": 0,
+            "model": "uniform",
+            "std_ns": 0,
+            "tail_ns": 0,
+            "tail_probability": 0.0
+          },
+          "strategy": {
+            "base_ns": 200000,
+            "jitter_ns": 100000,
+            "max_ns": 0,
+            "min_ns": 0,
+            "model": "uniform",
+            "std_ns": 0,
+            "tail_ns": 0,
+            "tail_probability": 0.0
+          },
+          "submit_ack": {
+            "base_ns": 36000000,
+            "jitter_ns": 0,
+            "max_ns": 2000000000,
+            "min_ns": 300000,
+            "model": "lognormal",
+            "std_ns": 8000000,
+            "tail_ns": 0,
+            "tail_probability": 0.0
+          },
+          "venue": "BINANCE"
+        },
+        "BYBIT": {
+          "cancel": {
+            "base_ns": 6000000,
+            "jitter_ns": 0,
+            "max_ns": 2000000000,
+            "min_ns": 300000,
+            "model": "lognormal",
+            "std_ns": 2500000,
+            "tail_ns": 0,
+            "tail_probability": 0.0
+          },
+          "entry": {
+            "base_ns": 6000000,
+            "jitter_ns": 0,
+            "max_ns": 2000000000,
+            "min_ns": 300000,
+            "model": "lognormal",
+            "std_ns": 2500000,
+            "tail_ns": 0,
+            "tail_probability": 0.0
+          },
+          "fill": {
+            "base_ns": 2000000,
+            "jitter_ns": 0,
+            "max_ns": 2000000000,
+            "min_ns": 300000,
+            "model": "lognormal",
+            "std_ns": 2500000,
+            "tail_ns": 0,
+            "tail_probability": 0.0
+          },
+          "market_data": {
+            "base_ns": 2000000,
+            "jitter_ns": 0,
+            "max_ns": 2000000000,
+            "min_ns": 300000,
+            "model": "lognormal",
+            "std_ns": 2500000,
+            "tail_ns": 0,
+            "tail_probability": 0.0
+          },
+          "risk": {
+            "base_ns": 100000,
+            "jitter_ns": 50000,
+            "max_ns": 0,
+            "min_ns": 0,
+            "model": "uniform",
+            "std_ns": 0,
+            "tail_ns": 0,
+            "tail_probability": 0.0
+          },
+          "strategy": {
+            "base_ns": 200000,
+            "jitter_ns": 100000,
+            "max_ns": 0,
+            "min_ns": 0,
+            "model": "uniform",
+            "std_ns": 0,
+            "tail_ns": 0,
+            "tail_probability": 0.0
+          },
+          "submit_ack": {
+            "base_ns": 2000000,
+            "jitter_ns": 0,
+            "max_ns": 2000000000,
+            "min_ns": 300000,
+            "model": "lognormal",
+            "std_ns": 2500000,
+            "tail_ns": 0,
+            "tail_probability": 0.0
+          },
+          "venue": "BYBIT"
+        }
+      },
+      "schema_version": "1.0.0",
+      "seed": 2465239424,
+      "source": "maker:preset:singapore",
+      "stages": {
+        "BINANCE.entry": {
+          "count": 2,
+          "event_pair": [
+            "order_send_ts",
+            "venue_match_ts"
+          ],
+          "max_ns": 47614027,
+          "mean_ns": 43934279,
+          "p50_ns": 47614027,
+          "p95_ns": 47614027,
+          "p99_ns": 47614027,
+          "window": 2
+        },
+        "BINANCE.fill": {
+          "count": 2,
+          "event_pair": [
+            "venue_match_ts",
+            "fill_observed_ts"
+          ],
+          "max_ns": 37702258,
+          "mean_ns": 32967266,
+          "p50_ns": 37702258,
+          "p95_ns": 37702258,
+          "p99_ns": 37702258,
+          "window": 2
+        },
+        "BINANCE.risk": {
+          "count": 1,
+          "event_pair": [
+            "decision_ts",
+            "route_decision_ts"
+          ],
+          "max_ns": 109240,
+          "mean_ns": 109240,
+          "p50_ns": 109240,
+          "p95_ns": 109240,
+          "p99_ns": 109240,
+          "window": 1
+        },
+        "BINANCE.strategy": {
+          "count": 1,
+          "event_pair": [
+            "receive_ts",
+            "decision_ts"
+          ],
+          "max_ns": 283612,
+          "mean_ns": 283612,
+          "p50_ns": 283612,
+          "p95_ns": 283612,
+          "p99_ns": 283612,
+          "window": 1
+        },
+        "BYBIT.entry": {
+          "count": 2,
+          "event_pair": [
+            "order_send_ts",
+            "venue_match_ts"
+          ],
+          "max_ns": 8628835,
+          "mean_ns": 6316128,
+          "p50_ns": 8628835,
+          "p95_ns": 8628835,
+          "p99_ns": 8628835,
+          "window": 2
+        },
+        "BYBIT.fill": {
+          "count": 2,
+          "event_pair": [
+            "venue_match_ts",
+            "fill_observed_ts"
+          ],
+          "max_ns": 12437318,
+          "mean_ns": 6706961,
+          "p50_ns": 12437318,
+          "p95_ns": 12437318,
+          "p99_ns": 12437318,
+          "window": 2
+        },
+        "BYBIT.risk": {
+          "count": 1,
+          "event_pair": [
+            "decision_ts",
+            "route_decision_ts"
+          ],
+          "max_ns": 122853,
+          "mean_ns": 122853,
+          "p50_ns": 122853,
+          "p95_ns": 122853,
+          "p99_ns": 122853,
+          "window": 1
+        },
+        "BYBIT.strategy": {
+          "count": 1,
+          "event_pair": [
+            "receive_ts",
+            "decision_ts"
+          ],
+          "max_ns": 252144,
+          "mean_ns": 252144,
+          "p50_ns": 252144,
+          "p95_ns": 252144,
+          "p99_ns": 252144,
+          "window": 1
+        }
+      }
+    },
+    "limitations": [
+      "Passive at-touch quoting harness for fill-model validation, not a strategy.",
+      "Fills are strictly print-driven: a book that crosses a resting order without a print reaching its queue is counted in crossed_without_print, never filled.",
+      "Cancellations ahead of a resting order are only inferred when the visible level shrinks below the order's queue ahead (conservative).",
+      "The recorded receive_ts_ns is the event clock; an order's arrival is placed on that clock without an extra market-data leg, as in the OMS replay."
+    ],
+    "max_inventory": 0.01,
+    "queue_position_frac": 1.0,
+    "quote_cadence": {
+      "quote_interval_ns": 1000000000
+    },
+    "quote_interval_ns": 1000000000,
+    "quote_size": 0.001,
+    "schema_version": "2.0.0",
+    "source": "sim_engine mm_matching_engine (crypto_stat_arb copy with queue-accounting fixes)",
+    "symbol": "BTC/USDT",
+    "timeline": {
+      "clock": "receive-time event clock (SimulationClock)",
+      "clock_regressions": 1,
+      "timers_fired": 18
+    },
+    "venues": {
+      "BINANCE": {
+        "book_events": 40,
+        "buy_quantity": 0.001,
+        "cancel_rejects_too_late": 0,
+        "cancel_rejects_unknown_order": 0,
+        "cancels_applied": 0,
+        "cancels_sent": 0,
+        "crossed_without_print": 0,
+        "fees": 0.02399998,
+        "fill_ratio": 1.0,
+        "fills": 2,
+        "fills_trade_through": 0,
+        "fills_while_cancel_pending": 0,
+        "invalid_book_events": 1,
+        "inventory": 0.005,
+        "inventory_range": [
+          0.005,
+          0.006
+        ],
+        "known_inventory": 0.005,
+        "mark_to_market_pnl_quote": -0.023899980000025103,
+        "markout_bps": {},
+        "markouts_truncated": 4,
+        "mean_queue_ahead_at_arrival": 1.0,
+        "order_states": {
+          "FILLED": 2
+        },
+        "orders_filled": 2,
+        "orders_rested": 2,
+        "post_only_rejects": 0,
+        "quotes": 2,
+        "quotes_kept": 0,
+        "sanity_violation_count": 0,
+        "sanity_violations": [],
+        "sell_quantity": 0.001,
+        "trades_seen": 39
+      },
+      "BYBIT": {
+        "book_events": 49,
+        "buy_quantity": 0.001,
+        "cancel_rejects_too_late": 0,
+        "cancel_rejects_unknown_order": 0,
+        "cancels_applied": 0,
+        "cancels_sent": 0,
+        "crossed_without_print": 0,
+        "fees": 0.02400002,
+        "fill_ratio": 1.0,
+        "fills": 2,
+        "fills_trade_through": 0,
+        "fills_while_cancel_pending": 0,
+        "invalid_book_events": 0,
+        "inventory": 0.005,
+        "inventory_range": [
+          0.004,
+          0.005
+        ],
+        "known_inventory": 0.005,
+        "mark_to_market_pnl_quote": -0.02390001999996826,
+        "markout_bps": {},
+        "markouts_truncated": 4,
+        "mean_queue_ahead_at_arrival": 1.0,
+        "order_states": {
+          "FILLED": 2
+        },
+        "orders_filled": 2,
+        "orders_rested": 2,
+        "post_only_rejects": 0,
+        "quotes": 2,
+        "quotes_kept": 0,
+        "sanity_violation_count": 0,
+        "sanity_violations": [],
+        "sell_quantity": 0.001,
+        "trades_seen": 49
+      }
+    }
+  },
+  "margin_collateral": {
+    "alert_count": 0,
+    "report": "margin_status.json",
+    "state": "NOT_APPLICABLE"
+  },
+  "net_pnl": "0",
+  "opportunities": 0,
+  "paper_timestamps": "paper_timestamps.jsonl",
+  "pipeline_monitoring": {
+    "alert_count": 0,
+    "health": "HEALTHY",
+    "prometheus_metrics": "pipeline_metrics.prom",
+    "report": "pipeline_monitoring.json",
+    "strategy_execution": {
+      "net_pnl": "0",
+      "opportunities": 0,
+      "orders": 0
+    }
+  },
+  "pretrade_validation": {
+    "decision": "NOT_RUN",
+    "failure_codes": [],
+    "report": null
+  },
+  "recorded_event_timing_used": 0,
+  "residual_risk": {
+    "legging_control_overrides": 0,
+    "legging_limit_bindings": 0,
+    "limit_breaches": 0,
+    "open_residual_base": "0",
+    "open_residual_plans": 0,
+    "policy": {
+      "allow_risk_reducing_under_stop": true,
+      "hedge_venue_priority": [
+        "BINANCE",
+        "BYBIT"
+      ],
+      "max_one_sided_notional": "1000",
+      "max_residual_age_ns": 5000000000,
+      "max_residual_base": "0.002",
+      "max_unwind_attempts": 2,
+      "unwind_price_slippage_bps": "10",
+      "unwind_urgency": "NORMAL"
+    },
+    "schema_version": "1.0.0",
+    "unwind_children": 0
+  },
+  "risk_reservation": {
+    "active_reservations": 0,
+    "exposure_binding_events": [],
+    "exposure_control_state": "NORMAL",
+    "exposure_transition_count": 0,
+    "kill_switch_active": false,
+    "pretrade_decision": "NOT_RUN",
+    "pretrade_failure_codes": [],
+    "reconciliation_decision": "APPROVED",
+    "reserved_cash": {},
+    "reserved_gross": "0",
+    "reserved_margin": {},
+    "reserved_messages": {},
+    "reserved_position": {},
+    "reserved_residual": "0",
+    "suspended_venues": {}
+  },
+  "rms_reconciliation": {
+    "decision": "APPROVED",
+    "issue_count": 0,
+    "reconciliation_id": "0d0bd499-b094-52e0-ad23-d2ac64d1f11c",
+    "report": "rms_reconciliation_report.json"
+  },
+  "strategies": {
+    "flattening": false,
+    "strategies": {
+      "basis_mean_reversion_v1": {
+        "closed_plans": 0,
+        "fees": "0",
+        "gross_pnl": "0",
+        "net_pnl": "0",
+        "opportunities": 0,
+        "outcomes": {},
+        "plans": 0,
+        "summary": {
+          "actions": {},
+          "basis_mean_bps": null,
+          "basis_stdev_bps": null,
+          "config": {
+            "cooldown_ns": 10000000000,
+            "entry_z": 2.5,
+            "exit_z": 0.5,
+            "max_holding_ns": 1800000000000,
+            "min_deviation_bps": 1.0,
+            "min_samples": 60,
+            "quantity": "0.001",
+            "sample_interval_ns": 1000000000,
+            "stop_z": 6.0,
+            "strategy_id": "basis_mean_reversion_v1",
+            "window": 300
+          },
+          "last_basis_bps": 0.01666668055556713,
+          "last_zscore": null,
+          "max_abs_zscore": 0.0,
+          "pending_plans": 0,
+          "plan_outcomes": {},
+          "samples_taken": 1,
+          "skipped": {
+            "warmup": 86
+          },
+          "stance": "FLAT",
+          "stance_reverts": 0,
+          "strategy_id": "basis_mean_reversion_v1",
+          "type": "CROSS_VENUE_BASIS_MEAN_REVERSION",
+          "version": "1.0.0",
+          "warmed_up": false,
+          "window_samples": 1
+        },
+        "type": "CROSS_VENUE_BASIS_MEAN_REVERSION"
+      },
+      "cross_venue_btc_v1": {
+        "closed_plans": 0,
+        "fees": "0",
+        "gross_pnl": "0",
+        "net_pnl": "0",
+        "opportunities": 0,
+        "outcomes": {},
+        "plans": 0,
+        "summary": {
+          "type": "CrossVenueSpreadStrategy"
+        },
+        "type": "CrossVenueSpreadStrategy"
+      }
+    }
+  },
+  "structured_logs": {
+    "components": {
+      "MARKET_DATA": 90,
+      "PAPER_HOST": 7
+    },
+    "database": "structured_logs.sqlite",
+    "failed_opportunities": 0,
+    "failed_trace_count": 0,
+    "failed_traces": "failed_opportunity_traces.jsonl",
+    "jsonl": "structured_logs.jsonl",
+    "levels": {
+      "INFO": 95,
+      "WARNING": 2
+    },
+    "records": 97,
+    "schema_version": "1.0.0",
+    "searchable_fields": [
+      "correlation_id",
+      "component",
+      "level",
+      "event_type",
+      "venue",
+      "source_event_id",
+      "feature_state_id",
+      "opportunity_id",
+      "risk_decision_id",
+      "parent_plan_id",
+      "child_order_id",
+      "request_id"
+    ]
+  },
+  "tca": {
+    "daily_reports": [
+      "tca_daily/1970-01-01.json"
+    ],
+    "fees": "0",
+    "fills": 0,
+    "missed_opportunities": 0,
+    "report": "tca_report.json",
+    "weighted_slippage_bps": "0"
+  },
+  "time_integrity": {
+    "blocked_events": 0,
+    "cross_venue_skew_breaches": 0,
+    "events": 90,
+    "host_clock_state": "UNKNOWN"
+  }
+}

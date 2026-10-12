@@ -1,0 +1,38 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://papertowninsights.org/schemas/strategy-sdk-acceptance-1.0.0.json",
+  "title": "Strategy SDK acceptance result",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version", "sdk_version", "strategy_id", "strategy_class",
+    "canonical_event_count", "modes", "opportunity_count_by_mode",
+    "canonical_order_requests_by_mode", "acceptance", "interfaces"
+  ],
+  "properties": {
+    "schema_version": {"const": "1.0.0"},
+    "sdk_version": {"const": "1.2.0"},
+    "strategy_id": {"type": "string", "minLength": 1},
+    "strategy_class": {"type": "string", "minLength": 1},
+    "canonical_event_count": {"type": "integer", "minimum": 1},
+    "modes": {
+      "type": "array",
+      "items": {"enum": ["BACKTEST", "PAPER", "TESTNET"]},
+      "contains": {"const": "PAPER"}
+    },
+    "opportunity_count_by_mode": {"type": "object"},
+    "canonical_order_requests_by_mode": {"type": "object"},
+    "acceptance": {
+      "type": "object",
+      "additionalProperties": {"const": true},
+      "minProperties": 6
+    },
+    "interfaces": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {
+        "enum": ["canonical_data", "replay", "features", "portfolio", "risk", "oms_ems", "advanced_backtest"]
+      }
+    }
+  }
+}

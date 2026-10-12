@@ -1,0 +1,593 @@
+{
+  "alert_ownership": {
+    "coverage_statement": "Research-hours coverage; 24/7 staffing is not required. Every paper alert has a named owner and response target.",
+    "policies": [
+      {
+        "alert_type": "FAILED_INGESTION",
+        "coverage": "RESEARCH_HOURS",
+        "owner": "market-data-owner",
+        "response_expectation": "Stop dependent paper strategies, preserve the failed partition and restart or backfill after diagnosis.",
+        "response_target_minutes": 30,
+        "severity": "CRITICAL"
+      },
+      {
+        "alert_type": "INVALID_BOOK",
+        "coverage": "RESEARCH_HOURS",
+        "owner": "market-data-owner",
+        "response_expectation": "Confirm automatic strategy gating, cancel ordinary orders on the venue and force a clean snapshot resync.",
+        "response_target_minutes": 15,
+        "severity": "CRITICAL"
+      },
+      {
+        "alert_type": "REPLAY_FAILURE",
+        "coverage": "RESEARCH_HOURS",
+        "owner": "research-infrastructure-owner",
+        "response_expectation": "Quarantine the run, retain its checkpoint and raw lineage, then resume only after a deterministic replay check.",
+        "response_target_minutes": 240,
+        "severity": "HIGH"
+      },
+      {
+        "alert_type": "RISK_BREACH",
+        "coverage": "RESEARCH_HOURS",
+        "owner": "paper-risk-owner",
+        "response_expectation": "Confirm the kill state, cancel new-risk orders, permit only approved risk reduction and reconcile before resume.",
+        "response_target_minutes": 15,
+        "severity": "CRITICAL"
+      },
+      {
+        "alert_type": "PIPELINE_THRESHOLD",
+        "coverage": "RESEARCH_HOURS",
+        "owner": "research-infrastructure-owner",
+        "response_expectation": "Inspect the breached pipeline threshold and record disposition before the next paper session.",
+        "response_target_minutes": 240,
+        "severity": "WARNING"
+      },
+      {
+        "alert_type": "EXECUTION_THRESHOLD",
+        "coverage": "RESEARCH_HOURS",
+        "owner": "paper-trading-owner",
+        "response_expectation": "Inspect the execution threshold, residual and connector state; suspend new risk if safety is uncertain.",
+        "response_target_minutes": 30,
+        "severity": "HIGH"
+      }
+    ],
+    "schema_version": "1.0.0"
+  },
+  "alerts": [],
+  "books": {
+    "BINANCE": {
+      "age_ns": 47000000,
+      "checksum_failures": 0,
+      "duplicates": 0,
+      "gaps": 0,
+      "instrument_id": "BTC-USDT-SPOT",
+      "out_of_order": 0,
+      "sequence": 140,
+      "state": "VALID"
+    },
+    "BYBIT": {
+      "age_ns": 0,
+      "checksum_failures": 0,
+      "duplicates": 0,
+      "gaps": 0,
+      "instrument_id": "BTC-USDT-SPOT",
+      "out_of_order": 0,
+      "sequence": 49,
+      "state": "VALID"
+    }
+  },
+  "correlation_id": "parity",
+  "data": {
+    "clock": "HOST_WALL_CLOCK",
+    "event_count": 90,
+    "latest_receive_ts_ns": 1633000000
+  },
+  "generated_ts_ns": 1633000000,
+  "health": "HEALTHY",
+  "job": {
+    "mode": "INTERNAL_PAPER",
+    "state": "COMPLETE"
+  },
+  "live": {
+    "persistence_lag_ns": 23000000,
+    "reconnects": 0,
+    "stale_disconnects": 0
+  },
+  "metrics": [
+    {
+      "breached": false,
+      "comparator": "<=",
+      "health_on_breach": "CRITICAL",
+      "name": "data_age_ns",
+      "scope": "PIPELINE",
+      "threshold": 1000000000,
+      "unit": "nanoseconds",
+      "value": 47000000
+    },
+    {
+      "breached": false,
+      "comparator": ">=",
+      "health_on_breach": "CRITICAL",
+      "name": "partition_completeness",
+      "scope": "PIPELINE",
+      "threshold": 1.0,
+      "unit": "ratio",
+      "value": 1.0
+    },
+    {
+      "breached": false,
+      "comparator": "<=",
+      "health_on_breach": "CRITICAL",
+      "name": "sequence_gaps",
+      "scope": "PIPELINE",
+      "threshold": 0,
+      "unit": "count",
+      "value": 0
+    },
+    {
+      "breached": false,
+      "comparator": "<=",
+      "health_on_breach": "CRITICAL",
+      "name": "invalid_books",
+      "scope": "PIPELINE",
+      "threshold": 0,
+      "unit": "count",
+      "value": 0
+    },
+    {
+      "breached": false,
+      "comparator": "<=",
+      "health_on_breach": "CRITICAL",
+      "name": "schema_mismatches",
+      "scope": "PIPELINE",
+      "threshold": 0,
+      "unit": "count",
+      "value": 0
+    },
+    {
+      "breached": false,
+      "comparator": "<=",
+      "health_on_breach": "DEGRADED",
+      "name": "reconnects",
+      "scope": "PIPELINE",
+      "threshold": 10,
+      "unit": "count",
+      "value": 0
+    },
+    {
+      "breached": false,
+      "comparator": "<=",
+      "health_on_breach": "CRITICAL",
+      "name": "stale_disconnects",
+      "scope": "PIPELINE",
+      "threshold": 5,
+      "unit": "count",
+      "value": 0
+    },
+    {
+      "breached": false,
+      "comparator": "<=",
+      "health_on_breach": "DEGRADED",
+      "name": "persistence_lag_ns",
+      "scope": "PIPELINE",
+      "threshold": 5000000000,
+      "unit": "nanoseconds",
+      "value": 23000000
+    },
+    {
+      "breached": false,
+      "comparator": "<=",
+      "health_on_breach": "CRITICAL",
+      "name": "order_rejects",
+      "scope": "STRATEGY_EXECUTION",
+      "threshold": 0,
+      "unit": "count",
+      "value": 0
+    },
+    {
+      "breached": false,
+      "comparator": "<=",
+      "health_on_breach": "CRITICAL",
+      "name": "open_residual_base",
+      "scope": "STRATEGY_EXECUTION",
+      "threshold": 0.002,
+      "unit": "base_quantity",
+      "value": 0.0
+    },
+    {
+      "breached": false,
+      "comparator": "<=",
+      "health_on_breach": "DEGRADED",
+      "name": "max_dispatch_latency_ns",
+      "scope": "STRATEGY_EXECUTION",
+      "threshold": 10000000,
+      "unit": "nanoseconds",
+      "value": 0
+    },
+    {
+      "breached": false,
+      "comparator": "<=",
+      "health_on_breach": "DEGRADED",
+      "name": "rate_limit_utilization",
+      "scope": "STRATEGY_EXECUTION",
+      "threshold": 0.9,
+      "unit": "ratio",
+      "value": 0.0
+    },
+    {
+      "breached": false,
+      "comparator": "<=",
+      "health_on_breach": "CRITICAL",
+      "name": "unhealthy_connectors",
+      "scope": "STRATEGY_EXECUTION",
+      "threshold": 0,
+      "unit": "count",
+      "value": 0
+    },
+    {
+      "breached": false,
+      "comparator": "<=",
+      "health_on_breach": "CRITICAL",
+      "name": "active_kill_switches",
+      "scope": "STRATEGY_EXECUTION",
+      "threshold": 0,
+      "unit": "count",
+      "value": 0
+    }
+  ],
+  "mode": "LIVE",
+  "partitions": {
+    "complete": 1,
+    "completeness": 1.0,
+    "rejected": 0,
+    "total": 1
+  },
+  "performance": {
+    "replay_duration_ns": 640000000,
+    "replay_events_per_second": 140.625
+  },
+  "restart_resilience": {},
+  "schema_version": "1.0.0",
+  "strategy_execution": {
+    "account": {
+      "positions": {},
+      "schema_version": "1.0.0",
+      "venues": {
+        "BINANCE": {
+          "available_capital": "10000",
+          "available_cash": "10000",
+          "cash_balance": "10000",
+          "cash_delta": "0",
+          "equity": "10000",
+          "fees": "0",
+          "initial_capital": "10000",
+          "realized_pnl": "0",
+          "reserved_cash": "0",
+          "reserved_gross_notional": "0",
+          "reserved_margin": "0",
+          "reserved_messages": 0,
+          "reserved_position": "0",
+          "unrealized_pnl": "0",
+          "venue": "BINANCE"
+        },
+        "BYBIT": {
+          "available_capital": "10000",
+          "available_cash": "10000",
+          "cash_balance": "10000",
+          "cash_delta": "0",
+          "equity": "10000",
+          "fees": "0",
+          "initial_capital": "10000",
+          "realized_pnl": "0",
+          "reserved_cash": "0",
+          "reserved_gross_notional": "0",
+          "reserved_margin": "0",
+          "reserved_messages": 0,
+          "reserved_position": "0",
+          "unrealized_pnl": "0",
+          "venue": "BYBIT"
+        }
+      }
+    },
+    "connectors": {
+      "unhealthy": 0,
+      "venues": {
+        "BINANCE": {
+          "account_enabled": true,
+          "healthy": true,
+          "supported_order_types": [
+            "LIMIT",
+            "MARKET"
+          ],
+          "supports_post_only": true,
+          "supports_reduce_only": true,
+          "venue_enabled": true
+        },
+        "BYBIT": {
+          "account_enabled": true,
+          "healthy": true,
+          "supported_order_types": [
+            "LIMIT",
+            "MARKET"
+          ],
+          "supports_post_only": true,
+          "supports_reduce_only": true,
+          "venue_enabled": true
+        }
+      }
+    },
+    "kill_switch": {
+      "activated_ts_ns": null,
+      "cancel_all_on_activation": true,
+      "events": [],
+      "last_reset_reconciliation_id": "",
+      "reason": "",
+      "reconciliation_required_before_resume": false,
+      "risk_reducing_orders_allowed": true,
+      "schema_version": "1.0.0",
+      "source": "",
+      "state": "INACTIVE",
+      "strategy_new_risk_allowed": true
+    },
+    "latency": {
+      "callbacks_observed": 0,
+      "children_dispatched": 0,
+      "max_dispatch_duration_ns": 0,
+      "max_first_callback_latency_ns": 0,
+      "measurements": [],
+      "min_dispatch_duration_ns": 0,
+      "min_first_callback_latency_ns": 0,
+      "policy": "DETERMINISTIC_SEQUENTIAL"
+    },
+    "margin": {
+      "alerts": [],
+      "report_id": "f0550db6-1fa5-57da-bf52-530023c22ec5",
+      "schema_version": "1.0.0",
+      "state": "NOT_APPLICABLE",
+      "ts_ns": 1633000000,
+      "venues": {
+        "BINANCE": {
+          "alert_codes": [],
+          "effective_margin_balance": "10000",
+          "gross_notional": "0",
+          "initial_margin_required": "0",
+          "liquidation_buffer": "10000",
+          "maintenance_margin_required": "0",
+          "maintenance_margin_utilization": "0",
+          "margin_balance": "10000",
+          "margin_enabled": false,
+          "required_liquidation_buffer": "0.00",
+          "state": "NOT_APPLICABLE",
+          "venue": "BINANCE",
+          "venue_reported_margin_balance": null
+        },
+        "BYBIT": {
+          "alert_codes": [],
+          "effective_margin_balance": "10000",
+          "gross_notional": "0",
+          "initial_margin_required": "0",
+          "liquidation_buffer": "10000",
+          "maintenance_margin_required": "0",
+          "maintenance_margin_utilization": "0",
+          "margin_balance": "10000",
+          "margin_enabled": false,
+          "required_liquidation_buffer": "0.00",
+          "state": "NOT_APPLICABLE",
+          "venue": "BYBIT",
+          "venue_reported_margin_balance": null
+        }
+      }
+    },
+    "opportunities": {
+      "count": 0,
+      "expected_net_edge_bps": {
+        "average": "0",
+        "maximum": "0",
+        "minimum": "0"
+      }
+    },
+    "orders": {
+      "cancels": 0,
+      "fills": 0,
+      "rejects": 0,
+      "states": {},
+      "total": 0
+    },
+    "pnl": {
+      "fees": "0",
+      "gross": "0",
+      "net": "0"
+    },
+    "rate_limits": {
+      "in_flight_requests": 0,
+      "max_utilization": 0.0,
+      "pending_requests": 0,
+      "schema_version": "1.0.0",
+      "undelivered_reports": 0,
+      "utilization_by_venue": {
+        "BINANCE": 0.0,
+        "BYBIT": 0.0
+      },
+      "venues": {
+        "BINANCE": {
+          "capacity": 1000,
+          "delayed": 0,
+          "headroom": 1000,
+          "in_flight": 0,
+          "next_release_ts_ns": null,
+          "next_window_ts_ns": 1000000000,
+          "policy": "REJECT",
+          "queue_depth": 0,
+          "queued": 0,
+          "throttle_delay_ns": 0,
+          "used": 0,
+          "window_start_ts_ns": 0
+        },
+        "BYBIT": {
+          "capacity": 1000,
+          "delayed": 0,
+          "headroom": 1000,
+          "in_flight": 0,
+          "next_release_ts_ns": null,
+          "next_window_ts_ns": 1000000000,
+          "policy": "REJECT",
+          "queue_depth": 0,
+          "queued": 0,
+          "throttle_delay_ns": 0,
+          "used": 0,
+          "window_start_ts_ns": 0
+        }
+      }
+    },
+    "residual": {
+      "legging_control_overrides": 0,
+      "legging_limit_bindings": 0,
+      "limit_breaches": 0,
+      "open_residual_base": "0",
+      "open_residual_plans": 0,
+      "policy": {
+        "allow_risk_reducing_under_stop": true,
+        "hedge_venue_priority": [
+          "BINANCE",
+          "BYBIT"
+        ],
+        "max_one_sided_notional": "1000",
+        "max_residual_age_ns": 5000000000,
+        "max_residual_base": "0.002",
+        "max_unwind_attempts": 2,
+        "unwind_price_slippage_bps": "10",
+        "unwind_urgency": "NORMAL"
+      },
+      "schema_version": "1.0.0",
+      "unwind_children": 0
+    },
+    "routing": {
+      "route_decisions": 0,
+      "route_overrides": 0,
+      "route_rejections": 0,
+      "routes_by_venue": {}
+    },
+    "schema_version": "1.0.0",
+    "session_mode": "PAPER_SIMULATION"
+  },
+  "structured_logs": {
+    "components": {
+      "MARKET_DATA": 90,
+      "PAPER_HOST": 7
+    },
+    "database": "structured_logs.sqlite",
+    "failed_opportunities": 0,
+    "failed_trace_count": 0,
+    "failed_traces": "failed_opportunity_traces.jsonl",
+    "jsonl": "structured_logs.jsonl",
+    "levels": {
+      "INFO": 95,
+      "WARNING": 2
+    },
+    "records": 97,
+    "schema_version": "1.0.0",
+    "searchable_fields": [
+      "correlation_id",
+      "component",
+      "level",
+      "event_type",
+      "venue",
+      "source_event_id",
+      "feature_state_id",
+      "opportunity_id",
+      "risk_decision_id",
+      "parent_plan_id",
+      "child_order_id",
+      "request_id"
+    ]
+  },
+  "tca": {
+    "calculation": {
+      "benchmark": "child decision/limit price at dispatch",
+      "buy_slippage_quote": "(average_fill_price - benchmark_price) * filled_quantity",
+      "missed_opportunity": "not all primary children filled or residual outside approved bound",
+      "sell_slippage_quote": "(benchmark_price - average_fill_price) * filled_quantity",
+      "sign": "positive is adverse; negative is price improvement",
+      "weighted_slippage_bps": "sum(slippage_quote) / sum(filled_quantity * benchmark_price) * 10000"
+    },
+    "calculation_version": "basic-tca-v1",
+    "correlation_id": "parity",
+    "groups": [],
+    "lineage": {
+      "canonical_source_path": "/Users/vaibhav/Documents/Newproject/crypto_MFT_arb_platform/reports/evidence/20261011T191621Z/3_live_replay_parity/session/parity/paper/canonical_events.jsonl",
+      "canonical_source_sha256": "39a3a01f3e6158bb6537081687cea4fd6d896024fceb83b2114471ed5e367d7d",
+      "raw_reference_coverage": 1.0,
+      "raw_refs": [],
+      "source_event_ids": [],
+      "source_event_raw_refs": {}
+    },
+    "opportunities": [],
+    "period": {
+      "date_utc": null,
+      "end_ts_ns": 1633000000,
+      "start_ts_ns": 1015000000
+    },
+    "report_id": "0eb65c2b-410e-5bd4-b3a4-249855622486",
+    "schema_version": "1.0.0",
+    "scope": "RUN",
+    "summary": {
+      "benchmark_notional": "0",
+      "cancels": 0,
+      "fees": "0",
+      "filled_notional": "0",
+      "filled_quantity": "0",
+      "fills": 0,
+      "missed_opportunities": 0,
+      "net_pnl": "0",
+      "open_residual_base": "0",
+      "opportunities_detected": 0,
+      "opportunities_executed": 0,
+      "orders": 0,
+      "partials": 0,
+      "rejects": 0,
+      "slippage_quote": "0",
+      "timeouts": 0,
+      "unwind_cost": "0",
+      "unwind_fills": 0,
+      "unwind_orders": 0,
+      "weighted_slippage_bps": "0"
+    }
+  },
+  "thresholds": {
+    "max_active_kill_switches": 0,
+    "max_data_age_ns": 1000000000,
+    "max_dispatch_latency_ns": 10000000,
+    "max_gaps": 0,
+    "max_invalid_books": 0,
+    "max_open_residual_base": 0.002,
+    "max_order_rejects": 0,
+    "max_persistence_lag_ns": 5000000000,
+    "max_rate_limit_utilization": 0.9,
+    "max_reconnects": 10,
+    "max_schema_mismatches": 0,
+    "max_stale_disconnects": 5,
+    "max_unhealthy_connectors": 0,
+    "min_partition_completeness": 1.0,
+    "min_replay_events_per_second": 1.0
+  },
+  "versions": {
+    "adapter_versions": [
+      "binance-depth-v1",
+      "binance-rest-depth-v1",
+      "bybit-depth-v1"
+    ],
+    "canonical_schema_expected": "1.2.0",
+    "canonical_schema_observed": [
+      "1.2.0"
+    ],
+    "instrument_master": {
+      "content_sha256": "04c05f877e7e19fbfe8ab85525c9efdb3da031918dc21acd3ea03ebcdc1e2997",
+      "fee_rule_count": 2,
+      "instrument_count": 2,
+      "schema_version": "1.1.0",
+      "status_event_count": 0,
+      "version_count": 2
+    },
+    "schema_mismatches": 0
+  }
+}

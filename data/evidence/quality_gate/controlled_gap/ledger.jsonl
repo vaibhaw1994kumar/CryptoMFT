@@ -1,0 +1,1 @@
+{"cancelled_orders": 0, "event_type": "BOOK_INTEGRITY_CANCEL_ALL", "reason": "BINANCE:GAP_DETECTED:sequence_gap:10->12-12", "ts_ns": 3}

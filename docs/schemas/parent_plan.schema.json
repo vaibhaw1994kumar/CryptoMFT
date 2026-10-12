@@ -1,0 +1,58 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://papertowninsights.org/schemas/parent-plan-1.2.0.json",
+  "title": "Persistent OMS parent plan snapshot",
+  "type": "object",
+  "required": [
+    "parent_id", "opportunity", "children", "state", "residual_base",
+    "gross_pnl", "fees", "unwind_cost", "net_pnl", "terminal_outcome",
+    "transitions", "residual_since_ts_ns", "unwind_attempts"
+  ],
+  "properties": {
+    "parent_id": {"type": "string", "minLength": 1},
+    "opportunity": {"type": "object"},
+    "children": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": [
+          "order_id", "parent_id", "opportunity_id", "venue",
+          "instrument_id", "side", "quantity", "limit_price", "state",
+          "filled_quantity", "average_price", "fee", "order_role",
+          "reduce_only", "unwind_attempt"
+        ],
+        "properties": {
+          "state": {
+            "enum": [
+              "CREATED", "ACKNOWLEDGED", "PARTIAL", "FILLED", "REJECTED",
+              "TIMED_OUT", "CANCELLED"
+            ]
+          },
+          "state_updates": {"type": "array", "items": {"type": "object"}},
+          "order_role": {"enum": ["PRIMARY", "UNWIND"]},
+          "reduce_only": {"type": "boolean"},
+          "unwind_attempt": {"type": "integer", "minimum": 0}
+        }
+      }
+    },
+    "state": {
+      "enum": [
+        "CREATED", "RISK_RESERVED", "DISPATCHED", "ACKNOWLEDGED", "PARTIAL",
+        "FILLED", "REJECTED", "TIMED_OUT", "HEDGE_UNWIND", "RECONCILED",
+        "CLOSED"
+      ]
+    },
+    "residual_base": {"type": "string"},
+    "gross_pnl": {"type": "string"},
+    "fees": {"type": "string"},
+    "unwind_cost": {"type": "string"},
+    "net_pnl": {"type": "string"},
+    "terminal_outcome": {
+      "enum": ["", "FILLED", "PARTIAL", "REJECTED", "TIMED_OUT"]
+    },
+    "transitions": {"type": "array", "items": {"type": "object"}},
+    "residual_since_ts_ns": {"type": ["integer", "null"], "minimum": 0},
+    "unwind_attempts": {"type": "integer", "minimum": 0}
+  }
+}

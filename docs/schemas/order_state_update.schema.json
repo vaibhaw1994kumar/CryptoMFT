@@ -1,0 +1,39 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://papertowninsights.org/schemas/order-state-update-1.0.0.json",
+  "title": "Canonical OMS order state update",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "update_id", "source", "parent_order_id", "order_id", "venue",
+    "instrument_id", "state", "event_ts_ns", "observed_ts_ns",
+    "sequence", "cumulative_filled_quantity", "average_price", "fee"
+  ],
+  "properties": {
+    "update_id": {"type": "string", "minLength": 1},
+    "source": {
+      "enum": ["ADAPTER_CALLBACK", "PRIVATE_STREAM", "REST_QUERY", "TIMER", "INTERNAL"]
+    },
+    "parent_order_id": {"type": "string", "minLength": 1},
+    "order_id": {"type": "string", "minLength": 1},
+    "venue": {"type": "string", "minLength": 1},
+    "instrument_id": {"type": "string", "minLength": 1},
+    "state": {
+      "enum": [
+        "ACKNOWLEDGED", "PARTIAL", "FILLED", "REJECTED", "TIMED_OUT",
+        "CANCELLED", "REPLACED"
+      ]
+    },
+    "event_ts_ns": {"type": "integer", "minimum": 0},
+    "observed_ts_ns": {"type": "integer", "minimum": 0},
+    "sequence": {"type": "integer", "minimum": 0},
+    "cumulative_filled_quantity": {"type": "string", "pattern": "^[0-9]+(\\.[0-9]+)?$"},
+    "average_price": {"type": "string", "pattern": "^[0-9]+(\\.[0-9]+)?$"},
+    "fee": {"type": "string", "pattern": "^[0-9]+(\\.[0-9]+)?$"},
+    "reason": {"type": "string"},
+    "venue_order_id": {"type": "string"},
+    "resolved_order_state": {
+      "enum": ["ACKNOWLEDGED", "PARTIAL", "FILLED", "REJECTED", "TIMED_OUT", "CANCELLED"]
+    }
+  }
+}

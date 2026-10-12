@@ -1,0 +1,441 @@
+{
+  "checks": [
+    {
+      "code": "STRATEGY_PACKAGE_NOTIONAL",
+      "detail": "",
+      "instrument_id": "",
+      "limit": "10000",
+      "observed": "1200.60000",
+      "passed": true,
+      "scope": "STRATEGY",
+      "venue": ""
+    },
+    {
+      "code": "PLATFORM_GROSS_NOTIONAL",
+      "detail": "",
+      "instrument_id": "",
+      "limit": "10000",
+      "observed": "1200.60000",
+      "passed": true,
+      "scope": "PLATFORM",
+      "venue": ""
+    },
+    {
+      "code": "STRATEGY_GROSS_EXPOSURE",
+      "detail": "projected utilization=0.12006",
+      "instrument_id": "",
+      "limit": "10000",
+      "observed": "1200.60000",
+      "passed": true,
+      "scope": "STRATEGY",
+      "venue": ""
+    },
+    {
+      "code": "STRATEGY_NET_EXPOSURE",
+      "detail": "projected utilization=0.0003005",
+      "instrument_id": "",
+      "limit": "2000",
+      "observed": "0.60100",
+      "passed": true,
+      "scope": "STRATEGY",
+      "venue": ""
+    },
+    {
+      "code": "INSTRUMENT_GROSS_EXPOSURE",
+      "detail": "projected utilization=0.12006",
+      "instrument_id": "BTC-USDT-SPOT",
+      "limit": "10000",
+      "observed": "1200.60000",
+      "passed": true,
+      "scope": "INSTRUMENT",
+      "venue": ""
+    },
+    {
+      "code": "VENUE_GROSS_EXPOSURE",
+      "detail": "projected utilization=0.1199999",
+      "instrument_id": "",
+      "limit": "5000",
+      "observed": "599.99950",
+      "passed": true,
+      "scope": "VENUE",
+      "venue": "BINANCE"
+    },
+    {
+      "code": "VENUE_GROSS_EXPOSURE",
+      "detail": "projected utilization=0.1201201",
+      "instrument_id": "",
+      "limit": "5000",
+      "observed": "600.60050",
+      "passed": true,
+      "scope": "VENUE",
+      "venue": "BYBIT"
+    },
+    {
+      "code": "ACCOUNT_STATUS",
+      "detail": "",
+      "instrument_id": "BTC-USDT-SPOT",
+      "limit": "True",
+      "observed": "True",
+      "passed": true,
+      "scope": "VENUE",
+      "venue": "BINANCE"
+    },
+    {
+      "code": "VENUE_STATUS",
+      "detail": "",
+      "instrument_id": "BTC-USDT-SPOT",
+      "limit": "True",
+      "observed": "True",
+      "passed": true,
+      "scope": "VENUE",
+      "venue": "BINANCE"
+    },
+    {
+      "code": "STRATEGY_STATUS",
+      "detail": "",
+      "instrument_id": "BTC-USDT-SPOT",
+      "limit": "True",
+      "observed": "True",
+      "passed": true,
+      "scope": "STRATEGY",
+      "venue": "BINANCE"
+    },
+    {
+      "code": "TRADE_BREAK_STATUS",
+      "detail": "",
+      "instrument_id": "BTC-USDT-SPOT",
+      "limit": "ACTIVE",
+      "observed": "ACTIVE",
+      "passed": true,
+      "scope": "VENUE",
+      "venue": "BINANCE"
+    },
+    {
+      "code": "INSTRUMENT_EXISTS",
+      "detail": "",
+      "instrument_id": "BTC-USDT-SPOT",
+      "limit": "FOUND",
+      "observed": "FOUND",
+      "passed": true,
+      "scope": "INSTRUMENT",
+      "venue": "BINANCE"
+    },
+    {
+      "code": "INSTRUMENT_STATUS",
+      "detail": "",
+      "instrument_id": "BTC-USDT-SPOT",
+      "limit": "TRADING",
+      "observed": "TRADING",
+      "passed": true,
+      "scope": "INSTRUMENT",
+      "venue": "BINANCE"
+    },
+    {
+      "code": "MINIMUM_QUANTITY",
+      "detail": "",
+      "instrument_id": "BTC-USDT-SPOT",
+      "limit": "0.001",
+      "observed": "0.010",
+      "passed": true,
+      "scope": "ORDER",
+      "venue": "BINANCE"
+    },
+    {
+      "code": "LOT_SIZE",
+      "detail": "",
+      "instrument_id": "BTC-USDT-SPOT",
+      "limit": "0.001",
+      "observed": "0.010",
+      "passed": true,
+      "scope": "ORDER",
+      "venue": "BINANCE"
+    },
+    {
+      "code": "TICK_SIZE",
+      "detail": "",
+      "instrument_id": "BTC-USDT-SPOT",
+      "limit": "0.10",
+      "observed": "60000.00",
+      "passed": true,
+      "scope": "ORDER",
+      "venue": "BINANCE"
+    },
+    {
+      "code": "MINIMUM_NOTIONAL",
+      "detail": "",
+      "instrument_id": "BTC-USDT-SPOT",
+      "limit": "5",
+      "observed": "600.00000",
+      "passed": true,
+      "scope": "ORDER",
+      "venue": "BINANCE"
+    },
+    {
+      "code": "MAXIMUM_ORDER_NOTIONAL",
+      "detail": "",
+      "instrument_id": "BTC-USDT-SPOT",
+      "limit": "5000",
+      "observed": "600.00000",
+      "passed": true,
+      "scope": "ORDER",
+      "venue": "BINANCE"
+    },
+    {
+      "code": "VENUE_ORDER_NOTIONAL",
+      "detail": "",
+      "instrument_id": "BTC-USDT-SPOT",
+      "limit": "Infinity",
+      "observed": "600.00000",
+      "passed": true,
+      "scope": "VENUE",
+      "venue": "BINANCE"
+    },
+    {
+      "code": "LIVE_BOOK_AVAILABLE",
+      "detail": "",
+      "instrument_id": "BTC-USDT-SPOT",
+      "limit": "AVAILABLE",
+      "observed": "AVAILABLE",
+      "passed": true,
+      "scope": "MARKET_DATA",
+      "venue": "BINANCE"
+    },
+    {
+      "code": "LIVE_BOOK_VALID",
+      "detail": "",
+      "instrument_id": "BTC-USDT-SPOT",
+      "limit": "VALID",
+      "observed": "VALID",
+      "passed": true,
+      "scope": "MARKET_DATA",
+      "venue": "BINANCE"
+    },
+    {
+      "code": "LIVE_DATA_AGE",
+      "detail": "",
+      "instrument_id": "BTC-USDT-SPOT",
+      "limit": "1000000000",
+      "observed": "200000",
+      "passed": true,
+      "scope": "MARKET_DATA",
+      "venue": "BINANCE"
+    },
+    {
+      "code": "PRICE_BAND",
+      "detail": "reference_mid=59999.95",
+      "instrument_id": "BTC-USDT-SPOT",
+      "limit": "100",
+      "observed": "0.008333340277783564819637349698",
+      "passed": true,
+      "scope": "ORDER",
+      "venue": "BINANCE"
+    },
+    {
+      "code": "AVAILABLE_CASH",
+      "detail": "",
+      "instrument_id": "BTC-USDT-SPOT",
+      "limit": "Infinity",
+      "observed": "600.00000",
+      "passed": true,
+      "scope": "ACCOUNT",
+      "venue": "BINANCE"
+    },
+    {
+      "code": "AVAILABLE_MARGIN",
+      "detail": "",
+      "instrument_id": "BTC-USDT-SPOT",
+      "limit": "Infinity",
+      "observed": "0.00000",
+      "passed": true,
+      "scope": "ACCOUNT",
+      "venue": "BINANCE"
+    },
+    {
+      "code": "ACCOUNT_STATUS",
+      "detail": "",
+      "instrument_id": "BTC-USDT-SPOT",
+      "limit": "True",
+      "observed": "True",
+      "passed": true,
+      "scope": "VENUE",
+      "venue": "BYBIT"
+    },
+    {
+      "code": "VENUE_STATUS",
+      "detail": "",
+      "instrument_id": "BTC-USDT-SPOT",
+      "limit": "True",
+      "observed": "True",
+      "passed": true,
+      "scope": "VENUE",
+      "venue": "BYBIT"
+    },
+    {
+      "code": "STRATEGY_STATUS",
+      "detail": "",
+      "instrument_id": "BTC-USDT-SPOT",
+      "limit": "True",
+      "observed": "True",
+      "passed": true,
+      "scope": "STRATEGY",
+      "venue": "BYBIT"
+    },
+    {
+      "code": "TRADE_BREAK_STATUS",
+      "detail": "",
+      "instrument_id": "BTC-USDT-SPOT",
+      "limit": "ACTIVE",
+      "observed": "ACTIVE",
+      "passed": true,
+      "scope": "VENUE",
+      "venue": "BYBIT"
+    },
+    {
+      "code": "INSTRUMENT_EXISTS",
+      "detail": "",
+      "instrument_id": "BTC-USDT-SPOT",
+      "limit": "FOUND",
+      "observed": "FOUND",
+      "passed": true,
+      "scope": "INSTRUMENT",
+      "venue": "BYBIT"
+    },
+    {
+      "code": "INSTRUMENT_STATUS",
+      "detail": "",
+      "instrument_id": "BTC-USDT-SPOT",
+      "limit": "TRADING",
+      "observed": "TRADING",
+      "passed": true,
+      "scope": "INSTRUMENT",
+      "venue": "BYBIT"
+    },
+    {
+      "code": "MINIMUM_QUANTITY",
+      "detail": "",
+      "instrument_id": "BTC-USDT-SPOT",
+      "limit": "0.001",
+      "observed": "0.010",
+      "passed": true,
+      "scope": "ORDER",
+      "venue": "BYBIT"
+    },
+    {
+      "code": "LOT_SIZE",
+      "detail": "",
+      "instrument_id": "BTC-USDT-SPOT",
+      "limit": "0.001",
+      "observed": "0.010",
+      "passed": true,
+      "scope": "ORDER",
+      "venue": "BYBIT"
+    },
+    {
+      "code": "TICK_SIZE",
+      "detail": "",
+      "instrument_id": "BTC-USDT-SPOT",
+      "limit": "0.10",
+      "observed": "60060.00",
+      "passed": true,
+      "scope": "ORDER",
+      "venue": "BYBIT"
+    },
+    {
+      "code": "MINIMUM_NOTIONAL",
+      "detail": "",
+      "instrument_id": "BTC-USDT-SPOT",
+      "limit": "5",
+      "observed": "600.60000",
+      "passed": true,
+      "scope": "ORDER",
+      "venue": "BYBIT"
+    },
+    {
+      "code": "MAXIMUM_ORDER_NOTIONAL",
+      "detail": "",
+      "instrument_id": "BTC-USDT-SPOT",
+      "limit": "5000",
+      "observed": "600.60000",
+      "passed": true,
+      "scope": "ORDER",
+      "venue": "BYBIT"
+    },
+    {
+      "code": "VENUE_ORDER_NOTIONAL",
+      "detail": "",
+      "instrument_id": "BTC-USDT-SPOT",
+      "limit": "Infinity",
+      "observed": "600.60000",
+      "passed": true,
+      "scope": "VENUE",
+      "venue": "BYBIT"
+    },
+    {
+      "code": "LIVE_BOOK_AVAILABLE",
+      "detail": "",
+      "instrument_id": "BTC-USDT-SPOT",
+      "limit": "AVAILABLE",
+      "observed": "AVAILABLE",
+      "passed": true,
+      "scope": "MARKET_DATA",
+      "venue": "BYBIT"
+    },
+    {
+      "code": "LIVE_BOOK_VALID",
+      "detail": "",
+      "instrument_id": "BTC-USDT-SPOT",
+      "limit": "VALID",
+      "observed": "VALID",
+      "passed": true,
+      "scope": "MARKET_DATA",
+      "venue": "BYBIT"
+    },
+    {
+      "code": "LIVE_DATA_AGE",
+      "detail": "",
+      "instrument_id": "BTC-USDT-SPOT",
+      "limit": "1000000000",
+      "observed": "0",
+      "passed": true,
+      "scope": "MARKET_DATA",
+      "venue": "BYBIT"
+    },
+    {
+      "code": "PRICE_BAND",
+      "detail": "reference_mid=60060.05",
+      "instrument_id": "BTC-USDT-SPOT",
+      "limit": "100",
+      "observed": "0.008325001394437733568320372694",
+      "passed": true,
+      "scope": "ORDER",
+      "venue": "BYBIT"
+    },
+    {
+      "code": "AVAILABLE_CASH",
+      "detail": "",
+      "instrument_id": "BTC-USDT-SPOT",
+      "limit": "Infinity",
+      "observed": "0",
+      "passed": true,
+      "scope": "ACCOUNT",
+      "venue": "BYBIT"
+    },
+    {
+      "code": "AVAILABLE_MARGIN",
+      "detail": "",
+      "instrument_id": "BTC-USDT-SPOT",
+      "limit": "Infinity",
+      "observed": "0.00000",
+      "passed": true,
+      "scope": "ACCOUNT",
+      "venue": "BYBIT"
+    }
+  ],
+  "decision": "APPROVED",
+  "failure_codes": [],
+  "opportunity_id": "429760e2-1b6f-5a38-bbae-5ffec8b4d4eb",
+  "schema_version": "1.0.0",
+  "strategy_id": "cross_venue_btc_v1",
+  "ts_ns": 1000300000,
+  "validation_id": "d59d0306-afb5-5fc7-91c5-407b71b55aac"
+}

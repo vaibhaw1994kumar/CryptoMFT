@@ -1,0 +1,68 @@
+{
+  "blocked_events": 0,
+  "created_at": "2026-09-04T19:38:33.597244+00:00",
+  "cross_venue_alignment": {
+    "breaches": 0,
+    "maximum_skew_ns": 1,
+    "rule": "compare latest local receive timestamps; do not rewrite venue clocks",
+    "samples": 3,
+    "threshold_ns": 1000000000
+  },
+  "events": 4,
+  "host_clock": {
+    "last_observed_ts_ns": null,
+    "latest_drift_ppm": null,
+    "latest_offset_ns": null,
+    "max_abs_drift_ppm": 0.0,
+    "max_abs_offset_ns": 0,
+    "max_drift_ppm": 500.0,
+    "max_offset_ns": 100000000,
+    "samples": 0,
+    "source": "UNOBSERVED",
+    "state": "UNKNOWN"
+  },
+  "ordering_rule": [
+    "receive_ts_ns",
+    "exchange_ts_ns",
+    "source_ts_ns",
+    "venue",
+    "sequence_start",
+    "sequence",
+    "event_id"
+  ],
+  "policy": {
+    "max_cross_venue_skew_ns": 1000000000,
+    "max_event_latency_ns": 60000000000,
+    "max_feed_age_ns": 1000000000,
+    "max_host_drift_ppm": 500.0,
+    "max_host_offset_ns": 100000000
+  },
+  "schema_version": "1.0.0",
+  "timestamp_unit": "nanoseconds_since_unix_epoch_utc",
+  "venues": {
+    "BINANCE": {
+      "events": 2,
+      "feed_age_ns_max": 0,
+      "impossible_latency_events": 0,
+      "latency_ns_max": 0,
+      "latency_ns_mean": 0,
+      "latency_ns_min": 0,
+      "latency_ns_p50": 0,
+      "latency_ns_p95": 0,
+      "negative_latency_events": 0,
+      "stale_feed_events": 0
+    },
+    "BYBIT": {
+      "events": 2,
+      "feed_age_ns_max": 0,
+      "impossible_latency_events": 0,
+      "latency_ns_max": 0,
+      "latency_ns_mean": 0,
+      "latency_ns_min": 0,
+      "latency_ns_p50": 0,
+      "latency_ns_p95": 0,
+      "negative_latency_events": 0,
+      "stale_feed_events": 0
+    }
+  }
+}

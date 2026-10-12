@@ -1,0 +1,19 @@
+{
+  "attempts": 1,
+  "checkpoint_line": 2,
+  "checkpoint_offset": 2038,
+  "committed_records": 2,
+  "job_id": "local-acceptance",
+  "last_error": null,
+  "last_receive_ts_ns": 1000300000,
+  "late_records": 0,
+  "output_path": "/Users/vaibhav/Documents/Newproject/crypto_MFT_arb_platform/runs/local-all-20261011T164033Z/pipeline/events.jsonl",
+  "partition_id": "20261011T164033Z",
+  "persistence_lag_ns": 1791736845312619000,
+  "rejected_records": 0,
+  "source_path": "/Users/vaibhav/Documents/Newproject/crypto_MFT_arb_platform/runs/local-all-20261011T164033Z/raw/local-acceptance/raw.jsonl",
+  "source_size": 2038,
+  "status": "COMPLETE",
+  "unpersisted_bytes": 0,
+  "updated_ts_ns": 1791736846312394000
+}

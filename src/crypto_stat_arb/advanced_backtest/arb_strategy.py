@@ -1,0 +1,446 @@
+"""Cross-venue arbitrage signal generation.
+
+The edge, stated plainly: when venue A's best ask is below venue B's best bid by
+more than the round-trip fee, buying on A and selling on B locks in the
+difference. Everything hard about this is in the qualifiers.
+
+Gates, and why each one exists — each blocks a distinct way a backtest invents
+profit that does not exist live:
+
+  staleness   A book that has not updated in 500ms is not a price, it is a
+              memory. If one venue's feed gaps, the other venue moves, and the
+              stale side shows an enormous spread against it. Unfiltered, feed
+              gaps become the single largest source of "profit" in the run.
+
+  crossed     A book whose bid exceeds its own ask has lost a delete. Its touch
+              is not tradeable. Skip until the next snapshot resyncs it.
+
+  toxicity    A spread that opens while depth collapses and trades run one way
+              is not an opportunity — it is one venue repricing and the other
+              about to follow. Taking it buys the top of a move.
+
+  depth       Edge measured at the touch is only available for the touch size.
+              Sizing beyond it walks the book and the realised VWAP can erase
+              the entire spread. Size is capped by depth reachable within
+              max_walk_bps.
+
+  inventory   Selling base on venue B requires base on venue B. Cross-exchange
+              arb is inventory-bounded rebalancing, not free money: withdrawals
+              take minutes, so intraday you trade only what you already hold.
+              This is the real capacity constraint and it is modelled, not
+              assumed away.
+
+Two execution modes:
+
+  TAKER_TAKER  Both legs aggressive. Both fills near-certain, both pay taker
+               fees (~10bps round trip). On liquid majors this is usually a
+               losing structure and the backtest should say so.
+
+  MAKER_TAKER  Rest passive on the wide venue; when it fills, immediately take
+               on the tight venue. Round-trip fee falls to roughly maker+taker,
+               which is where the economics actually work — at the cost of leg
+               risk, since the passive fill is probabilistic and the hedge can
+               slip. EmpiricalFillModel prices that fill probability.
+"""
+from __future__ import annotations
+
+import itertools
+from dataclasses import dataclass, field
+
+from .config import VenueSpec
+from .models import Side
+from .order_book import OrderBook
+from .venue_state import VenueState
+
+
+TAKER_TAKER = "taker_taker"
+MAKER_TAKER = "maker_taker"
+
+
+@dataclass
+class ArbConfig:
+    mode: str = TAKER_TAKER
+
+    # Edge thresholds
+    min_net_edge_bps: float = 1.0        # after fees, before slippage
+    safety_buffer_bps: float = 0.5       # extra cushion for in-flight drift
+
+    # Gates
+    max_book_age_s: float = 0.50
+    # The best level we intend to hit must have been confirmed (snapshot, delta
+    # at that price, or trade at that price) within this window. The Bybit
+    # collector drops most level removals, so an unconfirmed touch is often a
+    # level that no longer exists.
+    max_touch_age_s: float = 0.30
+    max_spread_bps: float = 50.0         # absurd spread => bad data, not an edge
+    block_on_toxic: bool = True
+    toxic_trade_sign: float = 0.75
+    toxic_depth_collapse: float = 0.60
+
+    # Sizing
+    max_clip_base: float = 0.0           # 0 => derive from max_position_base
+    max_clip_notional: float = 25_000.0
+    max_walk_bps: float = 2.0            # how far past touch we will consume
+    min_clip_notional: float = 50.0
+    depth_utilisation: float = 0.50      # take at most this share of visible depth
+
+    # Inventory
+    max_position_base: float = 1.0       # |net base across venues|
+    max_venue_imbalance_base: float = 0.0  # 0 => 2x max_position_base
+
+    # Maker-taker
+    maker_improve_ticks: int = 1         # how far inside the touch we rest
+    maker_requote_bps: float = 0.5       # requote if fair moves by this much
+    maker_max_live_orders: int = 1
+
+    # Pacing
+    min_resignal_gap_s: float = 0.0      # throttle repeat fires on one edge
+
+
+@dataclass
+class ArbLeg:
+    venue: str
+    side: str                # "buy" | "sell"
+    qty: float
+    limit_price: float
+    is_taker: bool
+    expected_price: float
+    fee_bps: float
+
+
+@dataclass
+class ArbSignal:
+    signal_id: int
+    ts: float
+    buy_venue: str
+    sell_venue: str
+    qty: float
+    gross_edge_bps: float
+    fee_bps: float
+    net_edge_bps: float
+    legs: list[ArbLeg]
+    mode: str
+    buy_price: float
+    sell_price: float
+    depth_limited: bool = False
+    inventory_limited: bool = False
+
+
+@dataclass
+class InventoryBook:
+    """Per-venue base balances, plus the aggregate net position.
+
+    Quote balances are tracked as running cash rather than a hard constraint —
+    the binding constraint in practice is base inventory on the sell side.
+    """
+    base: dict[str, float] = field(default_factory=dict)
+    cash: dict[str, float] = field(default_factory=dict)
+
+    def ensure(self, venues: tuple[str, ...]) -> None:
+        for v in venues:
+            self.base.setdefault(v, 0.0)
+            self.cash.setdefault(v, 0.0)
+
+    @property
+    def net_base(self) -> float:
+        return sum(self.base.values())
+
+    @property
+    def total_cash(self) -> float:
+        return sum(self.cash.values())
+
+    def apply(self, venue: str, signed_qty: float, cash_delta: float) -> None:
+        self.base[venue] = self.base.get(venue, 0.0) + signed_qty
+        self.cash[venue] = self.cash.get(venue, 0.0) + cash_delta
+
+    def imbalance(self) -> float:
+        """Largest single-venue absolute base position."""
+        return max((abs(v) for v in self.base.values()), default=0.0)
+
+
+class CrossVenueArbStrategy:
+    def __init__(
+        self,
+        pair: str,
+        venues: dict[str, VenueSpec],
+        config: ArbConfig | None = None,
+    ) -> None:
+        self.pair = pair
+        self.venues = venues
+        self.config = config or ArbConfig()
+        self.venue_names = tuple(sorted(venues))
+        self._ids = itertools.count(1)
+        self._last_signal_ts = 0.0
+
+        # Rejection accounting — the reason distribution is usually more
+        # informative than the PnL, because it says which constraint binds.
+        self.rejects: dict[str, int] = {
+            "not_ready": 0, "stale": 0, "crossed": 0, "wide_spread": 0,
+            "toxic": 0, "no_edge": 0, "stale_touch": 0, "no_depth": 0,
+            "inventory": 0, "clip_too_small": 0, "throttled": 0,
+        }
+        self.evaluations = 0
+        self.signals = 0
+        self.best_edge_seen_bps = float("-inf")
+
+    # ── Gates ────────────────────────────────────────────────────────────────
+
+    def _venue_tradeable(self, venue: str, book: OrderBook, state: VenueState, now: float) -> bool:
+        cfg = self.config
+        if not book.ready:
+            self.rejects["not_ready"] += 1
+            return False
+        if book.is_stale(now, cfg.max_book_age_s):
+            self.rejects["stale"] += 1
+            return False
+        if book.is_crossed():
+            self.rejects["crossed"] += 1
+            return False
+        if book.spread_bps > cfg.max_spread_bps:
+            self.rejects["wide_spread"] += 1
+            return False
+        if cfg.block_on_toxic and state.is_toxic(book, cfg.toxic_trade_sign, cfg.toxic_depth_collapse):
+            self.rejects["toxic"] += 1
+            return False
+        return True
+
+    # ── Sizing ───────────────────────────────────────────────────────────────
+
+    def _max_clip(self, price: float) -> float:
+        cfg = self.config
+        clip = cfg.max_clip_base if cfg.max_clip_base > 0 else cfg.max_position_base
+        if cfg.max_clip_notional > 0 and price > 0:
+            clip = min(clip, cfg.max_clip_notional / price)
+        return max(0.0, clip)
+
+    def _tradeable_depth(self, book: OrderBook, side: str, touch: float) -> float:
+        """Depth reachable without walking more than max_walk_bps past the touch."""
+        cfg = self.config
+        if touch <= 0:
+            return 0.0
+        slack = touch * cfg.max_walk_bps / 10_000.0
+        limit = touch + slack if side == "ask" else touch - slack
+        return book.depth_within(side, limit) * cfg.depth_utilisation
+
+    def _inventory_room(self, buy_venue: str, sell_venue: str, inv: InventoryBook) -> float:
+        """How much we can trade before breaching a position limit.
+
+        Buying on A and selling on B leaves the net flat but moves A's balance up
+        and B's down. The binding limits are the per-venue imbalance cap (we
+        cannot sell base we do not hold on that venue) and the aggregate net.
+        """
+        cfg = self.config
+        cap = cfg.max_venue_imbalance_base or (2.0 * cfg.max_position_base)
+        buy_room = max(0.0, cap - inv.base.get(buy_venue, 0.0))
+        sell_room = max(0.0, cap + inv.base.get(sell_venue, 0.0))
+        net_room = max(0.0, cfg.max_position_base * 2.0 - abs(inv.net_base))
+        return min(buy_room, sell_room, net_room)
+
+    # ── Evaluation ───────────────────────────────────────────────────────────
+
+    def evaluate(
+        self,
+        books: dict[str, OrderBook],
+        states: dict[str, VenueState],
+        inventory: InventoryBook,
+        now: float,
+    ) -> ArbSignal | None:
+        cfg = self.config
+        self.evaluations += 1
+
+        if cfg.min_resignal_gap_s > 0 and now - self._last_signal_ts < cfg.min_resignal_gap_s:
+            self.rejects["throttled"] += 1
+            return None
+
+        tradeable = [
+            v for v in self.venue_names
+            if self._venue_tradeable(v, books[v], states[v], now)
+        ]
+        if len(tradeable) < 2:
+            return None
+
+        best: ArbSignal | None = None
+        for buy_venue in tradeable:
+            for sell_venue in tradeable:
+                if buy_venue == sell_venue:
+                    continue
+                sig = self._evaluate_direction(buy_venue, sell_venue, books, inventory, now)
+                if sig is not None and (best is None or sig.net_edge_bps > best.net_edge_bps):
+                    best = sig
+
+        if best is not None:
+            self.signals += 1
+            self._last_signal_ts = now
+        return best
+
+    def _evaluate_direction(
+        self,
+        buy_venue: str,
+        sell_venue: str,
+        books: dict[str, OrderBook],
+        inventory: InventoryBook,
+        now: float,
+    ) -> ArbSignal | None:
+        cfg = self.config
+        buy_book, sell_book = books[buy_venue], books[sell_venue]
+        buy_fees, sell_fees = self.venues[buy_venue].fees, self.venues[sell_venue].fees
+
+        if cfg.mode == MAKER_TAKER:
+            return self._evaluate_maker_taker(buy_venue, sell_venue, books, inventory, now)
+
+        buy_px = buy_book.best_ask      # we lift the offer
+        sell_px = sell_book.best_bid    # we hit the bid
+        if buy_px <= 0 or sell_px <= 0:
+            return None
+
+        gross_bps = (sell_px - buy_px) / buy_px * 10_000.0
+        fee_bps = buy_fees.taker_bps + sell_fees.taker_bps
+        net_bps = gross_bps - fee_bps - cfg.safety_buffer_bps
+        self.best_edge_seen_bps = max(self.best_edge_seen_bps, net_bps)
+
+        if net_bps < cfg.min_net_edge_bps:
+            self.rejects["no_edge"] += 1
+            return None
+
+        # Only after the edge check, so this counts phantom-touch edges
+        # specifically rather than every quiet moment.
+        if (buy_book.touch_age_s("ask", now) > cfg.max_touch_age_s
+                or sell_book.touch_age_s("bid", now) > cfg.max_touch_age_s):
+            self.rejects["stale_touch"] += 1
+            return None
+
+        buy_depth = self._tradeable_depth(buy_book, "ask", buy_px)
+        sell_depth = self._tradeable_depth(sell_book, "bid", sell_px)
+        depth_cap = min(buy_depth, sell_depth)
+        if depth_cap <= 0:
+            self.rejects["no_depth"] += 1
+            return None
+
+        inv_cap = self._inventory_room(buy_venue, sell_venue, inventory)
+        if inv_cap <= 0:
+            self.rejects["inventory"] += 1
+            return None
+
+        clip_cap = self._max_clip(buy_px)
+        qty = min(depth_cap, inv_cap, clip_cap)
+        if qty * buy_px < cfg.min_clip_notional:
+            self.rejects["clip_too_small"] += 1
+            return None
+
+        # Limit prices bound how far the book may move during flight before we
+        # decline the fill. Without them the sim would fill at any price and
+        # report slippage as profit.
+        slack_buy = buy_px * cfg.max_walk_bps / 10_000.0
+        slack_sell = sell_px * cfg.max_walk_bps / 10_000.0
+
+        return ArbSignal(
+            signal_id=next(self._ids), ts=now,
+            buy_venue=buy_venue, sell_venue=sell_venue, qty=qty,
+            gross_edge_bps=gross_bps, fee_bps=fee_bps, net_edge_bps=net_bps,
+            mode=TAKER_TAKER, buy_price=buy_px, sell_price=sell_px,
+            depth_limited=qty >= depth_cap - 1e-12,
+            inventory_limited=qty >= inv_cap - 1e-12,
+            legs=[
+                ArbLeg(buy_venue, "buy", qty, buy_px + slack_buy, True, buy_px, buy_fees.taker_bps),
+                ArbLeg(sell_venue, "sell", qty, sell_px - slack_sell, True, sell_px, sell_fees.taker_bps),
+            ],
+        )
+
+    def _evaluate_maker_taker(
+        self,
+        maker_venue: str,
+        taker_venue: str,
+        books: dict[str, OrderBook],
+        inventory: InventoryBook,
+        now: float,
+    ) -> ArbSignal | None:
+        """Rest a passive bid on maker_venue, hedge by selling on taker_venue.
+
+        The passive price is set from the hedge price backwards: whatever we can
+        sell for on the taker venue, minus both fees and the buffer, is the most
+        we can afford to bid. If that price is not competitive with the maker
+        venue's own touch, there is no trade.
+        """
+        cfg = self.config
+        maker_book, taker_book = books[maker_venue], books[taker_venue]
+        maker_fees, taker_fees = self.venues[maker_venue].fees, self.venues[taker_venue].fees
+
+        hedge_px = taker_book.best_bid
+        if hedge_px <= 0 or not maker_book.ready:
+            return None
+
+        fee_bps = maker_fees.maker_bps + taker_fees.taker_bps
+        required_bps = fee_bps + cfg.min_net_edge_bps + cfg.safety_buffer_bps
+        max_bid = hedge_px * (1.0 - required_bps / 10_000.0)
+
+        # Must be a real improvement on the maker venue's book, and never cross it.
+        touch_bid, touch_ask = maker_book.best_bid, maker_book.best_ask
+        if max_bid <= touch_bid or max_bid >= touch_ask:
+            self.rejects["no_edge"] += 1
+            return None
+
+        gross_bps = (hedge_px - max_bid) / max_bid * 10_000.0
+        net_bps = gross_bps - fee_bps - cfg.safety_buffer_bps
+        self.best_edge_seen_bps = max(self.best_edge_seen_bps, net_bps)
+        if net_bps < cfg.min_net_edge_bps:
+            self.rejects["no_edge"] += 1
+            return None
+
+        if taker_book.touch_age_s("bid", now) > cfg.max_touch_age_s:
+            self.rejects["stale_touch"] += 1
+            return None
+
+        hedge_depth = self._tradeable_depth(taker_book, "bid", hedge_px)
+        if hedge_depth <= 0:
+            self.rejects["no_depth"] += 1
+            return None
+
+        inv_cap = self._inventory_room(maker_venue, taker_venue, inventory)
+        if inv_cap <= 0:
+            self.rejects["inventory"] += 1
+            return None
+
+        qty = min(hedge_depth, inv_cap, self._max_clip(max_bid))
+        if qty * max_bid < cfg.min_clip_notional:
+            self.rejects["clip_too_small"] += 1
+            return None
+
+        slack = hedge_px * cfg.max_walk_bps / 10_000.0
+        return ArbSignal(
+            signal_id=next(self._ids), ts=now,
+            buy_venue=maker_venue, sell_venue=taker_venue, qty=qty,
+            gross_edge_bps=gross_bps, fee_bps=fee_bps, net_edge_bps=net_bps,
+            mode=MAKER_TAKER, buy_price=max_bid, sell_price=hedge_px,
+            depth_limited=qty >= hedge_depth - 1e-12,
+            inventory_limited=qty >= inv_cap - 1e-12,
+            legs=[
+                # Passive leg only. The hedge is fired on fill, not now — firing
+                # it up front would be a naked short against a maybe-fill.
+                ArbLeg(maker_venue, "buy", qty, max_bid, False, max_bid, maker_fees.maker_bps),
+            ],
+        )
+
+    def hedge_leg(self, signal: ArbSignal, filled_qty: float, book: OrderBook) -> ArbLeg | None:
+        """Build the aggressive hedge after a passive leg fills."""
+        if filled_qty <= 0 or not book.ready:
+            return None
+        px = book.best_bid
+        if px <= 0:
+            return None
+        slack = px * max(self.config.max_walk_bps, 5.0) / 10_000.0
+        return ArbLeg(
+            venue=signal.sell_venue, side="sell", qty=filled_qty,
+            limit_price=px - slack, is_taker=True, expected_price=signal.sell_price,
+            fee_bps=self.venues[signal.sell_venue].fees.taker_bps,
+        )
+
+    def report(self) -> dict[str, float]:
+        total_rejects = sum(self.rejects.values())
+        return {
+            "evaluations": float(self.evaluations),
+            "signals": float(self.signals),
+            "signal_rate": self.signals / max(1, self.evaluations),
+            "best_net_edge_bps": self.best_edge_seen_bps if self.best_edge_seen_bps > float("-inf") else 0.0,
+            "rejects_total": float(total_rejects),
+            **{f"reject_{k}": float(v) for k, v in self.rejects.items()},
+        }

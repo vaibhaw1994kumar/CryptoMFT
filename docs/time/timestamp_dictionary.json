@@ -1,0 +1,44 @@
+{
+  "schema_version": "1.0.0",
+  "unit": "nanoseconds_since_unix_epoch_utc",
+  "timestamps": {
+    "source_ts_ns": {
+      "authority": "matching_engine_or_source_system",
+      "meaning": "Time the source says the market action occurred; Binance T or Bybit cts when present.",
+      "fallback": "exchange_ts_ns"
+    },
+    "exchange_ts_ns": {
+      "authority": "exchange_gateway",
+      "meaning": "Time the exchange says it published the message; Binance E or Bybit ts.",
+      "fallback": "receive_ts_ns only when the venue omits exchange time"
+    },
+    "receive_ts_ns": {
+      "authority": "collector_host_clock",
+      "meaning": "Local time at which the complete raw frame was received.",
+      "fallback": "none in live/paper capture"
+    },
+    "observed_ts_ns": {
+      "authority": "monitor_host_clock",
+      "meaning": "Time at which a host-clock reference sample was observed.",
+      "fallback": "none"
+    }
+  },
+  "derived_measurements": {
+    "event_latency_ns": "receive_ts_ns - exchange_ts_ns",
+    "feed_age_ns": "monitor_now_ns - receive_ts_ns",
+    "host_offset_ns": "local_reference_sample_ns - trusted_reference_ns",
+    "host_drift_ppm": "change_in_host_offset_ns / elapsed_observation_ns * 1000000",
+    "cross_venue_skew_ns": "absolute difference between latest receive_ts_ns values for the same instrument"
+  },
+  "replay_order": [
+    "receive_ts_ns",
+    "exchange_ts_ns",
+    "source_ts_ns",
+    "venue",
+    "sequence_start",
+    "sequence",
+    "event_id"
+  ],
+  "cross_venue_alignment": "Compare latest local receive timestamps using a configured tolerance; never rewrite venue timestamps.",
+  "replay_clock": "The current event receive_ts_ns is simulated now; processing speed must not affect results."
+}

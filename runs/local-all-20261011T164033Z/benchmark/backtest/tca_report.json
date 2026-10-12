@@ -1,0 +1,2846 @@
+{
+  "calculation": {
+    "benchmark": "child decision/limit price at dispatch",
+    "buy_slippage_quote": "(average_fill_price - benchmark_price) * filled_quantity",
+    "missed_opportunity": "not all primary children filled or residual outside approved bound",
+    "sell_slippage_quote": "(benchmark_price - average_fill_price) * filled_quantity",
+    "sign": "positive is adverse; negative is price improvement",
+    "weighted_slippage_bps": "sum(slippage_quote) / sum(filled_quantity * benchmark_price) * 10000"
+  },
+  "calculation_version": "basic-tca-v1",
+  "correlation_id": "benchmark_events.jsonl",
+  "groups": [
+    {
+      "benchmark_notional": "4800.00100",
+      "cancels": 0,
+      "fees": "1.9200004",
+      "filled_notional": "4800.00100",
+      "filled_quantity": "0.080",
+      "fills": 8,
+      "instrument_id": "BTC-USDT-SPOT",
+      "missed_opportunities": 142,
+      "order_type": "LIMIT",
+      "orders": 150,
+      "partials": 0,
+      "rejects": 0,
+      "slippage_quote": "0.00000",
+      "timeouts": 0,
+      "unwind_fills": 0,
+      "unwind_orders": 0,
+      "venue": "BINANCE",
+      "weighted_slippage_bps": "0"
+    },
+    {
+      "benchmark_notional": "4806.70400",
+      "cancels": 0,
+      "fees": "1.9226816",
+      "filled_notional": "4806.70400",
+      "filled_quantity": "0.080",
+      "fills": 8,
+      "instrument_id": "BTC-USDT-SPOT",
+      "missed_opportunities": 142,
+      "order_type": "LIMIT",
+      "orders": 150,
+      "partials": 0,
+      "rejects": 0,
+      "slippage_quote": "0.00000",
+      "timeouts": 0,
+      "unwind_fills": 0,
+      "unwind_orders": 0,
+      "venue": "BYBIT",
+      "weighted_slippage_bps": "0"
+    }
+  ],
+  "lineage": {
+    "canonical_source_path": "/Users/vaibhav/Documents/Newproject/crypto_MFT_arb_platform/runs/local-all-20261011T164033Z/benchmark/benchmark_events.jsonl",
+    "canonical_source_sha256": "47e2d5bd1e4d49a33b957223f149a567ad5d09ca66cfa18bf90c2caffe45c45a",
+    "raw_reference_coverage": 0.0,
+    "raw_refs": [],
+    "source_event_ids": [
+      "01edc1d4-745e-5d62-a437-7fc1f5380943",
+      "0360e49b-98c3-5013-8739-c09ca0861e3b",
+      "0406422d-bf39-5243-ada1-c677ff3b6541",
+      "04c36cb8-c073-5240-82f6-b11bb0ed358d",
+      "05979115-9855-5a35-bb99-85db329ca970",
+      "06468916-314b-5cda-8a0c-2a791714da5e",
+      "070aa028-ea48-58a3-b91a-98b91a835fbc",
+      "074e7428-d19d-5396-9d2e-bed04a541825",
+      "0831248a-2d26-5aff-bc42-db2cdef61692",
+      "0851a231-44ca-52a4-aa27-73fa28d77aa3",
+      "0885cbd0-e106-51fe-80bd-64d5d2fca857",
+      "0e2708f0-a2fe-50f1-b433-2e3d2716569a",
+      "11fc73e8-e899-5d04-8dd5-2bce91e1a238",
+      "1317b2a2-c769-5721-97ed-9c977898fa22",
+      "1330a50c-3a43-57a9-8c48-e2321e5c10bd",
+      "13ad5e65-e3d2-55c4-b285-79d358741cb7",
+      "145dc662-9f7c-5733-9d57-533a380142dd",
+      "16908d62-d593-5d01-abf7-3ed6d63c17d6",
+      "1709c963-a5bb-5554-8438-75523152b8e8",
+      "1714e411-aac1-5b11-ada7-de2d8b97bab2",
+      "17777fb6-7a82-5302-a1ae-6afa390775e7",
+      "17a88147-e6d0-5e1c-b969-6ed5d3ceecc0",
+      "17f2d0af-366b-5995-8b90-b0f231474f85",
+      "1805fbf0-0385-589d-b6b8-fd0263220b3a",
+      "18cecbfd-8eb2-5141-a6cc-78cf011de274",
+      "1916f1b8-bfc9-59d6-b351-f22b87455cc9",
+      "1bac9a39-1335-55ac-b0d2-29bb4c073da9",
+      "1c210d5a-9d25-5eb1-98a8-a5b2d766045a",
+      "1c73dc94-ff24-544e-9214-9667224386a7",
+      "1cc82c64-69f3-522c-8939-10386aa740fe",
+      "1fa3c6ad-e212-5b62-a380-495e53c22e7e",
+      "1fde58ba-8b52-592b-b17e-b427abafd1ca",
+      "2046e3b4-0ca7-566d-82ac-adf42db02787",
+      "22b6f6d0-8899-5685-8b9a-a8caa2b5798c",
+      "24c4670c-b5ea-5741-96e6-0dbdebc5059b",
+      "25549908-fdc2-5c37-9074-9e950e83ae0f",
+      "2c43d9e2-9811-5416-920d-24d32477e989",
+      "2dd17502-aa06-5765-81d3-37ad4014a698",
+      "2ea14ca8-226f-534a-bd80-b93b6c7dcdaa",
+      "2ea91587-d041-54c7-8ba6-0e8efcba8800",
+      "3013af10-76a3-594e-bd5e-83c14efc2e19",
+      "30918832-491b-5729-8faa-c58804988238",
+      "30efadcd-2f41-5d12-b767-69a965f01314",
+      "3838809f-f38b-5639-bb1a-4b15d6cce138",
+      "396ebb54-7ee8-5ec8-84d8-a84351a56215",
+      "399a0a75-2d59-5f2a-bb92-f3f84f1463e7",
+      "3a2e3ab8-120c-5f15-ac22-40ef4e7488f8",
+      "3ad11808-d523-512f-94e2-e11a29d1ba8a",
+      "3cb6e251-c9af-5697-a8cc-f6d3dd4c685f",
+      "4347aecc-0458-5150-af5c-0075bcb5e348",
+      "4563bb40-4da7-5e3f-8d91-99d741d761d1",
+      "47e1b6f3-682f-5fec-82a6-0883c7afa0f6",
+      "4b6e246d-897f-5cb6-9000-7baf2d8408be",
+      "4e0d3c14-37ad-5734-ae23-98c83ed4af59",
+      "50e74420-d19d-5d74-aac6-db3e94c643b3",
+      "512bab90-bad2-581e-a0b7-8c2c738bf413",
+      "54ac9648-fa05-5b7a-86fd-90dba9d8af5e",
+      "5784d9a0-5816-5bb4-bf96-ee213d4f6efb",
+      "5976268c-b153-5429-9ce5-ae7534564e68",
+      "5a1bc5f7-f342-5993-b562-6e8f34c7ecaa",
+      "5b53d55a-00d5-5409-a487-10d85db1c903",
+      "5be82406-800a-5130-9542-7b4343c77ae2",
+      "5e53aff9-c3e8-5d87-9990-5f7d2c94766e",
+      "605f25c0-3a84-5bd3-ab2e-14970cbadb5b",
+      "6136cdb9-510a-55a1-b1b0-7ca0369751d2",
+      "6213ab59-10b0-582d-b520-3eaa13d68317",
+      "6b4a25e1-6d18-56ed-9817-512ecf6469df",
+      "6c3a456f-de70-5dbf-af5e-5b3bf3b4dd0e",
+      "6eec2805-38cf-5c99-927f-64368ac7d0cf",
+      "6fdebcb3-4d10-571f-9bfd-6f5e3d0576ce",
+      "70012c6f-30da-5fee-835c-ede3c7f4f7c1",
+      "7170825a-8bd0-583c-94dd-fb4ea2f1b741",
+      "731c3eb8-8e13-57ce-9577-342102460b1f",
+      "74749c5b-9080-5093-97b7-f0b30ae4119b",
+      "76391fa2-1865-5b14-997f-f64f7a739f7e",
+      "768255c4-457b-5f86-8fc7-adc9df766056",
+      "7d9dff54-36df-5815-9c4e-eadf107ffbf5",
+      "7ff03d0d-537a-5fec-9eb3-9c7c3482dd45",
+      "7ffa6fcb-c510-5816-8087-ee2392f147c3",
+      "838b2c62-2f19-5846-aefd-b9d75ee2d382",
+      "853b44b0-74db-59bc-9e49-9ffc808b984e",
+      "858c7cca-f9f5-5c4e-bb83-4d9708fffbf0",
+      "87508757-5ef8-5d29-b060-c3d7021157a5",
+      "885955b9-3d59-51e3-8b09-d8b0073c2c0a",
+      "8860a641-0415-5af7-b40e-75d9294719aa",
+      "88cffa1f-ebd1-508a-b239-11d1cc91a247",
+      "8c1b72ad-ef6d-51fe-ad0e-1815224c4c11",
+      "8cef1cc6-84a3-5123-8af5-f85e1545953c",
+      "8d4783eb-1c82-52f5-a205-17985922b7e4",
+      "8da94019-c544-5339-a9d2-55b9b31b91d2",
+      "8e8dcb70-3f14-5ee5-908f-a9e5ef5b0fd0",
+      "8fd8b87f-3a3e-5436-a388-025efb342cc0",
+      "90f40836-c280-5c0b-aa96-1fdff24598d6",
+      "91adcbf3-c363-5ff4-bd2c-9d8d9a08e23f",
+      "93ab5073-0a17-5ca0-a6e5-1644f448cc0e",
+      "942d461b-332b-534f-be85-ffaa7c7fc311",
+      "949317c4-fab2-5292-8607-eeb6e795c338",
+      "949d39fb-ca9d-5071-be33-9e059fa18514",
+      "94fb2ae3-1354-5b57-b988-9c6c5c7e5e00",
+      "95dcd002-0a5a-59a2-a98a-6a7d24ca5531",
+      "98ab21e5-5a99-50df-84de-8d32e8e49e59",
+      "98d7d010-c361-540d-906b-b456c2c209f8",
+      "9929ccfc-0678-5080-83bd-4c1a6f0d34ad",
+      "99a75507-4919-59a6-8ba7-47294dd73f61",
+      "9b326e49-60d7-5ae0-bccb-e14256d43b0f",
+      "9ef623ec-5916-5f86-9782-14bcd74e19e7",
+      "a298ab50-ab73-5c57-9e95-c887f061e964",
+      "a3f91e69-4649-52a7-bc3d-a4ca49655db9",
+      "a45e1c56-3796-58a5-a13a-9e5152a6cc13",
+      "a5f048dd-4f6d-5e91-81aa-3d76d9f7806b",
+      "a5f9ce7b-abc0-5c55-9fe2-a165e9c17e42",
+      "a9c73b96-eddd-5461-9195-aeb0753ea91d",
+      "ab6a5379-be71-5950-be4f-bd51654143f5",
+      "abdb832f-b983-5ad3-8d1a-276e7de5f144",
+      "ad71fe2f-19bc-577d-8e81-626c69f211c7",
+      "ae624c84-cc5a-5195-8e67-5dc6a8eb8004",
+      "ae6c54e4-3daf-50df-ad8c-91f49175eee9",
+      "affd6f6c-b2d3-5a27-8e7a-4019a0e5af62",
+      "b0371661-518c-5b4b-8691-31340dd7f108",
+      "b2120023-d89b-5807-8de1-f4e7167859af",
+      "b2311dae-966c-5d23-b44c-fc71c5e6c85c",
+      "b2a2d782-0991-5c36-83ef-6b4d18feb310",
+      "b9b6eb02-dc95-5891-a090-df34f82cd8da",
+      "bda8db91-bb36-5f15-8d85-4ef9bdd94663",
+      "c00b6f06-a796-5ebd-a68c-82c71eb7f112",
+      "c0153d5a-8b3f-53fb-9824-6775c9146b3f",
+      "c19b2ed0-cb13-5f3b-98aa-2a4cc8ed61bc",
+      "c1a375ff-78c4-5305-abe2-8cdba091891c",
+      "c214ca25-27a1-5b24-a31c-a4880a88abe8",
+      "c493faf0-5403-5a9b-8a5c-b86562876669",
+      "c4a62d7c-ea29-53e7-a03e-de31b8e13b07",
+      "c6f62045-0f08-552c-be94-54f2985e3a3d",
+      "c7b78e6f-093f-5de4-83ea-d5164bec5749",
+      "cd1fc6c6-2a1a-560f-b292-69f0cdebe53d",
+      "cd2f1b19-095e-504d-ae2d-fb88888b24ec",
+      "cf925ed1-b8d3-5b8c-83ac-3f9743f219ad",
+      "d4fa724b-d8b9-56f6-90d6-ac3e057ed173",
+      "d513b1c6-2dd9-5ac1-8e49-62e41499c485",
+      "d70cf432-e9d5-537f-a799-2308f3161ad0",
+      "d90a41b5-7578-55db-bd62-d42d38cfc5bc",
+      "d9558ce0-50e7-501b-9e8f-6e04fe6fdbee",
+      "dae39e1b-b703-5143-bd8a-a0f03ea1b59b",
+      "dcad7e44-2e5b-5920-b1c6-648f4e0d7565",
+      "dcff0278-7dc0-581d-a61d-fd2769d5c6fc",
+      "ddf278ae-fb15-56f6-9dbb-98e632d76489",
+      "e02e6150-2b0d-585a-9496-1100d7e19803",
+      "e04c977a-a938-5e27-b937-e8b59153093b",
+      "e1bc0b85-2ac8-5442-9807-089718c82d30",
+      "e1fa6e84-ac27-5838-8e95-89248935e536",
+      "e350ab52-f207-5287-9df8-ef48fabce6f5",
+      "e45884da-97c5-5931-87bc-4374519e2176",
+      "e733577c-6f4a-522f-abcd-569ccdd2f3fd",
+      "e8ffa88d-9663-500b-b2d3-9a0dc7da6910",
+      "e990cd33-0f7f-54f7-980a-11f2c689cf37",
+      "ea50ff88-ceae-54d3-b21f-a8e482531249",
+      "ebd6c424-0bfb-571c-a5db-9368871c63ee",
+      "ec8925f4-7493-5267-9611-f10696d695aa",
+      "ef131dd6-52e3-53a9-961a-ad29ca9d017e",
+      "ef62901a-a699-52c8-b8ed-3083aecf2082",
+      "efc6e5aa-e58a-5be1-a212-d9e9961643c8",
+      "f26871de-0d2a-568f-bc4e-2a934400fa30",
+      "f3e4a66e-f348-5d51-8db0-560f4f0694af",
+      "f54a5894-2e5f-50c7-88ae-7238df33158f",
+      "f5bfb915-debe-5979-9ef8-3c27d5f97f73",
+      "f6883c18-eac3-5c3a-8c4c-d337ec48c42d",
+      "f8121587-a0fc-5f89-bebe-32727a0e0dc0",
+      "f8479678-17d1-5f4f-87ae-e389a66cf97d",
+      "f87fb05a-a284-552a-8258-250606533186",
+      "f8a78196-17a1-51af-9135-1b2a831be095",
+      "f9a0112b-a193-5fce-bd2b-52f8e353a52b",
+      "f9e9689b-64d6-5d46-8637-aa638b5337f8",
+      "fc92b20d-2114-5829-b512-f94a3a9350af",
+      "fd563971-ce33-5d2e-a8e7-e3436b0229d2",
+      "fef9e547-f7c2-5c99-8a0a-c9acc031c571",
+      "ff2c7578-72c0-56c0-992e-b821f15ce0a8"
+    ],
+    "source_event_raw_refs": {
+      "01edc1d4-745e-5d62-a437-7fc1f5380943": null,
+      "0360e49b-98c3-5013-8739-c09ca0861e3b": null,
+      "0406422d-bf39-5243-ada1-c677ff3b6541": null,
+      "04c36cb8-c073-5240-82f6-b11bb0ed358d": null,
+      "05979115-9855-5a35-bb99-85db329ca970": null,
+      "06468916-314b-5cda-8a0c-2a791714da5e": null,
+      "070aa028-ea48-58a3-b91a-98b91a835fbc": null,
+      "074e7428-d19d-5396-9d2e-bed04a541825": null,
+      "0831248a-2d26-5aff-bc42-db2cdef61692": null,
+      "0851a231-44ca-52a4-aa27-73fa28d77aa3": null,
+      "0885cbd0-e106-51fe-80bd-64d5d2fca857": null,
+      "0e2708f0-a2fe-50f1-b433-2e3d2716569a": null,
+      "11fc73e8-e899-5d04-8dd5-2bce91e1a238": null,
+      "1317b2a2-c769-5721-97ed-9c977898fa22": null,
+      "1330a50c-3a43-57a9-8c48-e2321e5c10bd": null,
+      "13ad5e65-e3d2-55c4-b285-79d358741cb7": null,
+      "145dc662-9f7c-5733-9d57-533a380142dd": null,
+      "16908d62-d593-5d01-abf7-3ed6d63c17d6": null,
+      "1709c963-a5bb-5554-8438-75523152b8e8": null,
+      "1714e411-aac1-5b11-ada7-de2d8b97bab2": null,
+      "17777fb6-7a82-5302-a1ae-6afa390775e7": null,
+      "17a88147-e6d0-5e1c-b969-6ed5d3ceecc0": null,
+      "17f2d0af-366b-5995-8b90-b0f231474f85": null,
+      "1805fbf0-0385-589d-b6b8-fd0263220b3a": null,
+      "18cecbfd-8eb2-5141-a6cc-78cf011de274": null,
+      "1916f1b8-bfc9-59d6-b351-f22b87455cc9": null,
+      "1bac9a39-1335-55ac-b0d2-29bb4c073da9": null,
+      "1c210d5a-9d25-5eb1-98a8-a5b2d766045a": null,
+      "1c73dc94-ff24-544e-9214-9667224386a7": null,
+      "1cc82c64-69f3-522c-8939-10386aa740fe": null,
+      "1fa3c6ad-e212-5b62-a380-495e53c22e7e": null,
+      "1fde58ba-8b52-592b-b17e-b427abafd1ca": null,
+      "2046e3b4-0ca7-566d-82ac-adf42db02787": null,
+      "22b6f6d0-8899-5685-8b9a-a8caa2b5798c": null,
+      "24c4670c-b5ea-5741-96e6-0dbdebc5059b": null,
+      "25549908-fdc2-5c37-9074-9e950e83ae0f": null,
+      "2c43d9e2-9811-5416-920d-24d32477e989": null,
+      "2dd17502-aa06-5765-81d3-37ad4014a698": null,
+      "2ea14ca8-226f-534a-bd80-b93b6c7dcdaa": null,
+      "2ea91587-d041-54c7-8ba6-0e8efcba8800": null,
+      "3013af10-76a3-594e-bd5e-83c14efc2e19": null,
+      "30918832-491b-5729-8faa-c58804988238": null,
+      "30efadcd-2f41-5d12-b767-69a965f01314": null,
+      "3838809f-f38b-5639-bb1a-4b15d6cce138": null,
+      "396ebb54-7ee8-5ec8-84d8-a84351a56215": null,
+      "399a0a75-2d59-5f2a-bb92-f3f84f1463e7": null,
+      "3a2e3ab8-120c-5f15-ac22-40ef4e7488f8": null,
+      "3ad11808-d523-512f-94e2-e11a29d1ba8a": null,
+      "3cb6e251-c9af-5697-a8cc-f6d3dd4c685f": null,
+      "4347aecc-0458-5150-af5c-0075bcb5e348": null,
+      "4563bb40-4da7-5e3f-8d91-99d741d761d1": null,
+      "47e1b6f3-682f-5fec-82a6-0883c7afa0f6": null,
+      "4b6e246d-897f-5cb6-9000-7baf2d8408be": null,
+      "4e0d3c14-37ad-5734-ae23-98c83ed4af59": null,
+      "50e74420-d19d-5d74-aac6-db3e94c643b3": null,
+      "512bab90-bad2-581e-a0b7-8c2c738bf413": null,
+      "54ac9648-fa05-5b7a-86fd-90dba9d8af5e": null,
+      "5784d9a0-5816-5bb4-bf96-ee213d4f6efb": null,
+      "5976268c-b153-5429-9ce5-ae7534564e68": null,
+      "5a1bc5f7-f342-5993-b562-6e8f34c7ecaa": null,
+      "5b53d55a-00d5-5409-a487-10d85db1c903": null,
+      "5be82406-800a-5130-9542-7b4343c77ae2": null,
+      "5e53aff9-c3e8-5d87-9990-5f7d2c94766e": null,
+      "605f25c0-3a84-5bd3-ab2e-14970cbadb5b": null,
+      "6136cdb9-510a-55a1-b1b0-7ca0369751d2": null,
+      "6213ab59-10b0-582d-b520-3eaa13d68317": null,
+      "6b4a25e1-6d18-56ed-9817-512ecf6469df": null,
+      "6c3a456f-de70-5dbf-af5e-5b3bf3b4dd0e": null,
+      "6eec2805-38cf-5c99-927f-64368ac7d0cf": null,
+      "6fdebcb3-4d10-571f-9bfd-6f5e3d0576ce": null,
+      "70012c6f-30da-5fee-835c-ede3c7f4f7c1": null,
+      "7170825a-8bd0-583c-94dd-fb4ea2f1b741": null,
+      "731c3eb8-8e13-57ce-9577-342102460b1f": null,
+      "74749c5b-9080-5093-97b7-f0b30ae4119b": null,
+      "76391fa2-1865-5b14-997f-f64f7a739f7e": null,
+      "768255c4-457b-5f86-8fc7-adc9df766056": null,
+      "7d9dff54-36df-5815-9c4e-eadf107ffbf5": null,
+      "7ff03d0d-537a-5fec-9eb3-9c7c3482dd45": null,
+      "7ffa6fcb-c510-5816-8087-ee2392f147c3": null,
+      "838b2c62-2f19-5846-aefd-b9d75ee2d382": null,
+      "853b44b0-74db-59bc-9e49-9ffc808b984e": null,
+      "858c7cca-f9f5-5c4e-bb83-4d9708fffbf0": null,
+      "87508757-5ef8-5d29-b060-c3d7021157a5": null,
+      "885955b9-3d59-51e3-8b09-d8b0073c2c0a": null,
+      "8860a641-0415-5af7-b40e-75d9294719aa": null,
+      "88cffa1f-ebd1-508a-b239-11d1cc91a247": null,
+      "8c1b72ad-ef6d-51fe-ad0e-1815224c4c11": null,
+      "8cef1cc6-84a3-5123-8af5-f85e1545953c": null,
+      "8d4783eb-1c82-52f5-a205-17985922b7e4": null,
+      "8da94019-c544-5339-a9d2-55b9b31b91d2": null,
+      "8e8dcb70-3f14-5ee5-908f-a9e5ef5b0fd0": null,
+      "8fd8b87f-3a3e-5436-a388-025efb342cc0": null,
+      "90f40836-c280-5c0b-aa96-1fdff24598d6": null,
+      "91adcbf3-c363-5ff4-bd2c-9d8d9a08e23f": null,
+      "93ab5073-0a17-5ca0-a6e5-1644f448cc0e": null,
+      "942d461b-332b-534f-be85-ffaa7c7fc311": null,
+      "949317c4-fab2-5292-8607-eeb6e795c338": null,
+      "949d39fb-ca9d-5071-be33-9e059fa18514": null,
+      "94fb2ae3-1354-5b57-b988-9c6c5c7e5e00": null,
+      "95dcd002-0a5a-59a2-a98a-6a7d24ca5531": null,
+      "98ab21e5-5a99-50df-84de-8d32e8e49e59": null,
+      "98d7d010-c361-540d-906b-b456c2c209f8": null,
+      "9929ccfc-0678-5080-83bd-4c1a6f0d34ad": null,
+      "99a75507-4919-59a6-8ba7-47294dd73f61": null,
+      "9b326e49-60d7-5ae0-bccb-e14256d43b0f": null,
+      "9ef623ec-5916-5f86-9782-14bcd74e19e7": null,
+      "a298ab50-ab73-5c57-9e95-c887f061e964": null,
+      "a3f91e69-4649-52a7-bc3d-a4ca49655db9": null,
+      "a45e1c56-3796-58a5-a13a-9e5152a6cc13": null,
+      "a5f048dd-4f6d-5e91-81aa-3d76d9f7806b": null,
+      "a5f9ce7b-abc0-5c55-9fe2-a165e9c17e42": null,
+      "a9c73b96-eddd-5461-9195-aeb0753ea91d": null,
+      "ab6a5379-be71-5950-be4f-bd51654143f5": null,
+      "abdb832f-b983-5ad3-8d1a-276e7de5f144": null,
+      "ad71fe2f-19bc-577d-8e81-626c69f211c7": null,
+      "ae624c84-cc5a-5195-8e67-5dc6a8eb8004": null,
+      "ae6c54e4-3daf-50df-ad8c-91f49175eee9": null,
+      "affd6f6c-b2d3-5a27-8e7a-4019a0e5af62": null,
+      "b0371661-518c-5b4b-8691-31340dd7f108": null,
+      "b2120023-d89b-5807-8de1-f4e7167859af": null,
+      "b2311dae-966c-5d23-b44c-fc71c5e6c85c": null,
+      "b2a2d782-0991-5c36-83ef-6b4d18feb310": null,
+      "b9b6eb02-dc95-5891-a090-df34f82cd8da": null,
+      "bda8db91-bb36-5f15-8d85-4ef9bdd94663": null,
+      "c00b6f06-a796-5ebd-a68c-82c71eb7f112": null,
+      "c0153d5a-8b3f-53fb-9824-6775c9146b3f": null,
+      "c19b2ed0-cb13-5f3b-98aa-2a4cc8ed61bc": null,
+      "c1a375ff-78c4-5305-abe2-8cdba091891c": null,
+      "c214ca25-27a1-5b24-a31c-a4880a88abe8": null,
+      "c493faf0-5403-5a9b-8a5c-b86562876669": null,
+      "c4a62d7c-ea29-53e7-a03e-de31b8e13b07": null,
+      "c6f62045-0f08-552c-be94-54f2985e3a3d": null,
+      "c7b78e6f-093f-5de4-83ea-d5164bec5749": null,
+      "cd1fc6c6-2a1a-560f-b292-69f0cdebe53d": null,
+      "cd2f1b19-095e-504d-ae2d-fb88888b24ec": null,
+      "cf925ed1-b8d3-5b8c-83ac-3f9743f219ad": null,
+      "d4fa724b-d8b9-56f6-90d6-ac3e057ed173": null,
+      "d513b1c6-2dd9-5ac1-8e49-62e41499c485": null,
+      "d70cf432-e9d5-537f-a799-2308f3161ad0": null,
+      "d90a41b5-7578-55db-bd62-d42d38cfc5bc": null,
+      "d9558ce0-50e7-501b-9e8f-6e04fe6fdbee": null,
+      "dae39e1b-b703-5143-bd8a-a0f03ea1b59b": null,
+      "dcad7e44-2e5b-5920-b1c6-648f4e0d7565": null,
+      "dcff0278-7dc0-581d-a61d-fd2769d5c6fc": null,
+      "ddf278ae-fb15-56f6-9dbb-98e632d76489": null,
+      "e02e6150-2b0d-585a-9496-1100d7e19803": null,
+      "e04c977a-a938-5e27-b937-e8b59153093b": null,
+      "e1bc0b85-2ac8-5442-9807-089718c82d30": null,
+      "e1fa6e84-ac27-5838-8e95-89248935e536": null,
+      "e350ab52-f207-5287-9df8-ef48fabce6f5": null,
+      "e45884da-97c5-5931-87bc-4374519e2176": null,
+      "e733577c-6f4a-522f-abcd-569ccdd2f3fd": null,
+      "e8ffa88d-9663-500b-b2d3-9a0dc7da6910": null,
+      "e990cd33-0f7f-54f7-980a-11f2c689cf37": null,
+      "ea50ff88-ceae-54d3-b21f-a8e482531249": null,
+      "ebd6c424-0bfb-571c-a5db-9368871c63ee": null,
+      "ec8925f4-7493-5267-9611-f10696d695aa": null,
+      "ef131dd6-52e3-53a9-961a-ad29ca9d017e": null,
+      "ef62901a-a699-52c8-b8ed-3083aecf2082": null,
+      "efc6e5aa-e58a-5be1-a212-d9e9961643c8": null,
+      "f26871de-0d2a-568f-bc4e-2a934400fa30": null,
+      "f3e4a66e-f348-5d51-8db0-560f4f0694af": null,
+      "f54a5894-2e5f-50c7-88ae-7238df33158f": null,
+      "f5bfb915-debe-5979-9ef8-3c27d5f97f73": null,
+      "f6883c18-eac3-5c3a-8c4c-d337ec48c42d": null,
+      "f8121587-a0fc-5f89-bebe-32727a0e0dc0": null,
+      "f8479678-17d1-5f4f-87ae-e389a66cf97d": null,
+      "f87fb05a-a284-552a-8258-250606533186": null,
+      "f8a78196-17a1-51af-9135-1b2a831be095": null,
+      "f9a0112b-a193-5fce-bd2b-52f8e353a52b": null,
+      "f9e9689b-64d6-5d46-8637-aa638b5337f8": null,
+      "fc92b20d-2114-5829-b512-f94a3a9350af": null,
+      "fd563971-ce33-5d2e-a8e7-e3436b0229d2": null,
+      "fef9e547-f7c2-5c99-8a0a-c9acc031c571": null,
+      "ff2c7578-72c0-56c0-992e-b821f15ce0a8": null
+    }
+  },
+  "opportunities": [
+    {
+      "executed": true,
+      "expected_net_edge_bps": "5.94997675003874993541677431",
+      "missed": false,
+      "missed_reason": "",
+      "observed_ts_ns": 1700000000151000000,
+      "opportunity_id": "db0bc6f0-e439-5719-ad3d-d2bb22fdbd66",
+      "parent_id": "09b2ae6f-905a-57c7-aa4d-95f543d81390",
+      "raw_refs": [],
+      "residual_base": "0.000",
+      "source_event_ids": [
+        "4e0d3c14-37ad-5734-ae23-98c83ed4af59",
+        "b2a2d782-0991-5c36-83ef-6b4d18feb310"
+      ],
+      "terminal_outcome": "FILLED"
+    },
+    {
+      "executed": true,
+      "expected_net_edge_bps": "5.96666666666666666666666667",
+      "missed": false,
+      "missed_reason": "",
+      "observed_ts_ns": 1700000000201000000,
+      "opportunity_id": "9d0c8aa2-097d-5e16-8875-3c3171bdbbfb",
+      "parent_id": "7c9e0ac1-157e-5b32-be8e-c201f2a8ebca",
+      "raw_refs": [],
+      "residual_base": "0.000",
+      "source_event_ids": [
+        "70012c6f-30da-5fee-835c-ede3c7f4f7c1",
+        "b2a2d782-0991-5c36-83ef-6b4d18feb310"
+      ],
+      "terminal_outcome": "FILLED"
+    },
+    {
+      "executed": true,
+      "expected_net_edge_bps": "5.98333333333333333333333333",
+      "missed": false,
+      "missed_reason": "",
+      "observed_ts_ns": 1700000000251000000,
+      "opportunity_id": "84282a8a-2a6a-555b-a339-d2716b1a6b81",
+      "parent_id": "16a71364-5743-56ec-b74c-21bd7fa57575",
+      "raw_refs": [],
+      "residual_base": "0.000",
+      "source_event_ids": [
+        "70012c6f-30da-5fee-835c-ede3c7f4f7c1",
+        "b2311dae-966c-5d23-b44c-fc71c5e6c85c"
+      ],
+      "terminal_outcome": "FILLED"
+    },
+    {
+      "executed": true,
+      "expected_net_edge_bps": "5.98333333333333333333333333",
+      "missed": false,
+      "missed_reason": "",
+      "observed_ts_ns": 1700000000301000000,
+      "opportunity_id": "c33130bf-4e52-5b21-8665-115ce180c45c",
+      "parent_id": "bc3e3cbd-a9c1-5210-9cef-848a27203244",
+      "raw_refs": [],
+      "residual_base": "0.000",
+      "source_event_ids": [
+        "731c3eb8-8e13-57ce-9577-342102460b1f",
+        "b2311dae-966c-5d23-b44c-fc71c5e6c85c"
+      ],
+      "terminal_outcome": "FILLED"
+    },
+    {
+      "executed": true,
+      "expected_net_edge_bps": "5.950000",
+      "missed": false,
+      "missed_reason": "",
+      "observed_ts_ns": 1700000000351000000,
+      "opportunity_id": "4d431307-b80b-5aeb-80bc-aeef34603145",
+      "parent_id": "53f0bdac-b59d-5222-97fa-53680df1500b",
+      "raw_refs": [],
+      "residual_base": "0.000",
+      "source_event_ids": [
+        "731c3eb8-8e13-57ce-9577-342102460b1f",
+        "6fdebcb3-4d10-571f-9bfd-6f5e3d0576ce"
+      ],
+      "terminal_outcome": "FILLED"
+    },
+    {
+      "executed": true,
+      "expected_net_edge_bps": "5.950000",
+      "missed": false,
+      "missed_reason": "",
+      "observed_ts_ns": 1700000000401000000,
+      "opportunity_id": "8fbbd2d6-b718-5bad-8f11-d2ef84dc4b40",
+      "parent_id": "3bcbf4d7-17fd-54b1-b09a-0b54f35a7c30",
+      "raw_refs": [],
+      "residual_base": "0.000",
+      "source_event_ids": [
+        "ab6a5379-be71-5950-be4f-bd51654143f5",
+        "6fdebcb3-4d10-571f-9bfd-6f5e3d0576ce"
+      ],
+      "terminal_outcome": "FILLED"
+    },
+    {
+      "executed": true,
+      "expected_net_edge_bps": "5.94997675003874993541677431",
+      "missed": false,
+      "missed_reason": "",
+      "observed_ts_ns": 1700000010151000000,
+      "opportunity_id": "77439e24-e2a3-5e1c-a4ac-d4ccf9398180",
+      "parent_id": "08879dd0-a649-5885-a5c3-86574d181816",
+      "raw_refs": [],
+      "residual_base": "0.000",
+      "source_event_ids": [
+        "1c73dc94-ff24-544e-9214-9667224386a7",
+        "fd563971-ce33-5d2e-a8e7-e3436b0229d2"
+      ],
+      "terminal_outcome": "FILLED"
+    },
+    {
+      "executed": true,
+      "expected_net_edge_bps": "5.98335663892773154621924370",
+      "missed": false,
+      "missed_reason": "",
+      "observed_ts_ns": 1700000010201000000,
+      "opportunity_id": "45897f42-3b9d-5094-809f-480e74cb3a41",
+      "parent_id": "6256b968-4163-576a-a53f-bb3bb81b3ea0",
+      "raw_refs": [],
+      "residual_base": "0.000",
+      "source_event_ids": [
+        "c493faf0-5403-5a9b-8a5c-b86562876669",
+        "fd563971-ce33-5d2e-a8e7-e3436b0229d2"
+      ],
+      "terminal_outcome": "FILLED"
+    },
+    {
+      "executed": false,
+      "expected_net_edge_bps": "5.95002325003875006458344097",
+      "missed": true,
+      "missed_reason": "REJECTED",
+      "observed_ts_ns": 1700000010251000000,
+      "opportunity_id": "9fe9f235-fe30-51b6-abb2-79142bb6b84a",
+      "parent_id": "aeee8d4a-801a-50ed-add5-97389c63adc7",
+      "raw_refs": [],
+      "residual_base": "0",
+      "source_event_ids": [
+        "c493faf0-5403-5a9b-8a5c-b86562876669",
+        "bda8db91-bb36-5f15-8d85-4ef9bdd94663"
+      ],
+      "terminal_outcome": "REJECTED"
+    },
+    {
+      "executed": false,
+      "expected_net_edge_bps": "5.96671322237740792469308231",
+      "missed": true,
+      "missed_reason": "REJECTED",
+      "observed_ts_ns": 1700000010301000000,
+      "opportunity_id": "c5af7106-18d8-5673-8abf-751d2c10556e",
+      "parent_id": "cbcfc649-9142-5b66-ba3d-2546eb02cd23",
+      "raw_refs": [],
+      "residual_base": "0",
+      "source_event_ids": [
+        "04c36cb8-c073-5240-82f6-b11bb0ed358d",
+        "bda8db91-bb36-5f15-8d85-4ef9bdd94663"
+      ],
+      "terminal_outcome": "REJECTED"
+    },
+    {
+      "executed": false,
+      "expected_net_edge_bps": "5.95004650015500051666838889",
+      "missed": true,
+      "missed_reason": "REJECTED",
+      "observed_ts_ns": 1700000010351000000,
+      "opportunity_id": "6c3313a9-95e5-5ce8-9d28-a15a1cdefacb",
+      "parent_id": "d5ef802d-3d98-51a1-9455-da3184343b8b",
+      "raw_refs": [],
+      "residual_base": "0",
+      "source_event_ids": [
+        "04c36cb8-c073-5240-82f6-b11bb0ed358d",
+        "affd6f6c-b2d3-5a27-8e7a-4019a0e5af62"
+      ],
+      "terminal_outcome": "REJECTED"
+    },
+    {
+      "executed": false,
+      "expected_net_edge_bps": "5.98342655617704118027453516",
+      "missed": true,
+      "missed_reason": "REJECTED",
+      "observed_ts_ns": 1700000010401000000,
+      "opportunity_id": "e146fa31-391a-5eac-87fb-bb2c2ff3a790",
+      "parent_id": "bbee56d4-a286-5bb9-826b-01efe0dd73ab",
+      "raw_refs": [],
+      "residual_base": "0",
+      "source_event_ids": [
+        "7ffa6fcb-c510-5816-8087-ee2392f147c3",
+        "affd6f6c-b2d3-5a27-8e7a-4019a0e5af62"
+      ],
+      "terminal_outcome": "REJECTED"
+    },
+    {
+      "executed": false,
+      "expected_net_edge_bps": "5.96692272691666013876921077",
+      "missed": true,
+      "missed_reason": "REJECTED",
+      "observed_ts_ns": 1700000020151000000,
+      "opportunity_id": "964c5180-3f5d-5925-b513-34236d18a863",
+      "parent_id": "14e79814-312a-574a-aea7-69ee5560d3eb",
+      "raw_refs": [],
+      "residual_base": "0",
+      "source_event_ids": [
+        "2046e3b4-0ca7-566d-82ac-adf42db02787",
+        "25549908-fdc2-5c37-9074-9e950e83ae0f"
+      ],
+      "terminal_outcome": "REJECTED"
+    },
+    {
+      "executed": false,
+      "expected_net_edge_bps": "5.95023250387506458440974016",
+      "missed": true,
+      "missed_reason": "REJECTED",
+      "observed_ts_ns": 1700000020201000000,
+      "opportunity_id": "bf5231da-0966-5208-ac36-3a54436082b5",
+      "parent_id": "26fdc278-5a4d-54db-aefb-ca7bea09cf61",
+      "raw_refs": [],
+      "residual_base": "0",
+      "source_event_ids": [
+        "1bac9a39-1335-55ac-b0d2-29bb4c073da9",
+        "25549908-fdc2-5c37-9074-9e950e83ae0f"
+      ],
+      "terminal_outcome": "REJECTED"
+    },
+    {
+      "executed": false,
+      "expected_net_edge_bps": "5.98356639277321288688144802",
+      "missed": true,
+      "missed_reason": "REJECTED",
+      "observed_ts_ns": 1700000020251000000,
+      "opportunity_id": "d4af8e12-4a17-5d1e-aba3-45fdc79fcd50",
+      "parent_id": "766bf30a-7377-5b8d-9754-d52faeef00c0",
+      "raw_refs": [],
+      "residual_base": "0",
+      "source_event_ids": [
+        "1bac9a39-1335-55ac-b0d2-29bb4c073da9",
+        "50e74420-d19d-5d74-aac6-db3e94c643b3"
+      ],
+      "terminal_outcome": "REJECTED"
+    },
+    {
+      "executed": false,
+      "expected_net_edge_bps": "5.95018600248003306710756143",
+      "missed": true,
+      "missed_reason": "REJECTED",
+      "observed_ts_ns": 1700000020301000000,
+      "opportunity_id": "f43b1462-1ae8-5779-ba68-7c55111a15d2",
+      "parent_id": "5ddbfa38-c740-503d-bc14-98ccec53462c",
+      "raw_refs": [],
+      "residual_base": "0",
+      "source_event_ids": [
+        "fef9e547-f7c2-5c99-8a0a-c9acc031c571",
+        "50e74420-d19d-5d74-aac6-db3e94c643b3"
+      ],
+      "terminal_outcome": "REJECTED"
+    },
+    {
+      "executed": false,
+      "expected_net_edge_bps": "5.98351978026373684982466433",
+      "missed": true,
+      "missed_reason": "REJECTED",
+      "observed_ts_ns": 1700000020351000000,
+      "opportunity_id": "d99a90db-6357-5f82-8cdf-a84b5f060201",
+      "parent_id": "43d03f12-13b7-5724-b20c-d7515059d838",
+      "raw_refs": [],
+      "residual_base": "0",
+      "source_event_ids": [
+        "fef9e547-f7c2-5c99-8a0a-c9acc031c571",
+        "16908d62-d593-5d01-abf7-3ed6d63c17d6"
+      ],
+      "terminal_outcome": "REJECTED"
+    },
+    {
+      "executed": false,
+      "expected_net_edge_bps": "5.96682961301215180843776511",
+      "missed": true,
+      "missed_reason": "REJECTED",
+      "observed_ts_ns": 1700000020401000000,
+      "opportunity_id": "fc0dc69f-108d-5a6c-acc3-43d6e96b3a38",
+      "parent_id": "81043a75-9a3c-52c5-81d9-f3e29a587587",
+      "raw_refs": [],
+      "residual_base": "0",
+      "source_event_ids": [
+        "17777fb6-7a82-5302-a1ae-6afa390775e7",
+        "16908d62-d593-5d01-abf7-3ed6d63c17d6"
+      ],
+      "terminal_outcome": "REJECTED"
+    },
+    {
+      "executed": false,
+      "expected_net_edge_bps": "5.96713223774125804193473116",
+      "missed": true,
+      "missed_reason": "REJECTED",
+      "observed_ts_ns": 1700000030151000000,
+      "opportunity_id": "ff2bb743-789d-52de-88eb-3c49405b630a",
+      "parent_id": "0f25c47c-33ef-5b30-902b-80c594d9ced2",
+      "raw_refs": [],
+      "residual_base": "0",
+      "source_event_ids": [
+        "e990cd33-0f7f-54f7-980a-11f2c689cf37",
+        "2c43d9e2-9811-5416-920d-24d32477e989"
+      ],
+      "terminal_outcome": "REJECTED"
+    },
+    {
+      "executed": false,
+      "expected_net_edge_bps": "5.96713223774125804193473116",
+      "missed": true,
+      "missed_reason": "REJECTED",
+      "observed_ts_ns": 1700000030201000000,
+      "opportunity_id": "599978e3-db4b-5fab-ae07-bc238ab76ee8",
+      "parent_id": "4fa8d272-8098-55de-b12f-a1298bb22a93",
+      "raw_refs": [],
+      "residual_base": "0",
+      "source_event_ids": [
+        "1fde58ba-8b52-592b-b17e-b427abafd1ca",
+        "2c43d9e2-9811-5416-920d-24d32477e989"
+      ],
+      "terminal_outcome": "REJECTED"
+    },
+    {
+      "executed": false,
+      "expected_net_edge_bps": "5.95046501550051668388946298",
+      "missed": true,
+      "missed_reason": "REJECTED",
+      "observed_ts_ns": 1700000030251000000,
+      "opportunity_id": "7e1e8a13-db1c-5679-8cd8-c26921b38cc6",
+      "parent_id": "855bf36b-15c3-59dd-b326-ab87d22e2c00",
+      "raw_refs": [],
+      "residual_base": "0",
+      "source_event_ids": [
+        "1fde58ba-8b52-592b-b17e-b427abafd1ca",
+        "11fc73e8-e899-5d04-8dd5-2bce91e1a238"
+      ],
+      "terminal_outcome": "REJECTED"
+    },
+    {
+      "executed": false,
+      "expected_net_edge_bps": "5.98384607435605972218981363",
+      "missed": true,
+      "missed_reason": "REJECTED",
+      "observed_ts_ns": 1700000030301000000,
+      "opportunity_id": "4b2db93e-d547-5b29-a5d6-46eff8918a2e",
+      "parent_id": "61908ce9-121d-51cd-a9c1-1b57db4aa2d2",
+      "raw_refs": [],
+      "residual_base": "0",
+      "source_event_ids": [
+        "22b6f6d0-8899-5685-8b9a-a8caa2b5798c",
+        "11fc73e8-e899-5d04-8dd5-2bce91e1a238"
+      ],
+      "terminal_outcome": "REJECTED"
+    },
+    {
+      "executed": false,
+      "expected_net_edge_bps": "5.95051151875568770854931347",
+      "missed": true,
+      "missed_reason": "REJECTED",
+      "observed_ts_ns": 1700000030351000000,
+      "opportunity_id": "4a3e16ea-6bb0-5c44-ab88-8592c6918dea",
+      "parent_id": "d154eff9-2db1-5a22-9510-27819013f1b7",
+      "raw_refs": [],
+      "residual_base": "0",
+      "source_event_ids": [
+        "22b6f6d0-8899-5685-8b9a-a8caa2b5798c",
+        "0831248a-2d26-5aff-bc42-db2cdef61692"
+      ],
+      "terminal_outcome": "REJECTED"
+    },
+    {
+      "executed": false,
+      "expected_net_edge_bps": "5.98389268904089496913209862",
+      "missed": true,
+      "missed_reason": "REJECTED",
+      "observed_ts_ns": 1700000030401000000,
+      "opportunity_id": "56d2e1d9-6251-59c0-9dd9-bc36fe3678dc",
+      "parent_id": "d06a82c2-6080-5c12-bdb9-7c9b046eca6b",
+      "raw_refs": [],
+      "residual_base": "0",
+      "source_event_ids": [
+        "1916f1b8-bfc9-59d6-b351-f22b87455cc9",
+        "0831248a-2d26-5aff-bc42-db2cdef61692"
+      ],
+      "terminal_outcome": "REJECTED"
+    },
+    {
+      "executed": false,
+      "expected_net_edge_bps": "5.95039526119906730690702903",
+      "missed": true,
+      "missed_reason": "REJECTED",
+      "observed_ts_ns": 1700000040151000000,
+      "opportunity_id": "f47fc53b-41d2-52e1-a6b0-c5c0e900600c",
+      "parent_id": "56ef0cd1-00d2-5c36-bb18-b9298fff1fed",
+      "raw_refs": [],
+      "residual_base": "0",
+      "source_event_ids": [
+        "ddf278ae-fb15-56f6-9dbb-98e632d76489",
+        "f6883c18-eac3-5c3a-8c4c-d337ec48c42d"
+      ],
+      "terminal_outcome": "REJECTED"
+    },
+    {
+      "executed": false,
+      "expected_net_edge_bps": "5.98377615291150886444737417",
+      "missed": true,
+      "missed_reason": "REJECTED",
+      "observed_ts_ns": 1700000040201000000,
+      "opportunity_id": "ebe74140-fc24-5be9-b213-e3e7780551d1",
+      "parent_id": "273f86e5-64aa-5858-aa2f-14c20608ee03",
+      "raw_refs": [],
+      "residual_base": "0",
+      "source_event_ids": [
+        "f87fb05a-a284-552a-8258-250606533186",
+        "f6883c18-eac3-5c3a-8c4c-d337ec48c42d"
+      ],
+      "terminal_outcome": "REJECTED"
+    },
+    {
+      "executed": false,
+      "expected_net_edge_bps": "5.98377615291150886444737417",
+      "missed": true,
+      "missed_reason": "REJECTED",
+      "observed_ts_ns": 1700000040251000000,
+      "opportunity_id": "dcb5a84c-12e5-5fed-a290-b0d83c35ec2b",
+      "parent_id": "f421c219-ebad-573f-87d8-2a1411050d3c",
+      "raw_refs": [],
+      "residual_base": "0",
+      "source_event_ids": [
+        "f87fb05a-a284-552a-8258-250606533186",
+        "dae39e1b-b703-5143-bd8a-a0f03ea1b59b"
+      ],
+      "terminal_outcome": "REJECTED"
+    },
+    {
+      "executed": false,
+      "expected_net_edge_bps": "5.98377615291150886444737417",
+      "missed": true,
+      "missed_reason": "REJECTED",
+      "observed_ts_ns": 1700000040301000000,
+      "opportunity_id": "5b63dfe8-e553-5c2e-bcd6-dc46c6067261",
+      "parent_id": "aba6209f-7fb5-560c-a82a-092f0ece3803",
+      "raw_refs": [],
+      "residual_base": "0",
+      "source_event_ids": [
+        "54ac9648-fa05-5b7a-86fd-90dba9d8af5e",
+        "dae39e1b-b703-5143-bd8a-a0f03ea1b59b"
+      ],
+      "terminal_outcome": "REJECTED"
+    },
+    {
+      "executed": false,
+      "expected_net_edge_bps": "5.95044176398919299111138519",
+      "missed": true,
+      "missed_reason": "REJECTED",
+      "observed_ts_ns": 1700000040351000000,
+      "opportunity_id": "81e09018-8156-5a11-830a-f292fbf1d385",
+      "parent_id": "8e83e9a0-7a22-591b-b539-9c42cf96415b",
+      "raw_refs": [],
+      "residual_base": "0",
+      "source_event_ids": [
+        "54ac9648-fa05-5b7a-86fd-90dba9d8af5e",
+        "f8479678-17d1-5f4f-87ae-e389a66cf97d"
+      ],
+      "terminal_outcome": "REJECTED"
+    },
+    {
+      "executed": false,
+      "expected_net_edge_bps": "5.95044176398919299111138519",
+      "missed": true,
+      "missed_reason": "REJECTED",
+      "observed_ts_ns": 1700000040401000000,
+      "opportunity_id": "b5a5d004-d328-5389-b6b7-e5f93f3d7e0c",
+      "parent_id": "49fb4f30-74d4-59b2-9ce0-2e54bdeb0d6d",
+      "raw_refs": [],
+      "residual_base": "0",
+      "source_event_ids": [
+        "e8ffa88d-9663-500b-b2d3-9a0dc7da6910",
+        "f8479678-17d1-5f4f-87ae-e389a66cf97d"
+      ],
+      "terminal_outcome": "REJECTED"
+    },
+    {
+      "executed": false,
+      "expected_net_edge_bps": "5.95069753487674383719185959",
+      "missed": true,
+      "missed_reason": "REJECTED",
+      "observed_ts_ns": 1700000050151000000,
+      "opportunity_id": "5c2bacc6-e017-52a7-aeb2-25d360090b82",
+      "parent_id": "35a0ac2f-a8c6-5203-b982-2ffdb77e4fdc",
+      "raw_refs": [],
+      "residual_base": "0",
+      "source_event_ids": [
+        "98ab21e5-5a99-50df-84de-8d32e8e49e59",
+        "ea50ff88-ceae-54d3-b21f-a8e482531249"
+      ],
+      "terminal_outcome": "REJECTED"
+    },
+    {
+      "executed": false,
+      "expected_net_edge_bps": "5.98407915088804736252600139",
+      "missed": true,
+      "missed_reason": "REJECTED",
+      "observed_ts_ns": 1700000050201000000,
+      "opportunity_id": "a969313b-d383-593e-95ca-ff01dadcd12c",
+      "parent_id": "5bd578c8-e2e3-59d3-81a5-9a590da12864",
+      "raw_refs": [],
+      "residual_base": "0",
+      "source_event_ids": [
+        "4b6e246d-897f-5cb6-9000-7baf2d8408be",
+        "ea50ff88-ceae-54d3-b21f-a8e482531249"
+      ],
+      "terminal_outcome": "REJECTED"
+    },
+    {
+      "executed": false,
+      "expected_net_edge_bps": "5.95074403968211637954024215",
+      "missed": true,
+      "missed_reason": "REJECTED",
+      "observed_ts_ns": 1700000050251000000,
+      "opportunity_id": "a8dd9fe0-0fc5-5423-abcb-9fb2c4fc278d",
+      "parent_id": "d90463d9-b609-53b5-bd0f-8e41a4f9daf8",
+      "raw_refs": [],
+      "residual_base": "0",
+      "source_event_ids": [
+        "4b6e246d-897f-5cb6-9000-7baf2d8408be",
+        "7ff03d0d-537a-5fec-9eb3-9c7c3482dd45"
+      ],
+      "terminal_outcome": "REJECTED"
+    },
+    {
+      "executed": false,
+      "expected_net_edge_bps": "5.98412576712680385221829237",
+      "missed": true,
+      "missed_reason": "REJECTED",
+      "observed_ts_ns": 1700000050301000000,
+      "opportunity_id": "ea15366a-5f04-57f6-838e-4a3fa245fa9d",
+      "parent_id": "57ddd1e9-ff6f-5518-8dac-37bfce302046",
+      "raw_refs": [],
+      "residual_base": "0",
+      "source_event_ids": [
+        "ad71fe2f-19bc-577d-8e81-626c69f211c7",
+        "7ff03d0d-537a-5fec-9eb3-9c7c3482dd45"
+      ],
+      "terminal_outcome": "REJECTED"
+    },
+    {
+      "executed": false,
+      "expected_net_edge_bps": "5.98412576712680385221829237",
+      "missed": true,
+      "missed_reason": "REJECTED",
+      "observed_ts_ns": 1700000050351000000,
+      "opportunity_id": "f8f3f3d4-01c9-584d-bd22-c4f45602aa56",
+      "parent_id": "916c70a5-75bd-54c3-b14b-e6e9309e5a14",
+      "raw_refs": [],
+      "residual_base": "0",
+      "source_event_ids": [
+        "ad71fe2f-19bc-577d-8e81-626c69f211c7",
+        "99a75507-4919-59a6-8ba7-47294dd73f61"
+      ],
+      "terminal_outcome": "REJECTED"
+    },
+    {
+      "executed": false,
+      "expected_net_edge_bps": "5.98412576712680385221829237",
+      "missed": true,
+      "missed_reason": "REJECTED",
+      "observed_ts_ns": 1700000050401000000,
+      "opportunity_id": "409d8e60-05b1-5d74-8b56-813d6a91c288",
+      "parent_id": "98d5c34a-66be-580f-a369-c8bd62b43545",
+      "raw_refs": [],
+      "residual_base": "0",
+      "source_event_ids": [
+        "8cef1cc6-84a3-5123-8af5-f85e1545953c",
+        "99a75507-4919-59a6-8ba7-47294dd73f61"
+      ],
+      "terminal_outcome": "REJECTED"
+    },
+    {
+      "executed": false,
+      "expected_net_edge_bps": "5.96787721602538886703514305",
+      "missed": true,
+      "missed_reason": "REJECTED",
+      "observed_ts_ns": 1700000060151000000,
+      "opportunity_id": "7b502830-7e88-5bf6-8d2a-3466f9c253a1",
+      "parent_id": "6e8f5fb8-a398-5726-b01c-61c9f4f3e540",
+      "raw_refs": [],
+      "residual_base": "0",
+      "source_event_ids": [
+        "c0153d5a-8b3f-53fb-9824-6775c9146b3f",
+        "853b44b0-74db-59bc-9e49-9ffc808b984e"
+      ],
+      "terminal_outcome": "REJECTED"
+    },
+    {
+      "executed": false,
+      "expected_net_edge_bps": "5.96787721602538886703514305",
+      "missed": true,
+      "missed_reason": "REJECTED",
+      "observed_ts_ns": 1700000060201000000,
+      "opportunity_id": "f657e0b0-00a7-5de4-a7ea-5177d1109c4c",
+      "parent_id": "7e3e212b-11cb-5890-9902-a1d66b5f9272",
+      "raw_refs": [],
+      "residual_base": "0",
+      "source_event_ids": [
+        "13ad5e65-e3d2-55c4-b285-79d358741cb7",
+        "853b44b0-74db-59bc-9e49-9ffc808b984e"
+      ],
+      "terminal_outcome": "REJECTED"
+    },
+    {
+      "executed": false,
+      "expected_net_edge_bps": "5.96787721602538886703514305",
+      "missed": true,
+      "missed_reason": "REJECTED",
+      "observed_ts_ns": 1700000060251000000,
+      "opportunity_id": "d4e3650c-c7bc-535b-a3cf-ebaccc1901f7",
+      "parent_id": "8930629a-1d56-5c49-9d40-3861c0338a71",
+      "raw_refs": [],
+      "residual_base": "0",
+      "source_event_ids": [
+        "13ad5e65-e3d2-55c4-b285-79d358741cb7",
+        "6c3a456f-de70-5dbf-af5e-5b3bf3b4dd0e"
+      ],
+      "terminal_outcome": "REJECTED"
+    },
+    {
+      "executed": false,
+      "expected_net_edge_bps": "5.96787721602538886703514305",
+      "missed": true,
+      "missed_reason": "REJECTED",
+      "observed_ts_ns": 1700000060301000000,
+      "opportunity_id": "31aecaa0-34a9-57c5-962b-0211526bbd3b",
+      "parent_id": "e472b3fb-d47a-50fe-96cb-f6ac1992c7f5",
+      "raw_refs": [],
+      "residual_base": "0",
+      "source_event_ids": [
+        "05979115-9855-5a35-bb99-85db329ca970",
+        "6c3a456f-de70-5dbf-af5e-5b3bf3b4dd0e"
+      ],
+      "terminal_outcome": "REJECTED"
+    },
+    {
+      "executed": false,
+      "expected_net_edge_bps": "5.95120910478908172041576937",
+      "missed": true,
+      "missed_reason": "REJECTED",
+      "observed_ts_ns": 1700000060351000000,
+      "opportunity_id": "adf4c190-08bf-5f5b-9cb8-469f32e4ff24",
+      "parent_id": "9db0989d-bb44-5591-a5a3-26a14847ca09",
+      "raw_refs": [],
+      "residual_base": "0",
+      "source_event_ids": [
+        "05979115-9855-5a35-bb99-85db329ca970",
+        "a5f048dd-4f6d-5e91-81aa-3d76d9f7806b"
+      ],
+      "terminal_outcome": "REJECTED"
+    },
+    {
+      "executed": false,
+      "expected_net_edge_bps": "5.96790049787731249593714111",
+      "missed": true,
+      "missed_reason": "REJECTED",
+      "observed_ts_ns": 1700000060401000000,
+      "opportunity_id": "410feb31-7f40-5e99-a403-02d846d4cded",
+      "parent_id": "e1874067-09b7-5976-96a9-06434e71e017",
+      "raw_refs": [],
+      "residual_base": "0",
+      "source_event_ids": [
+        "a298ab50-ab73-5c57-9e95-c887f061e964",
+        "a5f048dd-4f6d-5e91-81aa-3d76d9f7806b"
+      ],
+      "terminal_outcome": "REJECTED"
+    },
+    {
+      "executed": false,
+      "expected_net_edge_bps": "5.95181373578565213477752108",
+      "missed": true,
+      "missed_reason": "REJECTED",
+      "observed_ts_ns": 1700000070151000000,
+      "opportunity_id": "6b3958a7-cc14-5a72-a9dd-aa57538fd772",
+      "parent_id": "6c7c5c56-f82c-5e60-9c50-46521bf3591d",
+      "raw_refs": [],
+      "residual_base": "0",
+      "source_event_ids": [
+        "8da94019-c544-5339-a9d2-55b9b31b91d2",
+        "768255c4-457b-5f86-8fc7-adc9df766056"
+      ],
+      "terminal_outcome": "REJECTED"
+    },
+    {
+      "executed": false,
+      "expected_net_edge_bps": "5.95181373578565213477752108",
+      "missed": true,
+      "missed_reason": "REJECTED",
+      "observed_ts_ns": 1700000070201000000,
+      "opportunity_id": "41682993-5c4d-508d-93a4-052e7fbbfb12",
+      "parent_id": "5a432198-1e22-5a3e-bf9d-d81bad203bd3",
+      "raw_refs": [],
+      "residual_base": "0",
+      "source_event_ids": [
+        "3ad11808-d523-512f-94e2-e11a29d1ba8a",
+        "768255c4-457b-5f86-8fc7-adc9df766056"
+      ],
+      "terminal_outcome": "REJECTED"
+    },
+    {
+      "executed": false,
+      "expected_net_edge_bps": "5.98515140301572537763242555",
+      "missed": true,
+      "missed_reason": "REJECTED",
+      "observed_ts_ns": 1700000070251000000,
+      "opportunity_id": "38ad85bb-569c-55af-981d-41a3000d9911",
+      "parent_id": "4fe30c4c-6cda-5fcc-a295-a8e8a99df152",
+      "raw_refs": [],
+      "residual_base": "0",
+      "source_event_ids": [
+        "3ad11808-d523-512f-94e2-e11a29d1ba8a",
+        "5784d9a0-5816-5bb4-bf96-ee213d4f6efb"
+      ],
+      "terminal_outcome": "REJECTED"
+    },
+    {
+      "executed": false,
+      "expected_net_edge_bps": "5.96845928560831973436591029",
+      "missed": true,
+      "missed_reason": "REJECTED",
+      "observed_ts_ns": 1700000070301000000,
+      "opportunity_id": "31dc8b8e-a993-5955-bbde-d6b5366ed26e",
+      "parent_id": "cd85ef98-0656-52e7-bf57-6bee54383642",
+      "raw_refs": [],
+      "residual_base": "0",
+      "source_event_ids": [
+        "396ebb54-7ee8-5ec8-84d8-a84351a56215",
+        "5784d9a0-5816-5bb4-bf96-ee213d4f6efb"
+      ],
+      "terminal_outcome": "REJECTED"
+    },
+    {
+      "executed": false,
+      "expected_net_edge_bps": "5.98512809143840126149522522",
+      "missed": true,
+      "missed_reason": "REJECTED",
+      "observed_ts_ns": 1700000070351000000,
+      "opportunity_id": "a5ced083-4cc7-5673-a37c-57199e8b4ffa",
+      "parent_id": "7a7a23d6-29ca-510e-bf2e-a2914de1c309",
+      "raw_refs": [],
+      "residual_base": "0",
+      "source_event_ids": [
+        "396ebb54-7ee8-5ec8-84d8-a84351a56215",
+        "1c210d5a-9d25-5eb1-98a8-a5b2d766045a"
+      ],
+      "terminal_outcome": "REJECTED"
+    },
+    {
+      "executed": false,
+      "expected_net_edge_bps": "5.95174396799599949993749219",
+      "missed": true,
+      "missed_reason": "REJECTED",
+      "observed_ts_ns": 1700000070401000000,
+      "opportunity_id": "50298235-ff72-51bc-9585-85aab7842938",
+      "parent_id": "bc99556d-c37e-5382-8e91-f33d5e58cfe6",
+      "raw_refs": [],
+      "residual_base": "0",
+      "source_event_ids": [
+        "e1fa6e84-ac27-5838-8e95-89248935e536",
+        "1c210d5a-9d25-5eb1-98a8-a5b2d766045a"
+      ],
+      "terminal_outcome": "REJECTED"
+    },
+    {
+      "executed": false,
+      "expected_net_edge_bps": "5.98524465010218063135295157",
+      "missed": true,
+      "missed_reason": "REJECTED",
+      "observed_ts_ns": 1700000080151000000,
+      "opportunity_id": "b8386bae-9d53-56eb-a456-d5d9956281a8",
+      "parent_id": "1c42f71a-8c4c-5f38-9501-50a8206ce3d1",
+      "raw_refs": [],
+      "residual_base": "0",
+      "source_event_ids": [
+        "ef131dd6-52e3-53a9-961a-ad29ca9d017e",
+        "b2120023-d89b-5807-8de1-f4e7167859af"
+      ],
+      "terminal_outcome": "REJECTED"
+    },
+    {
+      "executed": false,
+      "expected_net_edge_bps": "5.95186024803307107614348580",
+      "missed": true,
+      "missed_reason": "REJECTED",
+      "observed_ts_ns": 1700000080201000000,
+      "opportunity_id": "7bde7ca2-4ff2-5b0d-93f4-84069c5d543e",
+      "parent_id": "851755a6-7416-5d50-96b3-53adc506a2ce",
+      "raw_refs": [],
+      "residual_base": "0",
+      "source_event_ids": [
+        "7170825a-8bd0-583c-94dd-fb4ea2f1b741",
+        "b2120023-d89b-5807-8de1-f4e7167859af"
+      ],
+      "terminal_outcome": "REJECTED"
+    },
+    {
+      "executed": false,
+      "expected_net_edge_bps": "5.96852913721829577276970263",
+      "missed": true,
+      "missed_reason": "REJECTED",
+      "observed_ts_ns": 1700000080251000000,
+      "opportunity_id": "f87ced56-3cf6-55fb-b0da-671384881ae8",
+      "parent_id": "43d1f3d2-d572-5b94-b6f3-4ceec67cea85",
+      "raw_refs": [],
+      "residual_base": "0",
+      "source_event_ids": [
+        "7170825a-8bd0-583c-94dd-fb4ea2f1b741",
+        "c214ca25-27a1-5b24-a31c-a4880a88abe8"
+      ],
+      "terminal_outcome": "REJECTED"
+    },
+    {
+      "executed": false,
+      "expected_net_edge_bps": "5.95183699187059629517886522",
+      "missed": true,
+      "missed_reason": "REJECTED",
+      "observed_ts_ns": 1700000080301000000,
+      "opportunity_id": "eea9c97b-6bc0-5d71-b5b6-2bbd489b426c",
+      "parent_id": "996ef90a-c6fa-5c4e-b7a7-63ef4c1cdd9f",
+      "raw_refs": [],
+      "residual_base": "0",
+      "source_event_ids": [
+        "e04c977a-a938-5e27-b937-e8b59153093b",
+        "c214ca25-27a1-5b24-a31c-a4880a88abe8"
+      ],
+      "terminal_outcome": "REJECTED"
+    },
+    {
+      "executed": false,
+      "expected_net_edge_bps": "5.95183699187059629517886522",
+      "missed": true,
+      "missed_reason": "REJECTED",
+      "observed_ts_ns": 1700000080351000000,
+      "opportunity_id": "7ebd5b27-16a9-53ff-b106-c7d9c92695f0",
+      "parent_id": "3eb1407c-db2e-5d5a-81dd-2d07598debac",
+      "raw_refs": [],
+      "residual_base": "0",
+      "source_event_ids": [
+        "e04c977a-a938-5e27-b937-e8b59153093b",
+        "f8121587-a0fc-5f89-bebe-32727a0e0dc0"
+      ],
+      "terminal_outcome": "REJECTED"
+    },
+    {
+      "executed": false,
+      "expected_net_edge_bps": "5.95183699187059629517886522",
+      "missed": true,
+      "missed_reason": "REJECTED",
+      "observed_ts_ns": 1700000080401000000,
+      "opportunity_id": "6fedeb30-0b9e-5adc-bd40-08535d92f7c5",
+      "parent_id": "9f10f812-b0f2-57a2-aade-337224fe57b8",
+      "raw_refs": [],
+      "residual_base": "0",
+      "source_event_ids": [
+        "a45e1c56-3796-58a5-a13a-9e5152a6cc13",
+        "f8121587-a0fc-5f89-bebe-32727a0e0dc0"
+      ],
+      "terminal_outcome": "REJECTED"
+    },
+    {
+      "executed": false,
+      "expected_net_edge_bps": "5.98533789843210860223298673",
+      "missed": true,
+      "missed_reason": "REJECTED",
+      "observed_ts_ns": 1700000090151000000,
+      "opportunity_id": "4545fa9f-07b3-5d96-970c-c4c7ea086885",
+      "parent_id": "713a6c4b-5ee9-5113-aa7d-f76eb6de5e26",
+      "raw_refs": [],
+      "residual_base": "0",
+      "source_event_ids": [
+        "0406422d-bf39-5243-ada1-c677ff3b6541",
+        "1805fbf0-0385-589d-b6b8-fd0263220b3a"
+      ],
+      "terminal_outcome": "REJECTED"
+    },
+    {
+      "executed": false,
+      "expected_net_edge_bps": "5.98533789843210860223298673",
+      "missed": true,
+      "missed_reason": "REJECTED",
+      "observed_ts_ns": 1700000090201000000,
+      "opportunity_id": "00e0faba-625d-5d3e-b6f9-9f67214f4d41",
+      "parent_id": "36591d5c-ae16-5245-bc40-4e713e744970",
+      "raw_refs": [],
+      "residual_base": "0",
+      "source_event_ids": [
+        "1709c963-a5bb-5554-8438-75523152b8e8",
+        "1805fbf0-0385-589d-b6b8-fd0263220b3a"
+      ],
+      "terminal_outcome": "REJECTED"
+    },
+    {
+      "executed": false,
+      "expected_net_edge_bps": "5.98533789843210860223298673",
+      "missed": true,
+      "missed_reason": "REJECTED",
+      "observed_ts_ns": 1700000090251000000,
+      "opportunity_id": "d6048077-93d4-5eb4-8256-2802d540dd0f",
+      "parent_id": "6f1b8f0c-ba05-5652-871f-a2db696c8922",
+      "raw_refs": [],
+      "residual_base": "0",
+      "source_event_ids": [
+        "1709c963-a5bb-5554-8438-75523152b8e8",
+        "e02e6150-2b0d-585a-9496-1100d7e19803"
+      ],
+      "terminal_outcome": "REJECTED"
+    },
+    {
+      "executed": false,
+      "expected_net_edge_bps": "5.98533789843210860223298673",
+      "missed": true,
+      "missed_reason": "REJECTED",
+      "observed_ts_ns": 1700000090301000000,
+      "opportunity_id": "d58c70aa-378b-520e-9480-7475903061c8",
+      "parent_id": "01faa637-9eff-57c8-9a42-0a5ec6eb8f3d",
+      "raw_refs": [],
+      "residual_base": "0",
+      "source_event_ids": [
+        "0851a231-44ca-52a4-aa27-73fa28d77aa3",
+        "e02e6150-2b0d-585a-9496-1100d7e19803"
+      ],
+      "terminal_outcome": "REJECTED"
+    },
+    {
+      "executed": false,
+      "expected_net_edge_bps": "5.98533789843210860223298673",
+      "missed": true,
+      "missed_reason": "REJECTED",
+      "observed_ts_ns": 1700000090351000000,
+      "opportunity_id": "3e5f132a-3005-5209-8ce9-28032da0b4a9",
+      "parent_id": "6f98209f-8786-52b3-b0b4-f2d7a239b751",
+      "raw_refs": [],
+      "residual_base": "0",
+      "source_event_ids": [
+        "0851a231-44ca-52a4-aa27-73fa28d77aa3",
+        "95dcd002-0a5a-59a2-a98a-6a7d24ca5531"
+      ],
+      "terminal_outcome": "REJECTED"
+    },
+    {
+      "executed": false,
+      "expected_net_edge_bps": "5.98533789843210860223298673",
+      "missed": true,
+      "missed_reason": "REJECTED",
+      "observed_ts_ns": 1700000090401000000,
+      "opportunity_id": "884411bc-e031-55ec-ba2c-30b480f62d9c",
+      "parent_id": "70bffe27-07f7-5307-8256-f572444aeb14",
+      "raw_refs": [],
+      "residual_base": "0",
+      "source_event_ids": [
+        "17a88147-e6d0-5e1c-b969-6ed5d3ceecc0",
+        "95dcd002-0a5a-59a2-a98a-6a7d24ca5531"
+      ],
+      "terminal_outcome": "REJECTED"
+    },
+    {
+      "executed": false,
+      "expected_net_edge_bps": "5.96890169093721662132607884",
+      "missed": true,
+      "missed_reason": "REJECTED",
+      "observed_ts_ns": 1700000100151000000,
+      "opportunity_id": "f8ef7d46-829a-52a1-a11b-e95424466047",
+      "parent_id": "00be7066-53a2-5c7e-a9b0-99128ba57b4d",
+      "raw_refs": [],
+      "residual_base": "0",
+      "source_event_ids": [
+        "605f25c0-3a84-5bd3-ab2e-14970cbadb5b",
+        "18cecbfd-8eb2-5141-a6cc-78cf011de274"
+      ],
+      "terminal_outcome": "REJECTED"
+    },
+    {
+      "executed": false,
+      "expected_net_edge_bps": "5.96890169093721662132607884",
+      "missed": true,
+      "missed_reason": "REJECTED",
+      "observed_ts_ns": 1700000100201000000,
+      "opportunity_id": "f3ea2449-1602-50e2-9cad-d2db69b09e2e",
+      "parent_id": "1e15cd09-032b-59a9-b092-36f3d86d5051",
+      "raw_refs": [],
+      "residual_base": "0",
+      "source_event_ids": [
+        "93ab5073-0a17-5ca0-a6e5-1644f448cc0e",
+        "18cecbfd-8eb2-5141-a6cc-78cf011de274"
+      ],
+      "terminal_outcome": "REJECTED"
+    },
+    {
+      "executed": false,
+      "expected_net_edge_bps": "5.98557102469728489891716008",
+      "missed": true,
+      "missed_reason": "REJECTED",
+      "observed_ts_ns": 1700000100251000000,
+      "opportunity_id": "bcdcc995-0e81-55f1-801a-e94135c9129c",
+      "parent_id": "5b873ce2-9d0a-51ca-a69b-32ff9ac5c90f",
+      "raw_refs": [],
+      "residual_base": "0",
+      "source_event_ids": [
+        "93ab5073-0a17-5ca0-a6e5-1644f448cc0e",
+        "070aa028-ea48-58a3-b91a-98b91a835fbc"
+      ],
+      "terminal_outcome": "REJECTED"
+    },
+    {
+      "executed": false,
+      "expected_net_edge_bps": "5.98557102469728489891716008",
+      "missed": true,
+      "missed_reason": "REJECTED",
+      "observed_ts_ns": 1700000100301000000,
+      "opportunity_id": "85cdf2ca-abbc-55c0-851f-060566ce574c",
+      "parent_id": "10e0ffa8-5e70-5211-b173-8ac3e2ff0c98",
+      "raw_refs": [],
+      "residual_base": "0",
+      "source_event_ids": [
+        "e1bc0b85-2ac8-5442-9807-089718c82d30",
+        "070aa028-ea48-58a3-b91a-98b91a835fbc"
+      ],
+      "terminal_outcome": "REJECTED"
+    },
+    {
+      "executed": false,
+      "expected_net_edge_bps": "5.98557102469728489891716008",
+      "missed": true,
+      "missed_reason": "REJECTED",
+      "observed_ts_ns": 1700000100351000000,
+      "opportunity_id": "3be08ffd-213d-557e-b064-bfc9d246f77b",
+      "parent_id": "22e391cc-b6cc-5787-a929-abad9f70316c",
+      "raw_refs": [],
+      "residual_base": "0",
+      "source_event_ids": [
+        "e1bc0b85-2ac8-5442-9807-089718c82d30",
+        "8860a641-0415-5af7-b40e-75d9294719aa"
+      ],
+      "terminal_outcome": "REJECTED"
+    },
+    {
+      "executed": false,
+      "expected_net_edge_bps": "5.95218584244865028854520542",
+      "missed": true,
+      "missed_reason": "REJECTED",
+      "observed_ts_ns": 1700000100401000000,
+      "opportunity_id": "8944f66c-1284-5b19-b84b-67f00bcc8675",
+      "parent_id": "07abb685-79bc-5293-9671-50e50e700748",
+      "raw_refs": [],
+      "residual_base": "0",
+      "source_event_ids": [
+        "885955b9-3d59-51e3-8b09-d8b0073c2c0a",
+        "8860a641-0415-5af7-b40e-75d9294719aa"
+      ],
+      "terminal_outcome": "REJECTED"
+    },
+    {
+      "executed": false,
+      "expected_net_edge_bps": "5.95181373578565213477752108",
+      "missed": true,
+      "missed_reason": "REJECTED",
+      "observed_ts_ns": 1700000110151000000,
+      "opportunity_id": "19d9b86d-1055-5f1f-9cea-c1582359070c",
+      "parent_id": "3234dbc9-672d-562d-a736-5bd58d1fd7b2",
+      "raw_refs": [],
+      "residual_base": "0",
+      "source_event_ids": [
+        "76391fa2-1865-5b14-997f-f64f7a739f7e",
+        "f9a0112b-a193-5fce-bd2b-52f8e353a52b"
+      ],
+      "terminal_outcome": "REJECTED"
+    },
+    {
+      "executed": false,
+      "expected_net_edge_bps": "5.98519802640352046939591946",
+      "missed": true,
+      "missed_reason": "REJECTED",
+      "observed_ts_ns": 1700000110201000000,
+      "opportunity_id": "98fc0ac9-5046-5011-a6c8-732244a9e831",
+      "parent_id": "f383250a-d063-585b-bb55-015151a37406",
+      "raw_refs": [],
+      "residual_base": "0",
+      "source_event_ids": [
+        "d70cf432-e9d5-537f-a799-2308f3161ad0",
+        "f9a0112b-a193-5fce-bd2b-52f8e353a52b"
+      ],
+      "terminal_outcome": "REJECTED"
+    },
+    {
+      "executed": false,
+      "expected_net_edge_bps": "5.96852913721829577276970263",
+      "missed": true,
+      "missed_reason": "REJECTED",
+      "observed_ts_ns": 1700000110251000000,
+      "opportunity_id": "c350edc1-f032-5365-91dd-6df2a5e71338",
+      "parent_id": "ace65f1d-9332-55f6-b90f-096ca261b24d",
+      "raw_refs": [],
+      "residual_base": "0",
+      "source_event_ids": [
+        "d70cf432-e9d5-537f-a799-2308f3161ad0",
+        "ec8925f4-7493-5267-9611-f10696d695aa"
+      ],
+      "terminal_outcome": "REJECTED"
+    },
+    {
+      "executed": false,
+      "expected_net_edge_bps": "5.96852913721829577276970263",
+      "missed": true,
+      "missed_reason": "REJECTED",
+      "observed_ts_ns": 1700000110301000000,
+      "opportunity_id": "79f3f51b-86f6-5401-861e-01f1ab5cedeb",
+      "parent_id": "c72967fa-8880-55ef-a121-648e41e7d6fb",
+      "raw_refs": [],
+      "residual_base": "0",
+      "source_event_ids": [
+        "30efadcd-2f41-5d12-b767-69a965f01314",
+        "ec8925f4-7493-5267-9611-f10696d695aa"
+      ],
+      "terminal_outcome": "REJECTED"
+    },
+    {
+      "executed": false,
+      "expected_net_edge_bps": "5.95186024803307107614348580",
+      "missed": true,
+      "missed_reason": "REJECTED",
+      "observed_ts_ns": 1700000110351000000,
+      "opportunity_id": "c0fc4fc9-97d5-5662-a51a-9e61227b1d9a",
+      "parent_id": "d333604d-b1d9-50ac-8969-8e55555633db",
+      "raw_refs": [],
+      "residual_base": "0",
+      "source_event_ids": [
+        "30efadcd-2f41-5d12-b767-69a965f01314",
+        "9ef623ec-5916-5f86-9782-14bcd74e19e7"
+      ],
+      "terminal_outcome": "REJECTED"
+    },
+    {
+      "executed": false,
+      "expected_net_edge_bps": "5.98524465010218063135295157",
+      "missed": true,
+      "missed_reason": "REJECTED",
+      "observed_ts_ns": 1700000110401000000,
+      "opportunity_id": "cfcc4709-b0c7-54fc-9c9b-df380f17400e",
+      "parent_id": "c79d5a6f-5b5e-5275-bde3-75ea0806152a",
+      "raw_refs": [],
+      "residual_base": "0",
+      "source_event_ids": [
+        "949317c4-fab2-5292-8607-eeb6e795c338",
+        "9ef623ec-5916-5f86-9782-14bcd74e19e7"
+      ],
+      "terminal_outcome": "REJECTED"
+    },
+    {
+      "executed": false,
+      "expected_net_edge_bps": "5.98498822360646009777823709",
+      "missed": true,
+      "missed_reason": "REJECTED",
+      "observed_ts_ns": 1700000120151000000,
+      "opportunity_id": "73d5bbbc-f142-5790-a5a1-07ad7e4897e2",
+      "parent_id": "f2cf9ccb-064b-587c-91cf-4dc43a14e4f7",
+      "raw_refs": [],
+      "residual_base": "0",
+      "source_event_ids": [
+        "8c1b72ad-ef6d-51fe-ad0e-1815224c4c11",
+        "e733577c-6f4a-522f-abcd-569ccdd2f3fd"
+      ],
+      "terminal_outcome": "REJECTED"
+    },
+    {
+      "executed": false,
+      "expected_net_edge_bps": "5.96829630123514410014501692",
+      "missed": true,
+      "missed_reason": "REJECTED",
+      "observed_ts_ns": 1700000120201000000,
+      "opportunity_id": "7fcd6786-b744-5ec7-97f5-e26846186b50",
+      "parent_id": "0a065948-4845-5317-9bbc-3267b3321826",
+      "raw_refs": [],
+      "residual_base": "0",
+      "source_event_ids": [
+        "efc6e5aa-e58a-5be1-a212-d9e9961643c8",
+        "e733577c-6f4a-522f-abcd-569ccdd2f3fd"
+      ],
+      "terminal_outcome": "REJECTED"
+    },
+    {
+      "executed": false,
+      "expected_net_edge_bps": "5.98496491257313353224542863",
+      "missed": true,
+      "missed_reason": "REJECTED",
+      "observed_ts_ns": 1700000120251000000,
+      "opportunity_id": "e8b65433-4d05-5bff-98e6-c6f286b69650",
+      "parent_id": "ada442a6-bfa5-5c79-a46d-15ea5bd03b32",
+      "raw_refs": [],
+      "residual_base": "0",
+      "source_event_ids": [
+        "efc6e5aa-e58a-5be1-a212-d9e9961643c8",
+        "c7b78e6f-093f-5de4-83ea-d5164bec5749"
+      ],
+      "terminal_outcome": "REJECTED"
+    },
+    {
+      "executed": false,
+      "expected_net_edge_bps": "5.95158117920030936839508478",
+      "missed": true,
+      "missed_reason": "REJECTED",
+      "observed_ts_ns": 1700000120301000000,
+      "opportunity_id": "a8a2a604-b4a5-5c6f-8a59-5e3c971bbf78",
+      "parent_id": "9c13bde7-7001-5856-93b3-7ba989b888b7",
+      "raw_refs": [],
+      "residual_base": "0",
+      "source_event_ids": [
+        "74749c5b-9080-5093-97b7-f0b30ae4119b",
+        "c7b78e6f-093f-5de4-83ea-d5164bec5749"
+      ],
+      "terminal_outcome": "REJECTED"
+    },
+    {
+      "executed": false,
+      "expected_net_edge_bps": "5.98491829073961715661108259",
+      "missed": true,
+      "missed_reason": "REJECTED",
+      "observed_ts_ns": 1700000120351000000,
+      "opportunity_id": "9324167f-d96e-514c-acad-70e9fcfbb1ce",
+      "parent_id": "fe7ce95b-d378-56a5-be36-f0458a863fe7",
+      "raw_refs": [],
+      "residual_base": "0",
+      "source_event_ids": [
+        "74749c5b-9080-5093-97b7-f0b30ae4119b",
+        "30918832-491b-5729-8faa-c58804988238"
+      ],
+      "terminal_outcome": "REJECTED"
+    },
+    {
+      "executed": false,
+      "expected_net_edge_bps": "5.98491829073961715661108259",
+      "missed": true,
+      "missed_reason": "REJECTED",
+      "observed_ts_ns": 1700000120401000000,
+      "opportunity_id": "ab2cfbdf-26d4-5b58-96bd-47efbfade357",
+      "parent_id": "66ac4b04-5d78-5b88-ad92-127dd104f314",
+      "raw_refs": [],
+      "residual_base": "0",
+      "source_event_ids": [
+        "cd2f1b19-095e-504d-ae2d-fb88888b24ec",
+        "30918832-491b-5729-8faa-c58804988238"
+      ],
+      "terminal_outcome": "REJECTED"
+    },
+    {
+      "executed": false,
+      "expected_net_edge_bps": "5.95146490381490056455927872",
+      "missed": true,
+      "missed_reason": "REJECTED",
+      "observed_ts_ns": 1700000130151000000,
+      "opportunity_id": "eed3dcd1-9dbf-5300-b93a-0eb091a2eb67",
+      "parent_id": "36c6e094-c656-57cc-9524-c1d8882e1272",
+      "raw_refs": [],
+      "residual_base": "0",
+      "source_event_ids": [
+        "2ea91587-d041-54c7-8ba6-0e8efcba8800",
+        "d90a41b5-7578-55db-bd62-d42d38cfc5bc"
+      ],
+      "terminal_outcome": "REJECTED"
+    },
+    {
+      "executed": false,
+      "expected_net_edge_bps": "5.96815660337102624279923192",
+      "missed": true,
+      "missed_reason": "REJECTED",
+      "observed_ts_ns": 1700000130201000000,
+      "opportunity_id": "3a8cca62-92ba-5c07-9ec7-c2196695e515",
+      "parent_id": "29ddac50-d04c-5813-92c5-5231a6ac0011",
+      "raw_refs": [],
+      "residual_base": "0",
+      "source_event_ids": [
+        "d4fa724b-d8b9-56f6-90d6-ac3e057ed173",
+        "d90a41b5-7578-55db-bd62-d42d38cfc5bc"
+      ],
+      "terminal_outcome": "REJECTED"
+    },
+    {
+      "executed": false,
+      "expected_net_edge_bps": "5.96815660337102624279923192",
+      "missed": true,
+      "missed_reason": "REJECTED",
+      "observed_ts_ns": 1700000130251000000,
+      "opportunity_id": "67400328-f64d-5533-b6ef-77a6f6f03627",
+      "parent_id": "6958d9c8-7417-5311-9415-77c1d8fcc223",
+      "raw_refs": [],
+      "residual_base": "0",
+      "source_event_ids": [
+        "d4fa724b-d8b9-56f6-90d6-ac3e057ed173",
+        "074e7428-d19d-5396-9d2e-bed04a541825"
+      ],
+      "terminal_outcome": "REJECTED"
+    },
+    {
+      "executed": false,
+      "expected_net_edge_bps": "5.95146490381490056455927872",
+      "missed": true,
+      "missed_reason": "REJECTED",
+      "observed_ts_ns": 1700000130301000000,
+      "opportunity_id": "f8f521aa-4461-5276-b697-08be5e6c061d",
+      "parent_id": "8c4be2bc-9efb-51f8-b489-9099cdd314bb",
+      "raw_refs": [],
+      "residual_base": "0",
+      "source_event_ids": [
+        "1714e411-aac1-5b11-ada7-de2d8b97bab2",
+        "074e7428-d19d-5396-9d2e-bed04a541825"
+      ],
+      "terminal_outcome": "REJECTED"
+    },
+    {
+      "executed": false,
+      "expected_net_edge_bps": "5.98480173751577248944472503",
+      "missed": true,
+      "missed_reason": "REJECTED",
+      "observed_ts_ns": 1700000130351000000,
+      "opportunity_id": "4a89c046-9a8d-5515-b649-b5fac308db1e",
+      "parent_id": "534d5d0f-3685-5398-b292-2b92e1b97d99",
+      "raw_refs": [],
+      "residual_base": "0",
+      "source_event_ids": [
+        "1714e411-aac1-5b11-ada7-de2d8b97bab2",
+        "1fa3c6ad-e212-5b62-a380-495e53c22e7e"
+      ],
+      "terminal_outcome": "REJECTED"
+    },
+    {
+      "executed": false,
+      "expected_net_edge_bps": "5.98480173751577248944472503",
+      "missed": true,
+      "missed_reason": "REJECTED",
+      "observed_ts_ns": 1700000130401000000,
+      "opportunity_id": "5111620f-d786-54c5-8877-d698069172a8",
+      "parent_id": "9aba81ae-d1d6-562c-b230-419ae05a38de",
+      "raw_refs": [],
+      "residual_base": "0",
+      "source_event_ids": [
+        "0885cbd0-e106-51fe-80bd-64d5d2fca857",
+        "1fa3c6ad-e212-5b62-a380-495e53c22e7e"
+      ],
+      "terminal_outcome": "REJECTED"
+    },
+    {
+      "executed": false,
+      "expected_net_edge_bps": "5.95223235717714834373499760",
+      "missed": true,
+      "missed_reason": "REJECTED",
+      "observed_ts_ns": 1700000140151000000,
+      "opportunity_id": "7233ce65-988a-5a59-b88f-2a7c968ecd91",
+      "parent_id": "998e17dd-0c1a-582f-a0cf-63b262c51166",
+      "raw_refs": [],
+      "residual_base": "0",
+      "source_event_ids": [
+        "858c7cca-f9f5-5c4e-bb83-4d9708fffbf0",
+        "b9b6eb02-dc95-5891-a090-df34f82cd8da"
+      ],
+      "terminal_outcome": "REJECTED"
+    },
+    {
+      "executed": false,
+      "expected_net_edge_bps": "5.96892497620448639196670128",
+      "missed": true,
+      "missed_reason": "REJECTED",
+      "observed_ts_ns": 1700000140201000000,
+      "opportunity_id": "85c15993-9d61-5753-b206-efe3ba09a22c",
+      "parent_id": "a4d5f260-2eb5-519a-b4e6-cac1fd333806",
+      "raw_refs": [],
+      "residual_base": "0",
+      "source_event_ids": [
+        "3a2e3ab8-120c-5f15-ac22-40ef4e7488f8",
+        "b9b6eb02-dc95-5891-a090-df34f82cd8da"
+      ],
+      "terminal_outcome": "REJECTED"
+    },
+    {
+      "executed": false,
+      "expected_net_edge_bps": "5.98559433775126978861582623",
+      "missed": true,
+      "missed_reason": "REJECTED",
+      "observed_ts_ns": 1700000140251000000,
+      "opportunity_id": "89a7915d-b43d-546e-bb2e-a5a86762ef74",
+      "parent_id": "eabf28e8-6f07-54dd-aa93-35fe08cd3e0b",
+      "raw_refs": [],
+      "residual_base": "0",
+      "source_event_ids": [
+        "3a2e3ab8-120c-5f15-ac22-40ef4e7488f8",
+        "c00b6f06-a796-5ebd-a68c-82c71eb7f112"
+      ],
+      "terminal_outcome": "REJECTED"
+    },
+    {
+      "executed": false,
+      "expected_net_edge_bps": "5.98559433775126978861582623",
+      "missed": true,
+      "missed_reason": "REJECTED",
+      "observed_ts_ns": 1700000140301000000,
+      "opportunity_id": "781cf114-3fe8-5d52-91b4-6c4956cd4686",
+      "parent_id": "c06a8874-1e25-5a5c-a0f5-7101a44ae5d4",
+      "raw_refs": [],
+      "residual_base": "0",
+      "source_event_ids": [
+        "512bab90-bad2-581e-a0b7-8c2c738bf413",
+        "c00b6f06-a796-5ebd-a68c-82c71eb7f112"
+      ],
+      "terminal_outcome": "REJECTED"
+    },
+    {
+      "executed": false,
+      "expected_net_edge_bps": "5.95225561465770299531757634",
+      "missed": true,
+      "missed_reason": "REJECTED",
+      "observed_ts_ns": 1700000140351000000,
+      "opportunity_id": "545090f7-7b26-532b-8100-f826ba5cbb34",
+      "parent_id": "3322c37d-aea7-5e82-8d4e-cead6a2375cd",
+      "raw_refs": [],
+      "residual_base": "0",
+      "source_event_ids": [
+        "512bab90-bad2-581e-a0b7-8c2c738bf413",
+        "145dc662-9f7c-5733-9d57-533a380142dd"
+      ],
+      "terminal_outcome": "REJECTED"
+    },
+    {
+      "executed": false,
+      "expected_net_edge_bps": "5.98564096409240858074915694",
+      "missed": true,
+      "missed_reason": "REJECTED",
+      "observed_ts_ns": 1700000140401000000,
+      "opportunity_id": "e9304076-8166-5642-9d7f-0c74f5805f6e",
+      "parent_id": "a62c8e3c-0e4e-52bd-9769-9c6b7a8d3b41",
+      "raw_refs": [],
+      "residual_base": "0",
+      "source_event_ids": [
+        "9b326e49-60d7-5ae0-bccb-e14256d43b0f",
+        "145dc662-9f7c-5733-9d57-533a380142dd"
+      ],
+      "terminal_outcome": "REJECTED"
+    },
+    {
+      "executed": false,
+      "expected_net_edge_bps": "5.98575753130542627388747383",
+      "missed": true,
+      "missed_reason": "REJECTED",
+      "observed_ts_ns": 1700000150151000000,
+      "opportunity_id": "cf2b0d3a-734f-5d83-9a68-1017802fb7cc",
+      "parent_id": "9356d6c8-7b74-5d4c-b118-61401ed2462a",
+      "raw_refs": [],
+      "residual_base": "0",
+      "source_event_ids": [
+        "5e53aff9-c3e8-5d87-9990-5f7d2c94766e",
+        "c6f62045-0f08-552c-be94-54f2985e3a3d"
+      ],
+      "terminal_outcome": "REJECTED"
+    },
+    {
+      "executed": false,
+      "expected_net_edge_bps": "5.95237190322354800316053729",
+      "missed": true,
+      "missed_reason": "REJECTED",
+      "observed_ts_ns": 1700000150201000000,
+      "opportunity_id": "913f66fa-4edd-55c5-97aa-50f6744fdab7",
+      "parent_id": "25660d98-ecc2-5b33-a14d-11a517501ef5",
+      "raw_refs": [],
+      "residual_base": "0",
+      "source_event_ids": [
+        "2ea14ca8-226f-534a-bd80-b93b6c7dcdaa",
+        "c6f62045-0f08-552c-be94-54f2985e3a3d"
+      ],
+      "terminal_outcome": "REJECTED"
+    },
+    {
+      "executed": false,
+      "expected_net_edge_bps": "5.95237190322354800316053729",
+      "missed": true,
+      "missed_reason": "REJECTED",
+      "observed_ts_ns": 1700000150251000000,
+      "opportunity_id": "6cc2ce16-0043-5aef-a6bd-a3416977ee9e",
+      "parent_id": "22ab2574-e8a1-5247-b52a-c1068c9931e3",
+      "raw_refs": [],
+      "residual_base": "0",
+      "source_event_ids": [
+        "2ea14ca8-226f-534a-bd80-b93b6c7dcdaa",
+        "1cc82c64-69f3-522c-8939-10386aa740fe"
+      ],
+      "terminal_outcome": "REJECTED"
+    },
+    {
+      "executed": false,
+      "expected_net_edge_bps": "5.95237190322354800316053729",
+      "missed": true,
+      "missed_reason": "REJECTED",
+      "observed_ts_ns": 1700000150301000000,
+      "opportunity_id": "8b04a85c-85ab-57da-b0c1-852f855e076d",
+      "parent_id": "ab8386b3-fb34-59d5-b81d-61371469c6c4",
+      "raw_refs": [],
+      "residual_base": "0",
+      "source_event_ids": [
+        "4347aecc-0458-5150-af5c-0075bcb5e348",
+        "1cc82c64-69f3-522c-8939-10386aa740fe"
+      ],
+      "terminal_outcome": "REJECTED"
+    },
+    {
+      "executed": false,
+      "expected_net_edge_bps": "5.95237190322354800316053729",
+      "missed": true,
+      "missed_reason": "REJECTED",
+      "observed_ts_ns": 1700000150351000000,
+      "opportunity_id": "098a186f-981d-59d8-b46a-77360a0af2c2",
+      "parent_id": "6245f30f-333a-5568-b3b7-43fe082e83ae",
+      "raw_refs": [],
+      "residual_base": "0",
+      "source_event_ids": [
+        "4347aecc-0458-5150-af5c-0075bcb5e348",
+        "98d7d010-c361-540d-906b-b456c2c209f8"
+      ],
+      "terminal_outcome": "REJECTED"
+    },
+    {
+      "executed": false,
+      "expected_net_edge_bps": "5.96906468943835358403192548",
+      "missed": true,
+      "missed_reason": "REJECTED",
+      "observed_ts_ns": 1700000150401000000,
+      "opportunity_id": "4cc97edd-53c7-5089-80f0-4f2f77b2cf70",
+      "parent_id": "f80cb63c-46ea-521c-a674-86742ba50028",
+      "raw_refs": [],
+      "residual_base": "0",
+      "source_event_ids": [
+        "f26871de-0d2a-568f-bc4e-2a934400fa30",
+        "98d7d010-c361-540d-906b-b456c2c209f8"
+      ],
+      "terminal_outcome": "REJECTED"
+    },
+    {
+      "executed": false,
+      "expected_net_edge_bps": "5.95204630012401818933443572",
+      "missed": true,
+      "missed_reason": "REJECTED",
+      "observed_ts_ns": 1700000160151000000,
+      "opportunity_id": "ae2c9847-0cf3-5323-a801-3ba2843cdf1a",
+      "parent_id": "0e52636a-af97-5d54-bb98-ca50c49328a1",
+      "raw_refs": [],
+      "residual_base": "0",
+      "source_event_ids": [
+        "1317b2a2-c769-5721-97ed-9c977898fa22",
+        "942d461b-332b-534f-be85-ffaa7c7fc311"
+      ],
+      "terminal_outcome": "REJECTED"
+    },
+    {
+      "executed": false,
+      "expected_net_edge_bps": "5.95204630012401818933443572",
+      "missed": true,
+      "missed_reason": "REJECTED",
+      "observed_ts_ns": 1700000160201000000,
+      "opportunity_id": "e7dced1f-e1ac-571f-90f9-29ec0338d94f",
+      "parent_id": "dbae240a-3da3-5b92-8dc3-e85dfaaddf6f",
+      "raw_refs": [],
+      "residual_base": "0",
+      "source_event_ids": [
+        "2dd17502-aa06-5765-81d3-37ad4014a698",
+        "942d461b-332b-534f-be85-ffaa7c7fc311"
+      ],
+      "terminal_outcome": "REJECTED"
+    },
+    {
+      "executed": false,
+      "expected_net_edge_bps": "5.98538452306338262945231967",
+      "missed": true,
+      "missed_reason": "REJECTED",
+      "observed_ts_ns": 1700000160251000000,
+      "opportunity_id": "edc78ddf-941b-54f6-91c0-1f72b0b2b007",
+      "parent_id": "36cbc3dd-a9fb-5323-954c-6043d7237d64",
+      "raw_refs": [],
+      "residual_base": "0",
+      "source_event_ids": [
+        "2dd17502-aa06-5765-81d3-37ad4014a698",
+        "c19b2ed0-cb13-5f3b-98aa-2a4cc8ed61bc"
+      ],
+      "terminal_outcome": "REJECTED"
+    },
+    {
+      "executed": false,
+      "expected_net_edge_bps": "5.96869212702508530403575185",
+      "missed": true,
+      "missed_reason": "REJECTED",
+      "observed_ts_ns": 1700000160301000000,
+      "opportunity_id": "63627fbb-4999-5836-8319-fa672e716eeb",
+      "parent_id": "21680a8f-6bba-5f88-85e6-9363bd9bfa8b",
+      "raw_refs": [],
+      "residual_base": "0",
+      "source_event_ids": [
+        "5be82406-800a-5130-9542-7b4343c77ae2",
+        "c19b2ed0-cb13-5f3b-98aa-2a4cc8ed61bc"
+      ],
+      "terminal_outcome": "REJECTED"
+    },
+    {
+      "executed": false,
+      "expected_net_edge_bps": "5.96869212702508530403575185",
+      "missed": true,
+      "missed_reason": "REJECTED",
+      "observed_ts_ns": 1700000160351000000,
+      "opportunity_id": "e79d4a5a-fb83-5564-8515-3591aca5fc06",
+      "parent_id": "30c3fcb9-3ce3-5d86-84dd-c135a10bfe02",
+      "raw_refs": [],
+      "residual_base": "0",
+      "source_event_ids": [
+        "5be82406-800a-5130-9542-7b4343c77ae2",
+        "3013af10-76a3-594e-bd5e-83c14efc2e19"
+      ],
+      "terminal_outcome": "REJECTED"
+    },
+    {
+      "executed": false,
+      "expected_net_edge_bps": "5.98538452306338262945231967",
+      "missed": true,
+      "missed_reason": "REJECTED",
+      "observed_ts_ns": 1700000160401000000,
+      "opportunity_id": "6c45aa11-aaec-56d1-8365-75a168a2bd00",
+      "parent_id": "6839dfc5-d649-5d3e-9898-277b990f2d98",
+      "raw_refs": [],
+      "residual_base": "0",
+      "source_event_ids": [
+        "ae624c84-cc5a-5195-8e67-5dc6a8eb8004",
+        "3013af10-76a3-594e-bd5e-83c14efc2e19"
+      ],
+      "terminal_outcome": "REJECTED"
+    },
+    {
+      "executed": false,
+      "expected_net_edge_bps": "5.96890169093721662132607884",
+      "missed": true,
+      "missed_reason": "REJECTED",
+      "observed_ts_ns": 1700000170151000000,
+      "opportunity_id": "2271b2d2-39a4-5847-831e-87d25f2befd9",
+      "parent_id": "5dbb0b05-f597-5dad-8fea-4125350dd268",
+      "raw_refs": [],
+      "residual_base": "0",
+      "source_event_ids": [
+        "c4a62d7c-ea29-53e7-a03e-de31b8e13b07",
+        "7d9dff54-36df-5815-9c4e-eadf107ffbf5"
+      ],
+      "terminal_outcome": "REJECTED"
+    },
+    {
+      "executed": false,
+      "expected_net_edge_bps": "5.96890169093721662132607884",
+      "missed": true,
+      "missed_reason": "REJECTED",
+      "observed_ts_ns": 1700000170201000000,
+      "opportunity_id": "85674dd0-e3e9-5a48-b8d3-bfa4983fafcc",
+      "parent_id": "6083bd26-ceee-5271-b643-cfd666b2725d",
+      "raw_refs": [],
+      "residual_base": "0",
+      "source_event_ids": [
+        "3cb6e251-c9af-5697-a8cc-f6d3dd4c685f",
+        "7d9dff54-36df-5815-9c4e-eadf107ffbf5"
+      ],
+      "terminal_outcome": "REJECTED"
+    },
+    {
+      "executed": false,
+      "expected_net_edge_bps": "5.96890169093721662132607884",
+      "missed": true,
+      "missed_reason": "REJECTED",
+      "observed_ts_ns": 1700000170251000000,
+      "opportunity_id": "9f867165-6493-5ae6-8797-5f152b99c8fc",
+      "parent_id": "a38c7bdf-2549-51c0-acba-370c8e22cacb",
+      "raw_refs": [],
+      "residual_base": "0",
+      "source_event_ids": [
+        "3cb6e251-c9af-5697-a8cc-f6d3dd4c685f",
+        "3838809f-f38b-5639-bb1a-4b15d6cce138"
+      ],
+      "terminal_outcome": "REJECTED"
+    },
+    {
+      "executed": false,
+      "expected_net_edge_bps": "5.98559433775126978861582623",
+      "missed": true,
+      "missed_reason": "REJECTED",
+      "observed_ts_ns": 1700000170301000000,
+      "opportunity_id": "fa1b48c2-06b9-5b65-b71c-1e0852dde9f1",
+      "parent_id": "b3d4447a-b9ec-59f5-b157-cd0ff68eea60",
+      "raw_refs": [],
+      "residual_base": "0",
+      "source_event_ids": [
+        "91adcbf3-c363-5ff4-bd2c-9d8d9a08e23f",
+        "3838809f-f38b-5639-bb1a-4b15d6cce138"
+      ],
+      "terminal_outcome": "REJECTED"
+    },
+    {
+      "executed": false,
+      "expected_net_edge_bps": "5.96892497620448639196670128",
+      "missed": true,
+      "missed_reason": "REJECTED",
+      "observed_ts_ns": 1700000170351000000,
+      "opportunity_id": "e5b79d5d-1831-5254-83c5-7e9d89dccf3c",
+      "parent_id": "8d0c1fb7-f102-59ad-aee2-08aa758a6e12",
+      "raw_refs": [],
+      "residual_base": "0",
+      "source_event_ids": [
+        "91adcbf3-c363-5ff4-bd2c-9d8d9a08e23f",
+        "6b4a25e1-6d18-56ed-9817-512ecf6469df"
+      ],
+      "terminal_outcome": "REJECTED"
+    },
+    {
+      "executed": false,
+      "expected_net_edge_bps": "5.98561765088297755300032339",
+      "missed": true,
+      "missed_reason": "REJECTED",
+      "observed_ts_ns": 1700000170401000000,
+      "opportunity_id": "769f5d1a-5d85-5875-907e-36d05934c335",
+      "parent_id": "f2922398-71c5-5d4d-8c94-a0cee9f8df58",
+      "raw_refs": [],
+      "residual_base": "0",
+      "source_event_ids": [
+        "5a1bc5f7-f342-5993-b562-6e8f34c7ecaa",
+        "6b4a25e1-6d18-56ed-9817-512ecf6469df"
+      ],
+      "terminal_outcome": "REJECTED"
+    },
+    {
+      "executed": false,
+      "expected_net_edge_bps": "5.98536121070888612182099738",
+      "missed": true,
+      "missed_reason": "REJECTED",
+      "observed_ts_ns": 1700000180151000000,
+      "opportunity_id": "1f3e1a1b-ba84-550c-acf7-c21a5f18ac1c",
+      "parent_id": "60c729af-363b-51f4-aafa-fc9b4a05d265",
+      "raw_refs": [],
+      "residual_base": "0",
+      "source_event_ids": [
+        "e45884da-97c5-5931-87bc-4374519e2176",
+        "d513b1c6-2dd9-5ac1-8e49-62e41499c485"
+      ],
+      "terminal_outcome": "REJECTED"
+    },
+    {
+      "executed": false,
+      "expected_net_edge_bps": "5.98536121070888612182099738",
+      "missed": true,
+      "missed_reason": "REJECTED",
+      "observed_ts_ns": 1700000180201000000,
+      "opportunity_id": "14f5ed93-f8f2-5129-aa56-ddef51df3353",
+      "parent_id": "03368916-1631-58ac-823b-93d94e00f5b7",
+      "raw_refs": [],
+      "residual_base": "0",
+      "source_event_ids": [
+        "24c4670c-b5ea-5741-96e6-0dbdebc5059b",
+        "d513b1c6-2dd9-5ac1-8e49-62e41499c485"
+      ],
+      "terminal_outcome": "REJECTED"
+    },
+    {
+      "executed": false,
+      "expected_net_edge_bps": "5.96869212702508530403575185",
+      "missed": true,
+      "missed_reason": "REJECTED",
+      "observed_ts_ns": 1700000180251000000,
+      "opportunity_id": "af93b8cd-c1ed-5fe4-b984-760bdea04a3b",
+      "parent_id": "51dc7de0-fc3d-53f5-b714-a00954a894fe",
+      "raw_refs": [],
+      "residual_base": "0",
+      "source_event_ids": [
+        "24c4670c-b5ea-5741-96e6-0dbdebc5059b",
+        "0360e49b-98c3-5013-8739-c09ca0861e3b"
+      ],
+      "terminal_outcome": "REJECTED"
+    },
+    {
+      "executed": false,
+      "expected_net_edge_bps": "5.95199978663608450544578056",
+      "missed": true,
+      "missed_reason": "REJECTED",
+      "observed_ts_ns": 1700000180301000000,
+      "opportunity_id": "3f0d00e0-af67-5f6a-a2ed-2304f7f1c109",
+      "parent_id": "19ee2299-ba74-573f-aa04-90a4d942790f",
+      "raw_refs": [],
+      "residual_base": "0",
+      "source_event_ids": [
+        "8e8dcb70-3f14-5ee5-908f-a9e5ef5b0fd0",
+        "0360e49b-98c3-5013-8739-c09ca0861e3b"
+      ],
+      "terminal_outcome": "REJECTED"
+    },
+    {
+      "executed": false,
+      "expected_net_edge_bps": "5.98533789843210860223298673",
+      "missed": true,
+      "missed_reason": "REJECTED",
+      "observed_ts_ns": 1700000180351000000,
+      "opportunity_id": "7688483f-a089-5649-a771-d6b97056d481",
+      "parent_id": "7d691a9e-cc68-5bd8-8e4a-091d6d5fc031",
+      "raw_refs": [],
+      "residual_base": "0",
+      "source_event_ids": [
+        "8e8dcb70-3f14-5ee5-908f-a9e5ef5b0fd0",
+        "cd1fc6c6-2a1a-560f-b292-69f0cdebe53d"
+      ],
+      "terminal_outcome": "REJECTED"
+    },
+    {
+      "executed": false,
+      "expected_net_edge_bps": "5.98533789843210860223298673",
+      "missed": true,
+      "missed_reason": "REJECTED",
+      "observed_ts_ns": 1700000180401000000,
+      "opportunity_id": "e585b049-f3cb-5a41-882a-193e1972a591",
+      "parent_id": "d28eb0cc-bd0e-5512-a4a3-1ef30adf0469",
+      "raw_refs": [],
+      "residual_base": "0",
+      "source_event_ids": [
+        "6136cdb9-510a-55a1-b1b0-7ca0369751d2",
+        "cd1fc6c6-2a1a-560f-b292-69f0cdebe53d"
+      ],
+      "terminal_outcome": "REJECTED"
+    },
+    {
+      "executed": false,
+      "expected_net_edge_bps": "5.95227887221579524655693763",
+      "missed": true,
+      "missed_reason": "REJECTED",
+      "observed_ts_ns": 1700000190151000000,
+      "opportunity_id": "dd534a3d-f92c-5aea-ba21-5bdd4eb68732",
+      "parent_id": "c32c3ad5-2f1b-5596-8efd-1850485884a6",
+      "raw_refs": [],
+      "residual_base": "0",
+      "source_event_ids": [
+        "838b2c62-2f19-5846-aefd-b9d75ee2d382",
+        "399a0a75-2d59-5f2a-bb92-f3f84f1463e7"
+      ],
+      "terminal_outcome": "REJECTED"
+    },
+    {
+      "executed": false,
+      "expected_net_edge_bps": "5.95227887221579524655693763",
+      "missed": true,
+      "missed_reason": "REJECTED",
+      "observed_ts_ns": 1700000190201000000,
+      "opportunity_id": "45176246-5c97-543e-8d03-113cc6a56f70",
+      "parent_id": "0ec881e6-741f-5848-aca1-f892d6c5c8a1",
+      "raw_refs": [],
+      "residual_base": "0",
+      "source_event_ids": [
+        "abdb832f-b983-5ad3-8d1a-276e7de5f144",
+        "399a0a75-2d59-5f2a-bb92-f3f84f1463e7"
+      ],
+      "terminal_outcome": "REJECTED"
+    },
+    {
+      "executed": false,
+      "expected_net_edge_bps": "5.95227887221579524655693763",
+      "missed": true,
+      "missed_reason": "REJECTED",
+      "observed_ts_ns": 1700000190251000000,
+      "opportunity_id": "31fa613b-a641-5346-8644-ab9ec945e9fd",
+      "parent_id": "8c691af5-85f0-5426-86d1-e21f4681405d",
+      "raw_refs": [],
+      "residual_base": "0",
+      "source_event_ids": [
+        "abdb832f-b983-5ad3-8d1a-276e7de5f144",
+        "1330a50c-3a43-57a9-8c48-e2321e5c10bd"
+      ],
+      "terminal_outcome": "REJECTED"
+    },
+    {
+      "executed": false,
+      "expected_net_edge_bps": "5.95227887221579524655693763",
+      "missed": true,
+      "missed_reason": "REJECTED",
+      "observed_ts_ns": 1700000190301000000,
+      "opportunity_id": "6e8f1eed-d1b6-5177-ba12-6cfeeeefde1c",
+      "parent_id": "92a7bbbc-ae08-5749-bb69-c90bca6ad417",
+      "raw_refs": [],
+      "residual_base": "0",
+      "source_event_ids": [
+        "6eec2805-38cf-5c99-927f-64368ac7d0cf",
+        "1330a50c-3a43-57a9-8c48-e2321e5c10bd"
+      ],
+      "terminal_outcome": "REJECTED"
+    },
+    {
+      "executed": false,
+      "expected_net_edge_bps": "5.98561765088297755300032339",
+      "missed": true,
+      "missed_reason": "REJECTED",
+      "observed_ts_ns": 1700000190351000000,
+      "opportunity_id": "b021d5fc-39a0-5ccd-ba57-7b7ef6222c68",
+      "parent_id": "d60daf94-b91e-5fb9-a80c-2211432c5188",
+      "raw_refs": [],
+      "residual_base": "0",
+      "source_event_ids": [
+        "6eec2805-38cf-5c99-927f-64368ac7d0cf",
+        "dcff0278-7dc0-581d-a61d-fd2769d5c6fc"
+      ],
+      "terminal_outcome": "REJECTED"
+    },
+    {
+      "executed": false,
+      "expected_net_edge_bps": "5.96892497620448639196670128",
+      "missed": true,
+      "missed_reason": "REJECTED",
+      "observed_ts_ns": 1700000190401000000,
+      "opportunity_id": "df29e01e-022f-52ff-823d-141f60b513ff",
+      "parent_id": "2e876fef-0fa5-5aac-be14-baa533dbb4d3",
+      "raw_refs": [],
+      "residual_base": "0",
+      "source_event_ids": [
+        "dcad7e44-2e5b-5920-b1c6-648f4e0d7565",
+        "dcff0278-7dc0-581d-a61d-fd2769d5c6fc"
+      ],
+      "terminal_outcome": "REJECTED"
+    },
+    {
+      "executed": false,
+      "expected_net_edge_bps": "5.95197653000841785919671954",
+      "missed": true,
+      "missed_reason": "REJECTED",
+      "observed_ts_ns": 1700000200151000000,
+      "opportunity_id": "e5cb5af7-49e1-5ad7-a132-a0cb0337f600",
+      "parent_id": "78ee457b-0129-5a8c-9873-fe88cb04edc4",
+      "raw_refs": [],
+      "residual_base": "0",
+      "source_event_ids": [
+        "b0371661-518c-5b4b-8691-31340dd7f108",
+        "17f2d0af-366b-5995-8b90-b0f231474f85"
+      ],
+      "terminal_outcome": "REJECTED"
+    },
+    {
+      "executed": false,
+      "expected_net_edge_bps": "5.98536121070888612182099738",
+      "missed": true,
+      "missed_reason": "REJECTED",
+      "observed_ts_ns": 1700000200201000000,
+      "opportunity_id": "2b1cd183-14bb-58ed-9e95-8a36cddfedd1",
+      "parent_id": "56ed13a6-802d-55db-b00f-3b054b0528ad",
+      "raw_refs": [],
+      "residual_base": "0",
+      "source_event_ids": [
+        "06468916-314b-5cda-8a0c-2a791714da5e",
+        "17f2d0af-366b-5995-8b90-b0f231474f85"
+      ],
+      "terminal_outcome": "REJECTED"
+    },
+    {
+      "executed": false,
+      "expected_net_edge_bps": "5.98536121070888612182099738",
+      "missed": true,
+      "missed_reason": "REJECTED",
+      "observed_ts_ns": 1700000200251000000,
+      "opportunity_id": "99fe4e48-e78f-573b-ae76-2211f53e0378",
+      "parent_id": "1bc6c949-690b-53d3-9d34-f37ff941296a",
+      "raw_refs": [],
+      "residual_base": "0",
+      "source_event_ids": [
+        "06468916-314b-5cda-8a0c-2a791714da5e",
+        "e350ab52-f207-5287-9df8-ef48fabce6f5"
+      ],
+      "terminal_outcome": "REJECTED"
+    },
+    {
+      "executed": false,
+      "expected_net_edge_bps": "5.96866884253409655383938364",
+      "missed": true,
+      "missed_reason": "REJECTED",
+      "observed_ts_ns": 1700000200301000000,
+      "opportunity_id": "d639241c-d04f-5dae-acf1-5881765e9ea6",
+      "parent_id": "d654629c-b1c5-50b3-89f0-7fb61919f3ed",
+      "raw_refs": [],
+      "residual_base": "0",
+      "source_event_ids": [
+        "ff2c7578-72c0-56c0-992e-b821f15ce0a8",
+        "e350ab52-f207-5287-9df8-ef48fabce6f5"
+      ],
+      "terminal_outcome": "REJECTED"
+    },
+    {
+      "executed": false,
+      "expected_net_edge_bps": "5.98533789843210860223298673",
+      "missed": true,
+      "missed_reason": "REJECTED",
+      "observed_ts_ns": 1700000200351000000,
+      "opportunity_id": "31116d56-0564-5e13-9cd9-0817ff2cdb0f",
+      "parent_id": "2f82199c-d5d0-5bee-9a99-312969d0b3cb",
+      "raw_refs": [],
+      "residual_base": "0",
+      "source_event_ids": [
+        "ff2c7578-72c0-56c0-992e-b821f15ce0a8",
+        "ebd6c424-0bfb-571c-a5db-9368871c63ee"
+      ],
+      "terminal_outcome": "REJECTED"
+    },
+    {
+      "executed": false,
+      "expected_net_edge_bps": "5.95195327345828415978236953",
+      "missed": true,
+      "missed_reason": "REJECTED",
+      "observed_ts_ns": 1700000200401000000,
+      "opportunity_id": "a951c4bd-f798-5a98-a06a-aa907b7e406d",
+      "parent_id": "ba0420ba-99f0-50e2-8060-196431e45eb5",
+      "raw_refs": [],
+      "residual_base": "0",
+      "source_event_ids": [
+        "90f40836-c280-5c0b-aa96-1fdff24598d6",
+        "ebd6c424-0bfb-571c-a5db-9368871c63ee"
+      ],
+      "terminal_outcome": "REJECTED"
+    },
+    {
+      "executed": false,
+      "expected_net_edge_bps": "5.95197653000841785919671954",
+      "missed": true,
+      "missed_reason": "REJECTED",
+      "observed_ts_ns": 1700000210151000000,
+      "opportunity_id": "a17e57ba-acad-5f8d-8ba3-f78bbeeee886",
+      "parent_id": "f12d3885-abb9-5025-93be-5c7c30353926",
+      "raw_refs": [],
+      "residual_base": "0",
+      "source_event_ids": [
+        "f5bfb915-debe-5979-9ef8-3c27d5f97f73",
+        "9929ccfc-0678-5080-83bd-4c1a6f0d34ad"
+      ],
+      "terminal_outcome": "REJECTED"
+    },
+    {
+      "executed": false,
+      "expected_net_edge_bps": "5.98536121070888612182099738",
+      "missed": true,
+      "missed_reason": "REJECTED",
+      "observed_ts_ns": 1700000210201000000,
+      "opportunity_id": "96104f17-08c2-5aff-a639-6a6c411be61f",
+      "parent_id": "44e951e3-e90a-5b2f-9b90-52ce82768325",
+      "raw_refs": [],
+      "residual_base": "0",
+      "source_event_ids": [
+        "c1a375ff-78c4-5305-abe2-8cdba091891c",
+        "9929ccfc-0678-5080-83bd-4c1a6f0d34ad"
+      ],
+      "terminal_outcome": "REJECTED"
+    },
+    {
+      "executed": false,
+      "expected_net_edge_bps": "5.95202304334128448625050632",
+      "missed": true,
+      "missed_reason": "REJECTED",
+      "observed_ts_ns": 1700000210251000000,
+      "opportunity_id": "01d6cd1d-17de-5ad3-b318-6750673c745a",
+      "parent_id": "400119d2-86ec-5bd5-9c55-261756fee15c",
+      "raw_refs": [],
+      "residual_base": "0",
+      "source_event_ids": [
+        "c1a375ff-78c4-5305-abe2-8cdba091891c",
+        "ef62901a-a699-52c8-b8ed-3083aecf2082"
+      ],
+      "terminal_outcome": "REJECTED"
+    },
+    {
+      "executed": false,
+      "expected_net_edge_bps": "5.96871541159370040939337770",
+      "missed": true,
+      "missed_reason": "REJECTED",
+      "observed_ts_ns": 1700000210301000000,
+      "opportunity_id": "31d05f8c-6486-5b04-a351-dd3f5677d1a3",
+      "parent_id": "66ac67a7-ae52-505f-a65a-fc6e48746ded",
+      "raw_refs": [],
+      "residual_base": "0",
+      "source_event_ids": [
+        "47e1b6f3-682f-5fec-82a6-0883c7afa0f6",
+        "ef62901a-a699-52c8-b8ed-3083aecf2082"
+      ],
+      "terminal_outcome": "REJECTED"
+    },
+    {
+      "executed": false,
+      "expected_net_edge_bps": "5.98538452306338262945231967",
+      "missed": true,
+      "missed_reason": "REJECTED",
+      "observed_ts_ns": 1700000210351000000,
+      "opportunity_id": "d3d55e80-98a0-5d2a-874e-f3d9eb25d212",
+      "parent_id": "6bbf094e-9214-5da5-85a0-f7ff3c879955",
+      "raw_refs": [],
+      "residual_base": "0",
+      "source_event_ids": [
+        "47e1b6f3-682f-5fec-82a6-0883c7afa0f6",
+        "d9558ce0-50e7-501b-9e8f-6e04fe6fdbee"
+      ],
+      "terminal_outcome": "REJECTED"
+    },
+    {
+      "executed": false,
+      "expected_net_edge_bps": "5.95199978663608450544578056",
+      "missed": true,
+      "missed_reason": "REJECTED",
+      "observed_ts_ns": 1700000210401000000,
+      "opportunity_id": "d50b5413-37f5-5b69-97cb-fdc2185c0323",
+      "parent_id": "a696faf6-a760-55b0-92eb-ef20d4006116",
+      "raw_refs": [],
+      "residual_base": "0",
+      "source_event_ids": [
+        "94fb2ae3-1354-5b57-b988-9c6c5c7e5e00",
+        "d9558ce0-50e7-501b-9e8f-6e04fe6fdbee"
+      ],
+      "terminal_outcome": "REJECTED"
+    },
+    {
+      "executed": false,
+      "expected_net_edge_bps": "5.95216258520070610944696428",
+      "missed": true,
+      "missed_reason": "REJECTED",
+      "observed_ts_ns": 1700000220151000000,
+      "opportunity_id": "cbacb9c5-6aac-582f-9f56-ad9d47e47947",
+      "parent_id": "0a636b50-3968-568f-94f1-c159b9305601",
+      "raw_refs": [],
+      "residual_base": "0",
+      "source_event_ids": [
+        "a9c73b96-eddd-5461-9195-aeb0753ea91d",
+        "01edc1d4-745e-5d62-a437-7fc1f5380943"
+      ],
+      "terminal_outcome": "REJECTED"
+    },
+    {
+      "executed": false,
+      "expected_net_edge_bps": "5.98554771172102249522841117",
+      "missed": true,
+      "missed_reason": "REJECTED",
+      "observed_ts_ns": 1700000220201000000,
+      "opportunity_id": "f77c820e-14f3-59fd-9766-785588ab34af",
+      "parent_id": "71673093-df3f-5eb6-b725-05b782b4d6ef",
+      "raw_refs": [],
+      "residual_base": "0",
+      "source_event_ids": [
+        "8fd8b87f-3a3e-5436-a388-025efb342cc0",
+        "01edc1d4-745e-5d62-a437-7fc1f5380943"
+      ],
+      "terminal_outcome": "REJECTED"
+    },
+    {
+      "executed": false,
+      "expected_net_edge_bps": "5.95220909977413090405980947",
+      "missed": true,
+      "missed_reason": "REJECTED",
+      "observed_ts_ns": 1700000220251000000,
+      "opportunity_id": "a4628989-7a64-5657-b079-7122feb6723d",
+      "parent_id": "4a075014-f28f-5930-b3fa-a18dfabd0b20",
+      "raw_refs": [],
+      "residual_base": "0",
+      "source_event_ids": [
+        "8fd8b87f-3a3e-5436-a388-025efb342cc0",
+        "f3e4a66e-f348-5d51-8db0-560f4f0694af"
+      ],
+      "terminal_outcome": "REJECTED"
+    },
+    {
+      "executed": false,
+      "expected_net_edge_bps": "5.96890169093721662132607884",
+      "missed": true,
+      "missed_reason": "REJECTED",
+      "observed_ts_ns": 1700000220301000000,
+      "opportunity_id": "fe9f10b5-e95a-59a0-9467-23c1da3f21ca",
+      "parent_id": "e2737bc5-3ad9-5f37-a976-334accffc00c",
+      "raw_refs": [],
+      "residual_base": "0",
+      "source_event_ids": [
+        "5976268c-b153-5429-9ce5-ae7534564e68",
+        "f3e4a66e-f348-5d51-8db0-560f4f0694af"
+      ],
+      "terminal_outcome": "REJECTED"
+    },
+    {
+      "executed": false,
+      "expected_net_edge_bps": "5.95223235717714834373499760",
+      "missed": true,
+      "missed_reason": "REJECTED",
+      "observed_ts_ns": 1700000220351000000,
+      "opportunity_id": "418b4c26-9b18-55d2-86ce-f98cf5b2cd62",
+      "parent_id": "99ff87bd-2825-5d87-b3b0-106d85c9cb88",
+      "raw_refs": [],
+      "residual_base": "0",
+      "source_event_ids": [
+        "5976268c-b153-5429-9ce5-ae7534564e68",
+        "949d39fb-ca9d-5071-be33-9e059fa18514"
+      ],
+      "terminal_outcome": "REJECTED"
+    },
+    {
+      "executed": false,
+      "expected_net_edge_bps": "5.95223235717714834373499760",
+      "missed": true,
+      "missed_reason": "REJECTED",
+      "observed_ts_ns": 1700000220401000000,
+      "opportunity_id": "446785f2-2141-5c25-9f88-de3e8381a3df",
+      "parent_id": "f97cef10-5b0a-5628-9e23-fe5ef32a1941",
+      "raw_refs": [],
+      "residual_base": "0",
+      "source_event_ids": [
+        "88cffa1f-ebd1-508a-b239-11d1cc91a247",
+        "949d39fb-ca9d-5071-be33-9e059fa18514"
+      ],
+      "terminal_outcome": "REJECTED"
+    },
+    {
+      "executed": false,
+      "expected_net_edge_bps": "5.96850585327068063961754964",
+      "missed": true,
+      "missed_reason": "REJECTED",
+      "observed_ts_ns": 1700000230151000000,
+      "opportunity_id": "bbb6e568-16a8-51ae-868a-40a437567451",
+      "parent_id": "a76dc130-90af-5589-a9d3-7bad4a394197",
+      "raw_refs": [],
+      "residual_base": "0",
+      "source_event_ids": [
+        "f54a5894-2e5f-50c7-88ae-7238df33158f",
+        "6213ab59-10b0-582d-b520-3eaa13d68317"
+      ],
+      "terminal_outcome": "REJECTED"
+    },
+    {
+      "executed": false,
+      "expected_net_edge_bps": "5.96850585327068063961754964",
+      "missed": true,
+      "missed_reason": "REJECTED",
+      "observed_ts_ns": 1700000230201000000,
+      "opportunity_id": "8631bfd3-6862-5373-adbc-13e3f59b4ccf",
+      "parent_id": "7a5f0d87-7075-5db7-bb26-07063be30096",
+      "raw_refs": [],
+      "residual_base": "0",
+      "source_event_ids": [
+        "ae6c54e4-3daf-50df-ad8c-91f49175eee9",
+        "6213ab59-10b0-582d-b520-3eaa13d68317"
+      ],
+      "terminal_outcome": "REJECTED"
+    },
+    {
+      "executed": false,
+      "expected_net_edge_bps": "5.96850585327068063961754964",
+      "missed": true,
+      "missed_reason": "REJECTED",
+      "observed_ts_ns": 1700000230251000000,
+      "opportunity_id": "f61a77e4-4d80-5984-8f6a-019e71efa692",
+      "parent_id": "a87430f8-3c8a-5753-854a-be312f5b7019",
+      "raw_refs": [],
+      "residual_base": "0",
+      "source_event_ids": [
+        "ae6c54e4-3daf-50df-ad8c-91f49175eee9",
+        "87508757-5ef8-5d29-b060-c3d7021157a5"
+      ],
+      "terminal_outcome": "REJECTED"
+    },
+    {
+      "executed": false,
+      "expected_net_edge_bps": "5.98519802640352046939591946",
+      "missed": true,
+      "missed_reason": "REJECTED",
+      "observed_ts_ns": 1700000230301000000,
+      "opportunity_id": "53c96941-8b9a-54ce-9784-05703d3b34c6",
+      "parent_id": "1d3ad121-a0a0-55ec-a8d6-9297f17adb54",
+      "raw_refs": [],
+      "residual_base": "0",
+      "source_event_ids": [
+        "cf925ed1-b8d3-5b8c-83ac-3f9743f219ad",
+        "87508757-5ef8-5d29-b060-c3d7021157a5"
+      ],
+      "terminal_outcome": "REJECTED"
+    },
+    {
+      "executed": false,
+      "expected_net_edge_bps": "5.96852913721829577276970263",
+      "missed": true,
+      "missed_reason": "REJECTED",
+      "observed_ts_ns": 1700000230351000000,
+      "opportunity_id": "1de0576a-1de3-565f-986c-cabe7321d5e2",
+      "parent_id": "925805d6-5752-5398-8d64-b1afcd52fb66",
+      "raw_refs": [],
+      "residual_base": "0",
+      "source_event_ids": [
+        "cf925ed1-b8d3-5b8c-83ac-3f9743f219ad",
+        "f9e9689b-64d6-5d46-8637-aa638b5337f8"
+      ],
+      "terminal_outcome": "REJECTED"
+    },
+    {
+      "executed": false,
+      "expected_net_edge_bps": "5.98522133821399222228334158",
+      "missed": true,
+      "missed_reason": "REJECTED",
+      "observed_ts_ns": 1700000230401000000,
+      "opportunity_id": "e52b0498-ca14-577a-bb4e-d55706fab4c4",
+      "parent_id": "38e37459-356e-5cbe-ab94-9fa2c184dbab",
+      "raw_refs": [],
+      "residual_base": "0",
+      "source_event_ids": [
+        "4563bb40-4da7-5e3f-8d91-99d741d761d1",
+        "f9e9689b-64d6-5d46-8637-aa638b5337f8"
+      ],
+      "terminal_outcome": "REJECTED"
+    },
+    {
+      "executed": false,
+      "expected_net_edge_bps": "5.96848256940068875620497331",
+      "missed": true,
+      "missed_reason": "REJECTED",
+      "observed_ts_ns": 1700000240151000000,
+      "opportunity_id": "ba15b86f-5e65-55e8-b20e-0bb4b8fcf4b0",
+      "parent_id": "b8929669-d4cc-5cde-bc43-62a65e2e19d9",
+      "raw_refs": [],
+      "residual_base": "0",
+      "source_event_ids": [
+        "f8a78196-17a1-51af-9135-1b2a831be095",
+        "0e2708f0-a2fe-50f1-b433-2e3d2716569a"
+      ],
+      "terminal_outcome": "REJECTED"
+    },
+    {
+      "executed": false,
+      "expected_net_edge_bps": "5.98517471467076498405623407",
+      "missed": true,
+      "missed_reason": "REJECTED",
+      "observed_ts_ns": 1700000240201000000,
+      "opportunity_id": "96acce12-b249-56c6-a2b6-cc1b077c9f6f",
+      "parent_id": "012b1d4f-5106-5c9a-83e9-cdb5a8e8e3eb",
+      "raw_refs": [],
+      "residual_base": "0",
+      "source_event_ids": [
+        "fc92b20d-2114-5829-b512-f94a3a9350af",
+        "0e2708f0-a2fe-50f1-b433-2e3d2716569a"
+      ],
+      "terminal_outcome": "REJECTED"
+    },
+    {
+      "executed": false,
+      "expected_net_edge_bps": "5.95183699187059629517886522",
+      "missed": true,
+      "missed_reason": "REJECTED",
+      "observed_ts_ns": 1700000240251000000,
+      "opportunity_id": "7f91769d-e441-5d16-b935-0820c10459b1",
+      "parent_id": "918eceb1-45ef-5f1d-b648-9ce7db0f7366",
+      "raw_refs": [],
+      "residual_base": "0",
+      "source_event_ids": [
+        "fc92b20d-2114-5829-b512-f94a3a9350af",
+        "5b53d55a-00d5-5409-a487-10d85db1c903"
+      ],
+      "terminal_outcome": "REJECTED"
+    },
+    {
+      "executed": false,
+      "expected_net_edge_bps": "5.98522133821399222228334158",
+      "missed": true,
+      "missed_reason": "REJECTED",
+      "observed_ts_ns": 1700000240301000000,
+      "opportunity_id": "ff277256-274f-5468-8af2-97a836e9d75b",
+      "parent_id": "a8c3118a-0115-56ad-a873-dc55bfad9ccf",
+      "raw_refs": [],
+      "residual_base": "0",
+      "source_event_ids": [
+        "8d4783eb-1c82-52f5-a205-17985922b7e4",
+        "5b53d55a-00d5-5409-a487-10d85db1c903"
+      ],
+      "terminal_outcome": "REJECTED"
+    },
+    {
+      "executed": false,
+      "expected_net_edge_bps": "5.95188350427307686537682587",
+      "missed": true,
+      "missed_reason": "REJECTED",
+      "observed_ts_ns": 1700000240351000000,
+      "opportunity_id": "4861c1c5-66cb-5a18-8a28-1b200be54a7d",
+      "parent_id": "c469d4a6-f938-5cbe-8449-5e74e95ddac2",
+      "raw_refs": [],
+      "residual_base": "0",
+      "source_event_ids": [
+        "8d4783eb-1c82-52f5-a205-17985922b7e4",
+        "a5f9ce7b-abc0-5c55-9fe2-a165e9c17e42"
+      ],
+      "terminal_outcome": "REJECTED"
+    },
+    {
+      "executed": false,
+      "expected_net_edge_bps": "5.95188350427307686537682587",
+      "missed": true,
+      "missed_reason": "REJECTED",
+      "observed_ts_ns": 1700000240401000000,
+      "opportunity_id": "c7c3efd2-2101-57e5-ad05-70ddca3eda27",
+      "parent_id": "0303c011-9c81-559d-955d-209cbfec2780",
+      "raw_refs": [],
+      "residual_base": "0",
+      "source_event_ids": [
+        "a3f91e69-4649-52a7-bc3d-a4ca49655db9",
+        "a5f9ce7b-abc0-5c55-9fe2-a165e9c17e42"
+      ],
+      "terminal_outcome": "REJECTED"
+    }
+  ],
+  "period": {
+    "date_utc": null,
+    "end_ts_ns": 1700000249951000000,
+    "start_ts_ns": 1700000000001000000
+  },
+  "report_id": "4760cdbf-72d3-55e0-a4d1-33da6a711827",
+  "schema_version": "1.0.0",
+  "scope": "RUN",
+  "summary": {
+    "benchmark_notional": "9606.70500",
+    "cancels": 0,
+    "fees": "3.8426820",
+    "filled_notional": "9606.70500",
+    "filled_quantity": "0.160",
+    "fills": 16,
+    "missed_opportunities": 142,
+    "net_pnl": "2.8603180",
+    "open_residual_base": "0",
+    "opportunities_detected": 150,
+    "opportunities_executed": 8,
+    "orders": 300,
+    "partials": 0,
+    "rejects": 0,
+    "slippage_quote": "0.00000",
+    "timeouts": 0,
+    "unwind_cost": "0",
+    "unwind_fills": 0,
+    "unwind_orders": 0,
+    "weighted_slippage_bps": "0"
+  }
+}

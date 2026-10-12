@@ -1,0 +1,50 @@
+{
+  "command": "-m crypto_stat_arb.cli simulate-maker --config /Users/vaibhav/Documents/Newproject/crypto_MFT_arb_platform/config/paper_watch.json --session-dir /Users/vaibhav/Documents/Newproject/crypto_MFT_arb_platform/runs/paper_watch/live/cycle-0001-20260913T170323Z --output /Users/vaibhav/Documents/Newproject/crypto_MFT_arb_platform/reports/evidence/20261011T191621Z/7_cli_simulate_maker/cli_maker.json",
+  "decision": "PASS",
+  "engine": "cpp_mm_matching_engine",
+  "exit_code": 0,
+  "fill_rows": 23,
+  "latency_source": "maker:preset:singapore",
+  "replay": {
+    "book_events": 5370,
+    "ordering": "arrival_ordinal",
+    "rejected_invalid_envelopes": {},
+    "trades": 3240
+  },
+  "venues": {
+    "BINANCE": {
+      "cancels_applied": 12,
+      "cancels_sent": 12,
+      "crossed_without_print": 2,
+      "fees": 0.077311152,
+      "fills": 5,
+      "fills_trade_through": 3,
+      "fills_while_cancel_pending": 0,
+      "inventory": 0.0,
+      "mark_to_market_pnl_quote": -0.081576152000089,
+      "mean_queue_ahead_at_arrival": 4.532414999999999,
+      "orders_filled": 5,
+      "post_only_rejects": 0,
+      "quotes": 18,
+      "quotes_kept": 327,
+      "sanity_violation_count": 0
+    },
+    "BYBIT": {
+      "cancels_applied": 15,
+      "cancels_sent": 15,
+      "crossed_without_print": 4,
+      "fees": 0.2474389400000001,
+      "fills": 18,
+      "fills_trade_through": 10,
+      "fills_while_cancel_pending": 0,
+      "inventory": 0.005,
+      "mark_to_market_pnl_quote": -0.23453893999994135,
+      "mean_queue_ahead_at_arrival": 0.5463914999999999,
+      "orders_filled": 16,
+      "post_only_rejects": 0,
+      "quotes": 32,
+      "quotes_kept": 381,
+      "sanity_violation_count": 0
+    }
+  }
+}

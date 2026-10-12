@@ -1,0 +1,90 @@
+environment: testnet
+symbol: BTCUSDT
+
+binance:
+  rest_base_url: https://testnet.binance.vision
+  websocket_base_url: wss://stream.testnet.binance.vision
+  depth_levels: 1000
+  stale_after_ms: 2000
+
+binance_execution:
+  environment: testnet
+  rest_base_url: https://testnet.binance.vision
+  api_key_environment_variable: BINANCE_TESTNET_API_KEY
+  api_secret_environment_variable: BINANCE_TESTNET_API_SECRET
+  recv_window_ms: 5000
+  request_timeout_seconds: 10
+  allow_live_trading: false
+
+# Risk limits sized for a stock Binance Spot Testnet account.
+# Testnet grants roughly 1 BTC, 1 ETH, 1 BNB and 10,000 USDT.
+#
+# Important: the CLI derives the risk `position` from the *total*
+# balance of the base asset (free + locked), not from a flat book.
+# The production default of 0.05 is therefore smaller than the BTC
+# the exchange already gave you, so every order -- buy or sell -- is
+# rejected with `max_net_position` before it ever reaches the venue.
+# These values are sized for that grant. They are still real limits:
+# raising them is a deliberate, reviewable configuration change.
+risk:
+  # 0.001 BTC near 63,000 is about 63 USDT of notional, so this
+  # leaves ample room for the demo while still stopping a fat finger.
+  max_order_notional: "1000"
+  # Must exceed the base-asset grant plus the order size. Raise this
+  # if you trade an asset Testnet funds more generously -- XRP and
+  # TRX, for example, arrive in the hundreds or thousands.
+  max_net_position: "2"
+  max_open_orders: 10
+  max_daily_loss: "100"
+  # Fat-finger protection: reject anything more than 1% from the mid.
+  # Deliberately left at the production default. It also binds on
+  # replacements, so a `modify` far from the market is refused too.
+  price_collar_bps: 100
+
+okx_demo_execution:
+  rest_base_url: https://us.okx.com
+  api_key_environment_variable: OKX_DEMO_API_KEY
+  api_secret_environment_variable: OKX_DEMO_API_SECRET
+  passphrase_environment_variable: OKX_DEMO_PASSPHRASE
+  request_timeout_seconds: 10
+  transaction_expiry_ms: 5000
+  instrument_type: SPOT
+  trade_mode: cash
+
+deribit_test_execution:
+  rest_base_url: https://test.deribit.com/api/v2
+  client_id_environment_variable: DERIBIT_TEST_CLIENT_ID
+  client_secret_environment_variable: DERIBIT_TEST_CLIENT_SECRET
+  request_timeout_seconds: 10
+  transaction_expiry_ms: 5000
+  instrument_kind: future
+
+ems:
+  enabled_venues:
+    - binance
+    - okx
+    - deribit
+  dispatch_policy: sequential
+  max_reserved_notional: "1000000"
+  latency_penalty_bps_per_ms: "0"
+  instruments:
+    BTCUSDT:
+      compatibility_group: btc-usdt-spot
+      canonical_quantity_unit: base
+      venues:
+        binance:
+          symbol: BTCUSDT
+          compatibility_group: btc-usdt-spot
+          quantity_unit: base
+        okx:
+          symbol: BTC-USDT
+          compatibility_group: btc-usdt-spot
+          quantity_unit: base
+    BTC-PERPETUAL:
+      compatibility_group: btc-usd-inverse-perpetual
+      canonical_quantity_unit: base
+      venues:
+        deribit:
+          symbol: BTC-PERPETUAL
+          compatibility_group: btc-usd-inverse-perpetual
+          quantity_unit: quote

@@ -1,0 +1,15 @@
+{
+  "adapter_version": "0.1.0",
+  "created_at": "2026-09-13T14:27:57.291318+00:00",
+  "errors": [],
+  "normalized_records": 2,
+  "output": "/Users/vaibhav/Documents/Newproject/crypto_stat_arb_platform_phase1 (10)/runs/local-all-20260913T142755Z/canonical/events.jsonl",
+  "output_sha256": "3f02af369f3b4345a0bf01e9424d3315598023d9e77bb2c8421835a1182c5d91",
+  "quarantine": "/Users/vaibhav/Documents/Newproject/crypto_stat_arb_platform_phase1 (10)/runs/local-all-20260913T142755Z/canonical/events.jsonl.quarantine.jsonl",
+  "quarantine_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+  "rejected_records": 0,
+  "source": "/Users/vaibhav/Documents/Newproject/crypto_stat_arb_platform_phase1 (10)/runs/local-all-20260913T142755Z/raw/local-acceptance/raw.jsonl",
+  "source_sha256": "bec6a505ae711b79aa3a00a2d04d12b486f10c12f3f4eebda5feceb83a996b40",
+  "trace": "/Users/vaibhav/Documents/Newproject/crypto_stat_arb_platform_phase1 (10)/runs/local-all-20260913T142755Z/canonical/events.jsonl.trace.jsonl",
+  "trace_sha256": "dabdad59f30db86df0efda462f09ff24509881cd9d87eb90f178e00af8b1daf5"
+}

@@ -1,0 +1,27 @@
+{
+  "instruction": {
+    "strategy_id": "cross_venue_btc_v1",
+    "eligible_venues": ["BINANCE", "BYBIT"],
+    "instrument_id": "BTC-USDT-SPOT",
+    "side": "BUY",
+    "order_type": "LIMIT",
+    "price": "60000.00",
+    "quantity": "0.010",
+    "route_priority": ["BINANCE", "BYBIT"],
+    "maker_taker_intent": "TAKER",
+    "time_in_force": "IOC",
+    "post_only": false,
+    "reduce_only": false,
+    "parent_opportunity_id": "opportunity-1",
+    "parent_order_id": "parent-1",
+    "order_id": "child-buy-1",
+    "created_ts_ns": 1700000000000000000,
+    "route_override": "BYBIT",
+    "idempotency_key": "opportunity-1-child-buy-1"
+  },
+  "expected": {
+    "selected_venue": "BYBIT",
+    "override_applied": true,
+    "binance_not_dispatched": true
+  }
+}

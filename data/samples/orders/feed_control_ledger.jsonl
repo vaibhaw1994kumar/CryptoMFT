@@ -1,0 +1,3 @@
+{"event_type":"FEED_CONTROL_STATE_TRANSITION","ts_ns":1700000000000000000,"venue":"BYBIT","previous_mode":"ACTIVE","mode":"RISK_REDUCING_ONLY","reason":"STALE:market_data_stale","new_risk_allowed":false,"risk_reducing_allowed":true}
+{"event_type":"FEED_CONTROL_VENUE_CANCEL","ts_ns":1700000000000000000,"venue":"BYBIT","reason":"STALE:market_data_stale","preserve_risk_reducing":true,"cancelled_orders":2}
+{"event_type":"FEED_CONTROL_STATE_TRANSITION","ts_ns":1700000001000000000,"venue":"BYBIT","previous_mode":"RISK_REDUCING_ONLY","mode":"ACTIVE","reason":"","new_risk_allowed":true,"risk_reducing_allowed":true}

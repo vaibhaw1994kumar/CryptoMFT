@@ -1,0 +1,195 @@
+name: wheels
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: wheels-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  tests:
+    name: tests (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-14, windows-latest]
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v9.0.0
+        with:
+          enable-cache: true
+      - name: Sync dependencies
+        run: uv sync --frozen
+      # --frozen on the run as well as the sync: `uv run` performs its own
+      # resolution and will update uv.lock if it disagrees with it, so without
+      # this the suite can pass against a dependency set that the lock does
+      # not describe, which is the one thing the lock exists to prevent.
+      - name: Run test suite
+        run: uv run --frozen pytest -q
+
+  acceptance:
+    # The suite already runs inside `tests` via the slow-marked end-to-end
+    # test, but that one writes into a temporary directory and discards it.
+    # This job exists to keep the bundle: it is the artifact the release
+    # attaches and the client is asked to read, so it is produced under the
+    # release commit and checked as a deliverable rather than as a test.
+    name: acceptance evidence
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v9.0.0
+        with:
+          enable-cache: true
+      - name: Sync dependencies
+        run: uv sync --frozen
+      - name: Run AT-01 to AT-14
+        env:
+          # actions/checkout leaves a usable .git, but stamping the revision
+          # explicitly keeps the bundle honest if that ever stops being true.
+          HFT_PLATFORM_KIT_GIT_REVISION: ${{ github.sha }}
+        run: uv run --frozen trading-platform-poc mr-acceptance --output evidence
+      - name: Check the evidence bundle
+        run: python3 .github/scripts/check_evidence.py evidence
+      - uses: actions/upload-artifact@v7
+        with:
+          name: acceptance-evidence
+          path: evidence/
+
+  wheels:
+    name: wheels (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    # A runner label that no longer exists does not fail -- the job waits for
+    # a runner that never arrives, and is eventually reported as "cancelled",
+    # which does not look like a breakage. macos-13 sat queued for up to 4h47m
+    # across seven pushes before anyone noticed. Fail fast instead.
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        # macOS is arm64-only. macos-13 was retired on 2025-12-04, and its
+        # replacement macos-15-intel builds an x86_64 wheel that cannot be
+        # installed: llvmlite publishes no macosx_x86_64 wheels, so the
+        # install compiles LLVM from source and fails. See the skip list in
+        # pyproject.toml.
+        os:
+          - ubuntu-latest
+          - ubuntu-24.04-arm
+          - macos-14
+          - windows-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Build wheels
+        uses: pypa/cibuildwheel@v4.1.1
+      - uses: actions/upload-artifact@v7
+        with:
+          name: wheels-${{ matrix.os }}
+          path: ./wheelhouse/*.whl
+
+  sdist:
+    name: sdist
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v9.0.0
+      - name: Build sdist
+        run: uv build --sdist
+      - uses: actions/upload-artifact@v7
+        with:
+          name: sdist
+          path: ./dist/*.tar.gz
+
+  release:
+    # Every artifact a client is told to fetch is published from one place, so
+    # the wheels, the sdist and the evidence bundle attached to a release are
+    # by construction the ones built from the tagged commit.
+    name: github release
+    needs: [tests, acceptance, wheels, sdist]
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Resolve the version
+        id: version
+        run: |
+          set -euo pipefail
+          tag="${GITHUB_REF_NAME}"
+          version="${tag#v}"
+          # A tag that disagrees with the package it ships mislabels every
+          # artifact under it, and it cannot be corrected after publication.
+          packaged="$(python3 -c \
+            'import tomllib,pathlib;print(tomllib.loads(pathlib.Path("pyproject.toml").read_text())["project"]["version"])')"
+          if [ "$version" != "$packaged" ]; then
+            echo "tag $tag does not match pyproject version $packaged" >&2
+            exit 1
+          fi
+          echo "tag=$tag" >>"$GITHUB_OUTPUT"
+          echo "version=$version" >>"$GITHUB_OUTPUT"
+
+      - uses: actions/download-artifact@v7
+        with:
+          path: artifacts
+
+      - name: Assemble the release assets
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          # Scoped to the build artifacts: a find across everything would
+          # sweep any archive that later appears inside the evidence bundle
+          # into the release as though it were a distributable.
+          find artifacts -path 'artifacts/wheels-*' -name '*.whl' -exec cp {} dist/ \;
+          find artifacts/sdist -name '*.tar.gz' -exec cp {} dist/ \;
+          ls dist
+          test -n "$(find dist -name '*.whl' -print -quit)"
+          test -n "$(find dist -name '*.tar.gz' -print -quit)"
+          # The bundle is verified again here, not merely repackaged: this is
+          # the copy the client actually receives.
+          python3 .github/scripts/check_evidence.py \
+            artifacts/acceptance-evidence \
+            --expect-version "${{ steps.version.outputs.version }}"
+          ( cd artifacts/acceptance-evidence \
+            && zip -qr "$GITHUB_WORKSPACE/dist/hft-platform-kit-${{ steps.version.outputs.version }}-evidence.zip" . )
+
+      - name: Write the release notes
+        run: |
+          set -euo pipefail
+          python3 .github/scripts/release_notes.py \
+            "${{ steps.version.outputs.version }}" >notes.md
+          {
+            echo
+            echo "### Verification"
+            echo
+            echo "Acceptance suite AT-01 to AT-14 passed on \`${GITHUB_SHA}\`."
+            echo "\`hft-platform-kit-${{ steps.version.outputs.version }}-evidence.zip\`"
+            echo "is the bundle that run produced."
+            echo
+            echo '```'
+            echo "docker run --rm -v \"\$PWD/out:/out\" \\"
+            echo "  ghcr.io/${GITHUB_REPOSITORY}:${{ steps.version.outputs.version }}"
+            echo '```'
+          } >>notes.md
+
+      - name: Create the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${{ steps.version.outputs.tag }}" \
+            --title "${{ steps.version.outputs.tag }}" \
+            --notes-file notes.md \
+            --verify-tag \
+            dist/*

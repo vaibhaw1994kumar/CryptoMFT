@@ -1,0 +1,39 @@
+{
+  "alerts": [],
+  "report_id": "f0550db6-1fa5-57da-bf52-530023c22ec5",
+  "schema_version": "1.0.0",
+  "state": "NOT_APPLICABLE",
+  "ts_ns": 1633000000,
+  "venues": {
+    "BINANCE": {
+      "alert_codes": [],
+      "effective_margin_balance": "10000",
+      "gross_notional": "0",
+      "initial_margin_required": "0",
+      "liquidation_buffer": "10000",
+      "maintenance_margin_required": "0",
+      "maintenance_margin_utilization": "0",
+      "margin_balance": "10000",
+      "margin_enabled": false,
+      "required_liquidation_buffer": "0.00",
+      "state": "NOT_APPLICABLE",
+      "venue": "BINANCE",
+      "venue_reported_margin_balance": null
+    },
+    "BYBIT": {
+      "alert_codes": [],
+      "effective_margin_balance": "10000",
+      "gross_notional": "0",
+      "initial_margin_required": "0",
+      "liquidation_buffer": "10000",
+      "maintenance_margin_required": "0",
+      "maintenance_margin_utilization": "0",
+      "margin_balance": "10000",
+      "margin_enabled": false,
+      "required_liquidation_buffer": "0.00",
+      "state": "NOT_APPLICABLE",
+      "venue": "BYBIT",
+      "venue_reported_margin_balance": null
+    }
+  }
+}

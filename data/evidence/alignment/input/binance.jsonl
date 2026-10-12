@@ -1,0 +1,2 @@
+{"event_type":"BOOK_SNAPSHOT","venue":"BINANCE","instrument_id":"BTC-USDT-SPOT","exchange_ts_ns":1000000000,"receive_ts_ns":1000100000,"sequence":100,"bids":[["59999.90","1.000"],["59999.80","2.000"]],"asks":[["60000.00","1.000"],["60000.10","2.000"]],"native":{"lastUpdateId":100}}
+{"event_type":"BOOK_DELTA","venue":"BINANCE","instrument_id":"BTC-USDT-SPOT","exchange_ts_ns":1100000000,"receive_ts_ns":1100100000,"sequence":101,"bids":[["59999.90","0"],["59999.80","0"],["60009.90","1.000"]],"asks":[["60000.00","0"],["60000.10","0"],["60010.00","1.000"]],"native":{"u":101}}

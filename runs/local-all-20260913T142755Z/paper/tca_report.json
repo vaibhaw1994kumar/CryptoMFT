@@ -1,0 +1,116 @@
+{
+  "calculation": {
+    "benchmark": "child decision/limit price at dispatch",
+    "buy_slippage_quote": "(average_fill_price - benchmark_price) * filled_quantity",
+    "missed_opportunity": "not all primary children filled or residual outside approved bound",
+    "sell_slippage_quote": "(benchmark_price - average_fill_price) * filled_quantity",
+    "sign": "positive is adverse; negative is price improvement",
+    "weighted_slippage_bps": "sum(slippage_quote) / sum(filled_quantity * benchmark_price) * 10000"
+  },
+  "calculation_version": "basic-tca-v1",
+  "correlation_id": "two_venue_books.jsonl",
+  "groups": [
+    {
+      "benchmark_notional": "600.00000",
+      "cancels": 0,
+      "fees": "0.24000",
+      "filled_notional": "600.00000",
+      "filled_quantity": "0.010",
+      "fills": 1,
+      "instrument_id": "BTC-USDT-SPOT",
+      "missed_opportunities": 0,
+      "order_type": "LIMIT",
+      "orders": 1,
+      "partials": 0,
+      "rejects": 0,
+      "slippage_quote": "0.00000",
+      "timeouts": 0,
+      "unwind_fills": 0,
+      "unwind_orders": 0,
+      "venue": "BINANCE",
+      "weighted_slippage_bps": "0"
+    },
+    {
+      "benchmark_notional": "600.60000",
+      "cancels": 0,
+      "fees": "0.24024",
+      "filled_notional": "600.60000",
+      "filled_quantity": "0.010",
+      "fills": 1,
+      "instrument_id": "BTC-USDT-SPOT",
+      "missed_opportunities": 0,
+      "order_type": "LIMIT",
+      "orders": 1,
+      "partials": 0,
+      "rejects": 0,
+      "slippage_quote": "0.00000",
+      "timeouts": 0,
+      "unwind_fills": 0,
+      "unwind_orders": 0,
+      "venue": "BYBIT",
+      "weighted_slippage_bps": "0"
+    }
+  ],
+  "lineage": {
+    "canonical_source_path": "data/samples/two_venue_books.jsonl",
+    "canonical_source_sha256": "bf76072a30b2c2612810db0c702d97f03851a85c90205a18b9bbfcf3fe643c74",
+    "raw_reference_coverage": 0.0,
+    "raw_refs": [],
+    "source_event_ids": [
+      "35e2824a-105e-58df-92e9-0dc61cb4a182",
+      "8f7eae8a-97f8-51c2-9015-31779c1f36af"
+    ],
+    "source_event_raw_refs": {
+      "35e2824a-105e-58df-92e9-0dc61cb4a182": null,
+      "8f7eae8a-97f8-51c2-9015-31779c1f36af": null
+    }
+  },
+  "opportunities": [
+    {
+      "executed": true,
+      "expected_net_edge_bps": "2.000",
+      "missed": false,
+      "missed_reason": "",
+      "observed_ts_ns": 1000300000,
+      "opportunity_id": "429760e2-1b6f-5a38-bbae-5ffec8b4d4eb",
+      "parent_id": "214fce2d-b11b-50d6-b7ad-518029a282fd",
+      "raw_refs": [],
+      "residual_base": "0.000",
+      "source_event_ids": [
+        "8f7eae8a-97f8-51c2-9015-31779c1f36af",
+        "35e2824a-105e-58df-92e9-0dc61cb4a182"
+      ],
+      "terminal_outcome": "FILLED"
+    }
+  ],
+  "period": {
+    "date_utc": null,
+    "end_ts_ns": 1100300000,
+    "start_ts_ns": 1000100000
+  },
+  "report_id": "cfb06f31-dea5-5cac-bc2a-54106821d394",
+  "schema_version": "1.0.0",
+  "scope": "RUN",
+  "summary": {
+    "benchmark_notional": "1200.60000",
+    "cancels": 0,
+    "fees": "0.48024",
+    "filled_notional": "1200.60000",
+    "filled_quantity": "0.020",
+    "fills": 2,
+    "missed_opportunities": 0,
+    "net_pnl": "0.11976",
+    "open_residual_base": "0",
+    "opportunities_detected": 1,
+    "opportunities_executed": 1,
+    "orders": 2,
+    "partials": 0,
+    "rejects": 0,
+    "slippage_quote": "0.00000",
+    "timeouts": 0,
+    "unwind_cost": "0",
+    "unwind_fills": 0,
+    "unwind_orders": 0,
+    "weighted_slippage_bps": "0"
+  }
+}

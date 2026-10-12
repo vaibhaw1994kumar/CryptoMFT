@@ -1,0 +1,26 @@
+{
+  "schema_version": "1.0.0",
+  "report_id": "1c807e0f-6fdb-5e85-882a-2c39e6ea6e09",
+  "ts_ns": 1788518089000000000,
+  "state": "WARNING",
+  "alerts": [
+    {"venue": "BINANCE", "code": "LIQUIDATION_BUFFER_LOW"}
+  ],
+  "venues": {
+    "BINANCE": {
+      "venue": "BINANCE",
+      "state": "WARNING",
+      "margin_enabled": true,
+      "gross_notional": "100",
+      "margin_balance": "5",
+      "venue_reported_margin_balance": "5",
+      "effective_margin_balance": "5",
+      "initial_margin_required": "10",
+      "maintenance_margin_required": "4",
+      "liquidation_buffer": "1",
+      "required_liquidation_buffer": "1.2",
+      "maintenance_margin_utilization": "0.8",
+      "alert_codes": ["LIQUIDATION_BUFFER_LOW"]
+    }
+  }
+}

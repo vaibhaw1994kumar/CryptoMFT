@@ -1,0 +1,862 @@
+{
+  "checks": {
+    "1_engine_parity": {
+      "decision": "PASS",
+      "result": {
+        "cpp": {
+          "engine": "cpp_mm_matching_engine",
+          "fill_rows": 2000,
+          "fills_sha256": "8cbe23aefa9b944561dc135b5b2f2961392653c9ea09a2e08bfba3170f8aadfa",
+          "replay": {
+            "book_events": 79365,
+            "ordering": "arrival_ordinal",
+            "rejected_invalid_envelopes": {},
+            "trades": 151443
+          },
+          "runtime_s": 24.2,
+          "venues": {
+            "BINANCE": {
+              "cancels_applied": 575,
+              "cancels_sent": 578,
+              "crossed_without_print": 102,
+              "fees": 8.211521752000001,
+              "fills": 1130,
+              "fills_trade_through": 378,
+              "fills_while_cancel_pending": 9,
+              "inventory": 0.008000000000000028,
+              "mark_to_market_pnl_quote": -13.705186751999113,
+              "mean_queue_ahead_at_arrival": 3.5757147727272747,
+              "orders_filled": 524,
+              "post_only_rejects": 32,
+              "quotes": 1132,
+              "quotes_kept": 1787,
+              "sanity_violation_count": 0
+            },
+            "BYBIT": {
+              "cancels_applied": 795,
+              "cancels_sent": 796,
+              "crossed_without_print": 256,
+              "fees": 11.152935316299992,
+              "fills": 870,
+              "fills_trade_through": 504,
+              "fills_while_cancel_pending": 1,
+              "inventory": 0.006635000000000014,
+              "mark_to_market_pnl_quote": -17.2202115662995,
+              "mean_queue_ahead_at_arrival": 0.5039890650298611,
+              "orders_filled": 710,
+              "post_only_rejects": 6,
+              "quotes": 1513,
+              "quotes_kept": 1625,
+              "sanity_violation_count": 0
+            }
+          }
+        },
+        "cycle": "cycle-0006-20260914T142731Z",
+        "decision": "PASS",
+        "fills_byte_identical": true,
+        "python": {
+          "engine": "python_queue_model",
+          "fill_rows": 2000,
+          "fills_sha256": "8cbe23aefa9b944561dc135b5b2f2961392653c9ea09a2e08bfba3170f8aadfa",
+          "replay": {
+            "book_events": 79365,
+            "ordering": "arrival_ordinal",
+            "rejected_invalid_envelopes": {},
+            "trades": 151443
+          },
+          "runtime_s": 24.3,
+          "venues": {
+            "BINANCE": {
+              "cancels_applied": 575,
+              "cancels_sent": 578,
+              "crossed_without_print": 102,
+              "fees": 8.211521752000001,
+              "fills": 1130,
+              "fills_trade_through": 378,
+              "fills_while_cancel_pending": 9,
+              "inventory": 0.008000000000000028,
+              "mark_to_market_pnl_quote": -13.705186751999113,
+              "mean_queue_ahead_at_arrival": 3.5757147727272747,
+              "orders_filled": 524,
+              "post_only_rejects": 32,
+              "quotes": 1132,
+              "quotes_kept": 1787,
+              "sanity_violation_count": 0
+            },
+            "BYBIT": {
+              "cancels_applied": 795,
+              "cancels_sent": 796,
+              "crossed_without_print": 256,
+              "fees": 11.152935316299992,
+              "fills": 870,
+              "fills_trade_through": 504,
+              "fills_while_cancel_pending": 1,
+              "inventory": 0.006635000000000014,
+              "mark_to_market_pnl_quote": -17.2202115662995,
+              "mean_queue_ahead_at_arrival": 0.5039890650298611,
+              "orders_filled": 710,
+              "post_only_rejects": 6,
+              "quotes": 1513,
+              "quotes_kept": 1625,
+              "sanity_violation_count": 0
+            }
+          }
+        }
+      },
+      "seconds": 48.5,
+      "title": "C++ vs Python engine parity"
+    },
+    "2_cpp_semantics": {
+      "decision": "PASS",
+      "result": {
+        "decision": "PASS",
+        "module": "/Users/vaibhav/Documents/Newproject/crypto_MFT_arb_platform/src/crypto_stat_arb/sim_engine/mm_matching_engine.cpython-312-darwin.so",
+        "scenarios": [
+          {
+            "expected": {
+              "fills": [],
+              "queue_ahead": 3.0
+            },
+            "observed": {
+              "fills": [],
+              "queue_ahead": 3.0
+            },
+            "pass": true,
+            "scenario": "print + its book delta, trade first",
+            "setup": "level 10, our bid 2; print 4; then print 3 and level 10->3"
+          },
+          {
+            "expected": {
+              "fills": [],
+              "queue_ahead": 3.0
+            },
+            "observed": {
+              "fills": [],
+              "queue_ahead": 3.0
+            },
+            "pass": true,
+            "scenario": "print + its book delta, book first",
+            "setup": "level 10, our bid 2; print 4; then print 3 and level 10->3"
+          },
+          {
+            "expected": {
+              "fills": [
+                [
+                  1,
+                  1.0
+                ],
+                [
+                  2,
+                  0.5
+                ]
+              ]
+            },
+            "observed": {
+              "fills": [
+                [
+                  1,
+                  1.0
+                ],
+                [
+                  2,
+                  0.5
+                ]
+              ]
+            },
+            "pass": true,
+            "scenario": "two own orders share one print (FIFO)",
+            "setup": "level 5, orders a=1 then b=1, print 6.5"
+          },
+          {
+            "expected": {
+              "level_100_our_orders": 1,
+              "order_b_active": true
+            },
+            "observed": {
+              "level_100_our_orders": 1,
+              "order_b_active": true
+            },
+            "pass": true,
+            "scenario": "level updated to size 0 keeps our resting order",
+            "setup": "after previous scenario, level 100 -> 0"
+          },
+          {
+            "expected": {
+              "fills": [
+                [
+                  2,
+                  0.5
+                ]
+              ]
+            },
+            "observed": {
+              "fills": [
+                [
+                  2,
+                  0.5
+                ]
+              ]
+            },
+            "pass": true,
+            "scenario": "print through our price fills the remainder",
+            "setup": "order b remaining 0.5 at 100, SELL print 0.1 at 99"
+          },
+          {
+            "expected": {
+              "queue_ahead": 7.0
+            },
+            "observed": {
+              "queue_ahead": 7.0
+            },
+            "pass": true,
+            "scenario": "queue_position_frac = 0.7",
+            "setup": "level 10, place bid"
+          }
+        ]
+      },
+      "seconds": 0.0,
+      "title": "C++ queue semantics smoke test"
+    },
+    "3_live_replay_parity": {
+      "decision": "PASS",
+      "result": {
+        "decision": "PASS",
+        "identical": true,
+        "live": {
+          "fill_rows": 4,
+          "fills_sha256": "a6e0228e6249128fe48c17c328719fcc2dfa9ebc9f08a4dafc19c281ac27e336",
+          "venues": {
+            "BINANCE": {
+              "cancels_applied": 0,
+              "cancels_sent": 0,
+              "crossed_without_print": 0,
+              "fees": 0.02399998,
+              "fills": 2,
+              "fills_trade_through": 0,
+              "fills_while_cancel_pending": 0,
+              "inventory": 0.005,
+              "mark_to_market_pnl_quote": -0.023899980000025103,
+              "mean_queue_ahead_at_arrival": 1.0,
+              "orders_filled": 2,
+              "post_only_rejects": 0,
+              "quotes": 2,
+              "quotes_kept": 0,
+              "sanity_violation_count": 0
+            },
+            "BYBIT": {
+              "cancels_applied": 0,
+              "cancels_sent": 0,
+              "crossed_without_print": 0,
+              "fees": 0.02400002,
+              "fills": 2,
+              "fills_trade_through": 0,
+              "fills_while_cancel_pending": 0,
+              "inventory": 0.005,
+              "mark_to_market_pnl_quote": -0.02390001999996826,
+              "mean_queue_ahead_at_arrival": 1.0,
+              "orders_filled": 2,
+              "post_only_rejects": 0,
+              "quotes": 2,
+              "quotes_kept": 0,
+              "sanity_violation_count": 0
+            }
+          }
+        },
+        "recorded": {
+          "book_events": 90,
+          "trades": 88
+        },
+        "replay": {
+          "fill_rows": 4,
+          "fills_sha256": "a6e0228e6249128fe48c17c328719fcc2dfa9ebc9f08a4dafc19c281ac27e336",
+          "venues": {
+            "BINANCE": {
+              "cancels_applied": 0,
+              "cancels_sent": 0,
+              "crossed_without_print": 0,
+              "fees": 0.02399998,
+              "fills": 2,
+              "fills_trade_through": 0,
+              "fills_while_cancel_pending": 0,
+              "inventory": 0.005,
+              "mark_to_market_pnl_quote": -0.023899980000025103,
+              "mean_queue_ahead_at_arrival": 1.0,
+              "orders_filled": 2,
+              "post_only_rejects": 0,
+              "quotes": 2,
+              "quotes_kept": 0,
+              "sanity_violation_count": 0
+            },
+            "BYBIT": {
+              "cancels_applied": 0,
+              "cancels_sent": 0,
+              "crossed_without_print": 0,
+              "fees": 0.02400002,
+              "fills": 2,
+              "fills_trade_through": 0,
+              "fills_while_cancel_pending": 0,
+              "inventory": 0.005,
+              "mark_to_market_pnl_quote": -0.02390001999996826,
+              "mean_queue_ahead_at_arrival": 1.0,
+              "orders_filled": 2,
+              "post_only_rejects": 0,
+              "quotes": 2,
+              "quotes_kept": 0,
+              "sanity_violation_count": 0
+            }
+          }
+        },
+        "replay_ordering": "arrival_ordinal"
+      },
+      "seconds": 0.2,
+      "title": "Live paper vs replay parity"
+    },
+    "4_5_replay_order_and_ids": {
+      "decision": "PASS",
+      "result": {
+        "arrival_ordinal_cycles": 44,
+        "cycles": 46,
+        "decision": "PASS",
+        "duplicate_event_ids_total": 0,
+        "duplicate_trace_ids_total": 0,
+        "events_total": 1945052
+      },
+      "seconds": 25.3,
+      "title": "Replay ordering + duplicate event ids (all cycles)"
+    },
+    "6_session_audit": {
+      "decision": "PASS",
+      "result": {
+        "cycle": "cycle-0006-20260914T142731Z",
+        "decision": "PASS",
+        "new": {
+          "components": {
+            "backtest_replay": "FAIL",
+            "dry_run": "WARN",
+            "errors": "WARN",
+            "feed": "WARN",
+            "historical_storage": "FAIL",
+            "order_books": "OK",
+            "orderbook_replay": "WARN",
+            "security_master": "WARN",
+            "simulation": "OK",
+            "strategies": "OK",
+            "time_integrity": "WARN"
+          },
+          "simulation": {
+            "checks": [
+              {
+                "check": "cpp_matching_engine_loaded",
+                "detail": "compiled mm_matching_engine not importable on this Python/arch; its bit-identical Python mirror was used",
+                "status": "OK"
+              },
+              {
+                "check": "replay_in_live_arrival_order",
+                "detail": "ordering arrival_ordinal: no ingestion trace for every event",
+                "status": "OK"
+              },
+              {
+                "check": "BINANCE_quotes_placed",
+                "detail": "1132 quotes",
+                "status": "OK"
+              },
+              {
+                "check": "BINANCE_trades_replayed",
+                "detail": "131342 trades",
+                "status": "OK"
+              },
+              {
+                "check": "BINANCE_simulated_fills_sane",
+                "detail": "",
+                "status": "OK"
+              },
+              {
+                "check": "BYBIT_quotes_placed",
+                "detail": "1513 quotes",
+                "status": "OK"
+              },
+              {
+                "check": "BYBIT_trades_replayed",
+                "detail": "20101 trades",
+                "status": "OK"
+              },
+              {
+                "check": "BYBIT_simulated_fills_sane",
+                "detail": "",
+                "status": "OK"
+              }
+            ],
+            "metrics": {
+              "engine": "cpp_mm_matching_engine",
+              "latency_source": "maker:preset:singapore",
+              "replay": {
+                "book_events": 79365,
+                "ordering": "arrival_ordinal",
+                "rejected_invalid_envelopes": {},
+                "trades": 151443
+              },
+              "venues": {
+                "BINANCE": {
+                  "fees": 8.211521752000001,
+                  "fill_ratio": 0.9982332155477032,
+                  "fills": 1130,
+                  "inventory": 0.008000000000000028,
+                  "mark_to_market_pnl_quote": -13.705186751999113,
+                  "quotes": 1132,
+                  "sanity_violation_count": 0,
+                  "trades_seen": 131342
+                },
+                "BYBIT": {
+                  "fees": 11.152935316299992,
+                  "fill_ratio": 0.5750165234633179,
+                  "fills": 870,
+                  "inventory": 0.006635000000000014,
+                  "mark_to_market_pnl_quote": -17.2202115662995,
+                  "quotes": 1513,
+                  "sanity_violation_count": 0,
+                  "trades_seen": 20101
+                }
+              }
+            },
+            "status": "OK"
+          }
+        },
+        "old": {
+          "components": {
+            "backtest_replay": "FAIL",
+            "dry_run": "WARN",
+            "errors": "WARN",
+            "feed": "WARN",
+            "historical_storage": "OK",
+            "order_books": "OK",
+            "orderbook_replay": "OK",
+            "security_master": "WARN",
+            "simulation": "WARN",
+            "strategies": "OK",
+            "time_integrity": "WARN"
+          },
+          "simulation": {
+            "checks": [
+              {
+                "check": "cpp_matching_engine_loaded",
+                "detail": "compiled mm_matching_engine not importable on this Python/arch; sim_engine's Python queue-position model was used",
+                "status": "WARN"
+              },
+              {
+                "check": "BINANCE_quotes_placed",
+                "detail": "2739 quotes",
+                "status": "OK"
+              },
+              {
+                "check": "BINANCE_trades_replayed",
+                "detail": "131342 trades",
+                "status": "OK"
+              },
+              {
+                "check": "BINANCE_simulated_fills_sane",
+                "detail": "",
+                "status": "OK"
+              },
+              {
+                "check": "BYBIT_quotes_placed",
+                "detail": "3088 quotes",
+                "status": "OK"
+              },
+              {
+                "check": "BYBIT_trades_replayed",
+                "detail": "20101 trades",
+                "status": "OK"
+              },
+              {
+                "check": "BYBIT_simulated_fills_sane",
+                "detail": "",
+                "status": "OK"
+              }
+            ],
+            "metrics": {
+              "engine": "python_queue_model",
+              "replay": {
+                "book_events": 79365,
+                "trades": 151443
+              },
+              "venues": {
+                "BINANCE": {
+                  "fees": 3.3331000310109964,
+                  "fill_ratio": 0.3176341730558598,
+                  "fills": 870,
+                  "inventory": 0.006782000000000029,
+                  "mark_to_market_pnl_quote": -7.190570921009009,
+                  "quotes": 2739,
+                  "sanity_violation_count": 0,
+                  "trades_seen": 131342
+                },
+                "BYBIT": {
+                  "fees": 3.4427492189405005,
+                  "fill_ratio": 0.2665155440414508,
+                  "fills": 823,
+                  "inventory": 0.004917500000000004,
+                  "mark_to_market_pnl_quote": -8.168119903940076,
+                  "quotes": 3088,
+                  "sanity_violation_count": 0,
+                  "trades_seen": 20101
+                }
+              }
+            },
+            "status": "WARN"
+          }
+        }
+      },
+      "seconds": 40.9,
+      "title": "Session audit analyze-session (cycle-0006)"
+    },
+    "7_cli_simulate_maker": {
+      "decision": "PASS",
+      "result": {
+        "command": "-m crypto_stat_arb.cli simulate-maker --config /Users/vaibhav/Documents/Newproject/crypto_MFT_arb_platform/config/paper_watch.json --session-dir /Users/vaibhav/Documents/Newproject/crypto_MFT_arb_platform/runs/paper_watch/live/cycle-0001-20260913T170323Z --output /Users/vaibhav/Documents/Newproject/crypto_MFT_arb_platform/reports/evidence/20261011T191621Z/7_cli_simulate_maker/cli_maker.json",
+        "decision": "PASS",
+        "engine": "cpp_mm_matching_engine",
+        "exit_code": 0,
+        "fill_rows": 23,
+        "latency_source": "maker:preset:singapore",
+        "replay": {
+          "book_events": 5370,
+          "ordering": "arrival_ordinal",
+          "rejected_invalid_envelopes": {},
+          "trades": 3240
+        },
+        "venues": {
+          "BINANCE": {
+            "cancels_applied": 12,
+            "cancels_sent": 12,
+            "crossed_without_print": 2,
+            "fees": 0.077311152,
+            "fills": 5,
+            "fills_trade_through": 3,
+            "fills_while_cancel_pending": 0,
+            "inventory": 0.0,
+            "mark_to_market_pnl_quote": -0.081576152000089,
+            "mean_queue_ahead_at_arrival": 4.532414999999999,
+            "orders_filled": 5,
+            "post_only_rejects": 0,
+            "quotes": 18,
+            "quotes_kept": 327,
+            "sanity_violation_count": 0
+          },
+          "BYBIT": {
+            "cancels_applied": 15,
+            "cancels_sent": 15,
+            "crossed_without_print": 4,
+            "fees": 0.2474389400000001,
+            "fills": 18,
+            "fills_trade_through": 10,
+            "fills_while_cancel_pending": 0,
+            "inventory": 0.005,
+            "mark_to_market_pnl_quote": -0.23453893999994135,
+            "mean_queue_ahead_at_arrival": 0.5463914999999999,
+            "orders_filled": 16,
+            "post_only_rejects": 0,
+            "quotes": 32,
+            "quotes_kept": 381,
+            "sanity_violation_count": 0
+          }
+        }
+      },
+      "seconds": 1.8,
+      "title": "CLI simulate-maker (cycle-0001)"
+    },
+    "8_sensitivity_sweep": {
+      "decision": "PASS",
+      "result": {
+        "cycles": [
+          "cycle-0006-20260914T142731Z",
+          "cycle-0007-20260914T145802Z",
+          "cycle-0008-20260914T152833Z",
+          "cycle-0009-20260914T155903Z",
+          "cycle-0010-20260914T162934Z",
+          "cycle-0040-20260915T132143Z"
+        ],
+        "decision": "PASS",
+        "engine": [
+          "cpp_mm_matching_engine"
+        ],
+        "max_sanity_violations_in_any_run": 0,
+        "ordering": [
+          "arrival_ordinal"
+        ],
+        "rows": 168,
+        "runs": 84,
+        "sanity_violations_total": 0,
+        "source": "runs/maker_sensitivity/20261011T172155Z"
+      },
+      "seconds": 0.0,
+      "title": "Sensitivity sweep sanity"
+    }
+  },
+  "files": {
+    "1_engine_parity/maker_cpp.json": {
+      "bytes": 11824,
+      "sha256": "f0a1b4fb2ad38f25141c0b85d7734d2c6fe5eaf5b4d27a309f069fc474047bc7"
+    },
+    "1_engine_parity/maker_cpp_fills.jsonl": {
+      "bytes": 1393217,
+      "sha256": "8cbe23aefa9b944561dc135b5b2f2961392653c9ea09a2e08bfba3170f8aadfa"
+    },
+    "1_engine_parity/maker_python.json": {
+      "bytes": 11823,
+      "sha256": "ca0bbd1dacaeea8c47db7497164dd574eaf0e69bf76bac84dce58eba198410a0"
+    },
+    "1_engine_parity/maker_python_fills.jsonl": {
+      "bytes": 1393217,
+      "sha256": "8cbe23aefa9b944561dc135b5b2f2961392653c9ea09a2e08bfba3170f8aadfa"
+    },
+    "1_engine_parity/parity_summary.json": {
+      "bytes": 3103,
+      "sha256": "c7db0bee028ea9c8f6263283b8ce549e66baff8aaa73802d7fd6f3463966c00e"
+    },
+    "2_cpp_semantics/scenarios.json": {
+      "bytes": 2288,
+      "sha256": "85589dca03302e1dc6d3a25b3976d528278b750431dff2dae5cf1ca51b00ebab"
+    },
+    "3_live_replay_parity/live_fills.jsonl": {
+      "bytes": 2402,
+      "sha256": "a6e0228e6249128fe48c17c328719fcc2dfa9ebc9f08a4dafc19c281ac27e336"
+    },
+    "3_live_replay_parity/parity_summary.json": {
+      "bytes": 2506,
+      "sha256": "41b0f44e3997ec1525e256d9431f4ed02da65629e569c0fc0cc999f8fdb99cf5"
+    },
+    "3_live_replay_parity/replay.json": {
+      "bytes": 9695,
+      "sha256": "62b387be8975cbb064d1b02e6f18371f20b8af5f76bbac12235fdae11d162103"
+    },
+    "3_live_replay_parity/replay_fills.jsonl": {
+      "bytes": 2402,
+      "sha256": "a6e0228e6249128fe48c17c328719fcc2dfa9ebc9f08a4dafc19c281ac27e336"
+    },
+    "3_live_replay_parity/session/parity/live_manifest.json": {
+      "bytes": 7922,
+      "sha256": "be0b7bea4b04244d8109b6ca809fbfbd89b550af109a4765776eb685236cb85a"
+    },
+    "3_live_replay_parity/session/parity/ltp_ohlc_1m.csv": {
+      "bytes": 663,
+      "sha256": "8ee3aa55bf41c3b5a402b81b20c6fad40abec301918288956b7ef4bc07f23d54"
+    },
+    "3_live_replay_parity/session/parity/ohlc_1m.csv": {
+      "bytes": 916,
+      "sha256": "45b0b14c11fdde4442540bdb5e1d0690a29a5ace857a61e7980a6ab305d0b54e"
+    },
+    "3_live_replay_parity/session/parity/paper/account_state.json": {
+      "bytes": 996,
+      "sha256": "a70b76d729b880e89a87ebe33a818c5ff1d3a9eafb68b1f5712a65de3fd0a7bd"
+    },
+    "3_live_replay_parity/session/parity/paper/canonical_events.jsonl": {
+      "bytes": 55153,
+      "sha256": "39a3a01f3e6158bb6537081687cea4fd6d896024fceb83b2114471ed5e367d7d"
+    },
+    "3_live_replay_parity/session/parity/paper/data_quality_defects.jsonl": {
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "3_live_replay_parity/session/parity/paper/data_quality_report.json": {
+      "bytes": 1845,
+      "sha256": "e06c40cbafbab07702ea4ccb36aad9b502539eedb5ee4d75c80fc5dab779d684"
+    },
+    "3_live_replay_parity/session/parity/paper/exposure_utilization.json": {
+      "bytes": 177,
+      "sha256": "780e8b32e86e2938f7693cbf99c998cd81652e965feedaf52e25d20d05575551"
+    },
+    "3_live_replay_parity/session/parity/paper/failed_opportunity_traces.jsonl": {
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "3_live_replay_parity/session/parity/paper/kill_switch_status.json": {
+      "bytes": 330,
+      "sha256": "b9d82ce2e1aecd10afdcf535922d54bdaf4e2ee46b05bd8836b1defcb5fdd776"
+    },
+    "3_live_replay_parity/session/parity/paper/latency_report.json": {
+      "bytes": 5641,
+      "sha256": "2667fab270795551ebe1a4d04c9b661d92a15f218af6a6a452f586d114515928"
+    },
+    "3_live_replay_parity/session/parity/paper/ledger.jsonl": {
+      "bytes": 2177,
+      "sha256": "d0945f373f45e239e75f0321e15188ba7f1e1b2f058bae119236c3c854387c68"
+    },
+    "3_live_replay_parity/session/parity/paper/maker_dry_run.json": {
+      "bytes": 9570,
+      "sha256": "4a9f316cbd4e88fee570ffecc207188aae01b958ac1050941fc8f5a466267508"
+    },
+    "3_live_replay_parity/session/parity/paper/maker_dry_run_fills.jsonl": {
+      "bytes": 2402,
+      "sha256": "a6e0228e6249128fe48c17c328719fcc2dfa9ebc9f08a4dafc19c281ac27e336"
+    },
+    "3_live_replay_parity/session/parity/paper/margin_status.json": {
+      "bytes": 1158,
+      "sha256": "ddd527806f457bbf8cbc3235be782c7ed89cb88f83d75d658de81bd9e478c114"
+    },
+    "3_live_replay_parity/session/parity/paper/order_timestamps.jsonl": {
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "3_live_replay_parity/session/parity/paper/order_trace.jsonl": {
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "3_live_replay_parity/session/parity/paper/paper_summary.json": {
+      "bytes": 28636,
+      "sha256": "8b7eeceea3ede0bc6249d97d691ecb119be5c5dd4f6755a7f975eb8ae3c0647e"
+    },
+    "3_live_replay_parity/session/parity/paper/paper_timestamps.jsonl": {
+      "bytes": 20425,
+      "sha256": "17f6a87e050e1defc495eb4f9485ecbd766890be5e3a7ec72a6e4fd6ba523249"
+    },
+    "3_live_replay_parity/session/parity/paper/pipeline_metrics.prom": {
+      "bytes": 4013,
+      "sha256": "df164077fbc8bb881b65cc167bd6b16ccbdb107d571c1ceebb0c838bd0bf0cb6"
+    },
+    "3_live_replay_parity/session/parity/paper/pipeline_monitoring.json": {
+      "bytes": 16584,
+      "sha256": "ed678e27f8e9a9300e8b3b7b9d5bd8cc11e2f149d3aee5487f22068efaa39e81"
+    },
+    "3_live_replay_parity/session/parity/paper/rms_reconciliation_report.json": {
+      "bytes": 349,
+      "sha256": "53f37277864ed1c677824e52dc18b3323d7b5952e7a783087adb910bbcc05ea3"
+    },
+    "3_live_replay_parity/session/parity/paper/structured_logs.jsonl": {
+      "bytes": 70762,
+      "sha256": "906e4420ab2185ba3b93401f8fe0575636d19ab3d37bf9ddb16b934a1df01309"
+    },
+    "3_live_replay_parity/session/parity/paper/structured_logs.sqlite": {
+      "bytes": 110592,
+      "sha256": "034e03676d8c7cb53ad9080fef94c3e1946bcaca6159a724c577309cf7339031"
+    },
+    "3_live_replay_parity/session/parity/paper/summary.json": {
+      "bytes": 9620,
+      "sha256": "4ff31268054764195a992f2fd24fcc36efc6f5ebd46a0c0a1c0616b5aae551be"
+    },
+    "3_live_replay_parity/session/parity/paper/tca_daily/1970-01-01.json": {
+      "bytes": 1765,
+      "sha256": "4a9f611d796a6037ff68bc0360e235227cd874e2e5ffd7247cf0dbf6c612e886"
+    },
+    "3_live_replay_parity/session/parity/paper/tca_report.json": {
+      "bytes": 1767,
+      "sha256": "7641e64dc135bd26901d832c76cad110361f6a68db49bee0297a59d6411186e9"
+    },
+    "3_live_replay_parity/session/parity/paper/time_integrity_report.json": {
+      "bytes": 2456,
+      "sha256": "a110d25ce89604fcb38bfcbb254c1e382ab8b9157f047ad6b98cf13e3449c4e6"
+    },
+    "3_live_replay_parity/session/parity/part-000001/canonical.jsonl": {
+      "bytes": 55153,
+      "sha256": "39a3a01f3e6158bb6537081687cea4fd6d896024fceb83b2114471ed5e367d7d"
+    },
+    "3_live_replay_parity/session/parity/part-000001/live_part_manifest.json": {
+      "bytes": 3521,
+      "sha256": "52aa01490a5891d3782bfd60bcc17b19cf75894d4df4c51e9749d328b54be5af"
+    },
+    "3_live_replay_parity/session/parity/part-000001/quarantine.jsonl": {
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "3_live_replay_parity/session/parity/part-000001/raw.jsonl": {
+      "bytes": 187703,
+      "sha256": "d8e2a0c5332508f4ffe0f2acf27603d312bc16e631811a1c37ba39753ab28b64"
+    },
+    "3_live_replay_parity/session/parity/part-000001/raw_manifest.json": {
+      "bytes": 1391,
+      "sha256": "7dab4301c1df0b636ace9cc4dfbb90d64205c8a6db7e82c4b11097cf36c187a5"
+    },
+    "3_live_replay_parity/session/parity/part-000001/trace.jsonl": {
+      "bytes": 59799,
+      "sha256": "c1dadd65991eeb9ad1ebb93db97db1b9a4cb239f9acc350d5bb62a09384119d9"
+    },
+    "3_live_replay_parity/session/parity/part-000001/trades.jsonl": {
+      "bytes": 48898,
+      "sha256": "84db441ede4739a9679f0259ef798cc854c6fb9377c1267f727075071a97a10d"
+    },
+    "3_live_replay_parity/session/parity/pipeline_metrics.prom": {
+      "bytes": 1475,
+      "sha256": "02f0ce00b79b882cb7775005440aa3ebf4d7e6dc530ee2169205da1d1f68d7cf"
+    },
+    "3_live_replay_parity/session/parity/pipeline_monitoring.json": {
+      "bytes": 6992,
+      "sha256": "f26ed2699bb47082865c55da2f1d1151b89757d600c3c8ccb8c7f8654f14bc16"
+    },
+    "3_live_replay_parity/session/parity/structured_logs.jsonl": {
+      "bytes": 63517,
+      "sha256": "3c0130c36a23ca9b7a29cf97446cc70dad02da1badf9a3a63819846d82db62a3"
+    },
+    "3_live_replay_parity/session/parity/structured_logs.sqlite": {
+      "bytes": 106496,
+      "sha256": "7db0d830a531bc1720cf874ab3355c8dd5fd36d8cc141196bb0c5b593a7420cf"
+    },
+    "4_5_replay_order_and_ids/cycles.csv": {
+      "bytes": 3434,
+      "sha256": "70adea131960a608ec8321769181522a3f1f1258eaf55ba6b76577b796025261"
+    },
+    "4_5_replay_order_and_ids/summary.json": {
+      "bytes": 167,
+      "sha256": "b8ae85a67e02635483e1b7103ad03000391117033e18e0bcb228e12f4838ff49"
+    },
+    "6_session_audit/comparison.json": {
+      "bytes": 4997,
+      "sha256": "381d11c8a2bd9064cbfc107e3e56e202ede58ead48370cbe4b7feedd1f3e37df"
+    },
+    "6_session_audit/new/maker_simulation.json": {
+      "bytes": 11831,
+      "sha256": "48f9af81e29849cc5820443c2cb358c178592765d542369a277e53e19d90f9b0"
+    },
+    "6_session_audit/new/maker_simulation_fills.jsonl": {
+      "bytes": 1393217,
+      "sha256": "8cbe23aefa9b944561dc135b5b2f2961392653c9ea09a2e08bfba3170f8aadfa"
+    },
+    "6_session_audit/new/session_audit.json": {
+      "bytes": 21970,
+      "sha256": "68c0ef00f8261b74163c81ba4a138b47890816119d47b41c0d9982bbb577fb6d"
+    },
+    "6_session_audit/new/session_audit.md": {
+      "bytes": 1496,
+      "sha256": "b0604b84b227bb8668d73487557498e9782dc2e33b0d21f37f1d8ec655aed051"
+    },
+    "6_session_audit/old_session_audit.json": {
+      "bytes": 28232,
+      "sha256": "d4bde0332abe5bedcf4d7405df86391257d4cd22964e08ffe33a10ab019df7cc"
+    },
+    "7_cli_simulate_maker/cli_maker.json": {
+      "bytes": 11502,
+      "sha256": "5f867aca0615f6b609f7f10a57ab6e4126a5cba8e6509f356506a9a769be869f"
+    },
+    "7_cli_simulate_maker/cli_maker_fills.jsonl": {
+      "bytes": 15971,
+      "sha256": "e764d0d77637956fae0c01af0e3f71afe7a39eb43170cae55fe4f274e3592872"
+    },
+    "7_cli_simulate_maker/stdout.json": {
+      "bytes": 11503,
+      "sha256": "81ae19da00bee4b5d6cf6045a2472924ada1678796f2fbc69d957c9a23f67550"
+    },
+    "7_cli_simulate_maker/summary.json": {
+      "bytes": 1720,
+      "sha256": "278183db6dd571b546fadc16e73970a77badc5789a75168b12c564595c9eef16"
+    },
+    "8_sensitivity_sweep/SENSITIVITY.md": {
+      "bytes": 4862,
+      "sha256": "2509fd63c540a8646b42f3dd526cafdf23db74b0f78a1d028b19ebffd87c569f"
+    },
+    "8_sensitivity_sweep/results.csv": {
+      "bytes": 53725,
+      "sha256": "a61efb44ed6dfb77d0e25cd5db7e50b1c775335f1f973c5564073af019aa5ffe"
+    },
+    "8_sensitivity_sweep/sanity_summary.json": {
+      "bytes": 500,
+      "sha256": "ada2d98292755af5fa43846184d15d7c73c352cdb6a08c783b191a80a193deaf"
+    },
+    "8_sensitivity_sweep/summary.json": {
+      "bytes": 21950,
+      "sha256": "2e8aeb8248268513f717c0636005c1bde08e38d25d4c1a3e6884375fe4ff17b7"
+    },
+    "INDEX.md": {
+      "bytes": 639,
+      "sha256": "11bd5e0ad74019a9bb15f3ea8e9daecc40f91ba15989dd1c2794cebc2791c0ea"
+    }
+  },
+  "generated": "20261011T191621Z"
+}

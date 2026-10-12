@@ -1,0 +1,67 @@
+{
+  "active_flags": [
+    {
+      "code": "SEQUENCE_GAPS",
+      "level": "CRITICAL",
+      "message": "gaps exceeded configured threshold",
+      "metric": "gaps",
+      "observed": 1,
+      "scope": "BACKTEST_DATASET",
+      "threshold": 0
+    },
+    {
+      "code": "CROSSED_BOOKS",
+      "level": "CRITICAL",
+      "message": "crossed_books exceeded configured threshold",
+      "metric": "crossed_books",
+      "observed": 1,
+      "scope": "BACKTEST_DATASET",
+      "threshold": 0
+    }
+  ],
+  "approval_attestation_sha256": "f4f2c289cc2ac196c986995b8ec60cf894cf968c09812107d80c3d2cc45a1087",
+  "correlation_id": "controlled_gap.jsonl",
+  "counts": {
+    "crossed_books": 1,
+    "duplicates": 0,
+    "events": 4,
+    "gaps": 1,
+    "impossible_latency": 0,
+    "negative_latency": 0,
+    "out_of_order": 0,
+    "persistence_lag_ns": 0,
+    "rejected_partitions": 0,
+    "rejected_records": 0,
+    "schema_exceptions": 0,
+    "stale_intervals": 0,
+    "unknown_instrument_rules": 0,
+    "unpersisted_bytes": 0
+  },
+  "created_at": "2026-09-04T19:38:33.597607+00:00",
+  "decision": "REJECTED",
+  "defect_count": 2,
+  "defect_log_sha256": "d9e79ccd90a963d1365492ea1892c9aee24e516298186ed8c5d9eed84bbcfca4",
+  "health": "CRITICAL",
+  "limitations": [
+    "Host clock state is not sampled during recorded-time replay.",
+    "Approval covers the supplied canonical event file and configured instruments only."
+  ],
+  "schema_version": "1.0.0",
+  "scope": "BACKTEST_DATASET",
+  "terminal_defect_hash": "50fb5b9593a5add04721a9b22268b97391ecda87f72f06619dd9993da53341d5",
+  "thresholds": {
+    "max_crossed_books": 0,
+    "max_duplicates": 0,
+    "max_gaps": 0,
+    "max_impossible_latency": 0,
+    "max_negative_latency": 0,
+    "max_out_of_order": 0,
+    "max_persistence_lag_ns": 5000000000,
+    "max_rejected_partitions": 0,
+    "max_schema_exceptions": 0,
+    "max_stale_intervals": 0,
+    "max_unknown_instrument_rules": 0,
+    "max_unpersisted_bytes": 0,
+    "min_events": 1
+  }
+}

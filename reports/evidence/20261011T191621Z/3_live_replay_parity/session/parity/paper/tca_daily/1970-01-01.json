@@ -1,0 +1,52 @@
+{
+  "calculation": {
+    "benchmark": "child decision/limit price at dispatch",
+    "buy_slippage_quote": "(average_fill_price - benchmark_price) * filled_quantity",
+    "missed_opportunity": "not all primary children filled or residual outside approved bound",
+    "sell_slippage_quote": "(benchmark_price - average_fill_price) * filled_quantity",
+    "sign": "positive is adverse; negative is price improvement",
+    "weighted_slippage_bps": "sum(slippage_quote) / sum(filled_quantity * benchmark_price) * 10000"
+  },
+  "calculation_version": "basic-tca-v1",
+  "correlation_id": "parity",
+  "groups": [],
+  "lineage": {
+    "canonical_source_path": "/Users/vaibhav/Documents/Newproject/crypto_MFT_arb_platform/reports/evidence/20261011T191621Z/3_live_replay_parity/session/parity/paper/canonical_events.jsonl",
+    "canonical_source_sha256": "39a3a01f3e6158bb6537081687cea4fd6d896024fceb83b2114471ed5e367d7d",
+    "raw_reference_coverage": 1.0,
+    "raw_refs": [],
+    "source_event_ids": [],
+    "source_event_raw_refs": {}
+  },
+  "opportunities": [],
+  "period": {
+    "date_utc": "1970-01-01",
+    "end_ts_ns": 0,
+    "start_ts_ns": 0
+  },
+  "report_id": "f844daae-e3c1-5ae8-8fe3-a059c4743f7b",
+  "schema_version": "1.0.0",
+  "scope": "DAILY_PAPER",
+  "summary": {
+    "benchmark_notional": "0",
+    "cancels": 0,
+    "fees": "0",
+    "filled_notional": "0",
+    "filled_quantity": "0",
+    "fills": 0,
+    "missed_opportunities": 0,
+    "net_pnl": "0",
+    "open_residual_base": "0",
+    "opportunities_detected": 0,
+    "opportunities_executed": 0,
+    "orders": 0,
+    "partials": 0,
+    "rejects": 0,
+    "slippage_quote": "0",
+    "timeouts": 0,
+    "unwind_cost": "0",
+    "unwind_fills": 0,
+    "unwind_orders": 0,
+    "weighted_slippage_bps": "0"
+  }
+}

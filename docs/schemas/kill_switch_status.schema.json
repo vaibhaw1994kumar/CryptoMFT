@@ -1,0 +1,36 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://papertowninsights.org/schemas/kill-switch-status-1.0.0.json",
+  "title": "PM-visible strategy kill-switch status",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version", "state", "reason", "source", "activated_ts_ns",
+    "strategy_new_risk_allowed", "cancel_all_on_activation",
+    "risk_reducing_orders_allowed", "reconciliation_required_before_resume",
+    "last_reset_reconciliation_id", "events"
+  ],
+  "properties": {
+    "schema_version": {"const": "1.0.0"},
+    "state": {"enum": ["INACTIVE", "ACTIVE"]},
+    "reason": {"type": "string"},
+    "source": {"type": "string"},
+    "activated_ts_ns": {"type": ["integer", "null"], "minimum": 0},
+    "strategy_new_risk_allowed": {"type": "boolean"},
+    "cancel_all_on_activation": {"type": "boolean"},
+    "risk_reducing_orders_allowed": {"type": "boolean"},
+    "reconciliation_required_before_resume": {"type": "boolean"},
+    "last_reset_reconciliation_id": {"type": "string"},
+    "events": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "event_id", "ts_ns", "previous_state", "state", "action",
+          "reason", "source", "operator_id",
+          "reconciliation_required_before_resume"
+        ]
+      }
+    }
+  }
+}

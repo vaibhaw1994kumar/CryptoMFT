@@ -1,0 +1,31 @@
+{
+  "schema_version": "1.0.0",
+  "test_name": "paper-release-reproduce-and-rollback",
+  "result": "PASS",
+  "release_v1": {
+    "build_version": "build-1",
+    "parameter_version": "8",
+    "approved_by": "portfolio-manager"
+  },
+  "release_v2": {
+    "build_version": "build-2",
+    "parameter_version": "9",
+    "approved_by": "portfolio-manager"
+  },
+  "deployment_actions": ["DEPLOY", "DEPLOY", "ROLLBACK"],
+  "rollback": {
+    "from": "release_v2",
+    "to": "release_v1",
+    "owner": "paper-operator",
+    "reason": "restore accepted edge threshold"
+  },
+  "assertions": {
+    "content_addressed_release_ids": true,
+    "all_six_artifact_classes_versioned": true,
+    "approval_required": true,
+    "tamper_detection": true,
+    "audit_hash_chain_valid": true,
+    "active_release_restored": true,
+    "reproduced_parameter_value": 8
+  }
+}

@@ -1,0 +1,63 @@
+{
+  "positions": {
+    "BINANCE:BTC-USDT-SPOT": {
+      "average_price": "60000.00",
+      "fees": "0.24000",
+      "gross_traded_notional": "600.00000",
+      "instrument_id": "BTC-USDT-SPOT",
+      "mark_price": "60009.95",
+      "quantity": "0.010",
+      "realized_pnl": "0",
+      "unrealized_pnl": "0.09950",
+      "venue": "BINANCE"
+    },
+    "BYBIT:BTC-USDT-SPOT": {
+      "average_price": "60060.00",
+      "fees": "0.24024",
+      "gross_traded_notional": "600.60000",
+      "instrument_id": "BTC-USDT-SPOT",
+      "mark_price": "60009.95",
+      "quantity": "-0.010",
+      "realized_pnl": "0",
+      "unrealized_pnl": "0.50050",
+      "venue": "BYBIT"
+    }
+  },
+  "schema_version": "1.0.0",
+  "venues": {
+    "BINANCE": {
+      "available_capital": "9999.85950",
+      "available_cash": "9399.76000",
+      "cash_balance": "9399.76000",
+      "cash_delta": "-600.24000",
+      "equity": "9999.85950",
+      "fees": "0.24000",
+      "initial_capital": "10000",
+      "realized_pnl": "0",
+      "reserved_cash": "0",
+      "reserved_gross_notional": "0",
+      "reserved_margin": "0",
+      "reserved_messages": 0,
+      "reserved_position": "0.000",
+      "unrealized_pnl": "0.09950",
+      "venue": "BINANCE"
+    },
+    "BYBIT": {
+      "available_capital": "10000.26026",
+      "available_cash": "10600.35976",
+      "cash_balance": "10600.35976",
+      "cash_delta": "600.35976",
+      "equity": "10000.26026",
+      "fees": "0.24024",
+      "initial_capital": "10000",
+      "realized_pnl": "0",
+      "reserved_cash": "0",
+      "reserved_gross_notional": "0",
+      "reserved_margin": "0",
+      "reserved_messages": 0,
+      "reserved_position": "0.000",
+      "unrealized_pnl": "0.50050",
+      "venue": "BYBIT"
+    }
+  }
+}

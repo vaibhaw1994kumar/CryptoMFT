@@ -1,0 +1,66 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://papertowninsights.org/schemas/rms-reconciliation-report-1.0.0.json",
+  "title": "OMS/RMS reconciliation decision",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version", "reconciliation_id", "ts_ns", "decision",
+    "issues", "counts"
+  ],
+  "properties": {
+    "schema_version": {"const": "1.0.0"},
+    "reconciliation_id": {"type": "string", "format": "uuid"},
+    "ts_ns": {"type": "integer", "minimum": 0},
+    "decision": {"enum": ["APPROVED", "REJECTED"]},
+    "issues": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["code", "severity"],
+        "properties": {
+          "code": {
+            "enum": [
+              "DUPLICATE_LEDGER_EVENT", "DUPLICATE_FILL",
+              "ORPHAN_LEDGER_EVENT", "UNEXPLAINED_FILL",
+              "FILL_ACCOUNTING_MISMATCH", "ORPHAN_VENUE_ORDER",
+              "MISSING_VENUE_ORDER", "ORDER_STATE_MISMATCH",
+              "VENUE_FILL_MISMATCH", "POSITION_MISMATCH",
+              "MISSING_LOCAL_FILL", "EXTRA_LOCAL_FILL",
+              "CONFLICTING_ORDER_STATE", "INCOMPLETE_OPPORTUNITY",
+              "BALANCE_MISMATCH", "AVERAGE_PRICE_MISMATCH",
+              "REALIZED_PNL_MISMATCH", "UNREALIZED_PNL_MISMATCH",
+              "AVAILABLE_CASH_MISMATCH", "AVAILABLE_CAPITAL_MISMATCH",
+              "RESERVED_CAPACITY_MISMATCH", "CONTROL_STATE_MISMATCH"
+            ]
+          },
+          "severity": {"const": "ERROR"}
+        },
+        "additionalProperties": true
+      }
+    },
+    "venue_controls": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["suspended", "resolved"],
+      "properties": {
+        "suspended": {"type": "array", "items": {"type": "string"}, "uniqueItems": true},
+        "resolved": {"type": "array", "items": {"type": "string"}, "uniqueItems": true}
+      }
+    },
+    "counts": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "local_orders", "venue_orders", "fills", "venue_snapshots", "issues"
+      ],
+      "properties": {
+        "local_orders": {"type": "integer", "minimum": 0},
+        "venue_orders": {"type": "integer", "minimum": 0},
+        "fills": {"type": "integer", "minimum": 0},
+        "venue_snapshots": {"type": "integer", "minimum": 0},
+        "issues": {"type": "integer", "minimum": 0}
+      }
+    }
+  }
+}

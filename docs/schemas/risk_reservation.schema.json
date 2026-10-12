@@ -1,0 +1,31 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://papertowninsights.org/schemas/risk-reservation-1.0.0.json",
+  "title": "Atomic package risk reservation",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "reservation_id", "opportunity_id", "gross_notional", "cash_by_venue",
+    "margin_by_venue", "position_delta_by_venue", "messages_by_venue",
+    "residual_base", "active"
+  ],
+  "properties": {
+    "reservation_id": {"type": "string", "minLength": 1},
+    "opportunity_id": {"type": "string", "minLength": 1},
+    "gross_notional": {"type": "string"},
+    "cash_by_venue": {
+      "type": "object", "additionalProperties": {"type": "string"}
+    },
+    "margin_by_venue": {
+      "type": "object", "additionalProperties": {"type": "string"}
+    },
+    "position_delta_by_venue": {
+      "type": "object", "additionalProperties": {"type": "string"}
+    },
+    "messages_by_venue": {
+      "type": "object", "additionalProperties": {"type": "integer", "minimum": 0}
+    },
+    "residual_base": {"type": "string"},
+    "active": {"type": "boolean"}
+  }
+}

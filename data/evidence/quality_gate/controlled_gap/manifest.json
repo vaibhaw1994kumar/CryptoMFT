@@ -1,0 +1,75 @@
+{
+  "config": {
+    "instruments": [
+      {
+        "base": "BTC",
+        "instrument_id": "BTC-USDT-SPOT",
+        "min_notional": "5",
+        "min_quantity": "0.001",
+        "quantity_step": "0.001",
+        "quote": "USDT",
+        "symbol": "BTCUSDT",
+        "taker_fee_bps": "4",
+        "tick_size": "0.10",
+        "venue": "BINANCE"
+      },
+      {
+        "base": "BTC",
+        "instrument_id": "BTC-USDT-SPOT",
+        "min_notional": "5",
+        "min_quantity": "0.001",
+        "quantity_step": "0.001",
+        "quote": "USDT",
+        "symbol": "BTCUSDT",
+        "taker_fee_bps": "4",
+        "tick_size": "0.10",
+        "venue": "BYBIT"
+      }
+    ],
+    "quality": {
+      "max_crossed_books": 0,
+      "max_duplicates": 0,
+      "max_gaps": 0,
+      "max_impossible_latency": 0,
+      "max_negative_latency": 0,
+      "max_out_of_order": 0,
+      "max_persistence_lag_ms": 5000,
+      "max_rejected_partitions": 0,
+      "max_schema_exceptions": 0,
+      "max_stale_intervals": 0,
+      "max_unknown_instrument_rules": 0,
+      "max_unpersisted_bytes": 0,
+      "min_events": 1
+    },
+    "risk": {
+      "max_gross_notional": "10000",
+      "max_order_notional": "5000",
+      "max_residual_base": "0.002"
+    },
+    "strategy": {
+      "entry_bps": "8",
+      "instrument_id": "BTC-USDT-SPOT",
+      "max_book_age_ms": 1000,
+      "min_net_edge_bps": "2",
+      "quantity": "0.010",
+      "strategy_id": "cross_venue_btc_v1",
+      "venues": [
+        "BINANCE",
+        "BYBIT"
+      ]
+    },
+    "time": {
+      "max_cross_venue_skew_ms": 1000,
+      "max_event_latency_ms": 60000,
+      "max_feed_age_ms": 1000,
+      "max_host_drift_ppm": 500,
+      "max_host_offset_ms": 100
+    }
+  },
+  "config_sha256": "924457846b934eaf73d28a065ef85d2dbc24c24594db3afa6e3e45833b36593b",
+  "created_at": "2026-09-04T19:38:33.598053+00:00",
+  "deterministic_result_sha256": "8c0b6faa4634c911c1b42bb61a4cb987e08f076d50f6a66ea78e59c8b658a575",
+  "events_sha256": "c02b913f830ac6ecdf04a0303afc23e603de3b79f93e59e1797d8e722583c605",
+  "mode": "BACKTEST",
+  "platform_version": "0.1.0"
+}

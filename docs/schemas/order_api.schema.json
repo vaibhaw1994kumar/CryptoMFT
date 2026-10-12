@@ -1,0 +1,43 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://papertowninsights.org/schemas/order-api-1.0.0.json",
+  "title": "Canonical OMS/EMS order request",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version", "request_id", "idempotency_key", "action", "order_id",
+    "target_order_id", "parent_opportunity_id", "parent_order_id", "instrument_id", "venue",
+    "side", "price", "quantity", "order_type", "time_in_force", "post_only",
+    "reduce_only", "created_ts_ns"
+  ],
+  "properties": {
+    "schema_version": {"const": "1.0.0"},
+    "request_id": {"type": "string", "minLength": 1},
+    "idempotency_key": {"type": "string", "minLength": 1},
+    "action": {"enum": ["SUBMIT", "CANCEL", "REPLACE"]},
+    "order_id": {"type": "string", "minLength": 1},
+    "target_order_id": {"type": ["string", "null"]},
+    "parent_opportunity_id": {"type": "string", "minLength": 1},
+    "parent_order_id": {"type": "string"},
+    "instrument_id": {"type": "string", "minLength": 1},
+    "venue": {"type": "string", "minLength": 1},
+    "side": {"enum": ["BUY", "SELL"]},
+    "price": {"type": ["string", "null"], "pattern": "^[0-9]+(\\.[0-9]+)?$"},
+    "quantity": {"type": "string", "pattern": "^[0-9]+(\\.[0-9]+)?$"},
+    "order_type": {"enum": ["LIMIT", "MARKET"]},
+    "time_in_force": {"enum": ["GTC", "IOC", "FOK"]},
+    "post_only": {"type": "boolean"},
+    "reduce_only": {"type": "boolean"},
+    "created_ts_ns": {"type": "integer", "minimum": 0}
+  },
+  "allOf": [
+    {
+      "if": {"properties": {"action": {"enum": ["CANCEL", "REPLACE"]}}},
+      "then": {"properties": {"target_order_id": {"type": "string", "minLength": 1}}}
+    },
+    {
+      "if": {"properties": {"order_type": {"const": "LIMIT"}}},
+      "then": {"properties": {"price": {"type": "string"}}}
+    }
+  ]
+}

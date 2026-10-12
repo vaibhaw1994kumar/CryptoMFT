@@ -1,0 +1,36 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://papertowninsights.org/schemas/structured-log-1.0.0.json",
+  "title": "Central structured log record",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version", "log_id", "ts_ns", "level", "component",
+    "event_type", "message", "correlation_id"
+  ],
+  "properties": {
+    "schema_version": {"const": "1.0.0"},
+    "log_id": {"type": "string", "minLength": 1},
+    "ts_ns": {"type": "integer", "minimum": 0},
+    "level": {"enum": ["DEBUG", "INFO", "WARNING", "ERROR"]},
+    "component": {"type": "string", "minLength": 1},
+    "event_type": {"type": "string", "minLength": 1},
+    "message": {"type": "string"},
+    "correlation_id": {"type": "string", "minLength": 1},
+    "host": {"type": "string"},
+    "venue": {"type": "string"},
+    "instrument_id": {"type": "string"},
+    "source_event_id": {"type": "string"},
+    "source_event_ids": {"type": "array", "items": {"type": "string"}, "uniqueItems": true},
+    "raw_ref": {"type": "string"},
+    "feature_state_id": {"type": "string"},
+    "opportunity_id": {"type": "string"},
+    "risk_decision_id": {"type": "string"},
+    "reservation_id": {"type": "string"},
+    "parent_plan_id": {"type": "string"},
+    "child_order_id": {"type": "string"},
+    "request_id": {"type": "string"},
+    "route_id": {"type": "string"},
+    "payload": {"type": "object"}
+  }
+}

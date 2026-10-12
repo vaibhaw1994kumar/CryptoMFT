@@ -1,0 +1,13 @@
+{
+  "schema_version": "1.0.0",
+  "manifest_id": "two-venue-sample-v1",
+  "version": "1.0.0",
+  "datasets": [
+    {
+      "path": "data/samples/two_venue_books.jsonl",
+      "sha256": "bf76072a30b2c2612810db0c702d97f03851a85c90205a18b9bbfcf3fe643c74",
+      "event_count": 4,
+      "canonical_schema_version": "1.2.0"
+    }
+  ]
+}

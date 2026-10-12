@@ -1,0 +1,40 @@
+{
+  "positions": {},
+  "schema_version": "1.0.0",
+  "venues": {
+    "BINANCE": {
+      "available_capital": "10000",
+      "available_cash": "10000",
+      "cash_balance": "10000",
+      "cash_delta": "0",
+      "equity": "10000",
+      "fees": "0",
+      "initial_capital": "10000",
+      "realized_pnl": "0",
+      "reserved_cash": "0",
+      "reserved_gross_notional": "0",
+      "reserved_margin": "0",
+      "reserved_messages": 0,
+      "reserved_position": "0",
+      "unrealized_pnl": "0",
+      "venue": "BINANCE"
+    },
+    "BYBIT": {
+      "available_capital": "10000",
+      "available_cash": "10000",
+      "cash_balance": "10000",
+      "cash_delta": "0",
+      "equity": "10000",
+      "fees": "0",
+      "initial_capital": "10000",
+      "realized_pnl": "0",
+      "reserved_cash": "0",
+      "reserved_gross_notional": "0",
+      "reserved_margin": "0",
+      "reserved_messages": 0,
+      "reserved_position": "0",
+      "unrealized_pnl": "0",
+      "venue": "BYBIT"
+    }
+  }
+}
