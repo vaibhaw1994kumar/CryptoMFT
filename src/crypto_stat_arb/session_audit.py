@@ -448,6 +448,7 @@ def audit_session(
             "kill_switch": kill.get("state"), "kill_reason": kill.get("reason"),
             "rms_reconciliation": summary.get("rms_reconciliation", {}).get("decision"),
             "open_residual_base": residual.get("open_residual_base"),
+            "total_residual_base": residual.get("total_residual_base"),
             "flatten_started": summary.get("flatten_started"),
             "maker_dry_run": {
                 venue: {k: row.get(k) for k in ("quotes", "fills", "inventory", "mark_to_market_pnl_quote")}
@@ -465,6 +466,10 @@ def audit_session(
                 str(realism.get("residual_breaches_open")))
         c.check("no_open_residual", Decimal(str(residual.get("open_residual_base", "0"))) == 0,
                 str(residual.get("open_residual_base")))
+        c.check("no_carried_residual",
+                Decimal(str(residual.get("total_residual_base", "0"))) == 0,
+                f"{residual.get('total_residual_base')} base left unhedged by closed plans",
+                severity="WARN")
         c.check("kill_switch_inactive", kill.get("state") == "INACTIVE",
                 f"{kill.get('state')}: {kill.get('reason')}")
         c.check("rms_reconciliation_not_rejected",

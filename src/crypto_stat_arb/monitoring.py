@@ -182,6 +182,12 @@ class PipelineMonitor:
                     "STRATEGY_EXECUTION",
                 ),
                 self._metric(
+                    "total_residual_base",
+                    float(residual.get("total_residual_base", 0)), "base_quantity", "<=",
+                    self.thresholds.max_open_residual_base, MonitorHealth.CRITICAL,
+                    "STRATEGY_EXECUTION",
+                ),
+                self._metric(
                     "max_dispatch_latency_ns",
                     int(latency.get("max_dispatch_duration_ns", 0)), "nanoseconds", "<=",
                     self.thresholds.max_dispatch_latency_ns, MonitorHealth.DEGRADED,

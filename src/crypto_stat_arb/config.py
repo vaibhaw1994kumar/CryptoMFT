@@ -115,6 +115,11 @@ def load_config(path: Path) -> tuple[AppConfig, dict]:
             max_residual_base=d(risk["max_residual_base"]),
             max_book_age_ns=int(raw["strategy"]["max_book_age_ms"]) * 1_000_000,
             max_position_base=d(risk.get("max_position_base", "Infinity")),
+            # Defaults to the per-venue position limit, the most a single
+            # failed leg could ever leave on one venue.
+            max_legging_exposure_base=d(risk.get(
+                "max_legging_exposure_base", risk.get("max_position_base", "Infinity")
+            )),
             max_cash_reserved=d(risk.get("max_cash_reserved", "Infinity")),
             max_margin_reserved=d(risk.get("max_margin_reserved", "Infinity")),
             max_message_capacity=int(

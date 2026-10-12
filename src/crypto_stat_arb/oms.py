@@ -679,6 +679,13 @@ class OMS:
                 "max_one_sided_notional": str(policy.max_one_sided_notional),
             },
             "open_residual_plans": len(open_residuals),
+            "carried_residual_base": str(self.carried_residual_base()),
+            # Net unhedged base across open and closed plans: what the account
+            # actually holds because legs did not pair up.
+            "total_residual_base": str(abs(
+                self.carried_residual_base()
+                + sum((plan.residual_base for plan in open_residuals), Decimal("0"))
+            )),
             "open_residual_base": str(sum(
                 (abs(plan.residual_base) for plan in open_residuals), Decimal("0")
             )),
@@ -714,12 +721,41 @@ class OMS:
             for order in plan.children
         )
         plan.fees = sum(order.fee for order in plan.children)
-        plan.net_pnl = plan.gross_pnl - plan.fees - plan.unwind_cost
+        if plan.residual_base:
+            plan.residual_mark_price = self._residual_mark_price(plan)
+            plan.residual_mark_value = plan.residual_base * plan.residual_mark_price
+        else:
+            plan.residual_mark_price = Decimal("0")
+            plan.residual_mark_value = Decimal("0")
+        plan.net_pnl = (
+            plan.gross_pnl + plan.residual_mark_value - plan.fees - plan.unwind_cost
+        )
 
         if plan.residual_base == 0:
             plan.residual_since_ts_ns = None
         elif plan.residual_since_ts_ns is None and ts_ns is not None:
             plan.residual_since_ts_ns = ts_ns
+
+    def _residual_mark_price(self, plan: ParentPlan) -> Decimal:
+        """Mid across the instrument's valid books (falls back to the signal prices)."""
+        mids = [
+            (book.best_bid + book.best_ask) / Decimal("2")
+            for (venue, instrument_id), book in (self._books or {}).items()
+            if instrument_id == plan.opportunity.instrument_id and book.bids and book.asks
+        ]
+        if mids:
+            return sum(mids, start=Decimal("0")) / len(mids)
+        return (plan.opportunity.buy_price + plan.opportunity.sell_price) / Decimal("2")
+
+    def carried_residual_base(self, exclude: ParentPlan | None = None) -> Decimal:
+        """Signed residual left open by closed plans (derived, so restart-safe)."""
+        return sum(
+            (
+                plan.residual_base for plan in self.plans.values()
+                if plan.state == PlanState.CLOSED and plan is not exclude
+            ),
+            Decimal("0"),
+        )
 
     def _residual_event(
         self, plan: ParentPlan, event_type: str, ts_ns: int, **payload: object
@@ -765,7 +801,15 @@ class OMS:
         hard ceiling, not a threshold a plan may rest on indefinitely."""
         if plan.residual_base == 0:
             return True
-        return abs(plan.residual_base) < self.residual_policy.max_residual_base
+        cap = self.residual_policy.max_residual_base
+        if abs(plan.residual_base) >= cap:
+            return False
+        # The bound applies to the total left open, not to each plan alone:
+        # residuals "within bound" one at a time must not pile up past it. A
+        # residual that reduces the carried exposure is always acceptable.
+        carried = self.carried_residual_base(exclude=plan)
+        total = carried + plan.residual_base
+        return abs(total) < cap or abs(total) <= abs(carried)
 
     def _assess_legging_risk(
         self, plan: ParentPlan, ts_ns: int,
@@ -1127,6 +1171,7 @@ class OMS:
             return plan
         self._transition(plan, PlanState.RECONCILED, ts_ns)
         self._transition(plan, PlanState.CLOSED, ts_ns)
+        self.risk.carried_residual_base = self.carried_residual_base()
         reservation = self.risk.reservations.get(plan.opportunity.opportunity_id)
         if reservation is not None and reservation.active:
             self.risk.release(reservation)
@@ -2030,6 +2075,7 @@ class OMS:
         try:
             for order in children:
                 self.instruments.validate_order(order, now)
+            self.risk.carried_residual_base = self.carried_residual_base()
             reserved = self.risk.reserve(opportunity)
         except ValueError as exc:
             self.ledger.record(

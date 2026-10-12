@@ -263,6 +263,10 @@ class ParentPlan:
     gross_pnl: Decimal = Decimal("0")
     fees: Decimal = Decimal("0")
     unwind_cost: Decimal = Decimal("0")
+    # Open residual valued at the mid when economics were last computed, so
+    # ``net_pnl`` is marked: an unhedged leg's cash is offset by the position.
+    residual_mark_price: Decimal = Decimal("0")
+    residual_mark_value: Decimal = Decimal("0")
     net_pnl: Decimal = Decimal("0")
     terminal_outcome: str = ""
     transitions: list[dict[str, Any]] = field(default_factory=list)

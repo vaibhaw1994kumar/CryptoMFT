@@ -20,6 +20,12 @@ class RiskLimits:
     max_residual_base: Decimal
     max_book_age_ns: int
     max_position_base: Decimal = UNBOUNDED
+    # Worst-case one-sided base exposure: every admitted package reserves its
+    # full leg quantity (one leg may fill while the other fails), and that sum
+    # plus the residual already carried from closed plans must stay within
+    # this limit. Distinct from ``max_residual_base``, the residual a plan may
+    # be left holding without an unwind.
+    max_legging_exposure_base: Decimal = UNBOUNDED
     max_cash_reserved: Decimal = UNBOUNDED
     max_margin_reserved: Decimal = UNBOUNDED
     max_message_capacity: int = 1_000_000_000
@@ -328,7 +334,11 @@ class RiskEngine:
         self.reserved_margin: dict[str, Decimal] = {}
         self.reserved_position: dict[str, Decimal] = {}
         self.reserved_messages: dict[str, int] = {}
+        # Worst-case one-sided exposure reserved by active packages.
         self.reserved_residual = Decimal("0")
+        # Signed residual left open by closed plans (set by the OMS, which
+        # derives it from its plans so it survives a restart).
+        self.carried_residual_base = Decimal("0")
         self.reservations: dict[str, PackageReservation] = {}
         self.last_reconciliation: ReconciliationReport | None = None
         self.last_pretrade_validation: PreTradeValidationReport | None = None
@@ -638,6 +648,7 @@ class RiskEngine:
             "reserved_position": dict(self.reserved_position),
             "reserved_messages": dict(self.reserved_messages),
             "reserved_residual": self.reserved_residual,
+            "carried_residual_base": self.carried_residual_base,
         }
 
     def rehydrate_reservation(self, opportunity: Opportunity) -> PackageReservation:
@@ -1187,9 +1198,18 @@ class RiskEngine:
             positions[venue] = positions.get(venue, Decimal("0")) + position_delta
             messages[venue] = messages.get(venue, 0) + 1
 
-        planned_residual = abs(sum(positions.values(), start=Decimal("0")))
-        if self.reserved_residual + planned_residual > self.limits.max_residual_base:
-            raise ValueError("max residual base exceeded")
+        # The intended package is flat, but either leg can fail alone, so the
+        # reservation covers the larger leg (a balanced package would
+        # otherwise reserve nothing and many could leg out at once).
+        planned_residual = max(abs(delta) for _, delta, _ in legs)
+        carried = abs(self.carried_residual_base)
+        if carried and carried >= self.limits.max_residual_base:
+            raise ValueError("carried residual at limit")
+        if (
+            self.reserved_residual + planned_residual + carried
+            > self.limits.max_legging_exposure_base
+        ):
+            raise ValueError("max legging exposure exceeded")
 
         # Validate the complete package using temporary totals. No reservation
         # state is mutated unless every venue and resource passes.
@@ -1285,6 +1305,7 @@ class RiskEngine:
             "reserved_position": {key: str(value) for key, value in self.reserved_position.items()},
             "reserved_messages": dict(self.reserved_messages),
             "reserved_residual": str(self.reserved_residual),
+            "carried_residual_base": str(self.carried_residual_base),
             "active_reservations": sum(x.active for x in self.reservations.values()),
             "suspended_venues": {
                 venue: dict(state)

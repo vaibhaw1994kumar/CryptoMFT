@@ -287,3 +287,32 @@ cmake --build build/sim_engine
 ```
 
 The module is written into `src/crypto_stat_arb/sim_engine/`.
+
+## Residual exposure and marked plan PnL
+
+A two-leg package can leave a one-sided residual when one leg fills and the
+other does not. Three rules keep that exposure bounded and honestly valued:
+
+- **Worst-case reservation.** Admission reserves each package's full leg
+  quantity (a balanced package would otherwise reserve nothing, and many could
+  leg out at once). Reserved worst case + residual carried from closed plans
+  must stay within `risk.max_legging_exposure_base` (default:
+  `max_position_base`). New risk is refused while the carried residual is at
+  `max_residual_base`.
+- **The residual bound is aggregate.** `max_residual_base` applies to the
+  total left open across plans (carried + this plan), not to each plan alone;
+  a plan that would push the total to the bound unwinds instead of closing
+  with a naked leg. A residual that reduces the carried exposure is accepted.
+  The OMS snapshot reports `carried_residual_base` and `total_residual_base`;
+  monitoring alerts on `total_residual_base`, and `analyze-session` warns on
+  any residual left at session end.
+- **Marked PnL.** Plan `net_pnl` = cash + residual × mid − fees. Before, an
+  orphan leg's whole notional (~78 USDT per 0.001 BTC) was booked as profit or
+  loss. `compare-runs` gates on account equity PnL and reports `net_pnl` and
+  the residual for reference.
+
+On the five busiest recorded cycles (0006–0010) the replay now ends with at
+most 0.001 BTC of residual (previously up to 0.007 against a 0.002 bound),
+unwinds 7–10 residuals per cycle, and plan `net_pnl` agrees with equity PnL
+within 0.2 USDT. Inventory is not yet modelled per asset: a spot sell is
+admitted against the position limit, not against base held on that venue.
