@@ -1,0 +1,16 @@
+{
+  "benchmark/backtest/summary.json": {
+    "label": "PRE_FUNDED_INVENTORY_NO_REBALANCING",
+    "held_base": {
+      "BINANCE": "0.100",
+      "BYBIT": "0.000"
+    }
+  },
+  "paper/summary.json": {
+    "label": "PRE_FUNDED_INVENTORY_NO_REBALANCING",
+    "held_base": {
+      "BINANCE": "0.060",
+      "BYBIT": "0.040"
+    }
+  }
+}

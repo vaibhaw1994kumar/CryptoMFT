@@ -1,0 +1,59 @@
+{
+  "pre_funded_0.05": {
+    "plans_by_strategy": {
+      "cross_venue_btc_v1": 180,
+      "basis_mean_reversion_v1": 24
+    },
+    "refusals": {
+      "insufficient base inventory: BYBIT": 199
+    },
+    "inventory": {
+      "model": "PRE_FUNDED",
+      "label": "PRE_FUNDED_INVENTORY_NO_REBALANCING",
+      "instrument_id": "BTC-USDT-SPOT",
+      "venues": {
+        "BINANCE": {
+          "initial_base": "0.05",
+          "held_base": "0.100",
+          "reserved_base": "0",
+          "available_base": "0.100",
+          "initial_quote": "10000",
+          "held_quote": "6998.7889956",
+          "reserved_quote": "0",
+          "available_quote": "6998.7889956"
+        },
+        "BYBIT": {
+          "initial_base": "0.05",
+          "held_base": "0.000",
+          "reserved_base": "0",
+          "available_base": "0.000",
+          "initial_quote": "10000",
+          "held_quote": "13003.0003192",
+          "reserved_quote": "0",
+          "available_quote": "13003.0003192"
+        }
+      }
+    },
+    "ledger_positions": {
+      "BYBIT:BTC-USDT-SPOT": "-0.050",
+      "BINANCE:BTC-USDT-SPOT": "0.050"
+    }
+  },
+  "unconstrained": {
+    "plans_by_strategy": {
+      "cross_venue_btc_v1": 180,
+      "basis_mean_reversion_v1": 24
+    },
+    "refusals": {},
+    "inventory": {
+      "model": "UNCONSTRAINED",
+      "label": "UNCONSTRAINED_SPOT_SHORTING_ALLOWED",
+      "instrument_id": "",
+      "venues": {}
+    },
+    "ledger_positions": {
+      "BYBIT:BTC-USDT-SPOT": "-0.080",
+      "BINANCE:BTC-USDT-SPOT": "0.081"
+    }
+  }
+}

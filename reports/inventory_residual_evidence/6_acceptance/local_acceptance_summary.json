@@ -1,0 +1,11 @@
+{
+  "status": "PASSED",
+  "run_directory": "/Users/vaibhav/Documents/Newproject/crypto_MFT_arb_platform/runs/local-all-20261012T151448Z",
+  "tests": 250,
+  "benchmark_decision": "PASS",
+  "paper_opportunities": 1,
+  "paper_closed_plans": 1,
+  "paper_net_pnl": "0.11976",
+  "paper_release_id": "402f70d9-51ce-5b28-bcb4-a75ce4fe992d",
+  "public_network_checks": false
+}

@@ -1,0 +1,19 @@
+........................................................................ [ 28%]
+............................................................... [ 54%]
+........................................................................ [ 82%]
+...........................................                              [100%]
+=============================== warnings summary ===============================
+src/crypto_stat_arb/sdk.py:170
+  /Users/vaibhav/Documents/Newproject/crypto_MFT_arb_platform/src/crypto_stat_arb/sdk.py:170: PytestCollectionWarning: cannot collect test class 'TestnetVenueAdapter' because it has a __init__ constructor (from: tests/test_credentials.py)
+    class TestnetVenueAdapter:
+
+src/crypto_stat_arb/sdk.py:170
+  /Users/vaibhav/Documents/Newproject/crypto_MFT_arb_platform/src/crypto_stat_arb/sdk.py:170: PytestCollectionWarning: cannot collect test class 'TestnetVenueAdapter' because it has a __init__ constructor (from: tests/test_forward_testnet_calibration.py)
+    class TestnetVenueAdapter:
+
+src/crypto_stat_arb/sdk.py:170
+  /Users/vaibhav/Documents/Newproject/crypto_MFT_arb_platform/src/crypto_stat_arb/sdk.py:170: PytestCollectionWarning: cannot collect test class 'TestnetVenueAdapter' because it has a __init__ constructor (from: tests/test_strategy_sdk.py)
+    class TestnetVenueAdapter:
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+250 passed, 3 warnings, 9 subtests passed in 13.14s

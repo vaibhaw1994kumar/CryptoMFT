@@ -1,0 +1,494 @@
+From fa70b81e708432b1b11bb0cebbe419169af60af2 Mon Sep 17 00:00:00 2001
+From: vaibhaw1994kumar <vaibhaw01994@gmail.com>
+Date: Mon, 12 Oct 2026 20:23:19 +0530
+Subject: [PATCH] Add pre-funded spot inventory model to risk admission
+
+- risk.inventory.model: unconstrained (default, legacy; labelled
+  UNCONSTRAINED_SPOT_SHORTING_ALLOWED) or pre_funded with per-venue
+  initial_base_by_venue and quote (default initial_capital_by_venue).
+- In pre_funded mode a non-margin sell leg needs held base minus reserved
+  base on the sell venue, and a buy leg needs held quote minus reserved
+  quote. Held balances are opening + ledger fills (the OMS attaches its
+  ledger to the risk engine). Margin-enabled venues keep margin checks.
+- Reservations carry base_by_venue; capacity and run summaries report the
+  inventory model, label and per-venue balances.
+- 9 new tests (tests/test_spot_inventory.py); 249 tests pass.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ docs/execution_realism.md      |  32 +++++++-
+ src/crypto_stat_arb/config.py  |  29 ++++++-
+ src/crypto_stat_arb/oms.py     |   2 +
+ src/crypto_stat_arb/risk.py    |  96 ++++++++++++++++++++++-
+ src/crypto_stat_arb/runner.py  |   3 +
+ src/crypto_stat_arb/sdk.py     |   3 +-
+ src/crypto_stat_arb/session.py |   4 +-
+ tests/test_spot_inventory.py   | 138 +++++++++++++++++++++++++++++++++
+ 8 files changed, 301 insertions(+), 6 deletions(-)
+ create mode 100644 tests/test_spot_inventory.py
+
+diff --git a/docs/execution_realism.md b/docs/execution_realism.md
+index fafa4be..90c6209 100644
+--- a/docs/execution_realism.md
++++ b/docs/execution_realism.md
+@@ -314,5 +314,33 @@ other does not. Three rules keep that exposure bounded and honestly valued:
+ On the five busiest recorded cycles (0006–0010) the replay now ends with at
+ most 0.001 BTC of residual (previously up to 0.007 against a 0.002 bound),
+ unwinds 7–10 residuals per cycle, and plan `net_pnl` agrees with equity PnL
+-within 0.2 USDT. Inventory is not yet modelled per asset: a spot sell is
+-admitted against the position limit, not against base held on that venue.
++within 0.2 USDT. 
++
++## Spot inventory
++
++`risk.inventory` chooses the inventory assumption, and every run summary
++reports it under `inventory` (model, label, and per-venue initial / held /
++reserved / available base and quote):
++
++```json
++"inventory": {"model": "pre_funded",
++              "initial_base_by_venue": {"BINANCE": "0.05", "BYBIT": "0.05"}}
++```
++
++- `unconstrained` (default when the section is absent): legacy behaviour. A
++  spot sell is admitted against the position limit only, so a venue holding
++  no base can still sell. Labelled `UNCONSTRAINED_SPOT_SHORTING_ALLOWED`.
++- `pre_funded`: each venue starts with `initial_base_by_venue` and quote from
++  `initial_quote_by_venue` (default `initial_capital_by_venue`). Held balance =
++  opening + ledger fills. On a non-margin venue, a package's sell leg must fit
++  in held base minus base reserved by other packages, and its buy leg in held
++  quote minus quote reserved; otherwise it is refused (`insufficient base
++  inventory: VENUE` / `insufficient quote inventory: VENUE`). Margin-enabled
++  venues keep the margin checks instead. Labelled
++  `PRE_FUNDED_INVENTORY_NO_REBALANCING`: there are no inter-venue transfers,
++  so one-directional trading eventually exhausts a venue's base.
++
++Known gaps: quote reservation excludes fees; risk-reducing unwind orders are
++not blocked by inventory; a package's reservation is held until the plan
++closes, so balances are briefly double-counted between fill and close
++(conservative).
+diff --git a/src/crypto_stat_arb/config.py b/src/crypto_stat_arb/config.py
+index bddd88c..877d997 100644
+--- a/src/crypto_stat_arb/config.py
++++ b/src/crypto_stat_arb/config.py
+@@ -8,7 +8,7 @@ from typing import Any
+ 
+ from .instruments import InstrumentMaster
+ from .models import Instrument, d
+-from .risk import AccountRiskSnapshot, RiskLimits
++from .risk import AccountRiskSnapshot, InventoryModel, InventoryPolicy, RiskLimits
+ from .time_integrity import TimePolicy
+ from .quality import QualityThresholds
+ from .execution import OrderTimeoutPolicy, ResidualPolicy, UnwindUrgency
+@@ -42,6 +42,7 @@ class AppConfig:
+     performance: dict[str, Any] = field(default_factory=dict)
+     execution_mode: str = "INTERNAL_SIMULATION"
+     strategies: dict[str, Any] = field(default_factory=dict)
++    inventory_policy: InventoryPolicy = field(default_factory=InventoryPolicy)
+ 
+ 
+ def _optional_decimal(value: Any, default: str | None) -> Decimal | None:
+@@ -50,6 +51,31 @@ def _optional_decimal(value: Any, default: str | None) -> Decimal | None:
+     return d(default if value is None else value)
+ 
+ 
++def _inventory_policy(raw: dict) -> InventoryPolicy:
++    """``risk.inventory``: ``{"model": "pre_funded", "initial_base_by_venue":
++    {"BINANCE": "0.05", ...}}``. Quote balances default to
++    ``risk.initial_capital_by_venue``. Missing section: UNCONSTRAINED."""
++    risk = raw.get("risk", {})
++    section = risk.get("inventory") or {}
++    model = InventoryModel(str(section.get("model", "unconstrained")).upper())
++    quote = section.get("initial_quote_by_venue", risk.get("initial_capital_by_venue", {}))
++    policy = InventoryPolicy(
++        model=model,
++        instrument_id=str(raw["strategy"]["instrument_id"]),
++        initial_base_by_venue={str(v): d(q) for v, q in (section.get("initial_base_by_venue") or {}).items()},
++        initial_quote_by_venue={str(v): d(q) for v, q in quote.items()},
++    )
++    if model == InventoryModel.PRE_FUNDED:
++        venues = set(raw["strategy"]["venues"])
++        missing = venues - set(policy.initial_base_by_venue)
++        if missing:
++            raise ValueError(f"pre_funded inventory needs initial_base_by_venue for {sorted(missing)}")
++        missing = venues - set(policy.initial_quote_by_venue)
++        if missing:
++            raise ValueError(f"pre_funded inventory needs quote balances for {sorted(missing)}")
++    return policy
++
++
+ def load_config(path: Path) -> tuple[AppConfig, dict]:
+     raw = json.loads(path.read_text(encoding="utf-8"))
+     reject_plaintext_credentials(raw)
+@@ -109,6 +135,7 @@ def load_config(path: Path) -> tuple[AppConfig, dict]:
+             str(venue): d(amount)
+             for venue, amount in risk.get("initial_capital_by_venue", {}).items()
+         },
++        inventory_policy=_inventory_policy(raw),
+         risk_limits=RiskLimits(
+             max_order_notional=d(risk["max_order_notional"]),
+             max_gross_notional=d(risk["max_gross_notional"]),
+diff --git a/src/crypto_stat_arb/oms.py b/src/crypto_stat_arb/oms.py
+index 7317e46..d53caf7 100644
+--- a/src/crypto_stat_arb/oms.py
++++ b/src/crypto_stat_arb/oms.py
+@@ -138,6 +138,8 @@ class OMS:
+         self.instruments = instruments
+         self.risk = risk
+         self.ledger = ledger
++        if getattr(risk, "ledger", None) is None:
++            risk.ledger = ledger  # live balances for inventory admission
+         self.matcher = matcher or DeterministicMatcher()
+         self.router = router or StrategyDirectedRouter(instruments)
+         self.plan_store = plan_store
+diff --git a/src/crypto_stat_arb/risk.py b/src/crypto_stat_arb/risk.py
+index 0ee3ae8..52af4be 100644
+--- a/src/crypto_stat_arb/risk.py
++++ b/src/crypto_stat_arb/risk.py
+@@ -287,6 +287,29 @@ class ReconciliationReport:
+         )
+ 
+ 
++class InventoryModel(StrEnum):
++    # Legacy: a spot sell is admitted against the position limit only, so the
++    # simulation may sell base it does not hold (an implicit short).
++    UNCONSTRAINED = "UNCONSTRAINED"
++    # Each venue starts with explicit base and quote balances; a spot sell
++    # needs held base, a spot buy needs held quote. No inter-venue transfers.
++    PRE_FUNDED = "PRE_FUNDED"
++
++
++@dataclass(frozen=True, slots=True)
++class InventoryPolicy:
++    model: InventoryModel = InventoryModel.UNCONSTRAINED
++    instrument_id: str = ""
++    initial_base_by_venue: dict[str, Decimal] = field(default_factory=dict)
++    initial_quote_by_venue: dict[str, Decimal] = field(default_factory=dict)
++
++    @property
++    def label(self) -> str:
++        if self.model == InventoryModel.PRE_FUNDED:
++            return "PRE_FUNDED_INVENTORY_NO_REBALANCING"
++        return "UNCONSTRAINED_SPOT_SHORTING_ALLOWED"
++
++
+ @dataclass(slots=True)
+ class PackageReservation:
+     reservation_id: str
+@@ -298,12 +321,13 @@ class PackageReservation:
+     messages_by_venue: dict[str, int]
+     residual_base: Decimal
+     active: bool = True
++    base_by_venue: dict[str, Decimal] = field(default_factory=dict)
+ 
+     def to_dict(self) -> dict[str, Any]:
+         row = asdict(self)
+         for field_name in (
+             "gross_notional", "cash_by_venue", "margin_by_venue",
+-            "position_delta_by_venue", "residual_base",
++            "position_delta_by_venue", "residual_base", "base_by_venue",
+         ):
+             value = row[field_name]
+             if isinstance(value, Decimal):
+@@ -320,8 +344,14 @@ class RiskEngine:
+         self,
+         limits: RiskLimits,
+         account_snapshots: dict[str, AccountRiskSnapshot] | None = None,
++        inventory: InventoryPolicy | None = None,
+     ):
+         self.limits = limits
++        self.inventory = inventory or InventoryPolicy()
++        # Fills move balances; the OMS attaches its ledger so admission sees
++        # held = opening balance + filled deltas (not a static snapshot).
++        self.ledger: Any = None
++        self.reserved_base: dict[str, Decimal] = {}
+         self.kill_switch = False
+         self.kill_switch_reason = ""
+         self.kill_switch_source = ""
+@@ -649,6 +679,45 @@ class RiskEngine:
+             "reserved_messages": dict(self.reserved_messages),
+             "reserved_residual": self.reserved_residual,
+             "carried_residual_base": self.carried_residual_base,
++            "reserved_base": dict(self.reserved_base),
++            "inventory": self.inventory_snapshot(),
++        }
++
++    def held_base(self, venue: str) -> Decimal:
++        opening = self.inventory.initial_base_by_venue.get(venue, Decimal("0"))
++        if self.ledger is None:
++            return opening
++        return opening + self.ledger.positions.get(
++            (venue, self.inventory.instrument_id), Decimal("0")
++        )
++
++    def held_quote(self, venue: str) -> Decimal:
++        opening = self.inventory.initial_quote_by_venue.get(venue, Decimal("0"))
++        if self.ledger is None:
++            return opening
++        return opening + self.ledger.cash_deltas.get(venue, Decimal("0"))
++
++    def inventory_snapshot(self) -> dict[str, Any]:
++        venues = sorted(
++            set(self.inventory.initial_base_by_venue) | set(self.inventory.initial_quote_by_venue)
++        )
++        return {
++            "model": self.inventory.model.value,
++            "label": self.inventory.label,
++            "instrument_id": self.inventory.instrument_id,
++            "venues": {
++                venue: {
++                    "initial_base": str(self.inventory.initial_base_by_venue.get(venue, Decimal("0"))),
++                    "held_base": str(self.held_base(venue)),
++                    "reserved_base": str(self.reserved_base.get(venue, Decimal("0"))),
++                    "available_base": str(self.held_base(venue) - self.reserved_base.get(venue, Decimal("0"))),
++                    "initial_quote": str(self.inventory.initial_quote_by_venue.get(venue, Decimal("0"))),
++                    "held_quote": str(self.held_quote(venue)),
++                    "reserved_quote": str(self.reserved_cash.get(venue, Decimal("0"))),
++                    "available_quote": str(self.held_quote(venue) - self.reserved_cash.get(venue, Decimal("0"))),
++                }
++                for venue in venues
++            },
+         }
+ 
+     def rehydrate_reservation(self, opportunity: Opportunity) -> PackageReservation:
+@@ -1244,6 +1313,24 @@ class RiskEngine:
+             if message_total > account.message_capacity:
+                 raise ValueError(f"message capacity exceeded: {venue}")
+ 
++        base: dict[str, Decimal] = {}
++        if self.inventory.model == InventoryModel.PRE_FUNDED:
++            sell_account = self._account(opportunity.sell_venue)
++            if not buy_account.margin_enabled:
++                needed = (
++                    self.reserved_cash.get(opportunity.buy_venue, Decimal("0")) + buy_notional
++                )
++                if needed > self.held_quote(opportunity.buy_venue):
++                    raise ValueError(f"insufficient quote inventory: {opportunity.buy_venue}")
++            if not sell_account.margin_enabled:
++                base[opportunity.sell_venue] = opportunity.quantity
++                needed = (
++                    self.reserved_base.get(opportunity.sell_venue, Decimal("0"))
++                    + opportunity.quantity
++                )
++                if needed > self.held_base(opportunity.sell_venue):
++                    raise ValueError(f"insufficient base inventory: {opportunity.sell_venue}")
++
+         reservation = PackageReservation(
+             reservation_id=stable_id("risk-reservation", opportunity.opportunity_id),
+             opportunity_id=opportunity.opportunity_id,
+@@ -1253,11 +1340,14 @@ class RiskEngine:
+             position_delta_by_venue=positions,
+             messages_by_venue=messages,
+             residual_base=planned_residual,
++            base_by_venue=base,
+         )
+         self.reserved_gross += package_gross
+         self.reserved_residual += planned_residual
+         for venue, amount in cash.items():
+             self.reserved_cash[venue] = self.reserved_cash.get(venue, Decimal("0")) + amount
++        for venue, amount in base.items():
++            self.reserved_base[venue] = self.reserved_base.get(venue, Decimal("0")) + amount
+         for venue, amount in margin.items():
+             self.reserved_margin[venue] = self.reserved_margin.get(venue, Decimal("0")) + amount
+         for venue, amount in positions.items():
+@@ -1287,6 +1377,10 @@ class RiskEngine:
+             self.reserved_margin[venue] = max(
+                 Decimal("0"), self.reserved_margin.get(venue, Decimal("0")) - amount
+             )
++        for venue, amount in reservation.base_by_venue.items():
++            self.reserved_base[venue] = max(
++                Decimal("0"), self.reserved_base.get(venue, Decimal("0")) - amount
++            )
+         for venue, amount in reservation.position_delta_by_venue.items():
+             self.reserved_position[venue] = (
+                 self.reserved_position.get(venue, Decimal("0")) - amount
+diff --git a/src/crypto_stat_arb/runner.py b/src/crypto_stat_arb/runner.py
+index 7134c21..3250055 100644
+--- a/src/crypto_stat_arb/runner.py
++++ b/src/crypto_stat_arb/runner.py
+@@ -252,6 +252,9 @@ def write_session_artifacts(
+         "net_pnl": str(sum((x.net_pnl for x in plans), start=0)),
+         "gross_pnl": str(sum((x.gross_pnl for x in plans), start=0)),
+         "fees": str(sum((x.fees for x in plans), start=0)),
++        # Which inventory assumption produced these results (pre-funded spot
++        # balances, or unconstrained selling that implies shorting).
++        "inventory": oms.risk.inventory_snapshot(),
+         "execution_api": {
+             "schema_version": "1.0.0",
+             **oms.router.stats_snapshot(),
+diff --git a/src/crypto_stat_arb/sdk.py b/src/crypto_stat_arb/sdk.py
+index 9eb8230..04cb3ac 100644
+--- a/src/crypto_stat_arb/sdk.py
++++ b/src/crypto_stat_arb/sdk.py
+@@ -538,7 +538,8 @@ class StrategyRuntime:
+         self.mode = mode
+         self.ledger = Ledger()
+         self.risk_engine = RiskEngine(
+-            config.risk_limits, config.account_risk_snapshots
++            config.risk_limits, config.account_risk_snapshots,
++            inventory=config.inventory_policy,
+         )
+         self.eligibility = CrossVenueEligibilityPolicy(
+             config.venues, config.instrument_id, config.max_book_age_ns
+diff --git a/src/crypto_stat_arb/session.py b/src/crypto_stat_arb/session.py
+index 4c2b88c..60ccf1a 100644
+--- a/src/crypto_stat_arb/session.py
++++ b/src/crypto_stat_arb/session.py
+@@ -113,7 +113,9 @@ class TradingSession:
+         self.clock_ns = clock_ns
+         self.wall_ns = wall_ns
+         self.ledger = Ledger()
+-        self.risk = RiskEngine(cfg.risk_limits, cfg.account_risk_snapshots)
++        self.risk = RiskEngine(
++            cfg.risk_limits, cfg.account_risk_snapshots, inventory=cfg.inventory_policy
++        )
+         self.alignment_policy = CrossVenueEligibilityPolicy(
+             cfg.venues, cfg.instrument_id, cfg.max_book_age_ns
+         )
+diff --git a/tests/test_spot_inventory.py b/tests/test_spot_inventory.py
+new file mode 100644
+index 0000000..046974d
+--- /dev/null
++++ b/tests/test_spot_inventory.py
+@@ -0,0 +1,138 @@
++"""Pre-funded spot inventory: a sell needs base held on that venue.
++
++Before, a spot sell was admitted against the position limit only, so a venue
++holding 0 BTC could "sell" 1 BTC (an implicit short the venue would reject).
++"""
++
++from dataclasses import replace
++from decimal import Decimal
++import json
++from pathlib import Path
++import tempfile
++import unittest
++
++from crypto_stat_arb.config import load_config
++from crypto_stat_arb.ledger import Ledger
++from crypto_stat_arb.oms import OMS
++from crypto_stat_arb.risk import (
++    AccountRiskSnapshot, InventoryModel, InventoryPolicy, RiskEngine, RiskLimits,
++)
++from test_execution_realism import books
++from test_oms import instrument_master, opportunity
++
++
++ROOT = Path(__file__).parents[1]
++INSTRUMENT = "BTC-USDT-SPOT"
++
++
++def limits() -> RiskLimits:
++    return RiskLimits(
++        max_order_notional=Decimal("5000"), max_gross_notional=Decimal("10000"),
++        max_residual_base=Decimal("0.02"), max_book_age_ns=1_000_000_000,
++    )
++
++
++def engine(base: dict, quote: dict, accounts: dict | None = None) -> RiskEngine:
++    return RiskEngine(limits(), accounts, inventory=InventoryPolicy(
++        model=InventoryModel.PRE_FUNDED, instrument_id=INSTRUMENT,
++        initial_base_by_venue={k: Decimal(v) for k, v in base.items()},
++        initial_quote_by_venue={k: Decimal(v) for k, v in quote.items()},
++    ))
++
++
++def nth(n: int, qty: str = "0.01", reverse: bool = False):
++    opp = replace(opportunity(qty), opportunity_id=f"op-{n}", source_event_ids=(f"a{n}", f"b{n}"))
++    if reverse:
++        opp = replace(opp, buy_venue="BYBIT", sell_venue="BINANCE",
++                      buy_price=Decimal("60070.00"), sell_price=Decimal("59990.00"))
++    return opp
++
++
++class AdmissionTests(unittest.TestCase):
++    def test_sell_without_base_on_the_sell_venue_is_rejected(self):
++        risk = engine({"BINANCE": "1", "BYBIT": "0"}, {"BINANCE": "100000", "BYBIT": "100000"})
++        with self.assertRaisesRegex(ValueError, "insufficient base inventory: BYBIT"):
++            risk.reserve(nth(1))
++
++    def test_buy_without_quote_on_the_buy_venue_is_rejected(self):
++        risk = engine({"BINANCE": "1", "BYBIT": "1"}, {"BINANCE": "500", "BYBIT": "100000"})
++        with self.assertRaisesRegex(ValueError, "insufficient quote inventory: BINANCE"):
++            risk.reserve(nth(1))  # buys 0.01 x 60000 = 600 USDT on BINANCE
++
++    def test_reserved_base_is_held_until_release(self):
++        risk = engine({"BINANCE": "0", "BYBIT": "0.015"}, {"BINANCE": "100000", "BYBIT": "100000"})
++        first = risk.reserve(nth(1))
++        self.assertEqual(first.base_by_venue, {"BYBIT": Decimal("0.01")})
++        with self.assertRaisesRegex(ValueError, "insufficient base inventory: BYBIT"):
++            risk.reserve(nth(2))
++        risk.release(first)
++        self.assertEqual(risk.reserve(nth(2)).base_by_venue, {"BYBIT": Decimal("0.01")})
++        venue = risk.inventory_snapshot()["venues"]["BYBIT"]
++        self.assertEqual((venue["reserved_base"], venue["available_base"]), ("0.01", "0.005"))
++
++    def test_margin_enabled_sell_venue_needs_no_base(self):
++        accounts = {"BYBIT": AccountRiskSnapshot(venue="BYBIT", margin_enabled=True)}
++        risk = engine({"BINANCE": "0", "BYBIT": "0"}, {"BINANCE": "100000", "BYBIT": "100000"}, accounts)
++        self.assertEqual(risk.reserve(nth(1)).base_by_venue, {})
++
++    def test_unconstrained_model_keeps_the_legacy_behaviour(self):
++        risk = RiskEngine(limits())
++        self.assertEqual(risk.reserve(nth(1)).base_by_venue, {})
++        self.assertEqual(risk.inventory_snapshot()["label"], "UNCONSTRAINED_SPOT_SHORTING_ALLOWED")
++
++
++class LedgerDrivenBalanceTests(unittest.TestCase):
++    def test_fills_move_inventory_and_one_way_trading_runs_out_of_base(self):
++        risk = engine({"BINANCE": "0", "BYBIT": "0.01"}, {"BINANCE": "5000", "BYBIT": "1000"})
++        oms = OMS(instrument_master(), risk, Ledger())
++        plan = oms.execute(nth(1), books())  # buy BINANCE, sell BYBIT, 0.01 each
++        self.assertEqual(plan.residual_base, Decimal("0"))
++        self.assertEqual(risk.held_base("BYBIT"), Decimal("0"))
++        self.assertEqual(risk.held_base("BINANCE"), Decimal("0.01"))
++        self.assertLess(risk.held_quote("BINANCE"), Decimal("5000") - Decimal("599"))
++        # Same direction again: BYBIT has no BTC left, so it is refused...
++        refused = oms.execute(nth(2), books())
++        self.assertIn("REJECTED", [row["state"] for row in refused.transitions])
++        self.assertTrue(all(child.filled_quantity == 0 for child in refused.children))
++        self.assertTrue(any(
++            row["event_type"] == "PACKAGE_RISK_REJECTED"
++            and "insufficient base inventory: BYBIT" in row["reason"]
++            for row in oms.ledger.events
++        ))
++        # ...while the reverse trade, selling the BTC bought on BINANCE, is allowed.
++        back = oms.execute(nth(3, reverse=True), books())
++        self.assertNotIn("REJECTED", [row["state"] for row in back.transitions])
++        self.assertEqual(risk.held_base("BINANCE"), Decimal("0"))
++        self.assertEqual(risk.held_base("BYBIT"), Decimal("0.01"))
++
++
++class ConfigTests(unittest.TestCase):
++    def write(self, inventory: dict | None) -> Path:
++        raw = json.loads((ROOT / "config" / "research.json").read_text())
++        if inventory is not None:
++            raw["risk"]["inventory"] = inventory
++        directory = Path(tempfile.mkdtemp())
++        (directory / "c.json").write_text(json.dumps(raw))
++        return directory / "c.json"
++
++    def test_pre_funded_config_is_parsed_and_labelled(self):
++        cfg, _ = load_config(self.write({
++            "model": "pre_funded", "initial_base_by_venue": {"BINANCE": "0.05", "BYBIT": "0.05"},
++        }))
++        policy = cfg.inventory_policy
++        self.assertEqual(policy.model, InventoryModel.PRE_FUNDED)
++        self.assertEqual(policy.initial_base_by_venue["BYBIT"], Decimal("0.05"))
++        self.assertEqual(policy.initial_quote_by_venue["BINANCE"], Decimal("10000"))
++        self.assertEqual(policy.label, "PRE_FUNDED_INVENTORY_NO_REBALANCING")
++
++    def test_pre_funded_needs_a_base_balance_for_every_venue(self):
++        with self.assertRaisesRegex(ValueError, "initial_base_by_venue"):
++            load_config(self.write({"model": "pre_funded", "initial_base_by_venue": {"BINANCE": "1"}}))
++
++    def test_missing_section_is_unconstrained(self):
++        cfg, _ = load_config(self.write(None))
++        self.assertEqual(cfg.inventory_policy.model, InventoryModel.UNCONSTRAINED)
++
++
++if __name__ == "__main__":
++    unittest.main()
+-- 
+2.39.5 (Apple Git-154)
+

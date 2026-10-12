@@ -1,0 +1,964 @@
+{
+  "tests": {
+    "item_tests": 17,
+    "passed": 17,
+    "exit_code": 0,
+    "full_suite": "250 passed, 3 warnings, 9 subtests passed in 13.14s",
+    "cases": [
+      {
+        "file": "test_residual_exposure.py",
+        "class": "WorstCaseReservationTests",
+        "test": "test_balanced_package_reserves_its_full_leg_quantity",
+        "seconds": 0.001,
+        "status": "PASSED"
+      },
+      {
+        "file": "test_residual_exposure.py",
+        "class": "WorstCaseReservationTests",
+        "test": "test_carried_residual_counts_against_legging_exposure",
+        "seconds": 0.0,
+        "status": "PASSED"
+      },
+      {
+        "file": "test_residual_exposure.py",
+        "class": "WorstCaseReservationTests",
+        "test": "test_new_risk_is_blocked_while_carried_residual_is_at_the_limit",
+        "seconds": 0.0,
+        "status": "PASSED"
+      },
+      {
+        "file": "test_residual_exposure.py",
+        "class": "AggregateResidualBoundTests",
+        "test": "test_a_residual_that_offsets_the_carried_one_is_accepted",
+        "seconds": 0.002,
+        "status": "PASSED"
+      },
+      {
+        "file": "test_residual_exposure.py",
+        "class": "AggregateResidualBoundTests",
+        "test": "test_residuals_within_bound_one_at_a_time_cannot_pile_up",
+        "seconds": 0.003,
+        "status": "PASSED"
+      },
+      {
+        "file": "test_residual_exposure.py",
+        "class": "MarkedPlanPnlTests",
+        "test": "test_hedged_plan_pnl_is_unchanged",
+        "seconds": 0.001,
+        "status": "PASSED"
+      },
+      {
+        "file": "test_residual_exposure.py",
+        "class": "MarkedPlanPnlTests",
+        "test": "test_open_residual_is_marked_not_booked_as_cash",
+        "seconds": 0.001,
+        "status": "PASSED"
+      },
+      {
+        "file": "test_spot_inventory.py",
+        "class": "AdmissionTests",
+        "test": "test_buy_without_quote_on_the_buy_venue_is_rejected",
+        "seconds": 0.0,
+        "status": "PASSED"
+      },
+      {
+        "file": "test_spot_inventory.py",
+        "class": "AdmissionTests",
+        "test": "test_margin_enabled_sell_venue_needs_no_base",
+        "seconds": 0.0,
+        "status": "PASSED"
+      },
+      {
+        "file": "test_spot_inventory.py",
+        "class": "AdmissionTests",
+        "test": "test_reserved_base_is_held_until_release",
+        "seconds": 0.0,
+        "status": "PASSED"
+      },
+      {
+        "file": "test_spot_inventory.py",
+        "class": "AdmissionTests",
+        "test": "test_sell_without_base_on_the_sell_venue_is_rejected",
+        "seconds": 0.0,
+        "status": "PASSED"
+      },
+      {
+        "file": "test_spot_inventory.py",
+        "class": "AdmissionTests",
+        "test": "test_unconstrained_model_keeps_the_legacy_behaviour",
+        "seconds": 0.0,
+        "status": "PASSED"
+      },
+      {
+        "file": "test_spot_inventory.py",
+        "class": "LedgerDrivenBalanceTests",
+        "test": "test_fills_move_inventory_and_one_way_trading_runs_out_of_base",
+        "seconds": 0.003,
+        "status": "PASSED"
+      },
+      {
+        "file": "test_spot_inventory.py",
+        "class": "SharedInventoryTests",
+        "test": "test_one_directional_arb_drains_a_venue_shared_with_mean_reversion",
+        "seconds": 0.669,
+        "status": "PASSED"
+      },
+      {
+        "file": "test_spot_inventory.py",
+        "class": "ConfigTests",
+        "test": "test_missing_section_is_unconstrained",
+        "seconds": 0.001,
+        "status": "PASSED"
+      },
+      {
+        "file": "test_spot_inventory.py",
+        "class": "ConfigTests",
+        "test": "test_pre_funded_config_is_parsed_and_labelled",
+        "seconds": 0.001,
+        "status": "PASSED"
+      },
+      {
+        "file": "test_spot_inventory.py",
+        "class": "ConfigTests",
+        "test": "test_pre_funded_needs_a_base_balance_for_every_venue",
+        "seconds": 0.001,
+        "status": "PASSED"
+      }
+    ]
+  },
+  "paper_residual": {
+    "cycles": 44,
+    "sum_headline_net_pnl": 698.91,
+    "sum_equity_pnl": -25.46,
+    "max_abs_end_residual": 0.006,
+    "cycles_with_end_residual": 17,
+    "rows": [
+      {
+        "cycle": "cycle-0001-20260913T170323Z",
+        "headline_net_pnl": 0.0,
+        "equity_pnl": 0.0,
+        "end_residual_base": 0.0,
+        "overstatement": 0.0
+      },
+      {
+        "cycle": "cycle-0001-20260914T113814Z",
+        "headline_net_pnl": 0.0,
+        "equity_pnl": 0.0,
+        "end_residual_base": 0.0,
+        "overstatement": 0.0
+      },
+      {
+        "cycle": "cycle-0002-20260913T170854Z",
+        "headline_net_pnl": -465.05420052,
+        "equity_pnl": -1.440501,
+        "end_residual_base": 0.006,
+        "overstatement": -463.6137
+      },
+      {
+        "cycle": "cycle-0002-20260914T115440Z",
+        "headline_net_pnl": 0.0,
+        "equity_pnl": 0.0,
+        "end_residual_base": 0.0,
+        "overstatement": 0.0
+      },
+      {
+        "cycle": "cycle-0003-20260913T173924Z",
+        "headline_net_pnl": -155.18512409216,
+        "equity_pnl": -0.491194,
+        "end_residual_base": 0.002,
+        "overstatement": -154.69393
+      },
+      {
+        "cycle": "cycle-0003-20260914T123011Z",
+        "headline_net_pnl": 0.0,
+        "equity_pnl": 0.0,
+        "end_residual_base": 0.0,
+        "overstatement": 0.0
+      },
+      {
+        "cycle": "cycle-0004-20260913T215653Z",
+        "headline_net_pnl": 0.0,
+        "equity_pnl": 0.0,
+        "end_residual_base": 0.0,
+        "overstatement": 0.0
+      },
+      {
+        "cycle": "cycle-0004-20260914T131301Z",
+        "headline_net_pnl": 0.0,
+        "equity_pnl": 0.0,
+        "end_residual_base": 0.0,
+        "overstatement": 0.0
+      },
+      {
+        "cycle": "cycle-0005-20260914T040253Z",
+        "headline_net_pnl": 0.0,
+        "equity_pnl": 0.0,
+        "end_residual_base": 0.0,
+        "overstatement": 0.0
+      },
+      {
+        "cycle": "cycle-0005-20260914T135632Z",
+        "headline_net_pnl": 0.0,
+        "equity_pnl": 0.0,
+        "end_residual_base": 0.0,
+        "overstatement": 0.0
+      },
+      {
+        "cycle": "cycle-0006-20260914T063025Z",
+        "headline_net_pnl": 77.020552316,
+        "equity_pnl": -1.270698,
+        "end_residual_base": -0.001,
+        "overstatement": 78.29125
+      },
+      {
+        "cycle": "cycle-0006-20260914T142731Z",
+        "headline_net_pnl": 231.735112152,
+        "equity_pnl": -3.647928,
+        "end_residual_base": -0.003,
+        "overstatement": 235.38304
+      },
+      {
+        "cycle": "cycle-0007-20260914T145802Z",
+        "headline_net_pnl": 74.97287680396,
+        "equity_pnl": -3.427527,
+        "end_residual_base": -0.001,
+        "overstatement": 78.400403
+      },
+      {
+        "cycle": "cycle-0008-20260914T152833Z",
+        "headline_net_pnl": -250.12561263908,
+        "equity_pnl": -3.433465,
+        "end_residual_base": 0.00314,
+        "overstatement": -246.692148
+      },
+      {
+        "cycle": "cycle-0009-20260914T155903Z",
+        "headline_net_pnl": 74.91294811252,
+        "equity_pnl": -3.780327,
+        "end_residual_base": -0.001,
+        "overstatement": 78.693276
+      },
+      {
+        "cycle": "cycle-0010-20260914T162934Z",
+        "headline_net_pnl": 471.073296928,
+        "equity_pnl": -1.616003,
+        "end_residual_base": -0.006,
+        "overstatement": 472.6893
+      },
+      {
+        "cycle": "cycle-0011-20260914T170034Z",
+        "headline_net_pnl": -396.321411784,
+        "equity_pnl": -2.048807,
+        "end_residual_base": 0.005,
+        "overstatement": -394.272605
+      },
+      {
+        "cycle": "cycle-0012-20260914T175138Z",
+        "headline_net_pnl": 0.0,
+        "equity_pnl": 0.0,
+        "end_residual_base": 0.0,
+        "overstatement": 0.0
+      },
+      {
+        "cycle": "cycle-0013-20260914T182555Z",
+        "headline_net_pnl": 0.0,
+        "equity_pnl": 0.0,
+        "end_residual_base": 0.0,
+        "overstatement": 0.0
+      },
+      {
+        "cycle": "cycle-0014-20260914T191733Z",
+        "headline_net_pnl": 78.955747356,
+        "equity_pnl": -0.094348,
+        "end_residual_base": -0.001,
+        "overstatement": 79.050095
+      },
+      {
+        "cycle": "cycle-0015-20260914T201403Z",
+        "headline_net_pnl": 0.0,
+        "equity_pnl": 0.0,
+        "end_residual_base": 0.0,
+        "overstatement": 0.0
+      },
+      {
+        "cycle": "cycle-0016-20260914T205837Z",
+        "headline_net_pnl": 78.82505736,
+        "equity_pnl": -0.101993,
+        "end_residual_base": -0.001,
+        "overstatement": 78.92705
+      },
+      {
+        "cycle": "cycle-0017-20260914T214147Z",
+        "headline_net_pnl": 0.0,
+        "equity_pnl": 0.0,
+        "end_residual_base": 0.0,
+        "overstatement": 0.0
+      },
+      {
+        "cycle": "cycle-0018-20260914T221421Z",
+        "headline_net_pnl": 0.0,
+        "equity_pnl": 0.0,
+        "end_residual_base": 0.0,
+        "overstatement": 0.0
+      },
+      {
+        "cycle": "cycle-0019-20260914T230108Z",
+        "headline_net_pnl": 0.0,
+        "equity_pnl": 0.0,
+        "end_residual_base": 0.0,
+        "overstatement": 0.0
+      },
+      {
+        "cycle": "cycle-0020-20260914T234336Z",
+        "headline_net_pnl": 0.0,
+        "equity_pnl": 0.0,
+        "end_residual_base": 0.0,
+        "overstatement": 0.0
+      },
+      {
+        "cycle": "cycle-0021-20260915T002852Z",
+        "headline_net_pnl": 0.0,
+        "equity_pnl": 0.0,
+        "end_residual_base": 0.0,
+        "overstatement": 0.0
+      },
+      {
+        "cycle": "cycle-0022-20260915T010026Z",
+        "headline_net_pnl": 0.0,
+        "equity_pnl": 0.0,
+        "end_residual_base": 0.0,
+        "overstatement": 0.0
+      },
+      {
+        "cycle": "cycle-0023-20260915T014745Z",
+        "headline_net_pnl": 0.0,
+        "equity_pnl": 0.0,
+        "end_residual_base": 0.0,
+        "overstatement": 0.0
+      },
+      {
+        "cycle": "cycle-0024-20260915T021917Z",
+        "headline_net_pnl": 0.0,
+        "equity_pnl": 0.0,
+        "end_residual_base": 0.0,
+        "overstatement": 0.0
+      },
+      {
+        "cycle": "cycle-0025-20260915T030354Z",
+        "headline_net_pnl": 77.37590286,
+        "equity_pnl": -0.462647,
+        "end_residual_base": -0.001,
+        "overstatement": 77.83855
+      },
+      {
+        "cycle": "cycle-0026-20260915T034447Z",
+        "headline_net_pnl": 0.0,
+        "equity_pnl": 0.0,
+        "end_residual_base": 0.0,
+        "overstatement": 0.0
+      },
+      {
+        "cycle": "cycle-0027-20260915T041618Z",
+        "headline_net_pnl": 0.0,
+        "equity_pnl": 0.0,
+        "end_residual_base": 0.0,
+        "overstatement": 0.0
+      },
+      {
+        "cycle": "cycle-0028-20260915T045053Z",
+        "headline_net_pnl": 231.293885644,
+        "equity_pnl": -0.889489,
+        "end_residual_base": -0.003,
+        "overstatement": 232.183375
+      },
+      {
+        "cycle": "cycle-0029-20260915T052128Z",
+        "headline_net_pnl": 232.028090668,
+        "equity_pnl": -0.381759,
+        "end_residual_base": -0.003,
+        "overstatement": 232.40985
+      },
+      {
+        "cycle": "cycle-0030-20260915T060036Z",
+        "headline_net_pnl": 0.0,
+        "equity_pnl": 0.0,
+        "end_residual_base": 0.0,
+        "overstatement": 0.0
+      },
+      {
+        "cycle": "cycle-0031-20260915T063633Z",
+        "headline_net_pnl": 0.0,
+        "equity_pnl": 0.0,
+        "end_residual_base": 0.0,
+        "overstatement": 0.0
+      },
+      {
+        "cycle": "cycle-0032-20260915T071237Z",
+        "headline_net_pnl": 0.0,
+        "equity_pnl": 0.0,
+        "end_residual_base": 0.0,
+        "overstatement": 0.0
+      },
+      {
+        "cycle": "cycle-0033-20260915T075413Z",
+        "headline_net_pnl": 0.0,
+        "equity_pnl": 0.0,
+        "end_residual_base": 0.0,
+        "overstatement": 0.0
+      },
+      {
+        "cycle": "cycle-0034-20260915T085739Z",
+        "headline_net_pnl": 0.0,
+        "equity_pnl": 0.0,
+        "end_residual_base": 0.0,
+        "overstatement": 0.0
+      },
+      {
+        "cycle": "cycle-0035-20260915T095730Z",
+        "headline_net_pnl": 0.0,
+        "equity_pnl": 0.0,
+        "end_residual_base": 0.0,
+        "overstatement": 0.0
+      },
+      {
+        "cycle": "cycle-0036-20260915T103828Z",
+        "headline_net_pnl": 76.431620592,
+        "equity_pnl": -0.704429,
+        "end_residual_base": -0.001,
+        "overstatement": 77.13605
+      },
+      {
+        "cycle": "cycle-0037-20260915T110840Z",
+        "headline_net_pnl": -78.037617276,
+        "equity_pnl": -0.987817,
+        "end_residual_base": 0.001,
+        "overstatement": -77.0498
+      },
+      {
+        "cycle": "cycle-0040-20260915T132143Z",
+        "headline_net_pnl": 339.01270201852,
+        "equity_pnl": -0.683477,
+        "end_residual_base": -0.00444,
+        "overstatement": 339.696179
+      }
+    ]
+  },
+  "replay_residual": {
+    "rows": [
+      {
+        "cycle": "0006",
+        "run": "before",
+        "opportunities": 90,
+        "net_pnl": -3.8314,
+        "equity_pnl": -3.8274,
+        "net_minus_equity": -0.004,
+        "end_residual_base": 0.0,
+        "kill_switch": "INACTIVE",
+        "primary_fills": 154,
+        "unwind_fills": 0,
+        "residual_detected": 26,
+        "residual_within_bound": 26,
+        "residual_limit_breach": 0,
+        "risk_refusals": 0,
+        "paper_opportunities": 87,
+        "paper_net_pnl": 231.7351,
+        "paper_equity_pnl": -3.6479,
+        "paper_end_residual_base": -0.003
+      },
+      {
+        "cycle": "0006",
+        "run": "after",
+        "opportunities": 88,
+        "net_pnl": -4.6995,
+        "equity_pnl": -4.6447,
+        "net_minus_equity": -0.0548,
+        "end_residual_base": 0.0,
+        "kill_switch": "INACTIVE",
+        "primary_fills": 146,
+        "unwind_fills": 8,
+        "residual_detected": 30,
+        "residual_within_bound": 22,
+        "residual_limit_breach": 8,
+        "risk_refusals": 0,
+        "paper_opportunities": 87,
+        "paper_net_pnl": 231.7351,
+        "paper_equity_pnl": -3.6479,
+        "paper_end_residual_base": -0.003
+      },
+      {
+        "cycle": "0007",
+        "run": "before",
+        "opportunities": 72,
+        "net_pnl": -160.3915,
+        "equity_pnl": -3.5918,
+        "net_minus_equity": -156.7997,
+        "end_residual_base": 0.002,
+        "kill_switch": "INACTIVE",
+        "primary_fills": 118,
+        "unwind_fills": 0,
+        "residual_detected": 26,
+        "residual_within_bound": 26,
+        "residual_limit_breach": 0,
+        "risk_refusals": 0,
+        "paper_opportunities": 75,
+        "paper_net_pnl": 74.9729,
+        "paper_equity_pnl": -3.4275,
+        "paper_end_residual_base": -0.001
+      },
+      {
+        "cycle": "0007",
+        "run": "after",
+        "opportunities": 75,
+        "net_pnl": -3.9534,
+        "equity_pnl": -3.9566,
+        "net_minus_equity": 0.0032,
+        "end_residual_base": 0.0,
+        "kill_switch": "INACTIVE",
+        "primary_fills": 131,
+        "unwind_fills": 7,
+        "residual_detected": 19,
+        "residual_within_bound": 12,
+        "residual_limit_breach": 7,
+        "risk_refusals": 0,
+        "paper_opportunities": 75,
+        "paper_net_pnl": 74.9729,
+        "paper_equity_pnl": -3.4275,
+        "paper_end_residual_base": -0.001
+      },
+      {
+        "cycle": "0008",
+        "run": "before",
+        "opportunities": 82,
+        "net_pnl": -160.5964,
+        "equity_pnl": -3.4671,
+        "net_minus_equity": -157.1293,
+        "end_residual_base": 0.002,
+        "kill_switch": "INACTIVE",
+        "primary_fills": 138,
+        "unwind_fills": 0,
+        "residual_detected": 26,
+        "residual_within_bound": 26,
+        "residual_limit_breach": 0,
+        "risk_refusals": 0,
+        "paper_opportunities": 80,
+        "paper_net_pnl": -250.1256,
+        "paper_equity_pnl": -3.4335,
+        "paper_end_residual_base": 0.00314
+      },
+      {
+        "cycle": "0008",
+        "run": "after",
+        "opportunities": 82,
+        "net_pnl": -4.3133,
+        "equity_pnl": -4.3394,
+        "net_minus_equity": 0.0261,
+        "end_residual_base": 0.0,
+        "kill_switch": "INACTIVE",
+        "primary_fills": 140,
+        "unwind_fills": 10,
+        "residual_detected": 24,
+        "residual_within_bound": 14,
+        "residual_limit_breach": 10,
+        "risk_refusals": 0,
+        "paper_opportunities": 80,
+        "paper_net_pnl": -250.1256,
+        "paper_equity_pnl": -3.4335,
+        "paper_end_residual_base": 0.00314
+      },
+      {
+        "cycle": "0009",
+        "run": "before",
+        "opportunities": 81,
+        "net_pnl": -397.202,
+        "equity_pnl": -3.7203,
+        "net_minus_equity": -393.4817,
+        "end_residual_base": 0.005,
+        "kill_switch": "INACTIVE",
+        "primary_fills": 131,
+        "unwind_fills": 0,
+        "residual_detected": 31,
+        "residual_within_bound": 31,
+        "residual_limit_breach": 0,
+        "risk_refusals": 0,
+        "paper_opportunities": 82,
+        "paper_net_pnl": 74.9129,
+        "paper_equity_pnl": -3.7803,
+        "paper_end_residual_base": -0.001
+      },
+      {
+        "cycle": "0009",
+        "run": "after",
+        "opportunities": 82,
+        "net_pnl": -3.9508,
+        "equity_pnl": -3.8926,
+        "net_minus_equity": -0.0582,
+        "end_residual_base": -0.001,
+        "kill_switch": "INACTIVE",
+        "primary_fills": 130,
+        "unwind_fills": 9,
+        "residual_detected": 34,
+        "residual_within_bound": 25,
+        "residual_limit_breach": 9,
+        "risk_refusals": 0,
+        "paper_opportunities": 82,
+        "paper_net_pnl": 74.9129,
+        "paper_equity_pnl": -3.7803,
+        "paper_end_residual_base": -0.001
+      },
+      {
+        "cycle": "0010",
+        "run": "before",
+        "opportunities": 43,
+        "net_pnl": 549.7864,
+        "equity_pnl": -1.6844,
+        "net_minus_equity": 551.4709,
+        "end_residual_base": -0.007,
+        "kill_switch": "INACTIVE",
+        "primary_fills": 69,
+        "unwind_fills": 0,
+        "residual_detected": 17,
+        "residual_within_bound": 17,
+        "residual_limit_breach": 0,
+        "risk_refusals": 0,
+        "paper_opportunities": 44,
+        "paper_net_pnl": 471.0733,
+        "paper_equity_pnl": -1.616,
+        "paper_end_residual_base": -0.006
+      },
+      {
+        "cycle": "0010",
+        "run": "after",
+        "opportunities": 45,
+        "net_pnl": -2.3003,
+        "equity_pnl": -2.5044,
+        "net_minus_equity": 0.2042,
+        "end_residual_base": -0.001,
+        "kill_switch": "INACTIVE",
+        "primary_fills": 75,
+        "unwind_fills": 8,
+        "residual_detected": 15,
+        "residual_within_bound": 7,
+        "residual_limit_breach": 8,
+        "risk_refusals": 0,
+        "paper_opportunities": 44,
+        "paper_net_pnl": 471.0733,
+        "paper_equity_pnl": -1.616,
+        "paper_end_residual_base": -0.006
+      }
+    ]
+  },
+  "replay_inventory": {
+    "rows": [
+      {
+        "cycle": "0006",
+        "initial_base_per_venue": "0.05",
+        "opportunities_unconstrained": 88,
+        "opportunities_pre_funded": 88,
+        "risk_refusals": 0,
+        "equity_pnl_unconstrained": -4.6447,
+        "equity_pnl_pre_funded": -4.6447,
+        "end_base_binance": "0.05110",
+        "end_base_bybit": "0.04890",
+        "end_quote_binance": "9911.5963309600000",
+        "end_quote_bybit": "10083.76384456",
+        "label": "PRE_FUNDED_INVENTORY_NO_REBALANCING"
+      },
+      {
+        "cycle": "0006",
+        "initial_base_per_venue": "0.01",
+        "opportunities_unconstrained": 88,
+        "opportunities_pre_funded": 88,
+        "risk_refusals": 0,
+        "equity_pnl_unconstrained": -4.6447,
+        "equity_pnl_pre_funded": -4.6447,
+        "end_base_binance": "0.01110",
+        "end_base_bybit": "0.00890",
+        "end_quote_binance": "9911.5963309600000",
+        "end_quote_bybit": "10083.76384456",
+        "label": "PRE_FUNDED_INVENTORY_NO_REBALANCING"
+      },
+      {
+        "cycle": "0007",
+        "initial_base_per_venue": "0.05",
+        "opportunities_unconstrained": 75,
+        "opportunities_pre_funded": 75,
+        "risk_refusals": 0,
+        "equity_pnl_unconstrained": -3.9566,
+        "equity_pnl_pre_funded": -3.9566,
+        "end_base_binance": "0.04663",
+        "end_base_bybit": "0.05337",
+        "end_quote_binance": "10263.3277504587600",
+        "end_quote_bybit": "9732.7188273212",
+        "label": "PRE_FUNDED_INVENTORY_NO_REBALANCING"
+      },
+      {
+        "cycle": "0007",
+        "initial_base_per_venue": "0.01",
+        "opportunities_unconstrained": 75,
+        "opportunities_pre_funded": 75,
+        "risk_refusals": 0,
+        "equity_pnl_unconstrained": -3.9566,
+        "equity_pnl_pre_funded": -3.9566,
+        "end_base_binance": "0.00663",
+        "end_base_bybit": "0.01337",
+        "end_quote_binance": "10263.3277504587600",
+        "end_quote_bybit": "9732.7188273212",
+        "label": "PRE_FUNDED_INVENTORY_NO_REBALANCING"
+      },
+      {
+        "cycle": "0008",
+        "initial_base_per_venue": "0.05",
+        "opportunities_unconstrained": 82,
+        "opportunities_pre_funded": 82,
+        "risk_refusals": 0,
+        "equity_pnl_unconstrained": -4.3394,
+        "equity_pnl_pre_funded": -4.3394,
+        "end_base_binance": "0.048930",
+        "end_base_bybit": "0.051070",
+        "end_quote_binance": "10082.24019273604000",
+        "end_quote_bybit": "9913.4217726892",
+        "label": "PRE_FUNDED_INVENTORY_NO_REBALANCING"
+      },
+      {
+        "cycle": "0008",
+        "initial_base_per_venue": "0.01",
+        "opportunities_unconstrained": 82,
+        "opportunities_pre_funded": 82,
+        "risk_refusals": 0,
+        "equity_pnl_unconstrained": -4.3394,
+        "equity_pnl_pre_funded": -4.3394,
+        "end_base_binance": "0.008930",
+        "end_base_bybit": "0.011070",
+        "end_quote_binance": "10082.24019273604000",
+        "end_quote_bybit": "9913.4217726892",
+        "label": "PRE_FUNDED_INVENTORY_NO_REBALANCING"
+      },
+      {
+        "cycle": "0009",
+        "initial_base_per_venue": "0.05",
+        "opportunities_unconstrained": 82,
+        "opportunities_pre_funded": 82,
+        "risk_refusals": 0,
+        "equity_pnl_unconstrained": -3.8926,
+        "equity_pnl_pre_funded": -3.8926,
+        "end_base_binance": "0.04437000",
+        "end_base_bybit": "0.054630",
+        "end_quote_binance": "10441.6893048608400000",
+        "end_quote_bybit": "9633.0837534236",
+        "label": "PRE_FUNDED_INVENTORY_NO_REBALANCING"
+      },
+      {
+        "cycle": "0009",
+        "initial_base_per_venue": "0.01",
+        "opportunities_unconstrained": 82,
+        "opportunities_pre_funded": 82,
+        "risk_refusals": 0,
+        "equity_pnl_unconstrained": -3.8926,
+        "equity_pnl_pre_funded": -3.8926,
+        "end_base_binance": "0.00437000",
+        "end_base_bybit": "0.014630",
+        "end_quote_binance": "10441.6893048608400000",
+        "end_quote_bybit": "9633.0837534236",
+        "label": "PRE_FUNDED_INVENTORY_NO_REBALANCING"
+      },
+      {
+        "cycle": "0010",
+        "initial_base_per_venue": "0.05",
+        "opportunities_unconstrained": 45,
+        "opportunities_pre_funded": 45,
+        "risk_refusals": 0,
+        "equity_pnl_unconstrained": -2.5044,
+        "equity_pnl_pre_funded": -2.5044,
+        "end_base_binance": "0.056",
+        "end_base_bybit": "0.043",
+        "end_quote_binance": "9525.96271004000",
+        "end_quote_bybit": "10550.37588328",
+        "label": "PRE_FUNDED_INVENTORY_NO_REBALANCING"
+      },
+      {
+        "cycle": "0010",
+        "initial_base_per_venue": "0.01",
+        "opportunities_unconstrained": 45,
+        "opportunities_pre_funded": 45,
+        "risk_refusals": 0,
+        "equity_pnl_unconstrained": -2.5044,
+        "equity_pnl_pre_funded": -2.5044,
+        "end_base_binance": "0.016",
+        "end_base_bybit": "0.003",
+        "end_quote_binance": "9525.96271004000",
+        "end_quote_bybit": "10550.37588328",
+        "label": "PRE_FUNDED_INVENTORY_NO_REBALANCING"
+      }
+    ]
+  },
+  "synthetic_drain": {
+    "pre_funded_0.05": {
+      "plans_by_strategy": {
+        "cross_venue_btc_v1": 180,
+        "basis_mean_reversion_v1": 24
+      },
+      "refusals": {
+        "insufficient base inventory: BYBIT": 199
+      },
+      "inventory": {
+        "model": "PRE_FUNDED",
+        "label": "PRE_FUNDED_INVENTORY_NO_REBALANCING",
+        "instrument_id": "BTC-USDT-SPOT",
+        "venues": {
+          "BINANCE": {
+            "initial_base": "0.05",
+            "held_base": "0.100",
+            "reserved_base": "0",
+            "available_base": "0.100",
+            "initial_quote": "10000",
+            "held_quote": "6998.7889956",
+            "reserved_quote": "0",
+            "available_quote": "6998.7889956"
+          },
+          "BYBIT": {
+            "initial_base": "0.05",
+            "held_base": "0.000",
+            "reserved_base": "0",
+            "available_base": "0.000",
+            "initial_quote": "10000",
+            "held_quote": "13003.0003192",
+            "reserved_quote": "0",
+            "available_quote": "13003.0003192"
+          }
+        }
+      },
+      "ledger_positions": {
+        "BYBIT:BTC-USDT-SPOT": "-0.050",
+        "BINANCE:BTC-USDT-SPOT": "0.050"
+      }
+    },
+    "unconstrained": {
+      "plans_by_strategy": {
+        "cross_venue_btc_v1": 180,
+        "basis_mean_reversion_v1": 24
+      },
+      "refusals": {},
+      "inventory": {
+        "model": "UNCONSTRAINED",
+        "label": "UNCONSTRAINED_SPOT_SHORTING_ALLOWED",
+        "instrument_id": "",
+        "venues": {}
+      },
+      "ledger_positions": {
+        "BYBIT:BTC-USDT-SPOT": "-0.080",
+        "BINANCE:BTC-USDT-SPOT": "0.081"
+      }
+    }
+  },
+  "acceptance": {
+    "run": "local-all-20261012T151448Z",
+    "summary": {
+      "status": "PASSED",
+      "run_directory": "/Users/vaibhav/Documents/Newproject/crypto_MFT_arb_platform/runs/local-all-20261012T151448Z",
+      "tests": 250,
+      "benchmark_decision": "PASS",
+      "paper_opportunities": 1,
+      "paper_closed_plans": 1,
+      "paper_net_pnl": "0.11976",
+      "paper_release_id": "402f70d9-51ce-5b28-bcb4-a75ce4fe992d",
+      "public_network_checks": false
+    },
+    "labels": {
+      "benchmark/backtest/summary.json": {
+        "label": "PRE_FUNDED_INVENTORY_NO_REBALANCING",
+        "held_base": {
+          "BINANCE": "0.100",
+          "BYBIT": "0.000"
+        }
+      },
+      "paper/summary.json": {
+        "label": "PRE_FUNDED_INVENTORY_NO_REBALANCING",
+        "held_base": {
+          "BINANCE": "0.060",
+          "BYBIT": "0.040"
+        }
+      }
+    }
+  },
+  "code": {
+    "commits": [
+      {
+        "sha": "40b52d4",
+        "subject": "Reserve worst-case legging exposure and bound residual in aggregate",
+        "stat": "docs/execution_realism.md            |  29 +++++++++\n src/crypto_stat_arb/config.py        |   5 ++\n src/crypto_stat_arb/models.py        |   4 ++\n src/crypto_stat_arb/monitoring.py    |   6 ++\n src/crypto_stat_arb/oms.py           |  50 ++++++++++++++-\n src/crypto_stat_arb/risk.py          |  27 +++++++-\n src/crypto_stat_arb/session_audit.py |   5 ++\n tests/test_residual_exposure.py      | 118 +++++++++++++++++++++++++++++++++++\n 8 files changed, 239 insertions(+), 5 deletions(-)"
+      },
+      {
+        "sha": "fa70b81",
+        "subject": "Add pre-funded spot inventory model to risk admission",
+        "stat": "docs/execution_realism.md      |  32 +++++++++-\n src/crypto_stat_arb/config.py  |  29 ++++++++-\n src/crypto_stat_arb/oms.py     |   2 +\n src/crypto_stat_arb/risk.py    |  96 +++++++++++++++++++++++++++-\n src/crypto_stat_arb/runner.py  |   3 +\n src/crypto_stat_arb/sdk.py     |   3 +-\n src/crypto_stat_arb/session.py |   4 +-\n tests/test_spot_inventory.py   | 138 +++++++++++++++++++++++++++++++++++++++++\n 8 files changed, 301 insertions(+), 6 deletions(-)"
+      },
+      {
+        "sha": "8d66ce7",
+        "subject": "Use pre-funded inventory (0.05 BTC per venue) in research and paper_watch configs",
+        "stat": "config/paper_watch.json      |  7 +++++++\n config/research.json         |  7 +++++++\n docs/execution_realism.md    |  9 +++++++++\n tests/test_spot_inventory.py | 32 ++++++++++++++++++++++++++++++++\n tests/test_watch_pipeline.py | 18 ++++++++++++++++--\n 5 files changed, 71 insertions(+), 2 deletions(-)"
+      }
+    ]
+  },
+  "files": {
+    "1_tests/junit_item1_item2.xml": {
+      "bytes": 2680,
+      "sha256": "8f4589358f8a21ccf7fd0f6fd99aeb499e9c8e2f1f1325db95c7f59e9f621c7e"
+    },
+    "1_tests/pytest_full_suite.log": {
+      "bytes": 1439,
+      "sha256": "2f836986e85481c5c806b679ab89c3a653fcdc70178c8c8e601ac19e1fb64976"
+    },
+    "1_tests/pytest_item1_item2.log": {
+      "bytes": 3004,
+      "sha256": "3673837bfd60a20cd774b05a92efccac7fe3f38c6e18eab7bd9665a04d2ee876"
+    },
+    "1_tests/test_cases.csv": {
+      "bytes": 1874,
+      "sha256": "4998ecb1b2332aef0115a08019503d77641b0022abf6dc3685ff6e54809ba572"
+    },
+    "2_paper_residual/paper_cycles.csv": {
+      "bytes": 2476,
+      "sha256": "2fa6085c3fb1b6127841a2489de6b7f6180aeaeadf2e7d31f3dbd2d74fdd52c5"
+    },
+    "3_replay_residual/replay_before_after.csv": {
+      "bytes": 1245,
+      "sha256": "0d221f648065f664c314350bad58286f9a20cdf7e353563802732f142e6b8ef1"
+    },
+    "4_replay_inventory/inventory_levels.csv": {
+      "bytes": 1446,
+      "sha256": "e487ccb9e604bf5603c21bf1412658e75703b4cff2b6a07d64db2f3fe73670c2"
+    },
+    "5_synthetic_drain/synthetic_drain.json": {
+      "bytes": 1547,
+      "sha256": "ee2c7402c9df115490aab52629aee98012b829e41a1302375e2e7fc685a4fab8"
+    },
+    "6_acceptance/inventory_labels.json": {
+      "bytes": 329,
+      "sha256": "d8e0d2c137e8c7eab014492f65c825cc4ad51f5ba6acb8501292bb203e53f8ff"
+    },
+    "6_acceptance/local_acceptance_summary.json": {
+      "bytes": 368,
+      "sha256": "2768e6d8de194890466e04138b27aa93366e72c0deaad4e28eb4760d56577136"
+    },
+    "7_code/40b52d4.patch": {
+      "bytes": 22081,
+      "sha256": "07cba9347b698864a24580179896b8c31a8f87f956fe8c107a1e50106ee78727"
+    },
+    "7_code/8d66ce7.patch": {
+      "bytes": 7855,
+      "sha256": "531d42cf2585f10a24f3d3204d5bf72d0994325ddbcf547343988ea89a72a032"
+    },
+    "7_code/fa70b81.patch": {
+      "bytes": 23540,
+      "sha256": "097b00c895c5d26396624295923524669adf02f65b0eb2bc9aa2449e61f86822"
+    },
+    "7_code/paper_watch.json": {
+      "bytes": 6652,
+      "sha256": "1e710d8de9a23de258ba492ad3ff5779ee4217c9d159dfea69e4ae55ab86b39f"
+    },
+    "7_code/research.json": {
+      "bytes": 5509,
+      "sha256": "5c6b27c0b10f2f7f8feb5c3e5488895e1cad552ca38d9bdca19c20ffe39cc90d"
+    }
+  }
+}

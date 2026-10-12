@@ -1,0 +1,32 @@
+============================= test session starts ==============================
+platform darwin -- Python 3.12.0, pytest-9.1.1, pluggy-1.6.0 -- /Library/Frameworks/Python.framework/Versions/3.12/bin/python3.12
+rootdir: /Users/vaibhav/Documents/Newproject/crypto_MFT_arb_platform
+configfile: pyproject.toml
+plugins: asyncio-1.4.0, anyio-4.8.0
+asyncio: mode=Mode.AUTO, debug=False, asyncio_default_fixture_loop_scope=None, asyncio_default_test_loop_scope=function
+collecting ... collected 17 items
+
+tests/test_residual_exposure.py::WorstCaseReservationTests::test_balanced_package_reserves_its_full_leg_quantity PASSED [  5%]
+tests/test_residual_exposure.py::WorstCaseReservationTests::test_carried_residual_counts_against_legging_exposure PASSED [ 11%]
+tests/test_residual_exposure.py::WorstCaseReservationTests::test_new_risk_is_blocked_while_carried_residual_is_at_the_limit PASSED [ 17%]
+tests/test_residual_exposure.py::AggregateResidualBoundTests::test_a_residual_that_offsets_the_carried_one_is_accepted PASSED [ 23%]
+tests/test_residual_exposure.py::AggregateResidualBoundTests::test_residuals_within_bound_one_at_a_time_cannot_pile_up PASSED [ 29%]
+tests/test_residual_exposure.py::MarkedPlanPnlTests::test_hedged_plan_pnl_is_unchanged PASSED [ 35%]
+tests/test_residual_exposure.py::MarkedPlanPnlTests::test_open_residual_is_marked_not_booked_as_cash PASSED [ 41%]
+tests/test_spot_inventory.py::AdmissionTests::test_buy_without_quote_on_the_buy_venue_is_rejected PASSED [ 47%]
+tests/test_spot_inventory.py::AdmissionTests::test_margin_enabled_sell_venue_needs_no_base PASSED [ 52%]
+tests/test_spot_inventory.py::AdmissionTests::test_reserved_base_is_held_until_release PASSED [ 58%]
+tests/test_spot_inventory.py::AdmissionTests::test_sell_without_base_on_the_sell_venue_is_rejected PASSED [ 64%]
+tests/test_spot_inventory.py::AdmissionTests::test_unconstrained_model_keeps_the_legacy_behaviour PASSED [ 70%]
+tests/test_spot_inventory.py::LedgerDrivenBalanceTests::test_fills_move_inventory_and_one_way_trading_runs_out_of_base PASSED [ 76%]
+tests/test_spot_inventory.py::SharedInventoryTests::test_one_directional_arb_drains_a_venue_shared_with_mean_reversion PASSED [ 82%]
+tests/test_spot_inventory.py::ConfigTests::test_missing_section_is_unconstrained PASSED [ 88%]
+tests/test_spot_inventory.py::ConfigTests::test_pre_funded_config_is_parsed_and_labelled PASSED [ 94%]
+tests/test_spot_inventory.py::ConfigTests::test_pre_funded_needs_a_base_balance_for_every_venue PASSED [100%]
+
+- generated xml file: /Users/vaibhav/Documents/Newproject/crypto_MFT_arb_platform/reports/inventory_residual_evidence/1_tests/junit_item1_item2.xml -
+============================== slowest durations ===============================
+0.67s call     tests/test_spot_inventory.py::SharedInventoryTests::test_one_directional_arb_drains_a_venue_shared_with_mean_reversion
+
+(50 durations < 0.005s hidden.  Use -vv to show these durations.)
+============================== 17 passed in 0.77s ==============================
