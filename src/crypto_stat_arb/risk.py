@@ -287,6 +287,29 @@ class ReconciliationReport:
         )
 
 
+class InventoryModel(StrEnum):
+    # Legacy: a spot sell is admitted against the position limit only, so the
+    # simulation may sell base it does not hold (an implicit short).
+    UNCONSTRAINED = "UNCONSTRAINED"
+    # Each venue starts with explicit base and quote balances; a spot sell
+    # needs held base, a spot buy needs held quote. No inter-venue transfers.
+    PRE_FUNDED = "PRE_FUNDED"
+
+
+@dataclass(frozen=True, slots=True)
+class InventoryPolicy:
+    model: InventoryModel = InventoryModel.UNCONSTRAINED
+    instrument_id: str = ""
+    initial_base_by_venue: dict[str, Decimal] = field(default_factory=dict)
+    initial_quote_by_venue: dict[str, Decimal] = field(default_factory=dict)
+
+    @property
+    def label(self) -> str:
+        if self.model == InventoryModel.PRE_FUNDED:
+            return "PRE_FUNDED_INVENTORY_NO_REBALANCING"
+        return "UNCONSTRAINED_SPOT_SHORTING_ALLOWED"
+
+
 @dataclass(slots=True)
 class PackageReservation:
     reservation_id: str
@@ -298,12 +321,13 @@ class PackageReservation:
     messages_by_venue: dict[str, int]
     residual_base: Decimal
     active: bool = True
+    base_by_venue: dict[str, Decimal] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
         row = asdict(self)
         for field_name in (
             "gross_notional", "cash_by_venue", "margin_by_venue",
-            "position_delta_by_venue", "residual_base",
+            "position_delta_by_venue", "residual_base", "base_by_venue",
         ):
             value = row[field_name]
             if isinstance(value, Decimal):
@@ -320,8 +344,14 @@ class RiskEngine:
         self,
         limits: RiskLimits,
         account_snapshots: dict[str, AccountRiskSnapshot] | None = None,
+        inventory: InventoryPolicy | None = None,
     ):
         self.limits = limits
+        self.inventory = inventory or InventoryPolicy()
+        # Fills move balances; the OMS attaches its ledger so admission sees
+        # held = opening balance + filled deltas (not a static snapshot).
+        self.ledger: Any = None
+        self.reserved_base: dict[str, Decimal] = {}
         self.kill_switch = False
         self.kill_switch_reason = ""
         self.kill_switch_source = ""
@@ -649,6 +679,45 @@ class RiskEngine:
             "reserved_messages": dict(self.reserved_messages),
             "reserved_residual": self.reserved_residual,
             "carried_residual_base": self.carried_residual_base,
+            "reserved_base": dict(self.reserved_base),
+            "inventory": self.inventory_snapshot(),
+        }
+
+    def held_base(self, venue: str) -> Decimal:
+        opening = self.inventory.initial_base_by_venue.get(venue, Decimal("0"))
+        if self.ledger is None:
+            return opening
+        return opening + self.ledger.positions.get(
+            (venue, self.inventory.instrument_id), Decimal("0")
+        )
+
+    def held_quote(self, venue: str) -> Decimal:
+        opening = self.inventory.initial_quote_by_venue.get(venue, Decimal("0"))
+        if self.ledger is None:
+            return opening
+        return opening + self.ledger.cash_deltas.get(venue, Decimal("0"))
+
+    def inventory_snapshot(self) -> dict[str, Any]:
+        venues = sorted(
+            set(self.inventory.initial_base_by_venue) | set(self.inventory.initial_quote_by_venue)
+        )
+        return {
+            "model": self.inventory.model.value,
+            "label": self.inventory.label,
+            "instrument_id": self.inventory.instrument_id,
+            "venues": {
+                venue: {
+                    "initial_base": str(self.inventory.initial_base_by_venue.get(venue, Decimal("0"))),
+                    "held_base": str(self.held_base(venue)),
+                    "reserved_base": str(self.reserved_base.get(venue, Decimal("0"))),
+                    "available_base": str(self.held_base(venue) - self.reserved_base.get(venue, Decimal("0"))),
+                    "initial_quote": str(self.inventory.initial_quote_by_venue.get(venue, Decimal("0"))),
+                    "held_quote": str(self.held_quote(venue)),
+                    "reserved_quote": str(self.reserved_cash.get(venue, Decimal("0"))),
+                    "available_quote": str(self.held_quote(venue) - self.reserved_cash.get(venue, Decimal("0"))),
+                }
+                for venue in venues
+            },
         }
 
     def rehydrate_reservation(self, opportunity: Opportunity) -> PackageReservation:
@@ -1244,6 +1313,24 @@ class RiskEngine:
             if message_total > account.message_capacity:
                 raise ValueError(f"message capacity exceeded: {venue}")
 
+        base: dict[str, Decimal] = {}
+        if self.inventory.model == InventoryModel.PRE_FUNDED:
+            sell_account = self._account(opportunity.sell_venue)
+            if not buy_account.margin_enabled:
+                needed = (
+                    self.reserved_cash.get(opportunity.buy_venue, Decimal("0")) + buy_notional
+                )
+                if needed > self.held_quote(opportunity.buy_venue):
+                    raise ValueError(f"insufficient quote inventory: {opportunity.buy_venue}")
+            if not sell_account.margin_enabled:
+                base[opportunity.sell_venue] = opportunity.quantity
+                needed = (
+                    self.reserved_base.get(opportunity.sell_venue, Decimal("0"))
+                    + opportunity.quantity
+                )
+                if needed > self.held_base(opportunity.sell_venue):
+                    raise ValueError(f"insufficient base inventory: {opportunity.sell_venue}")
+
         reservation = PackageReservation(
             reservation_id=stable_id("risk-reservation", opportunity.opportunity_id),
             opportunity_id=opportunity.opportunity_id,
@@ -1253,11 +1340,14 @@ class RiskEngine:
             position_delta_by_venue=positions,
             messages_by_venue=messages,
             residual_base=planned_residual,
+            base_by_venue=base,
         )
         self.reserved_gross += package_gross
         self.reserved_residual += planned_residual
         for venue, amount in cash.items():
             self.reserved_cash[venue] = self.reserved_cash.get(venue, Decimal("0")) + amount
+        for venue, amount in base.items():
+            self.reserved_base[venue] = self.reserved_base.get(venue, Decimal("0")) + amount
         for venue, amount in margin.items():
             self.reserved_margin[venue] = self.reserved_margin.get(venue, Decimal("0")) + amount
         for venue, amount in positions.items():
@@ -1286,6 +1376,10 @@ class RiskEngine:
         for venue, amount in reservation.margin_by_venue.items():
             self.reserved_margin[venue] = max(
                 Decimal("0"), self.reserved_margin.get(venue, Decimal("0")) - amount
+            )
+        for venue, amount in reservation.base_by_venue.items():
+            self.reserved_base[venue] = max(
+                Decimal("0"), self.reserved_base.get(venue, Decimal("0")) - amount
             )
         for venue, amount in reservation.position_delta_by_venue.items():
             self.reserved_position[venue] = (

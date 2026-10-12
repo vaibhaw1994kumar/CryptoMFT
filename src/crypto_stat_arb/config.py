@@ -8,7 +8,7 @@ from typing import Any
 
 from .instruments import InstrumentMaster
 from .models import Instrument, d
-from .risk import AccountRiskSnapshot, RiskLimits
+from .risk import AccountRiskSnapshot, InventoryModel, InventoryPolicy, RiskLimits
 from .time_integrity import TimePolicy
 from .quality import QualityThresholds
 from .execution import OrderTimeoutPolicy, ResidualPolicy, UnwindUrgency
@@ -42,12 +42,38 @@ class AppConfig:
     performance: dict[str, Any] = field(default_factory=dict)
     execution_mode: str = "INTERNAL_SIMULATION"
     strategies: dict[str, Any] = field(default_factory=dict)
+    inventory_policy: InventoryPolicy = field(default_factory=InventoryPolicy)
 
 
 def _optional_decimal(value: Any, default: str | None) -> Decimal | None:
     if value is None and default is None:
         return None
     return d(default if value is None else value)
+
+
+def _inventory_policy(raw: dict) -> InventoryPolicy:
+    """``risk.inventory``: ``{"model": "pre_funded", "initial_base_by_venue":
+    {"BINANCE": "0.05", ...}}``. Quote balances default to
+    ``risk.initial_capital_by_venue``. Missing section: UNCONSTRAINED."""
+    risk = raw.get("risk", {})
+    section = risk.get("inventory") or {}
+    model = InventoryModel(str(section.get("model", "unconstrained")).upper())
+    quote = section.get("initial_quote_by_venue", risk.get("initial_capital_by_venue", {}))
+    policy = InventoryPolicy(
+        model=model,
+        instrument_id=str(raw["strategy"]["instrument_id"]),
+        initial_base_by_venue={str(v): d(q) for v, q in (section.get("initial_base_by_venue") or {}).items()},
+        initial_quote_by_venue={str(v): d(q) for v, q in quote.items()},
+    )
+    if model == InventoryModel.PRE_FUNDED:
+        venues = set(raw["strategy"]["venues"])
+        missing = venues - set(policy.initial_base_by_venue)
+        if missing:
+            raise ValueError(f"pre_funded inventory needs initial_base_by_venue for {sorted(missing)}")
+        missing = venues - set(policy.initial_quote_by_venue)
+        if missing:
+            raise ValueError(f"pre_funded inventory needs quote balances for {sorted(missing)}")
+    return policy
 
 
 def load_config(path: Path) -> tuple[AppConfig, dict]:
@@ -109,6 +135,7 @@ def load_config(path: Path) -> tuple[AppConfig, dict]:
             str(venue): d(amount)
             for venue, amount in risk.get("initial_capital_by_venue", {}).items()
         },
+        inventory_policy=_inventory_policy(raw),
         risk_limits=RiskLimits(
             max_order_notional=d(risk["max_order_notional"]),
             max_gross_notional=d(risk["max_gross_notional"]),

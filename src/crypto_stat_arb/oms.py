@@ -138,6 +138,8 @@ class OMS:
         self.instruments = instruments
         self.risk = risk
         self.ledger = ledger
+        if getattr(risk, "ledger", None) is None:
+            risk.ledger = ledger  # live balances for inventory admission
         self.matcher = matcher or DeterministicMatcher()
         self.router = router or StrategyDirectedRouter(instruments)
         self.plan_store = plan_store

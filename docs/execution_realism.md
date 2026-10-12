@@ -314,5 +314,33 @@ other does not. Three rules keep that exposure bounded and honestly valued:
 On the five busiest recorded cycles (0006–0010) the replay now ends with at
 most 0.001 BTC of residual (previously up to 0.007 against a 0.002 bound),
 unwinds 7–10 residuals per cycle, and plan `net_pnl` agrees with equity PnL
-within 0.2 USDT. Inventory is not yet modelled per asset: a spot sell is
-admitted against the position limit, not against base held on that venue.
+within 0.2 USDT. 
+
+## Spot inventory
+
+`risk.inventory` chooses the inventory assumption, and every run summary
+reports it under `inventory` (model, label, and per-venue initial / held /
+reserved / available base and quote):
+
+```json
+"inventory": {"model": "pre_funded",
+              "initial_base_by_venue": {"BINANCE": "0.05", "BYBIT": "0.05"}}
+```
+
+- `unconstrained` (default when the section is absent): legacy behaviour. A
+  spot sell is admitted against the position limit only, so a venue holding
+  no base can still sell. Labelled `UNCONSTRAINED_SPOT_SHORTING_ALLOWED`.
+- `pre_funded`: each venue starts with `initial_base_by_venue` and quote from
+  `initial_quote_by_venue` (default `initial_capital_by_venue`). Held balance =
+  opening + ledger fills. On a non-margin venue, a package's sell leg must fit
+  in held base minus base reserved by other packages, and its buy leg in held
+  quote minus quote reserved; otherwise it is refused (`insufficient base
+  inventory: VENUE` / `insufficient quote inventory: VENUE`). Margin-enabled
+  venues keep the margin checks instead. Labelled
+  `PRE_FUNDED_INVENTORY_NO_REBALANCING`: there are no inter-venue transfers,
+  so one-directional trading eventually exhausts a venue's base.
+
+Known gaps: quote reservation excludes fees; risk-reducing unwind orders are
+not blocked by inventory; a package's reservation is held until the plan
+closes, so balances are briefly double-counted between fill and close
+(conservative).

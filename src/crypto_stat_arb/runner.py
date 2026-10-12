@@ -252,6 +252,9 @@ def write_session_artifacts(
         "net_pnl": str(sum((x.net_pnl for x in plans), start=0)),
         "gross_pnl": str(sum((x.gross_pnl for x in plans), start=0)),
         "fees": str(sum((x.fees for x in plans), start=0)),
+        # Which inventory assumption produced these results (pre-funded spot
+        # balances, or unconstrained selling that implies shorting).
+        "inventory": oms.risk.inventory_snapshot(),
         "execution_api": {
             "schema_version": "1.0.0",
             **oms.router.stats_snapshot(),

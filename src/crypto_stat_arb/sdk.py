@@ -538,7 +538,8 @@ class StrategyRuntime:
         self.mode = mode
         self.ledger = Ledger()
         self.risk_engine = RiskEngine(
-            config.risk_limits, config.account_risk_snapshots
+            config.risk_limits, config.account_risk_snapshots,
+            inventory=config.inventory_policy,
         )
         self.eligibility = CrossVenueEligibilityPolicy(
             config.venues, config.instrument_id, config.max_book_age_ns

@@ -113,7 +113,9 @@ class TradingSession:
         self.clock_ns = clock_ns
         self.wall_ns = wall_ns
         self.ledger = Ledger()
-        self.risk = RiskEngine(cfg.risk_limits, cfg.account_risk_snapshots)
+        self.risk = RiskEngine(
+            cfg.risk_limits, cfg.account_risk_snapshots, inventory=cfg.inventory_policy
+        )
         self.alignment_policy = CrossVenueEligibilityPolicy(
             cfg.venues, cfg.instrument_id, cfg.max_book_age_ns
         )
