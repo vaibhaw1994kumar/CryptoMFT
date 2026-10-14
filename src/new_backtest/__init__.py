@@ -19,6 +19,7 @@ __all__ = [
     "OrderBook", "CrossVenueFeed", "LatencyBook", "PendingOrderQueue",
     "VenueState", "TakerExecutor", "MakerExecutor",
     "make_venues", "ALL_PAIRS",
+    "run_preflight",
 ]
 
 
@@ -50,4 +51,7 @@ def __getattr__(name: str):
     if name in ("make_venues", "ALL_PAIRS"):
         from . import config
         return getattr(config, name)
+    if name == "run_preflight":
+        from .quality_preflight import run_preflight
+        return run_preflight
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
