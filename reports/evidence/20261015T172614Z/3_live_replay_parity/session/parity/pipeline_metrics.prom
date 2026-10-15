@@ -1,0 +1,31 @@
+# HELP crypto_pipeline_monitor_health Pipeline health by level.
+# TYPE crypto_pipeline_monitor_health gauge
+crypto_pipeline_monitor_health{level="HEALTHY"} 1
+crypto_pipeline_monitor_health{level="DEGRADED"} 0
+crypto_pipeline_monitor_health{level="CRITICAL"} 0
+# TYPE crypto_pipeline_data_age_ns gauge
+crypto_pipeline_data_age_ns{mode="LIVE"} 53000000
+# TYPE crypto_pipeline_partition_completeness gauge
+crypto_pipeline_partition_completeness{mode="LIVE"} 1.0
+# TYPE crypto_pipeline_sequence_gaps gauge
+crypto_pipeline_sequence_gaps{mode="LIVE"} 0
+# TYPE crypto_pipeline_invalid_books gauge
+crypto_pipeline_invalid_books{mode="LIVE"} 0
+# TYPE crypto_pipeline_schema_mismatches gauge
+crypto_pipeline_schema_mismatches{mode="LIVE"} 0
+# TYPE crypto_pipeline_reconnects gauge
+crypto_pipeline_reconnects{mode="LIVE"} 0
+# TYPE crypto_pipeline_stale_disconnects gauge
+crypto_pipeline_stale_disconnects{mode="LIVE"} 0
+# TYPE crypto_pipeline_persistence_lag_ns gauge
+crypto_pipeline_persistence_lag_ns{mode="LIVE"} 23000000
+# TYPE crypto_pipeline_alerts gauge
+crypto_pipeline_alerts{mode="LIVE"} 0
+# TYPE crypto_structured_logs_records gauge
+crypto_structured_logs_records{mode="LIVE"} 99
+# TYPE crypto_structured_logs_errors gauge
+crypto_structured_logs_errors{mode="LIVE"} 0
+# TYPE crypto_structured_logs_warnings gauge
+crypto_structured_logs_warnings{mode="LIVE"} 0
+# TYPE crypto_structured_logs_failed_opportunities gauge
+crypto_structured_logs_failed_opportunities{mode="LIVE"} 0

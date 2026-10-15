@@ -1,0 +1,190 @@
+{
+  "cycle": "cycle-0006-20260914T142731Z",
+  "decision": "PASS",
+  "full_audit_issues": [
+    {
+      "check": "part-000002_files_present",
+      "component": "historical_storage",
+      "detail": "required input missing: /Users/vaibhav/Documents/Newproject/crypto_MFT_arb_platform/runs/paper_watch/live/cycle-0006-20260914T142731Z/part-000002/raw.jsonl, /Users/vaibhav/Documents/Newproject/crypto_MFT_arb_platform/runs/paper_watch/live/cycle-0006-20260914T142731Z/part-000002/wire.jsonl",
+      "status": "INPUT_MISSING"
+    }
+  ],
+  "full_audit_overall": "INPUT_MISSING",
+  "new": {
+    "components": {
+      "backtest_replay": "WARN",
+      "dry_run": "WARN",
+      "errors": "WARN",
+      "feed": "WARN",
+      "historical_storage": "INPUT_MISSING",
+      "order_books": "OK",
+      "orderbook_replay": "OK",
+      "security_master": "WARN",
+      "simulation": "OK",
+      "strategies": "OK",
+      "time_integrity": "WARN"
+    },
+    "simulation": {
+      "checks": [
+        {
+          "check": "cpp_matching_engine_loaded",
+          "detail": "engine=cpp_mm_matching_engine (compiled C++ mm_matching_engine)",
+          "status": "OK"
+        },
+        {
+          "check": "replay_in_live_arrival_order",
+          "detail": "ordering arrival_ordinal: replayed in live ingestion order (trace)",
+          "status": "OK"
+        },
+        {
+          "check": "BINANCE_quotes_placed",
+          "detail": "1132 quotes",
+          "status": "OK"
+        },
+        {
+          "check": "BINANCE_trades_replayed",
+          "detail": "131342 trades",
+          "status": "OK"
+        },
+        {
+          "check": "BINANCE_simulated_fills_sane",
+          "detail": "",
+          "status": "OK"
+        },
+        {
+          "check": "BYBIT_quotes_placed",
+          "detail": "1513 quotes",
+          "status": "OK"
+        },
+        {
+          "check": "BYBIT_trades_replayed",
+          "detail": "20101 trades",
+          "status": "OK"
+        },
+        {
+          "check": "BYBIT_simulated_fills_sane",
+          "detail": "",
+          "status": "OK"
+        }
+      ],
+      "metrics": {
+        "engine": "cpp_mm_matching_engine",
+        "latency_source": "maker:preset:singapore",
+        "replay": {
+          "book_events": 79365,
+          "ordering": "arrival_ordinal",
+          "rejected_invalid_envelopes": {},
+          "trades": 151443
+        },
+        "venues": {
+          "BINANCE": {
+            "fees": 8.211521752000001,
+            "fill_ratio": 0.9982332155477032,
+            "fills": 1130,
+            "inventory": 0.008000000000000028,
+            "mark_to_market_pnl_quote": -13.705186751999113,
+            "quotes": 1132,
+            "sanity_violation_count": 0,
+            "trades_seen": 131342
+          },
+          "BYBIT": {
+            "fees": 11.152935316299992,
+            "fill_ratio": 0.5750165234633179,
+            "fills": 870,
+            "inventory": 0.006635000000000014,
+            "mark_to_market_pnl_quote": -17.2202115662995,
+            "quotes": 1513,
+            "sanity_violation_count": 0,
+            "trades_seen": 20101
+          }
+        }
+      },
+      "status": "OK"
+    }
+  },
+  "old": {
+    "components": {
+      "backtest_replay": "FAIL",
+      "dry_run": "WARN",
+      "errors": "WARN",
+      "feed": "WARN",
+      "historical_storage": "OK",
+      "order_books": "OK",
+      "orderbook_replay": "OK",
+      "security_master": "WARN",
+      "simulation": "WARN",
+      "strategies": "OK",
+      "time_integrity": "WARN"
+    },
+    "simulation": {
+      "checks": [
+        {
+          "check": "cpp_matching_engine_loaded",
+          "detail": "compiled mm_matching_engine not importable on this Python/arch; sim_engine's Python queue-position model was used",
+          "status": "WARN"
+        },
+        {
+          "check": "BINANCE_quotes_placed",
+          "detail": "2739 quotes",
+          "status": "OK"
+        },
+        {
+          "check": "BINANCE_trades_replayed",
+          "detail": "131342 trades",
+          "status": "OK"
+        },
+        {
+          "check": "BINANCE_simulated_fills_sane",
+          "detail": "",
+          "status": "OK"
+        },
+        {
+          "check": "BYBIT_quotes_placed",
+          "detail": "3088 quotes",
+          "status": "OK"
+        },
+        {
+          "check": "BYBIT_trades_replayed",
+          "detail": "20101 trades",
+          "status": "OK"
+        },
+        {
+          "check": "BYBIT_simulated_fills_sane",
+          "detail": "",
+          "status": "OK"
+        }
+      ],
+      "metrics": {
+        "engine": "python_queue_model",
+        "replay": {
+          "book_events": 79365,
+          "trades": 151443
+        },
+        "venues": {
+          "BINANCE": {
+            "fees": 3.3331000310109964,
+            "fill_ratio": 0.3176341730558598,
+            "fills": 870,
+            "inventory": 0.006782000000000029,
+            "mark_to_market_pnl_quote": -7.190570921009009,
+            "quotes": 2739,
+            "sanity_violation_count": 0,
+            "trades_seen": 131342
+          },
+          "BYBIT": {
+            "fees": 3.4427492189405005,
+            "fill_ratio": 0.2665155440414508,
+            "fills": 823,
+            "inventory": 0.004917500000000004,
+            "mark_to_market_pnl_quote": -8.168119903940076,
+            "quotes": 3088,
+            "sanity_violation_count": 0,
+            "trades_seen": 20101
+          }
+        }
+      },
+      "status": "WARN"
+    }
+  },
+  "scope": "maker simulation component of analyze-session"
+}

@@ -1,0 +1,63 @@
+{
+  "positions": {
+    "BINANCE:BTC-USDT-SPOT": {
+      "average_price": "78442.21050803191299059067652",
+      "fees": "2.0444290400000",
+      "gross_traded_notional": "5111.0726000000000",
+      "instrument_id": "BTC-USDT-SPOT",
+      "mark_price": "78457.89500000",
+      "quantity": "0.00110",
+      "realized_pnl": "-0.0728084411648957103502558020",
+      "unrealized_pnl": "0.0172529411648957103502558280",
+      "venue": "BINANCE"
+    },
+    "BYBIT:BTC-USDT-SPOT": {
+      "average_price": "78449.61024470256734591039743",
+      "fees": "2.73495544",
+      "gross_traded_notional": "6837.38860",
+      "instrument_id": "BTC-USDT-SPOT",
+      "mark_price": "78462.35",
+      "quantity": "-0.00110",
+      "realized_pnl": "0.2042287308271759194985627680",
+      "unrealized_pnl": "-0.0140137308271759194985628270",
+      "venue": "BYBIT"
+    }
+  },
+  "schema_version": "1.0.0",
+  "venues": {
+    "BINANCE": {
+      "available_capital": "9997.900015460000000000000000",
+      "available_cash": "9911.5963309600000",
+      "cash_balance": "9911.5963309600000",
+      "cash_delta": "-88.4036690400000",
+      "equity": "9997.900015460000000000000000",
+      "fees": "2.0444290400000",
+      "initial_capital": "10000",
+      "realized_pnl": "-0.0728084411648957103502558020",
+      "reserved_cash": "0",
+      "reserved_gross_notional": "0",
+      "reserved_margin": "0",
+      "reserved_messages": 0,
+      "reserved_position": "0.00000",
+      "unrealized_pnl": "0.0172529411648957103502558280",
+      "venue": "BINANCE"
+    },
+    "BYBIT": {
+      "available_capital": "9997.45525956000000000000000",
+      "available_cash": "10083.76384456",
+      "cash_balance": "10083.76384456",
+      "cash_delta": "83.76384456",
+      "equity": "9997.45525956000000000000000",
+      "fees": "2.73495544",
+      "initial_capital": "10000",
+      "realized_pnl": "0.2042287308271759194985627680",
+      "reserved_cash": "0",
+      "reserved_gross_notional": "0",
+      "reserved_margin": "0",
+      "reserved_messages": 0,
+      "reserved_position": "0.00000",
+      "unrealized_pnl": "-0.0140137308271759194985628270",
+      "venue": "BYBIT"
+    }
+  }
+}

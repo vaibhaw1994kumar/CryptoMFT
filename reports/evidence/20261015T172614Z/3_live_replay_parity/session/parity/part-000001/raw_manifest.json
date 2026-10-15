@@ -1,0 +1,45 @@
+{
+  "closed_at_utc": "2026-10-15T17:27:09.298504+00:00",
+  "first_raw_ref": "96475fc6-08d5-5b5f-b826-2c5f3338e045",
+  "first_receive_ts_ns": 1015000000,
+  "last_raw_ref": "3a0667e6-d810-53e3-904e-47c88314e65e",
+  "last_receive_ts_ns": 1637000000,
+  "raw_file": "/Users/vaibhav/Documents/Newproject/crypto_MFT_arb_platform/reports/evidence/20261015T172614Z/3_live_replay_parity/session/parity/part-000001/raw.jsonl",
+  "raw_file_sha256": "d8e2a0c5332508f4ffe0f2acf27603d312bc16e631811a1c37ba39753ab28b64",
+  "raw_schema_version": "1.0.0",
+  "record_count": 178,
+  "session_id": "parity/part-000001",
+  "sources": [
+    {
+      "channel": "depth@100ms",
+      "host": "stream.binance.com:9443",
+      "vendor": "BINANCE",
+      "venue": "BINANCE"
+    },
+    {
+      "channel": "rest-depth-snapshot",
+      "host": "api.binance.com",
+      "vendor": "BINANCE",
+      "venue": "BINANCE"
+    },
+    {
+      "channel": "trade",
+      "host": "stream.binance.com:9443",
+      "vendor": "BINANCE",
+      "venue": "BINANCE"
+    },
+    {
+      "channel": "orderbook.50.BTCUSDT",
+      "host": "stream.bybit.com",
+      "vendor": "BYBIT",
+      "venue": "BYBIT"
+    },
+    {
+      "channel": "publicTrade.BTCUSDT",
+      "host": "stream.bybit.com",
+      "vendor": "BYBIT",
+      "venue": "BYBIT"
+    }
+  ],
+  "terminal_record_hash": "5de50230ae92ab445ab9727980bf042c2b05130efe3f2e68cf71969316b256cc"
+}

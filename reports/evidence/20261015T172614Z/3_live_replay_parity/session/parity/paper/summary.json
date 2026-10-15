@@ -1,0 +1,395 @@
+{
+  "account_state": {
+    "positions": 0,
+    "report": "account_state.json",
+    "venues": 2
+  },
+  "book_hashes": {
+    "BINANCE:BTC-USDT-SPOT": "c6216b82a63fa569100bc1513bbe62dea6bd959db4acc8a3bf1680ea01f8fdbe",
+    "BYBIT:BTC-USDT-SPOT": "d46225cfbc492f02f44ae2b2ee6c7430cfaa7f33cd9c2611afe853865849e5c7"
+  },
+  "book_integrity_gate": {
+    "cancel_requests": 0,
+    "cancelled_orders": 0,
+    "reason": "INITIAL_SYNC",
+    "resume_count": 0,
+    "suspend_count": 0,
+    "suspended": true,
+    "venue_transitions": 0,
+    "venues": {
+      "BINANCE": "RISK_REDUCING_ONLY",
+      "BYBIT": "RISK_REDUCING_ONLY"
+    }
+  },
+  "canonical_events_delivered": 90,
+  "closed_plans": 0,
+  "cross_venue_alignment": {
+    "blocked_evaluations": 0,
+    "eligible_evaluations": 172,
+    "evaluations": 172,
+    "policy": "cross-venue-eligibility-v1",
+    "routing_rejections": 0
+  },
+  "data_quality": {
+    "checksum_failures": 0,
+    "confirmed_price_moves": 0,
+    "crossed_or_locked": 0,
+    "duplicates": 0,
+    "events": 90,
+    "gaps": 0,
+    "invalid_books": 0,
+    "invalid_levels": 0,
+    "out_of_order": 0,
+    "price_jumps": 0,
+    "resyncs": 1,
+    "silent_feeds": [],
+    "stale_transitions": 0,
+    "wide_spreads": 0
+  },
+  "data_quality_approval": {
+    "active_flag_codes": [],
+    "decision": "APPROVED",
+    "defect_count": 0,
+    "health": "HEALTHY"
+  },
+  "execution_api": {
+    "arrivals": 0,
+    "callbacks": 0,
+    "dispatch": {
+      "callbacks_observed": 0,
+      "children_dispatched": 0,
+      "max_dispatch_duration_ns": 0,
+      "measurements": [],
+      "min_dispatch_duration_ns": 0,
+      "policy": "DETERMINISTIC_SEQUENTIAL"
+    },
+    "duplicates_suppressed": 0,
+    "in_flight_sent": 0,
+    "latency_model": "preset:singapore",
+    "liquidity_consumption_events": 0,
+    "rate_limit_delayed": 0,
+    "rate_limit_queued": 0,
+    "rate_limit_rejections": 0,
+    "rate_limit_released": 0,
+    "rate_limits": {
+      "in_flight_requests": 0,
+      "pending_requests": 0,
+      "schema_version": "1.0.0",
+      "undelivered_reports": 0,
+      "venues": {
+        "BINANCE": {
+          "capacity": 1000,
+          "delayed": 0,
+          "headroom": 1000,
+          "in_flight": 0,
+          "next_release_ts_ns": null,
+          "next_window_ts_ns": 1000000000,
+          "policy": "REJECT",
+          "queue_depth": 0,
+          "queued": 0,
+          "throttle_delay_ns": 0,
+          "used": 0,
+          "window_start_ts_ns": 0
+        },
+        "BYBIT": {
+          "capacity": 1000,
+          "delayed": 0,
+          "headroom": 1000,
+          "in_flight": 0,
+          "next_release_ts_ns": null,
+          "next_window_ts_ns": 1000000000,
+          "policy": "REJECT",
+          "queue_depth": 0,
+          "queued": 0,
+          "throttle_delay_ns": 0,
+          "used": 0,
+          "window_start_ts_ns": 0
+        }
+      }
+    },
+    "reports_delivered": 0,
+    "route_decisions": 0,
+    "route_overrides": 0,
+    "route_rejections": 0,
+    "schema_version": "1.0.0",
+    "state_machine": {
+      "closed_plans": 0,
+      "duplicates_suppressed": 0,
+      "order_updates": 0,
+      "plans": 0,
+      "schema_version": "1.0.0",
+      "terminal_conflicts_resolved": 0,
+      "terminal_outcomes": {},
+      "terminal_parent_state": "CLOSED",
+      "updates_by_source": {
+        "ADAPTER_CALLBACK": 0,
+        "INTERNAL": 0,
+        "PRIVATE_STREAM": 0,
+        "REST_QUERY": 0,
+        "TIMER": 0
+      }
+    },
+    "trace": {
+      "path": "order_trace.jsonl",
+      "records": 0
+    },
+    "trace_records": 0,
+    "unique_requests": 0,
+    "venue_queries": 0
+  },
+  "execution_mode": "INTERNAL_PAPER",
+  "execution_realism": {
+    "close_deferrals": 0,
+    "in_flight_or_undelivered": false,
+    "latency_model": "preset:singapore",
+    "new_risk_held_residual_breach": 0,
+    "open_plan_states": [],
+    "open_plans": 0,
+    "open_report_deadlines": 0,
+    "order_timeout_policy": {
+      "kill_on_unresolved": true,
+      "max_queries": 3,
+      "query_interval_ns": 500000000,
+      "report_timeout_ns": 2000000000
+    },
+    "rejected_cancels_requeried": 0,
+    "residual_breach_kill_escalations": 0,
+    "residual_breaches_open": [],
+    "resolved_by_query": 0,
+    "resting_fill_reports": 0,
+    "schema_version": "1.0.0",
+    "unknown_state_orders": 0,
+    "unresolved_after_queries": 0,
+    "venue_queries": 0
+  },
+  "exposure_limits": {
+    "binding_event_count": 0,
+    "report": "exposure_utilization.json",
+    "state": "NORMAL",
+    "transition_count": 0
+  },
+  "fees": "0",
+  "gross_pnl": "0",
+  "instrument_status_changes_applied": 0,
+  "inventory": {
+    "instrument_id": "BTC-USDT-SPOT",
+    "label": "PRE_FUNDED_INVENTORY_NO_REBALANCING",
+    "model": "PRE_FUNDED",
+    "venues": {
+      "BINANCE": {
+        "available_base": "0.05",
+        "available_quote": "10000",
+        "held_base": "0.05",
+        "held_quote": "10000",
+        "initial_base": "0.05",
+        "initial_quote": "10000",
+        "reserved_base": "0",
+        "reserved_quote": "0"
+      },
+      "BYBIT": {
+        "available_base": "0.05",
+        "available_quote": "10000",
+        "held_base": "0.05",
+        "held_quote": "10000",
+        "initial_base": "0.05",
+        "initial_quote": "10000",
+        "reserved_base": "0",
+        "reserved_quote": "0"
+      }
+    }
+  },
+  "kill_switch": {
+    "reason": "",
+    "reconciliation_required_before_resume": false,
+    "report": "kill_switch_status.json",
+    "risk_reducing_orders_allowed": true,
+    "state": "INACTIVE"
+  },
+  "latency": {
+    "model_source": "preset:singapore",
+    "order_timestamps": "order_timestamps.jsonl",
+    "report": "latency_report.json",
+    "seed": 7
+  },
+  "margin_collateral": {
+    "alert_count": 0,
+    "report": "margin_status.json",
+    "state": "NOT_APPLICABLE"
+  },
+  "net_pnl": "0",
+  "opportunities": 0,
+  "pipeline_monitoring": {
+    "alert_count": 0,
+    "health": "HEALTHY",
+    "prometheus_metrics": "pipeline_metrics.prom",
+    "report": "pipeline_monitoring.json",
+    "strategy_execution": {
+      "net_pnl": "0",
+      "opportunities": 0,
+      "orders": 0
+    }
+  },
+  "pretrade_validation": {
+    "decision": "NOT_RUN",
+    "failure_codes": [],
+    "report": null
+  },
+  "recorded_event_timing_used": 0,
+  "residual_risk": {
+    "carried_residual_base": "0",
+    "legging_control_overrides": 0,
+    "legging_limit_bindings": 0,
+    "limit_breaches": 0,
+    "open_residual_base": "0",
+    "open_residual_plans": 0,
+    "policy": {
+      "allow_risk_reducing_under_stop": true,
+      "hedge_venue_priority": [
+        "BINANCE",
+        "BYBIT"
+      ],
+      "max_one_sided_notional": "1000",
+      "max_residual_age_ns": 5000000000,
+      "max_residual_base": "0.002",
+      "max_unwind_attempts": 2,
+      "unwind_price_slippage_bps": "10",
+      "unwind_urgency": "NORMAL"
+    },
+    "schema_version": "1.0.0",
+    "total_residual_base": "0",
+    "unwind_children": 0
+  },
+  "risk_reservation": {
+    "active_reservations": 0,
+    "carried_residual_base": "0",
+    "exposure_binding_events": [],
+    "exposure_control_state": "NORMAL",
+    "exposure_transition_count": 0,
+    "kill_switch_active": false,
+    "pretrade_decision": "NOT_RUN",
+    "pretrade_failure_codes": [],
+    "reconciliation_decision": "APPROVED",
+    "reserved_cash": {},
+    "reserved_gross": "0",
+    "reserved_margin": {},
+    "reserved_messages": {},
+    "reserved_position": {},
+    "reserved_residual": "0",
+    "suspended_venues": {}
+  },
+  "rms_reconciliation": {
+    "decision": "APPROVED",
+    "issue_count": 0,
+    "reconciliation_id": "0d0bd499-b094-52e0-ad23-d2ac64d1f11c",
+    "report": "rms_reconciliation_report.json"
+  },
+  "strategies": {
+    "flattening": false,
+    "strategies": {
+      "basis_mean_reversion_v1": {
+        "closed_plans": 0,
+        "fees": "0",
+        "gross_pnl": "0",
+        "net_pnl": "0",
+        "opportunities": 0,
+        "outcomes": {},
+        "plans": 0,
+        "summary": {
+          "actions": {},
+          "basis_mean_bps": null,
+          "basis_stdev_bps": null,
+          "config": {
+            "cooldown_ns": 10000000000,
+            "entry_z": 2.5,
+            "exit_z": 0.5,
+            "max_holding_ns": 1800000000000,
+            "min_deviation_bps": 1.0,
+            "min_samples": 60,
+            "quantity": "0.001",
+            "sample_interval_ns": 1000000000,
+            "stop_z": 6.0,
+            "strategy_id": "basis_mean_reversion_v1",
+            "window": 300
+          },
+          "last_basis_bps": 0.01666668055556713,
+          "last_zscore": null,
+          "max_abs_zscore": 0.0,
+          "pending_plans": 0,
+          "plan_outcomes": {},
+          "samples_taken": 1,
+          "skipped": {
+            "warmup": 86
+          },
+          "stance": "FLAT",
+          "stance_reverts": 0,
+          "strategy_id": "basis_mean_reversion_v1",
+          "type": "CROSS_VENUE_BASIS_MEAN_REVERSION",
+          "version": "1.0.0",
+          "warmed_up": false,
+          "window_samples": 1
+        },
+        "type": "CROSS_VENUE_BASIS_MEAN_REVERSION"
+      },
+      "cross_venue_btc_v1": {
+        "closed_plans": 0,
+        "fees": "0",
+        "gross_pnl": "0",
+        "net_pnl": "0",
+        "opportunities": 0,
+        "outcomes": {},
+        "plans": 0,
+        "summary": {
+          "type": "CrossVenueSpreadStrategy"
+        },
+        "type": "CrossVenueSpreadStrategy"
+      }
+    }
+  },
+  "structured_logs": {
+    "components": {
+      "MARKET_DATA": 90,
+      "PAPER_HOST": 7
+    },
+    "database": "structured_logs.sqlite",
+    "failed_opportunities": 0,
+    "failed_trace_count": 0,
+    "failed_traces": "failed_opportunity_traces.jsonl",
+    "jsonl": "structured_logs.jsonl",
+    "levels": {
+      "INFO": 95,
+      "WARNING": 2
+    },
+    "records": 97,
+    "schema_version": "1.0.0",
+    "searchable_fields": [
+      "correlation_id",
+      "component",
+      "level",
+      "event_type",
+      "venue",
+      "source_event_id",
+      "feature_state_id",
+      "opportunity_id",
+      "risk_decision_id",
+      "parent_plan_id",
+      "child_order_id",
+      "request_id"
+    ]
+  },
+  "tca": {
+    "daily_reports": [
+      "tca_daily/1970-01-01.json"
+    ],
+    "fees": "0",
+    "fills": 0,
+    "missed_opportunities": 0,
+    "report": "tca_report.json",
+    "weighted_slippage_bps": "0"
+  },
+  "time_integrity": {
+    "blocked_events": 0,
+    "cross_venue_skew_breaches": 0,
+    "events": 90,
+    "host_clock_state": "UNKNOWN"
+  }
+}

@@ -1,0 +1,22 @@
+{
+  "cycles": [
+    "cycle-0006-20260914T142731Z",
+    "cycle-0007-20260914T145802Z",
+    "cycle-0008-20260914T152833Z",
+    "cycle-0009-20260914T155903Z",
+    "cycle-0010-20260914T162934Z",
+    "cycle-0040-20260915T132143Z"
+  ],
+  "decision": "PASS",
+  "engine": [
+    "cpp_mm_matching_engine"
+  ],
+  "max_sanity_violations_in_any_run": 0,
+  "ordering": [
+    "arrival_ordinal"
+  ],
+  "rows": 168,
+  "runs": 84,
+  "sanity_violations_total": 0,
+  "source": "runs/maker_sensitivity/20261011T172155Z"
+}

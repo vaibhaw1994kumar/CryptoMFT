@@ -1,0 +1,255 @@
+{
+  "config": {
+    "backtest": {
+      "drain_horizon_ms": 10000
+    },
+    "book_sanity": {
+      "jump_confirmation_updates": 3,
+      "max_mid_jump_bps": "500",
+      "max_spread_bps": "500"
+    },
+    "execution_mode": "INTERNAL_SIMULATION",
+    "fees": [
+      {
+        "effective_from": "1970-01-01T00:00:00Z",
+        "instrument_id": "BTC-USDT-SPOT",
+        "maker_fee_bps": "2",
+        "taker_fee_bps": "4",
+        "tier": "research-default",
+        "venue": "BINANCE"
+      },
+      {
+        "effective_from": "1970-01-01T00:00:00Z",
+        "instrument_id": "BTC-USDT-SPOT",
+        "maker_fee_bps": "2",
+        "taker_fee_bps": "4",
+        "tier": "research-default",
+        "venue": "BYBIT"
+      }
+    ],
+    "instruments": [
+      {
+        "base": "BTC",
+        "effective_from": "1970-01-01T00:00:00Z",
+        "instrument_id": "BTC-USDT-SPOT",
+        "leverage": "1",
+        "maker_fee_bps": "2",
+        "min_notional": "5",
+        "min_quantity": "0.00001",
+        "product_type": "SPOT",
+        "quantity_step": "0.00001",
+        "quote": "USDT",
+        "symbol": "BTCUSDT",
+        "taker_fee_bps": "4",
+        "tick_size": "0.01",
+        "venue": "BINANCE"
+      },
+      {
+        "base": "BTC",
+        "effective_from": "1970-01-01T00:00:00Z",
+        "instrument_id": "BTC-USDT-SPOT",
+        "leverage": "1",
+        "maker_fee_bps": "2",
+        "min_notional": "5",
+        "min_quantity": "0.000001",
+        "product_type": "SPOT",
+        "quantity_step": "0.000001",
+        "quote": "USDT",
+        "symbol": "BTCUSDT",
+        "taker_fee_bps": "4",
+        "tick_size": "0.10",
+        "venue": "BYBIT"
+      }
+    ],
+    "latency": {
+      "enabled": true,
+      "preset": "singapore",
+      "profiles": {},
+      "seed": 7
+    },
+    "monitoring": {
+      "max_active_kill_switches": 0,
+      "max_data_age_ms": 1000,
+      "max_dispatch_latency_ms": 10,
+      "max_gaps": 0,
+      "max_invalid_books": 0,
+      "max_open_residual_base": 0.002,
+      "max_order_rejects": 0,
+      "max_persistence_lag_ms": 5000,
+      "max_rate_limit_utilization": 0.9,
+      "max_reconnects": 10,
+      "max_schema_mismatches": 0,
+      "max_stale_disconnects": 5,
+      "max_unhealthy_connectors": 0,
+      "min_partition_completeness": 1.0,
+      "min_replay_events_per_second": 1.0
+    },
+    "oms": {
+      "residual": {
+        "allow_risk_reducing_under_stop": true,
+        "hedge_venue_priority": [
+          "BINANCE",
+          "BYBIT"
+        ],
+        "hold_new_risk_on_breach": true,
+        "kill_after_ms": 30000,
+        "max_one_sided_notional": "1000",
+        "max_residual_age_ms": 5000,
+        "max_residual_base": "0.002",
+        "max_unwind_attempts": 2,
+        "unwind_price_slippage_bps": "10",
+        "unwind_urgency": "NORMAL"
+      },
+      "timeouts": {
+        "kill_on_unresolved": true,
+        "max_queries": 3,
+        "query_interval_ms": 500,
+        "report_timeout_ms": 2000
+      }
+    },
+    "performance": {
+      "max_feed_to_strategy_p99_ms": 5,
+      "max_paper_frame_overhead_p99_ms": 20,
+      "max_route_decision_p99_ms": 10,
+      "min_replay_events_per_second": 2000
+    },
+    "quality": {
+      "max_crossed_books": 0,
+      "max_duplicates": 20,
+      "max_gaps": 5,
+      "max_impossible_latency": 0,
+      "max_invalid_levels": 0,
+      "max_invalid_trades": 5,
+      "max_negative_latency": 200,
+      "max_out_of_order": 20,
+      "max_persistence_lag_ms": 5000,
+      "max_price_jumps": 0,
+      "max_rejected_partitions": 0,
+      "max_schema_exceptions": 0,
+      "max_silent_feeds": 0,
+      "max_stale_intervals": 10,
+      "max_unknown_instrument_rules": 0,
+      "max_unpersisted_bytes": 0,
+      "max_wide_spreads": 5,
+      "min_events": 1
+    },
+    "risk": {
+      "initial_capital_by_venue": {
+        "BINANCE": "10000",
+        "BYBIT": "10000"
+      },
+      "instrument_gross_limits": {
+        "BTC-USDT-SPOT": "10000"
+      },
+      "inventory": {
+        "initial_base_by_venue": {
+          "BINANCE": "0.05",
+          "BYBIT": "0.05"
+        },
+        "model": "pre_funded"
+      },
+      "margin_accounts": {
+        "BINANCE": {
+          "initial_margin_rate": "0",
+          "liquidation_buffer_rate": "0.25",
+          "maintenance_margin_rate": "0",
+          "margin_enabled": false
+        },
+        "BYBIT": {
+          "initial_margin_rate": "0",
+          "liquidation_buffer_rate": "0.25",
+          "maintenance_margin_rate": "0",
+          "margin_enabled": false
+        }
+      },
+      "max_cash_reserved": "10000",
+      "max_gross_notional": "10000",
+      "max_instrument_gross_notional": "10000",
+      "max_margin_reserved": "10000",
+      "max_message_capacity": 1000,
+      "max_order_notional": "5000",
+      "max_position_base": "0.10",
+      "max_price_deviation_bps": "100",
+      "max_residual_base": "0.002",
+      "max_strategy_gross_notional": "10000",
+      "max_strategy_net_notional": "2000",
+      "max_strategy_package_notional": "10000",
+      "max_venue_gross_notional": "5000",
+      "strategy_gross_limits": {
+        "cross_venue_btc_v1": "10000"
+      },
+      "strategy_net_limits": {
+        "cross_venue_btc_v1": "2000"
+      },
+      "venue_gross_limits": {
+        "BINANCE": "5000",
+        "BYBIT": "5000"
+      }
+    },
+    "strategies": {
+      "cross_venue_arb": {
+        "enabled": true
+      },
+      "maker_simulation": {
+        "enabled": true,
+        "max_inventory": "0.01",
+        "quote_interval_ms": 1000,
+        "quote_size": "0.001",
+        "seed": 7,
+        "venues": [
+          "BINANCE",
+          "BYBIT"
+        ]
+      },
+      "mean_reversion": {
+        "cooldown_ms": 10000,
+        "enabled": true,
+        "entry_z": 2.5,
+        "exit_z": 0.5,
+        "max_holding_ms": 1800000,
+        "min_deviation_bps": 1.0,
+        "min_samples": 60,
+        "quantity": "0.001",
+        "sample_interval_ms": 1000,
+        "stop_z": 6.0,
+        "strategy_id": "basis_mean_reversion_v1",
+        "window": 300
+      }
+    },
+    "strategy": {
+      "entry_bps": "8",
+      "instrument_id": "BTC-USDT-SPOT",
+      "max_book_age_ms": 1000,
+      "min_net_edge_bps": "2",
+      "quantity": "0.010",
+      "strategy_id": "cross_venue_btc_v1",
+      "venues": [
+        "BINANCE",
+        "BYBIT"
+      ]
+    },
+    "time": {
+      "correct_host_offset": true,
+      "host_offset_min_samples": 20,
+      "host_offset_quantile": 0.01,
+      "host_offset_window": 2000,
+      "max_cross_venue_skew_ms": 1000,
+      "max_event_latency_ms": 60000,
+      "max_feed_age_ms": 1000,
+      "max_host_drift_ppm": 500,
+      "max_host_offset_ms": 100,
+      "negative_latency_tolerance_ms": 5
+    },
+    "watch_notes": [
+      "Paper watcher profile: research.json plus the basis mean-reversion strategy and the sim_engine maker dry run.",
+      "Live-session quality thresholds are relaxed for reconnect/shutdown staleness and host-clock warm-up; every breach is still counted and reported by analyze-session.",
+      "Mean-reversion thresholds are chosen to exercise the full execution path; with 4 bps taker fees per leg it is not expected to be profitable."
+    ]
+  },
+  "config_sha256": "1e710d8de9a23de258ba492ad3ff5779ee4217c9d159dfea69e4ae55ab86b39f",
+  "created_at": "2026-10-15T17:28:38.217297+00:00",
+  "deterministic_result_sha256": "6a335fb669aeed188be45cd4c16e5856a276a6039353e48ba05191e5b3c45489",
+  "events_sha256": "feec3bdb786aaf64e937fd22f4a5a7935d25bec54d53329f137e11a26b39d816",
+  "mode": "BACKTEST",
+  "platform_version": "0.1.0"
+}

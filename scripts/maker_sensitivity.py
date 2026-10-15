@@ -160,8 +160,11 @@ def render(table: list[dict], meta: dict) -> str:
         "Cycles: " + ", ".join(f"`{c}`" for c in meta["cycles"]),
         "",
         "Markouts are signed mid moves after each fill (positive = favourable, bps).",
-        "Qty fill rate = filled quantity / (orders sent x quote size); fully filled = orders filled",
+        "Δ filled qty = filled quantity vs the 0 ms row. Qty fill rate = filled quantity / (orders sent x",
+        "quote size); Δ qty fill rate is its change vs 0 ms. The two differ because orders sent vary with",
+        "lag. Fully filled = orders filled",
         "completely / orders sent. Through share = fill events caused by a print beyond our price.",
+        "Δ markout 1s = change in mean 1 s markout vs 0 ms (bps).",
         "PnL is mark-to-market including fees and inventory drift.",
         "",
     ]
@@ -172,18 +175,24 @@ def render(table: list[dict], meta: dict) -> str:
             lines += [
                 f"## {venue}, queue_position_frac = {frac}",
                 "",
-                "| feed lag ms | orders | filled qty | qty fill rate | Δ qty fill rate | fully filled "
-                "| through % | queue ahead | markout 1s | markout 5s | PnL USDT | Δ PnL | fees | PO rejects |",
-                "|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|",
+                "| feed lag ms | orders | filled qty | Δ filled qty | qty fill rate | Δ qty fill rate "
+                "| fully filled | through % | queue ahead | markout 1s | markout 5s | Δ markout 1s "
+                "| PnL USDT | Δ PnL | fees | PO rejects |",
+                "|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|",
             ]
             for r in rows:
                 d_rate = (r["fill_rate"] / base["fill_rate"] - 1) * 100 if base["fill_rate"] else None
+                d_qty = (r["fill_qty"] / base["fill_qty"] - 1) * 100 if base["fill_qty"] else None
+                d_mk = (
+                    r["markout_1s_bps"] - base["markout_1s_bps"]
+                    if r["markout_1s_bps"] is not None and base["markout_1s_bps"] is not None else None
+                )
                 lines.append(
                     f"| {_fmt(r['feed_lag_ms'], 0)} | {r['orders_sent']} | {_fmt(r['fill_qty'], 4)} "
-                    f"| {_fmt(r['fill_rate'] * 100, 1)}% | {_fmt(d_rate, 1)}% "
+                    f"| {_fmt(d_qty, 2)}% | {_fmt(r['fill_rate'] * 100, 1)}% | {_fmt(d_rate, 2)}% "
                     f"| {_fmt(r['orders_filled_rate'] * 100, 1)}% "
                     f"| {_fmt(r['through_share'] * 100, 1)}% | {_fmt(r['mean_queue_ahead'], 3)} "
-                    f"| {_fmt(r['markout_1s_bps'])} | {_fmt(r['markout_5s_bps'])} "
+                    f"| {_fmt(r['markout_1s_bps'])} | {_fmt(r['markout_5s_bps'])} | {_fmt(d_mk, 3)} "
                     f"| {_fmt(r['pnl'])} | {_fmt(r['pnl'] - base['pnl'])} "
                     f"| {_fmt(r['fees'])} | {r['post_only_rejects']} |"
                 )

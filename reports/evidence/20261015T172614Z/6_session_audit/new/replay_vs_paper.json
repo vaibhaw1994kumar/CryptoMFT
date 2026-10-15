@@ -1,0 +1,320 @@
+{
+  "decision": "DIVERGED",
+  "diverged_metrics": [
+    "BINANCE.risk.p50_ns",
+    "BINANCE.risk.p99_ns",
+    "BINANCE.strategy.p50_ns",
+    "BINANCE.strategy.p99_ns",
+    "BYBIT.fill.p99_ns",
+    "BYBIT.risk.p50_ns",
+    "BYBIT.risk.p99_ns",
+    "BYBIT.strategy.p50_ns",
+    "BYBIT.strategy.p99_ns"
+  ],
+  "forward_execution_mode": "INTERNAL_PAPER",
+  "forward_run": "/Users/vaibhav/Documents/Newproject/crypto_MFT_arb_platform/runs/paper_watch/live/cycle-0006-20260914T142731Z/paper",
+  "informational_metrics": {
+    "net_pnl": {
+      "difference": -236.434621632,
+      "gating": false,
+      "paper": 231.735112152,
+      "replay": -4.69950948
+    },
+    "residual_base": {
+      "difference": 0.003,
+      "gating": false,
+      "paper": -0.003,
+      "replay": 0.0
+    }
+  },
+  "latency": {
+    "BINANCE.entry": {
+      "p50_ns": {
+        "paper": 39220520,
+        "relative_difference": 0.03170371020068066,
+        "replay": 40463956,
+        "within_tolerance": true
+      },
+      "p99_ns": {
+        "paper": 66512123,
+        "relative_difference": 0.03206021554897594,
+        "replay": 68644516,
+        "within_tolerance": true
+      }
+    },
+    "BINANCE.fill": {
+      "p50_ns": {
+        "paper": 34691143,
+        "relative_difference": 0.07008535290981908,
+        "replay": 37122484,
+        "within_tolerance": true
+      },
+      "p99_ns": {
+        "paper": 52604252,
+        "relative_difference": 0.1950574261563495,
+        "replay": 62865102,
+        "within_tolerance": true
+      }
+    },
+    "BINANCE.market_data": {
+      "p50_ns": {
+        "paper": 32658000,
+        "relative_difference": 0.0,
+        "replay": 32658000,
+        "within_tolerance": true
+      },
+      "p99_ns": {
+        "paper": 459833000,
+        "relative_difference": 0.0,
+        "replay": 459833000,
+        "within_tolerance": true
+      }
+    },
+    "BINANCE.risk": {
+      "p50_ns": {
+        "paper": 5571000,
+        "relative_difference": 0.9786431520373362,
+        "replay": 118979,
+        "within_tolerance": false
+      },
+      "p99_ns": {
+        "paper": 20247000,
+        "relative_difference": 0.9926010767027214,
+        "replay": 149806,
+        "within_tolerance": false
+      }
+    },
+    "BINANCE.strategy": {
+      "p50_ns": {
+        "paper": 4088000,
+        "relative_difference": 0.9366658512720156,
+        "replay": 258910,
+        "within_tolerance": false
+      },
+      "p99_ns": {
+        "paper": 16130000,
+        "relative_difference": 0.9815332300061996,
+        "replay": 297869,
+        "within_tolerance": false
+      }
+    },
+    "BINANCE.submit_ack": {
+      "p50_ns": {
+        "paper": 36533098,
+        "relative_difference": 0.048251998776561465,
+        "replay": 34770303,
+        "within_tolerance": true
+      },
+      "p99_ns": {
+        "paper": 64209643,
+        "relative_difference": 0.07413333539325238,
+        "replay": 59449568,
+        "within_tolerance": true
+      }
+    },
+    "BYBIT.entry": {
+      "p50_ns": {
+        "paper": 5424152,
+        "relative_difference": 0.01811785510435548,
+        "replay": 5522426,
+        "within_tolerance": true
+      },
+      "p99_ns": {
+        "paper": 11340890,
+        "relative_difference": 0.29716362648786826,
+        "replay": 14710990,
+        "within_tolerance": true
+      }
+    },
+    "BYBIT.fill": {
+      "p50_ns": {
+        "paper": 1591698,
+        "relative_difference": 0.18695820438299224,
+        "replay": 1294117,
+        "within_tolerance": true
+      },
+      "p99_ns": {
+        "paper": 8785082,
+        "relative_difference": 2.1904067600051995,
+        "replay": 28027985,
+        "within_tolerance": false
+      }
+    },
+    "BYBIT.market_data": {
+      "p50_ns": {
+        "paper": 2204000,
+        "relative_difference": 0.0,
+        "replay": 2204000,
+        "within_tolerance": true
+      },
+      "p99_ns": {
+        "paper": 545756000,
+        "relative_difference": 0.0,
+        "replay": 545756000,
+        "within_tolerance": true
+      }
+    },
+    "BYBIT.risk": {
+      "p50_ns": {
+        "paper": 6361000,
+        "relative_difference": 0.980219147932715,
+        "replay": 125826,
+        "within_tolerance": false
+      },
+      "p99_ns": {
+        "paper": 22282000,
+        "relative_difference": 0.9932719235257158,
+        "replay": 149915,
+        "within_tolerance": false
+      }
+    },
+    "BYBIT.strategy": {
+      "p50_ns": {
+        "paper": 3433000,
+        "relative_difference": 0.9258348383338189,
+        "replay": 254609,
+        "within_tolerance": false
+      },
+      "p99_ns": {
+        "paper": 10069000,
+        "relative_difference": 0.9704606217101996,
+        "replay": 297432,
+        "within_tolerance": false
+      }
+    },
+    "BYBIT.submit_ack": {
+      "p50_ns": {
+        "paper": 1304210,
+        "relative_difference": 0.0456498570015565,
+        "replay": 1363747,
+        "within_tolerance": true
+      },
+      "p99_ns": {
+        "paper": 14772245,
+        "relative_difference": 0.0,
+        "replay": 14772245,
+        "within_tolerance": true
+      }
+    }
+  },
+  "latency_decision": "DIVERGED",
+  "metrics": {
+    "cancels": {
+      "difference": 0.0,
+      "paper": 0.0,
+      "relative_difference": 0.0,
+      "replay": 0.0,
+      "tolerance": {
+        "kind": "relative",
+        "value": 0.25
+      },
+      "within_tolerance": true
+    },
+    "closed_plans": {
+      "difference": 1.0,
+      "paper": 87.0,
+      "relative_difference": 0.011494252873563218,
+      "replay": 88.0,
+      "tolerance": {
+        "kind": "relative",
+        "value": 0.1
+      },
+      "within_tolerance": true
+    },
+    "equity_pnl": {
+      "difference": -0.9967966320000001,
+      "paper": -3.647928348,
+      "relative_difference": 0.27325005781610273,
+      "replay": -4.64472498,
+      "tolerance": {
+        "kind": "relative_or_absolute",
+        "value": [
+          0.25,
+          1.0
+        ]
+      },
+      "within_tolerance": true
+    },
+    "fees": {
+      "difference": 0.3454366320000002,
+      "paper": 4.433947848,
+      "relative_difference": 0.07790723838933168,
+      "replay": 4.77938448,
+      "tolerance": {
+        "kind": "relative",
+        "value": 0.1
+      },
+      "within_tolerance": true
+    },
+    "fill_ratio": {
+      "difference": 0.015117441279360322,
+      "paper": 0.8218390804597702,
+      "relative_difference": null,
+      "replay": 0.8369565217391305,
+      "tolerance": {
+        "kind": "absolute",
+        "value": 0.05
+      },
+      "within_tolerance": true
+    },
+    "fills": {
+      "difference": 11.0,
+      "paper": 143.0,
+      "relative_difference": 0.07692307692307693,
+      "replay": 154.0,
+      "tolerance": {
+        "kind": "relative",
+        "value": 0.1
+      },
+      "within_tolerance": true
+    },
+    "missed_opportunities": {
+      "difference": -1.0,
+      "paper": 31.0,
+      "relative_difference": 0.03225806451612903,
+      "replay": 30.0,
+      "tolerance": {
+        "kind": "relative",
+        "value": 0.25
+      },
+      "within_tolerance": true
+    },
+    "opportunities": {
+      "difference": 1.0,
+      "paper": 87.0,
+      "relative_difference": 0.011494252873563218,
+      "replay": 88.0,
+      "tolerance": {
+        "kind": "relative",
+        "value": 0.1
+      },
+      "within_tolerance": true
+    },
+    "rejects": {
+      "difference": -1.0,
+      "paper": 31.0,
+      "relative_difference": 0.03225806451612903,
+      "replay": 30.0,
+      "tolerance": {
+        "kind": "relative",
+        "value": 0.25
+      },
+      "within_tolerance": true
+    },
+    "weighted_slippage_bps": {
+      "difference": -0.5121598342301996,
+      "paper": -0.017591515610938288,
+      "relative_difference": null,
+      "replay": -0.5297513498411379,
+      "tolerance": {
+        "kind": "absolute",
+        "value": 1.0
+      },
+      "within_tolerance": true
+    }
+  },
+  "min_opportunities": 30,
+  "replay_run": "/Users/vaibhav/Documents/Newproject/crypto_MFT_arb_platform/reports/evidence/20261015T172614Z/6_session_audit/new/backtest_replay",
+  "schema_version": "1.0.0",
+  "trading_decision": "CONSISTENT"
+}

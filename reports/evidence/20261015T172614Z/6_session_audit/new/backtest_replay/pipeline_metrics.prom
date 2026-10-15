@@ -1,0 +1,97 @@
+# HELP crypto_pipeline_monitor_health Pipeline health by level.
+# TYPE crypto_pipeline_monitor_health gauge
+crypto_pipeline_monitor_health{level="HEALTHY"} 0
+crypto_pipeline_monitor_health{level="DEGRADED"} 0
+crypto_pipeline_monitor_health{level="CRITICAL"} 1
+# TYPE crypto_pipeline_data_age_ns gauge
+crypto_pipeline_data_age_ns{mode="REPLAY"} 32498000
+# TYPE crypto_pipeline_partition_completeness gauge
+crypto_pipeline_partition_completeness{mode="REPLAY"} 1.0
+# TYPE crypto_pipeline_sequence_gaps gauge
+crypto_pipeline_sequence_gaps{mode="REPLAY"} 2
+# TYPE crypto_pipeline_invalid_books gauge
+crypto_pipeline_invalid_books{mode="REPLAY"} 0
+# TYPE crypto_pipeline_schema_mismatches gauge
+crypto_pipeline_schema_mismatches{mode="REPLAY"} 0
+# TYPE crypto_pipeline_replay_events_per_second gauge
+crypto_pipeline_replay_events_per_second{mode="REPLAY"} 2302.7811385739083
+# TYPE crypto_pipeline_reconnects gauge
+crypto_pipeline_reconnects{mode="REPLAY"} 0
+# TYPE crypto_pipeline_stale_disconnects gauge
+crypto_pipeline_stale_disconnects{mode="REPLAY"} 0
+# TYPE crypto_pipeline_persistence_lag_ns gauge
+crypto_pipeline_persistence_lag_ns{mode="REPLAY"} 0
+# TYPE crypto_pipeline_order_rejects gauge
+crypto_pipeline_order_rejects{mode="REPLAY"} 30
+# TYPE crypto_pipeline_open_residual_base gauge
+crypto_pipeline_open_residual_base{mode="REPLAY"} 0.0
+# TYPE crypto_pipeline_total_residual_base gauge
+crypto_pipeline_total_residual_base{mode="REPLAY"} 0.0
+# TYPE crypto_pipeline_max_dispatch_latency_ns gauge
+crypto_pipeline_max_dispatch_latency_ns{mode="REPLAY"} 1
+# TYPE crypto_pipeline_rate_limit_utilization gauge
+crypto_pipeline_rate_limit_utilization{mode="REPLAY"} 0.001
+# TYPE crypto_pipeline_unhealthy_connectors gauge
+crypto_pipeline_unhealthy_connectors{mode="REPLAY"} 0
+# TYPE crypto_pipeline_active_kill_switches gauge
+crypto_pipeline_active_kill_switches{mode="REPLAY"} 0
+# TYPE crypto_pipeline_alerts gauge
+crypto_pipeline_alerts{mode="REPLAY"} 2
+crypto_pipeline_alerts_by_owner{alert_type="EXECUTION_THRESHOLD",owner="paper-trading-owner",severity="HIGH"} 1
+crypto_pipeline_alerts_by_owner{alert_type="INVALID_BOOK",owner="market-data-owner",severity="CRITICAL"} 1
+# TYPE crypto_strategy_opportunity_count gauge
+crypto_strategy_opportunity_count{mode="REPLAY"} 88
+# TYPE crypto_strategy_expected_net_edge_bps_average gauge
+crypto_strategy_expected_net_edge_bps_average{mode="REPLAY"} -14.73920993181818181818181818
+# TYPE crypto_strategy_route_decisions gauge
+crypto_strategy_route_decisions{mode="REPLAY"} 184
+# TYPE crypto_strategy_route_rejections gauge
+crypto_strategy_route_rejections{mode="REPLAY"} 0
+# TYPE crypto_strategy_route_overrides gauge
+crypto_strategy_route_overrides{mode="REPLAY"} 0
+# TYPE crypto_strategy_order_count gauge
+crypto_strategy_order_count{mode="REPLAY"} 184
+# TYPE crypto_strategy_order_fills gauge
+crypto_strategy_order_fills{mode="REPLAY"} 154
+# TYPE crypto_strategy_order_cancels gauge
+crypto_strategy_order_cancels{mode="REPLAY"} 0
+# TYPE crypto_strategy_gross_pnl gauge
+crypto_strategy_gross_pnl{mode="REPLAY"} 0.1395600000000
+# TYPE crypto_strategy_fees gauge
+crypto_strategy_fees{mode="REPLAY"} 4.7793844800000
+# TYPE crypto_strategy_net_pnl gauge
+crypto_strategy_net_pnl{mode="REPLAY"} -4.6995094800000
+# TYPE crypto_strategy_position_count gauge
+crypto_strategy_position_count{mode="REPLAY"} 2
+crypto_strategy_orders_by_state{mode="REPLAY",state="FILLED"} 154
+crypto_strategy_orders_by_state{mode="REPLAY",state="REJECTED"} 30
+# TYPE crypto_tca_opportunities_detected gauge
+crypto_tca_opportunities_detected{scope="RUN"} 88
+# TYPE crypto_tca_opportunities_executed gauge
+crypto_tca_opportunities_executed{scope="RUN"} 58
+# TYPE crypto_tca_missed_opportunities gauge
+crypto_tca_missed_opportunities{scope="RUN"} 30
+# TYPE crypto_tca_fills gauge
+crypto_tca_fills{scope="RUN"} 154
+# TYPE crypto_tca_rejects gauge
+crypto_tca_rejects{scope="RUN"} 30
+# TYPE crypto_tca_cancels gauge
+crypto_tca_cancels{scope="RUN"} 0
+# TYPE crypto_tca_unwind_orders gauge
+crypto_tca_unwind_orders{scope="RUN"} 8
+# TYPE crypto_tca_open_residual_base gauge
+crypto_tca_open_residual_base{scope="RUN"} 0
+# TYPE crypto_tca_weighted_slippage_bps gauge
+crypto_tca_weighted_slippage_bps{scope="RUN"} -0.5297513498411379496199720755
+# TYPE crypto_tca_fees gauge
+crypto_tca_fees{scope="RUN"} 4.7793844800000
+# TYPE crypto_tca_net_pnl gauge
+crypto_tca_net_pnl{scope="RUN"} -4.6995094800000
+# TYPE crypto_structured_logs_records gauge
+crypto_structured_logs_records{mode="REPLAY"} 84948
+# TYPE crypto_structured_logs_errors gauge
+crypto_structured_logs_errors{mode="REPLAY"} 68
+# TYPE crypto_structured_logs_warnings gauge
+crypto_structured_logs_warnings{mode="REPLAY"} 95
+# TYPE crypto_structured_logs_failed_opportunities gauge
+crypto_structured_logs_failed_opportunities{mode="REPLAY"} 30

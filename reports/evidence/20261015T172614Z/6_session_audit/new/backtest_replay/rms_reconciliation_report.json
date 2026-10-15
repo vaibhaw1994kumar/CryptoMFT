@@ -1,0 +1,18 @@
+{
+  "counts": {
+    "fills": 154,
+    "issues": 0,
+    "local_orders": 184,
+    "venue_orders": 0,
+    "venue_snapshots": 0
+  },
+  "decision": "APPROVED",
+  "issues": [],
+  "reconciliation_id": "e5186fb7-db78-5e9c-99fb-7632aaacf20e",
+  "schema_version": "1.0.0",
+  "ts_ns": 1789397853024235000,
+  "venue_controls": {
+    "resolved": [],
+    "suspended": []
+  }
+}

@@ -1,0 +1,18 @@
+{
+  "decision": "INPUT_MISSING",
+  "lineage_complete": 65,
+  "lineage_incomplete": [
+    "cycle-0006-20260914T142731Z/part-000002",
+    "cycle-0007-20260914T145802Z/part-000002",
+    "cycle-0008-20260914T152833Z/part-000001",
+    "cycle-0009-20260914T155903Z/part-000001",
+    "cycle-0009-20260914T155903Z/part-000002",
+    "cycle-0011-20260914T170034Z/part-000001"
+  ],
+  "paper_event_files": 46,
+  "paper_events_mismatched": [],
+  "paper_events_missing": [],
+  "parts": 71,
+  "raw_present_but_mismatched": [],
+  "scope": "recorded input files (presence and checksums)"
+}

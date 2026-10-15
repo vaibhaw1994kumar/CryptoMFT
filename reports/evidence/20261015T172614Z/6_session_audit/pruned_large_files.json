@@ -1,0 +1,20 @@
+{
+  "limit_bytes": 5000000,
+  "removed": [
+    {
+      "bytes": 161310172,
+      "path": "backtest_replay/canonical_events.jsonl",
+      "sha256": "84b619aa9501a22afc163626461f3ada0eb5a379f36df3997ebbfea3950ebf1d"
+    },
+    {
+      "bytes": 70931965,
+      "path": "backtest_replay/structured_logs.jsonl",
+      "sha256": "4d0882c92b91c734dfbfe9deb4d8d8d4b0d744628bc4de5dcba3cdc1fe61c6d8"
+    },
+    {
+      "bytes": 67600384,
+      "path": "backtest_replay/structured_logs.sqlite",
+      "sha256": "91e51591c0d39b6de661a185e4e16828b199ea2d9879207cbc8bcec855cd7e91"
+    }
+  ]
+}

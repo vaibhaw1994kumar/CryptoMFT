@@ -1,0 +1,448 @@
+{
+  "engine": "cpp_mm_matching_engine",
+  "feed_lag_ns": 0,
+  "fill_records": 2000,
+  "fill_records_dropped": 0,
+  "fills_path": "maker_cpp_fills.jsonl",
+  "initial_inventory": 0.005,
+  "instrument_id": "BTC-USDT-SPOT",
+  "latency": {
+    "defaulted_venues": [],
+    "profiles": {
+      "BINANCE": {
+        "cancel": {
+          "base_ns": 40000000,
+          "jitter_ns": 0,
+          "max_ns": 2000000000,
+          "min_ns": 300000,
+          "model": "lognormal",
+          "std_ns": 8000000,
+          "tail_ns": 0,
+          "tail_probability": 0.0
+        },
+        "entry": {
+          "base_ns": 40000000,
+          "jitter_ns": 0,
+          "max_ns": 2000000000,
+          "min_ns": 300000,
+          "model": "lognormal",
+          "std_ns": 8000000,
+          "tail_ns": 0,
+          "tail_probability": 0.0
+        },
+        "fill": {
+          "base_ns": 36000000,
+          "jitter_ns": 0,
+          "max_ns": 2000000000,
+          "min_ns": 300000,
+          "model": "lognormal",
+          "std_ns": 8000000,
+          "tail_ns": 0,
+          "tail_probability": 0.0
+        },
+        "market_data": {
+          "base_ns": 36000000,
+          "jitter_ns": 0,
+          "max_ns": 2000000000,
+          "min_ns": 300000,
+          "model": "lognormal",
+          "std_ns": 8000000,
+          "tail_ns": 0,
+          "tail_probability": 0.0
+        },
+        "risk": {
+          "base_ns": 100000,
+          "jitter_ns": 50000,
+          "max_ns": 0,
+          "min_ns": 0,
+          "model": "uniform",
+          "std_ns": 0,
+          "tail_ns": 0,
+          "tail_probability": 0.0
+        },
+        "strategy": {
+          "base_ns": 200000,
+          "jitter_ns": 100000,
+          "max_ns": 0,
+          "min_ns": 0,
+          "model": "uniform",
+          "std_ns": 0,
+          "tail_ns": 0,
+          "tail_probability": 0.0
+        },
+        "submit_ack": {
+          "base_ns": 36000000,
+          "jitter_ns": 0,
+          "max_ns": 2000000000,
+          "min_ns": 300000,
+          "model": "lognormal",
+          "std_ns": 8000000,
+          "tail_ns": 0,
+          "tail_probability": 0.0
+        },
+        "venue": "BINANCE"
+      },
+      "BYBIT": {
+        "cancel": {
+          "base_ns": 6000000,
+          "jitter_ns": 0,
+          "max_ns": 2000000000,
+          "min_ns": 300000,
+          "model": "lognormal",
+          "std_ns": 2500000,
+          "tail_ns": 0,
+          "tail_probability": 0.0
+        },
+        "entry": {
+          "base_ns": 6000000,
+          "jitter_ns": 0,
+          "max_ns": 2000000000,
+          "min_ns": 300000,
+          "model": "lognormal",
+          "std_ns": 2500000,
+          "tail_ns": 0,
+          "tail_probability": 0.0
+        },
+        "fill": {
+          "base_ns": 2000000,
+          "jitter_ns": 0,
+          "max_ns": 2000000000,
+          "min_ns": 300000,
+          "model": "lognormal",
+          "std_ns": 2500000,
+          "tail_ns": 0,
+          "tail_probability": 0.0
+        },
+        "market_data": {
+          "base_ns": 2000000,
+          "jitter_ns": 0,
+          "max_ns": 2000000000,
+          "min_ns": 300000,
+          "model": "lognormal",
+          "std_ns": 2500000,
+          "tail_ns": 0,
+          "tail_probability": 0.0
+        },
+        "risk": {
+          "base_ns": 100000,
+          "jitter_ns": 50000,
+          "max_ns": 0,
+          "min_ns": 0,
+          "model": "uniform",
+          "std_ns": 0,
+          "tail_ns": 0,
+          "tail_probability": 0.0
+        },
+        "strategy": {
+          "base_ns": 200000,
+          "jitter_ns": 100000,
+          "max_ns": 0,
+          "min_ns": 0,
+          "model": "uniform",
+          "std_ns": 0,
+          "tail_ns": 0,
+          "tail_probability": 0.0
+        },
+        "submit_ack": {
+          "base_ns": 2000000,
+          "jitter_ns": 0,
+          "max_ns": 2000000000,
+          "min_ns": 300000,
+          "model": "lognormal",
+          "std_ns": 2500000,
+          "tail_ns": 0,
+          "tail_probability": 0.0
+        },
+        "venue": "BYBIT"
+      }
+    },
+    "schema_version": "1.0.0",
+    "seed": 2465239424,
+    "source": "maker:preset:singapore",
+    "stages": {
+      "BINANCE.cancel": {
+        "count": 578,
+        "event_pair": [
+          "cancel_send_ts",
+          "cancel_applied_ts"
+        ],
+        "max_ns": 69712508,
+        "mean_ns": 40296743,
+        "p50_ns": 39715847,
+        "p95_ns": 54239318,
+        "p99_ns": 61021682,
+        "window": 578
+      },
+      "BINANCE.entry": {
+        "count": 1132,
+        "event_pair": [
+          "order_send_ts",
+          "venue_match_ts"
+        ],
+        "max_ns": 73420795,
+        "mean_ns": 39889654,
+        "p50_ns": 39107541,
+        "p95_ns": 54189897,
+        "p99_ns": 62983577,
+        "window": 1132
+      },
+      "BINANCE.fill": {
+        "count": 1130,
+        "event_pair": [
+          "venue_match_ts",
+          "fill_observed_ts"
+        ],
+        "max_ns": 69503094,
+        "mean_ns": 36345789,
+        "p50_ns": 35486237,
+        "p95_ns": 52103770,
+        "p99_ns": 60329280,
+        "window": 1130
+      },
+      "BINANCE.risk": {
+        "count": 1763,
+        "event_pair": [
+          "decision_ts",
+          "route_decision_ts"
+        ],
+        "max_ns": 149996,
+        "mean_ns": 124853,
+        "p50_ns": 125278,
+        "p95_ns": 147215,
+        "p99_ns": 149548,
+        "window": 1763
+      },
+      "BINANCE.strategy": {
+        "count": 1763,
+        "event_pair": [
+          "receive_ts",
+          "decision_ts"
+        ],
+        "max_ns": 299992,
+        "mean_ns": 249839,
+        "p50_ns": 250380,
+        "p95_ns": 295369,
+        "p99_ns": 299311,
+        "window": 1763
+      },
+      "BINANCE.submit_ack": {
+        "count": 607,
+        "event_pair": [
+          "venue_match_ts",
+          "ack_observed_ts"
+        ],
+        "max_ns": 73904610,
+        "mean_ns": 36379252,
+        "p50_ns": 35273784,
+        "p95_ns": 51386253,
+        "p99_ns": 62074007,
+        "window": 607
+      },
+      "BYBIT.cancel": {
+        "count": 796,
+        "event_pair": [
+          "cancel_send_ts",
+          "cancel_applied_ts"
+        ],
+        "max_ns": 17678125,
+        "mean_ns": 6011599,
+        "p50_ns": 5572534,
+        "p95_ns": 10579057,
+        "p99_ns": 13305012,
+        "window": 796
+      },
+      "BYBIT.entry": {
+        "count": 1513,
+        "event_pair": [
+          "order_send_ts",
+          "venue_match_ts"
+        ],
+        "max_ns": 21536707,
+        "mean_ns": 6060091,
+        "p50_ns": 5586976,
+        "p95_ns": 10806785,
+        "p99_ns": 13616502,
+        "window": 1513
+      },
+      "BYBIT.fill": {
+        "count": 870,
+        "event_pair": [
+          "venue_match_ts",
+          "fill_observed_ts"
+        ],
+        "max_ns": 29224739,
+        "mean_ns": 2055228,
+        "p50_ns": 1286175,
+        "p95_ns": 6053490,
+        "p99_ns": 16103207,
+        "window": 870
+      },
+      "BYBIT.risk": {
+        "count": 1799,
+        "event_pair": [
+          "decision_ts",
+          "route_decision_ts"
+        ],
+        "max_ns": 149990,
+        "mean_ns": 124159,
+        "p50_ns": 123830,
+        "p95_ns": 147213,
+        "p99_ns": 149639,
+        "window": 1799
+      },
+      "BYBIT.strategy": {
+        "count": 1799,
+        "event_pair": [
+          "receive_ts",
+          "decision_ts"
+        ],
+        "max_ns": 299943,
+        "mean_ns": 251195,
+        "p50_ns": 250735,
+        "p95_ns": 295584,
+        "p99_ns": 299097,
+        "window": 1799
+      },
+      "BYBIT.submit_ack": {
+        "count": 801,
+        "event_pair": [
+          "venue_match_ts",
+          "ack_observed_ts"
+        ],
+        "max_ns": 33589621,
+        "mean_ns": 2034764,
+        "p50_ns": 1217332,
+        "p95_ns": 6071641,
+        "p99_ns": 11999725,
+        "window": 801
+      }
+    }
+  },
+  "limitations": [
+    "Passive at-touch quoting harness for fill-model validation, not a strategy.",
+    "Fills are strictly print-driven: a book that crosses a resting order without a print reaching its queue is counted in crossed_without_print, never filled.",
+    "Cancellations ahead of a resting order are only inferred when the visible level shrinks below the order's queue ahead (conservative).",
+    "The recorded receive_ts_ns is the event clock; an order's arrival is placed on that clock without an extra market-data leg, as in the OMS replay."
+  ],
+  "max_inventory": 0.01,
+  "queue_position_frac": 1.0,
+  "quote_cadence": {
+    "quote_interval_ns": 1000000000
+  },
+  "quote_interval_ns": 1000000000,
+  "quote_size": 0.001,
+  "replay": {
+    "book_events": 79365,
+    "ordering": "arrival_ordinal",
+    "rejected_invalid_envelopes": {},
+    "trades": 151443
+  },
+  "schema_version": "2.0.0",
+  "source": "sim_engine mm_matching_engine (crypto_stat_arb copy with queue-accounting fixes)",
+  "symbol": "BTC/USDT",
+  "timeline": {
+    "clock": "receive-time event clock (SimulationClock)",
+    "clock_regressions": 1,
+    "timers_fired": 15010
+  },
+  "venues": {
+    "BINANCE": {
+      "book_events": 17457,
+      "buy_quantity": 0.2629999999999986,
+      "cancel_rejects_too_late": 3,
+      "cancel_rejects_unknown_order": 0,
+      "cancels_applied": 575,
+      "cancels_sent": 578,
+      "crossed_without_print": 102,
+      "fees": 8.211521752000001,
+      "fill_ratio": 0.9982332155477032,
+      "fills": 1130,
+      "fills_trade_through": 378,
+      "fills_while_cancel_pending": 9,
+      "invalid_book_events": 226,
+      "inventory": 0.008000000000000028,
+      "inventory_range": [
+        0.0,
+        0.01000000000000003
+      ],
+      "known_inventory": 0.008000000000000024,
+      "mark_to_market_pnl_quote": -13.705186751999113,
+      "markout_bps": {
+        "1000ms": {
+          "count": 1130,
+          "mean": -0.9839604115144265
+        },
+        "5000ms": {
+          "count": 1128,
+          "mean": -1.1877587231849036
+        }
+      },
+      "markouts_truncated": 2,
+      "mean_queue_ahead_at_arrival": 3.5757147727272747,
+      "order_states": {
+        "CANCELLED": 575,
+        "FILLED": 523,
+        "REJECTED": 32,
+        "RESTING": 2
+      },
+      "orders_filled": 524,
+      "orders_rested": 1100,
+      "post_only_rejects": 32,
+      "quotes": 1132,
+      "quotes_kept": 1787,
+      "sanity_violation_count": 0,
+      "sanity_violations": [],
+      "sell_quantity": 0.2599999999999993,
+      "trades_seen": 131342
+    },
+    "BYBIT": {
+      "book_events": 61682,
+      "buy_quantity": 0.35600000000000026,
+      "cancel_rejects_too_late": 1,
+      "cancel_rejects_unknown_order": 0,
+      "cancels_applied": 795,
+      "cancels_sent": 796,
+      "crossed_without_print": 256,
+      "fees": 11.152935316299992,
+      "fill_ratio": 0.5750165234633179,
+      "fills": 870,
+      "fills_trade_through": 504,
+      "fills_while_cancel_pending": 1,
+      "invalid_book_events": 0,
+      "inventory": 0.006635000000000014,
+      "inventory_range": [
+        -8.673617379884035e-19,
+        0.010000000000000002
+      ],
+      "known_inventory": 0.006635000000000014,
+      "mark_to_market_pnl_quote": -17.2202115662995,
+      "markout_bps": {
+        "1000ms": {
+          "count": 870,
+          "mean": -1.0102823968012933
+        },
+        "5000ms": {
+          "count": 867,
+          "mean": -1.198901569836366
+        }
+      },
+      "markouts_truncated": 3,
+      "mean_queue_ahead_at_arrival": 0.5039890650298611,
+      "order_states": {
+        "CANCELLED": 795,
+        "FILLED": 710,
+        "REJECTED": 6,
+        "RESTING": 2
+      },
+      "orders_filled": 710,
+      "orders_rested": 1507,
+      "post_only_rejects": 6,
+      "quotes": 1513,
+      "quotes_kept": 1625,
+      "sanity_violation_count": 0,
+      "sanity_violations": [],
+      "sell_quantity": 0.35436500000000026,
+      "trades_seen": 20101
+    }
+  }
+}

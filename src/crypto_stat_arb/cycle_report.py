@@ -20,7 +20,7 @@ COMPONENTS = (
     "orderbook_replay", "backtest_replay", "simulation", "dry_run",
     "strategies", "security_master", "errors",
 )
-RANK = {"OK": 0, "WARN": 1, "FAIL": 2}
+RANK = {"OK": 0, "WARN": 1, "INPUT_MISSING": 2, "FAIL": 3}
 
 
 def _json(path: Path) -> Any:

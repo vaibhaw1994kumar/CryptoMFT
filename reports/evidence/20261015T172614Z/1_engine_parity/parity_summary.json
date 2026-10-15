@@ -1,0 +1,101 @@
+{
+  "cpp": {
+    "engine": "cpp_mm_matching_engine",
+    "fill_rows": 2000,
+    "fills_sha256": "8cbe23aefa9b944561dc135b5b2f2961392653c9ea09a2e08bfba3170f8aadfa",
+    "replay": {
+      "book_events": 79365,
+      "ordering": "arrival_ordinal",
+      "rejected_invalid_envelopes": {},
+      "trades": 151443
+    },
+    "runtime_s": 25.4,
+    "venues": {
+      "BINANCE": {
+        "cancels_applied": 575,
+        "cancels_sent": 578,
+        "crossed_without_print": 102,
+        "fees": 8.211521752000001,
+        "fills": 1130,
+        "fills_trade_through": 378,
+        "fills_while_cancel_pending": 9,
+        "inventory": 0.008000000000000028,
+        "mark_to_market_pnl_quote": -13.705186751999113,
+        "mean_queue_ahead_at_arrival": 3.5757147727272747,
+        "orders_filled": 524,
+        "post_only_rejects": 32,
+        "quotes": 1132,
+        "quotes_kept": 1787,
+        "sanity_violation_count": 0
+      },
+      "BYBIT": {
+        "cancels_applied": 795,
+        "cancels_sent": 796,
+        "crossed_without_print": 256,
+        "fees": 11.152935316299992,
+        "fills": 870,
+        "fills_trade_through": 504,
+        "fills_while_cancel_pending": 1,
+        "inventory": 0.006635000000000014,
+        "mark_to_market_pnl_quote": -17.2202115662995,
+        "mean_queue_ahead_at_arrival": 0.5039890650298611,
+        "orders_filled": 710,
+        "post_only_rejects": 6,
+        "quotes": 1513,
+        "quotes_kept": 1625,
+        "sanity_violation_count": 0
+      }
+    }
+  },
+  "cycle": "cycle-0006-20260914T142731Z",
+  "decision": "PASS",
+  "fills_byte_identical": true,
+  "python": {
+    "engine": "python_queue_model",
+    "fill_rows": 2000,
+    "fills_sha256": "8cbe23aefa9b944561dc135b5b2f2961392653c9ea09a2e08bfba3170f8aadfa",
+    "replay": {
+      "book_events": 79365,
+      "ordering": "arrival_ordinal",
+      "rejected_invalid_envelopes": {},
+      "trades": 151443
+    },
+    "runtime_s": 24.2,
+    "venues": {
+      "BINANCE": {
+        "cancels_applied": 575,
+        "cancels_sent": 578,
+        "crossed_without_print": 102,
+        "fees": 8.211521752000001,
+        "fills": 1130,
+        "fills_trade_through": 378,
+        "fills_while_cancel_pending": 9,
+        "inventory": 0.008000000000000028,
+        "mark_to_market_pnl_quote": -13.705186751999113,
+        "mean_queue_ahead_at_arrival": 3.5757147727272747,
+        "orders_filled": 524,
+        "post_only_rejects": 32,
+        "quotes": 1132,
+        "quotes_kept": 1787,
+        "sanity_violation_count": 0
+      },
+      "BYBIT": {
+        "cancels_applied": 795,
+        "cancels_sent": 796,
+        "crossed_without_print": 256,
+        "fees": 11.152935316299992,
+        "fills": 870,
+        "fills_trade_through": 504,
+        "fills_while_cancel_pending": 1,
+        "inventory": 0.006635000000000014,
+        "mark_to_market_pnl_quote": -17.2202115662995,
+        "mean_queue_ahead_at_arrival": 0.5039890650298611,
+        "orders_filled": 710,
+        "post_only_rejects": 6,
+        "quotes": 1513,
+        "quotes_kept": 1625,
+        "sanity_violation_count": 0
+      }
+    }
+  }
+}

@@ -72,6 +72,79 @@ def venue_brief(report: dict) -> dict:
     return {venue: {k: row.get(k) for k in keys} for venue, row in report["venues"].items()}
 
 
+def prune_large_files(folder: Path, record: Path, limit_bytes: int = 5_000_000) -> None:
+    """Drop bulky intermediates (replayed events, logs) but keep their hashes.
+
+    The audit's backtest replay rewrites the whole event stream and logs
+    (hundreds of MB); the bundle keeps the reports and records each removed
+    file's size and SHA-256 so it can be regenerated and checked.
+    """
+    removed = []
+    for path in sorted(folder.rglob("*")):
+        if path.is_file() and path.stat().st_size > limit_bytes:
+            removed.append({"path": str(path.relative_to(folder)), "bytes": path.stat().st_size,
+                            "sha256": digest(path)})
+            path.unlink()
+    write(record, {"limit_bytes": limit_bytes, "removed": removed})
+
+
+# 0 -----------------------------------------------------------------------------
+def data_integrity(out: Path) -> dict:
+    """Which recorded inputs exist, and whether restored files are exact.
+
+    raw.jsonl must hash to raw_manifest.json's raw_file_sha256 (written live);
+    paper/canonical_events.jsonl must hash to the events_sha256 that the
+    original audit's backtest replay recorded.
+    """
+    parts_rows, cycle_rows = [], []
+    for cycle in sorted(LIVE.glob("cycle-*")):
+        for part in parts(cycle):
+            manifest = json.loads((part / "raw_manifest.json").read_text()) if (part / "raw_manifest.json").exists() else {}
+            raw = part / "raw.jsonl"
+            raw_ok = raw.exists() and manifest.get("raw_file_sha256") == digest(raw)
+            parts_rows.append({
+                "cycle": cycle.name, "part": part.name,
+                "wire_present": (part / "wire.jsonl").exists(), "raw_present": raw.exists(),
+                "raw_matches_manifest_sha256": raw_ok,
+                "canonical_present": (part / "canonical.jsonl").exists(),
+                "trades_present": (part / "trades.jsonl").exists(),
+                "trace_present": (part / "trace.jsonl").exists(),
+                "lineage": "COMPLETE" if (part / "wire.jsonl").exists() and raw_ok else "INCOMPLETE",
+            })
+        paper = cycle / "paper" / "canonical_events.jsonl"
+        recorded = ROOT / "runs/paper_watch/audits" / cycle.name / "backtest_replay" / "manifest.json"
+        expected = json.loads(recorded.read_text()).get("events_sha256") if recorded.exists() else None
+        if (cycle / "paper").exists():
+            cycle_rows.append({
+                "cycle": cycle.name, "paper_events_present": paper.exists(),
+                "matches_original_audit_sha256": (
+                    None if expected is None or not paper.exists() else digest(paper) == expected
+                ),
+            })
+    import csv as _csv
+    for name, rows in (("parts.csv", parts_rows), ("paper_events.csv", cycle_rows)):
+        with (out / name).open("w", newline="") as handle:
+            writer = _csv.DictWriter(handle, fieldnames=list(rows[0]))
+            writer.writeheader()
+            writer.writerows(rows)
+    incomplete = [f"{r['cycle']}/{r['part']}" for r in parts_rows if r["lineage"] == "INCOMPLETE"]
+    mismatched_raw = [f"{r['cycle']}/{r['part']}" for r in parts_rows if r["raw_present"] and not r["raw_matches_manifest_sha256"]]
+    result = {
+        "parts": len(parts_rows), "lineage_complete": len(parts_rows) - len(incomplete),
+        "lineage_incomplete": incomplete, "raw_present_but_mismatched": mismatched_raw,
+        "paper_event_files": len(cycle_rows),
+        "paper_events_missing": [r["cycle"] for r in cycle_rows if not r["paper_events_present"]],
+        "paper_events_mismatched": [r["cycle"] for r in cycle_rows if r["matches_original_audit_sha256"] is False],
+        "scope": "recorded input files (presence and checksums)",
+    }
+    result["decision"] = (
+        "FAIL" if mismatched_raw or result["paper_events_mismatched"]
+        else "INPUT_MISSING" if incomplete or result["paper_events_missing"] else "PASS"
+    )
+    write(out / "summary.json", result)
+    return result
+
+
 # 1 -----------------------------------------------------------------------------
 def engine_parity(out: Path) -> dict:
     result = {"cycle": CYCLE6.name}
@@ -285,6 +358,16 @@ def session_audit(out: Path) -> dict:
         "new": {"simulation": sim(audit["components"]["simulation"]),
                 "components": {k: v["status"] for k, v in audit["components"].items()}},
     }
+    audit_new = json.loads((out / "new" / "session_audit.json").read_text())
+    prune_large_files(out / "new", out / "pruned_large_files.json")
+    result["full_audit_overall"] = audit_new["overall_status"]
+    result["full_audit_issues"] = [
+        {k: issue.get(k) for k in ("component", "check", "status", "detail")}
+        for issue in audit_new["issues"] if issue["status"] in ("FAIL", "INPUT_MISSING")
+    ]
+    # The decision covers the maker simulation component only; the full
+    # session audit status is reported beside it and never folded into PASS.
+    result["scope"] = "maker simulation component of analyze-session"
     result["decision"] = "PASS" if result["new"]["simulation"]["status"] == "OK" else "FAIL"
     write(out / "comparison.json", result)
     return result
@@ -326,6 +409,7 @@ def sensitivity_sweep(out: Path) -> dict:
 
 
 CHECKS = [
+    ("0_data_integrity", "Recorded inputs present and checksum-exact", data_integrity),
     ("1_engine_parity", "C++ vs Python engine parity", engine_parity),
     ("2_cpp_semantics", "C++ queue semantics smoke test", cpp_semantics),
     ("3_live_replay_parity", "Live paper vs replay parity", live_replay_parity),
@@ -347,6 +431,8 @@ def main() -> None:
         print(f"[{folder}] {title} ...", flush=True)
         result = func(out)
         summary["checks"][folder] = {"title": title, "decision": result.get("decision"),
+                                     "scope": result.get("scope", title),
+                                     "full_audit_overall": result.get("full_audit_overall"),
                                      "seconds": round(time.time() - started, 1), "result": result}
         print(f"[{folder}] {result.get('decision')} ({time.time() - started:.0f}s)", flush=True)
     files = {str(p.relative_to(root)): {"bytes": p.stat().st_size, "sha256": digest(p)}
@@ -354,8 +440,13 @@ def main() -> None:
     summary["files"] = files
     write(root / "evidence_summary.json", summary)
     lines = [f"# Maker execution-realism evidence ({stamp})", "",
-             "| Check | Decision | Folder |", "|---|---|---|"]
-    lines += [f"| {c['title']} | {c['decision']} | `{k}/` |" for k, c in summary["checks"].items()]
+             "Each decision covers only the scope stated; the full session audit status",
+             "is reported separately and is not implied by a PASS here.", "",
+             "| Check | Scope | Decision | Full audit overall | Folder |", "|---|---|---|---|---|"]
+    lines += [
+        f"| {c['title']} | {c['scope']} | {c['decision']} | {c.get('full_audit_overall') or 'n/a'} | `{k}/` |"
+        for k, c in summary["checks"].items()
+    ]
     lines += ["", f"{len(files)} files; SHA-256 of each in `evidence_summary.json`."]
     (root / "INDEX.md").write_text("\n".join(lines) + "\n")
     print(root)

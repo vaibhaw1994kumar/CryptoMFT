@@ -298,7 +298,7 @@ class Watcher:
                 record["comparison"] = comparison.get("decision")
                 for issue in audit["issues"]:
                     self.alert(
-                        "ERROR" if issue["status"] == "FAIL" else "WARN",
+                        "ERROR" if issue["status"] in ("FAIL", "INPUT_MISSING") else "WARN",
                         f"{issue['component']}.{issue['check']}", issue["detail"], session_id,
                     )
                 self.emit(

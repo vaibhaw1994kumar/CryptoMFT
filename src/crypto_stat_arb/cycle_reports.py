@@ -32,7 +32,9 @@ import zipfile
 from .cycle_report import COMPONENTS, _cycle_row, _json
 
 
-STATUS_ORDER = {"FAIL": 0, "WARN": 1, "NOT_EXERCISED": 2, "PASS": 3}
+# INPUT_MISSING: the evidence for a requirement was deleted or never written,
+# so it cannot be assessed (distinct from a requirement that failed).
+STATUS_ORDER = {"FAIL": 0, "INPUT_MISSING": 1, "WARN": 2, "NOT_EXERCISED": 3, "PASS": 4}
 CHROME_CANDIDATES = (
     "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
     "/Applications/Chromium.app/Contents/MacOS/Chromium",
@@ -112,6 +114,7 @@ def assess_requirements(row: dict[str, Any], extra: dict[str, Any], performance:
     add(
         "MR-01", "Multi-venue public capture and raw retention",
         "FAIL" if not both or components.get("historical_storage") == "FAIL"
+        else "INPUT_MISSING" if components.get("historical_storage") == "INPUT_MISSING"
         else "WARN" if unstable else "PASS",
         f"Book events {events}; trades {row.get('trades_by_venue')}; wire and raw files hash-chained "
         f"({components.get('historical_storage')}).",
@@ -147,6 +150,7 @@ def assess_requirements(row: dict[str, Any], extra: dict[str, Any], performance:
     add(
         "MR-04", "Ingestion, manifests and quality reports",
         "FAIL" if components.get("historical_storage") == "FAIL"
+        else "INPUT_MISSING" if components.get("historical_storage") == "INPUT_MISSING"
         else "WARN" if gate != "APPROVED" or components.get("historical_storage") == "WARN" else "PASS",
         f"{storage.get('parts')} partition(s), file SHA-256 verified, persistence lag "
         f"{_float(storage.get('max_persistence_lag_ms')) or 0:.0f} ms; quality gate {gate}.",

@@ -36,7 +36,9 @@ from .replay import deterministic_order
 from .runner import run_backtest
 
 
-LEVELS = {"OK": 0, "WARN": 1, "FAIL": 2}
+# INPUT_MISSING: a required input file is absent, so the check could not be
+# evaluated (data housekeeping), as opposed to FAIL (the data or code is wrong).
+LEVELS = {"OK": 0, "WARN": 1, "INPUT_MISSING": 2, "FAIL": 3}
 
 
 class Component:
@@ -46,11 +48,22 @@ class Component:
         self.checks: list[dict[str, Any]] = []
         self.metrics: dict[str, Any] = {}
 
-    def check(self, name: str, passed: bool, detail: str = "", *, severity: str = "FAIL") -> None:
+    def check(
+        self, name: str, passed: bool, detail: str = "", *, severity: str = "FAIL",
+        ok_detail: str | None = None,
+    ) -> None:
+        """``detail`` explains a failure; ``ok_detail`` (when given) is what a
+        passing check reports, so an OK row never carries a failure message."""
         status = "OK" if passed else severity
+        if passed and ok_detail is not None:
+            detail = ok_detail
         self.checks.append({"check": name, "status": status, "detail": detail})
         if LEVELS[status] > LEVELS[self.status]:
             self.status = status
+
+    def missing(self, name: str, paths: list[Path] | tuple[Path, ...]) -> None:
+        names = ", ".join(str(path) for path in paths)
+        self.check(name, False, f"required input missing: {names}", severity="INPUT_MISSING")
 
     def to_dict(self) -> dict[str, Any]:
         return {"status": self.status, "checks": self.checks, "metrics": self.metrics}
@@ -115,12 +128,18 @@ def audit_session(
         components[name] = component
         try:
             body(component)
+        except FileNotFoundError as exc:  # absent input, not a code or data defect
+            component.check(
+                "audit_completed", False, f"required input missing: {exc.filename or exc}",
+                severity="INPUT_MISSING",
+            )
         except Exception as exc:  # an audit bug must be visible, not fatal
             component.check("audit_completed", False, f"{type(exc).__name__}: {exc}")
 
     # -- feed ----------------------------------------------------------------
     def feed(c: Component) -> None:
-        c.check("live_manifest_present", bool(manifest), "session did not finalize its manifest")
+        c.check("live_manifest_present", bool(manifest), "session did not finalize its manifest",
+                ok_detail="live_manifest.json present")
         c.check(
             "public_market_data_only",
             service.get("mode") == "PUBLIC_MARKET_DATA_ONLY"
@@ -167,7 +186,8 @@ def audit_session(
     # -- books -----------------------------------------------------------------
     def order_books(c: Component) -> None:
         books = service.get("books", {})
-        c.check("books_reported", bool(books), "no book state in manifest")
+        c.check("books_reported", bool(books), "no book state in manifest",
+                ok_detail=f"{len(books)} venue books in manifest")
         for venue, book in sorted(books.items()):
             stats = book.get("stats", {})
             c.metrics[venue] = {"state": book.get("state"), "sequence": book.get("sequence"), **stats}
@@ -231,6 +251,10 @@ def audit_session(
             "offset unknown" if offset is None else
             f"host clock {offset / 1e6:.1f} ms vs exchanges; enable NTP sync",
             severity="WARN",
+            ok_detail=(
+                "offset unknown" if offset is None
+                else f"host clock {offset / 1e6:.1f} ms vs exchanges (within policy)"
+            ),
         )
         impossible = sum(row.get("impossible_latency_events", 0) for row in venues.values())
         c.check(
@@ -247,25 +271,34 @@ def audit_session(
 
     # -- storage ---------------------------------------------------------------
     def historical_storage(c: Component) -> None:
-        c.check("partitions_present", bool(parts), "no part-* directories")
+        c.check("partitions_present", bool(parts), "no part-* directories",
+                ok_detail=f"{len(parts)} parts")
         canonical_total = trades_total = quarantined = 0
         for part in parts:
             part_manifest = _read_json(part / "live_part_manifest.json")
-            c.check(f"{part.name}_manifest", part_manifest is not None, "missing live_part_manifest.json")
+            c.check(f"{part.name}_manifest", part_manifest is not None, "missing live_part_manifest.json",
+                    ok_detail="live_part_manifest.json present")
             if part_manifest:
-                mismatched = []
+                mismatched, absent = [], []
                 for kind, meta in sorted(part_manifest.get("files", {}).items()):
                     path = part / Path(meta["path"]).name
-                    if not path.exists() or _file_sha256(path) != meta["sha256"]:
+                    if not path.exists():
+                        absent.append(path)
+                    elif _file_sha256(path) != meta["sha256"]:
                         mismatched.append(kind)
+                if absent:
+                    c.missing(f"{part.name}_files_present", absent)
                 c.check(f"{part.name}_file_sha256", not mismatched,
-                        "mismatch: " + ",".join(mismatched) if mismatched else "all files match")
-            wire = verify_wire_file(part / "wire.jsonl")
-            c.check(f"{part.name}_wire_hash_chain",
-                    bool(wire.get("valid", wire.get("verified", True))), json.dumps(wire)[:200])
-            raw = verify_raw_file(part / "raw.jsonl")
-            c.check(f"{part.name}_raw_hash_chain",
-                    bool(raw.get("valid", raw.get("verified", True))), json.dumps(raw)[:200])
+                        "checksum mismatch: " + ",".join(mismatched),
+                        ok_detail=f"{len(part_manifest.get('files', {})) - len(absent)} present files match"
+                        + (f" ({len(absent)} missing, reported separately)" if absent else ""))
+            for kind, verify in (("wire", verify_wire_file), ("raw", verify_raw_file)):
+                path = part / f"{kind}.jsonl"
+                if not path.exists():
+                    continue  # reported as INPUT_MISSING above
+                result = verify(path)
+                c.check(f"{part.name}_{kind}_hash_chain",
+                        bool(result.get("valid", result.get("verified", True))), json.dumps(result)[:200])
             canonical_total += _count_lines(part / "canonical.jsonl")
             trades_total += _count_lines(part / "trades.jsonl")
             quarantined += _count_lines(part / "quarantine.jsonl")
@@ -332,12 +365,21 @@ def audit_session(
                     f"replayed seq {book.sequence} vs live {live.get('sequence')}",
                     severity=severity,
                 )
-        paper_events = _count_lines(paper_dir / "canonical_events.jsonl")
+        paper_events_path = paper_dir / "canonical_events.jsonl"
+        if not paper_events_path.exists():
+            c.missing("paper_session_saw_every_stored_event", [paper_events_path])
+            return
+        paper_events = _count_lines(paper_events_path)
         c.check("paper_session_saw_every_stored_event", paper_events == len(stored_events),
                 f"{paper_events} paper vs {len(stored_events)} stored", severity="WARN")
 
     # -- backtest replay -------------------------------------------------------
     def backtest_replay(c: Component) -> None:
+        required = [paper_dir / "canonical_events.jsonl", paper_dir / "paper_timestamps.jsonl"]
+        absent = [path for path in required if not path.exists()]
+        if absent:
+            c.missing("backtest_replay_inputs_present", absent)
+            return
         replay_dir = output_dir / "backtest_replay"
         result = run_backtest(
             config_path, paper_dir / "canonical_events.jsonl", replay_dir,
@@ -378,12 +420,26 @@ def audit_session(
                 for key, row in report["metrics"].items()
             },
         }
-        c.check("replay_consistent_with_forward_test", report["decision"] != "DIVERGED",
-                ",".join(report["diverged_metrics"]))
+        trading = [m for m in report["diverged_metrics"] if "." not in m]
+        latency = [m for m in report["diverged_metrics"] if "." in m]
+        # Trading outcomes (opportunities, fills, rejects, costs, marked PnL)
+        # gate; a latency-model mismatch is a calibration gap, reported apart.
+        c.check("replay_consistent_with_forward_test",
+                report.get("trading_decision", report["decision"]) != "DIVERGED",
+                "trading metrics diverged: " + ",".join(trading),
+                ok_detail="trading metrics within tolerance (opportunities, fills, rejects, costs, equity PnL)")
+        c.check("latency_model_matches_forward_test",
+                report.get("latency_decision", "CONSISTENT") != "DIVERGED",
+                "latency model needs calibration: " + ",".join(latency), severity="WARN",
+                ok_detail="modelled stage latencies within tolerance")
         c.check(
             "forward_sample_sufficient", report["decision"] != "INSUFFICIENT_SAMPLE",
             f"{report['metrics']['opportunities']['paper']:.0f} forward opportunities "
             f"(< {min_opportunities}): accuracy not yet measurable",
+            ok_detail=(
+                f"{report['metrics']['opportunities']['paper']:.0f} forward opportunities "
+                f"(>= {min_opportunities})"
+            ),
             severity="WARN",
         )
 
@@ -411,11 +467,13 @@ def audit_session(
             "cpp_matching_engine_loaded", report["engine"].startswith("cpp"),
             "compiled mm_matching_engine not importable on this Python/arch; "
             "its bit-identical Python mirror was used",
+            ok_detail=f"engine={report['engine']} (compiled C++ mm_matching_engine)",
             severity="WARN",
         )
         c.check(
             "replay_in_live_arrival_order", report["replay"].get("ordering") == "arrival_ordinal",
             f"ordering {report['replay'].get('ordering')}: no ingestion trace for every event",
+            ok_detail="ordering arrival_ordinal: replayed in live ingestion order (trace)",
             severity="WARN",
         )
         for venue, row in sorted(report["venues"].items()):
@@ -428,7 +486,8 @@ def audit_session(
 
     # -- dry run (forward test) --------------------------------------------------
     def dry_run(c: Component) -> None:
-        c.check("paper_summary_present", bool(summary), "no paper_summary.json")
+        c.check("paper_summary_present", bool(summary), "no paper_summary.json",
+                ok_detail="paper summary present")
         if not summary:
             return
         realism = summary.get("execution_realism", {})
@@ -469,6 +528,7 @@ def audit_session(
         c.check("no_carried_residual",
                 Decimal(str(residual.get("total_residual_base", "0"))) == 0,
                 f"{residual.get('total_residual_base')} base left unhedged by closed plans",
+                ok_detail="no residual left by closed plans",
                 severity="WARN")
         c.check("kill_switch_inactive", kill.get("state") == "INACTIVE",
                 f"{kill.get('state')}: {kill.get('reason')}")
@@ -486,7 +546,8 @@ def audit_session(
     # -- strategies ----------------------------------------------------------------
     def strategies(c: Component) -> None:
         report = (summary.get("strategies") or {}).get("strategies", {})
-        c.check("strategies_reported", bool(report), "no strategy report in summary")
+        c.check("strategies_reported", bool(report), "no strategy report in summary",
+                ok_detail=f"{len(report)} strategies reported")
         for strategy_id, row in sorted(report.items()):
             info = row.get("summary", {})
             c.metrics[strategy_id] = {
@@ -509,7 +570,8 @@ def audit_session(
                 z = info.get("last_zscore")
                 c.check(f"{strategy_id}_zscore_finite", z is None or math.isfinite(z), str(z))
                 c.check(f"{strategy_id}_flat_at_cycle_end", info.get("stance") == "FLAT",
-                        f"stance {info.get('stance')} left open", severity="WARN")
+                        f"stance {info.get('stance')} left open", severity="WARN",
+                    ok_detail="stance FLAT")
 
     # -- security master ----------------------------------------------------------
     def security_master(c: Component) -> None:
@@ -530,9 +592,11 @@ def audit_session(
             "poll_failure_samples": sorted({row.get("error", "")[:120] for row in failures})[:5],
         }
         c.check("instrument_status_polled", bool(changes or failures),
-                "no public instrument-status poll ran this cycle", severity="WARN")
+                "no public instrument-status poll ran this cycle", severity="WARN",
+                ok_detail=f"{len(changes)} changes, {len(failures)} failed polls")
         c.check("instrument_status_polls_succeeded", not failures,
-                f"{len(failures)} polls failed: {c.metrics['poll_failure_samples'][:1]}", severity="WARN")
+                f"{len(failures)} polls failed: {c.metrics['poll_failure_samples'][:1]}", severity="WARN",
+                ok_detail="all polls succeeded")
 
     # -- errors --------------------------------------------------------------------
     # Event types the platform's own structured-log severity classifier

@@ -1,0 +1,13 @@
+{
+  "activated_ts_ns": null,
+  "cancel_all_on_activation": true,
+  "events": [],
+  "last_reset_reconciliation_id": "",
+  "reason": "",
+  "reconciliation_required_before_resume": false,
+  "risk_reducing_orders_allowed": true,
+  "schema_version": "1.0.0",
+  "source": "",
+  "state": "INACTIVE",
+  "strategy_new_risk_allowed": true
+}
