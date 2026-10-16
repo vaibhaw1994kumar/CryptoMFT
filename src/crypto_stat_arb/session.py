@@ -11,6 +11,7 @@ from __future__ import annotations
 from collections import deque
 from dataclasses import asdict
 from enum import StrEnum
+from decimal import Decimal
 import time
 from typing import Any, Callable
 
@@ -19,6 +20,7 @@ from .book_gate import BookIntegrityGate
 from .config import AppConfig
 from .execution import StrategyDirectedRouter, VenueExecutionAdapter
 from .latency import LatencyModel, latency_model_from_config
+from .economics import opening_balance_events
 from .ledger import Ledger
 from .models import EventType, MarketEvent, Opportunity, PlanState
 from .oms import OMS
@@ -113,6 +115,21 @@ class TradingSession:
         self.clock_ns = clock_ns
         self.wall_ns = wall_ns
         self.ledger = Ledger()
+        # Opening balances are economic events (not dict lookups), booked
+        # before the OMS can rebuild recovered fills, so as-of balances and
+        # the equity reconciliation are reproducible from events alone.
+        quote_opening = cfg.inventory_policy.initial_quote_by_venue or cfg.initial_capital_by_venue
+        opening_rows = []
+        for venue in cfg.venues:
+            spec = cfg.instruments.get(venue, cfg.instrument_id)
+            opening_rows.append((venue, spec.quote, quote_opening.get(venue, Decimal("0"))))
+            opening_rows.append((
+                venue, spec.base, cfg.inventory_policy.initial_base_by_venue.get(venue, Decimal("0")),
+            ))
+        for opening_event in opening_balance_events(opening_rows):
+            self.ledger.economics.apply(opening_event)
+        # First valid mid per book: the opening marks for equity reconciliation.
+        self.opening_marks: dict[tuple[str, str], Decimal] = {}
         self.risk = RiskEngine(
             cfg.risk_limits, cfg.account_risk_snapshots, inventory=cfg.inventory_policy
         )
@@ -217,6 +234,11 @@ class TradingSession:
         if apply_book:
             self.books[(event.venue, event.instrument_id)].apply(event)
         self.oms.on_book_update(event.venue, event.instrument_id, now)
+        book_key = (event.venue, event.instrument_id)
+        if book_key not in self.opening_marks:
+            book = self.books.get(book_key)
+            if book is not None and book.state.value == "VALID" and book.bids and book.asks:
+                self.opening_marks[book_key] = (book.best_bid + book.best_ask) / Decimal("2")
         self._notify_closed_plans()
         if gate_allowed is None:
             required = tuple(

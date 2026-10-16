@@ -1,0 +1,495 @@
+"""Economic event ledger: every value-changing event as asset postings.
+
+The trade ledger (``ledger.Ledger``) books fills, positions and PnL. This
+module records the *economics* underneath: each event is a set of postings
+``(venue, account, asset, quantity)`` so balances are kept per venue, account
+and asset (Binance USDT, Bybit USDT, Binance BTC and Bybit BTC never pool),
+fees are booked in the asset actually charged, and every balance change is
+traceable to its source event.
+
+Event types: OPENING_BALANCE, TRADE_FILL, FEE, FUNDING, BORROW_ACCRUAL,
+BORROW_REPAY, TRANSFER, DEPOSIT, WITHDRAWAL, VALUATION_ADJUSTMENT, REVERSAL.
+FUNDING, BORROW_* and TRANSFER are defined so the schema is complete; nothing
+generates them yet, and reports show them as NOT_MODELLED (never as zero).
+
+Idempotency: an event's ``idempotency_key`` is derived from cumulative source
+values (e.g. order id + cumulative filled quantity), so a replayed or restarted
+event maps to the same key. A repeated key with the identical payload is
+ignored and counted; a repeated key with a different payload raises.
+Corrections are REVERSAL events that negate the original's postings; history
+is never rewritten. Events arriving with an effective time earlier than one
+already booked are accepted and flagged as late; as-of queries order by
+``(effective_ts_ns, ordinal)``.
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+from decimal import Decimal
+from enum import StrEnum
+from hashlib import sha256
+import json
+from pathlib import Path
+from typing import Any, Iterable, Mapping
+
+ECONOMICS_SCHEMA_VERSION = "1.0.0"
+ZERO = Decimal("0")
+TRADE_PNL_ROUNDING_TOLERANCE = Decimal("1e-9")
+
+
+class EconomicEventType(StrEnum):
+    OPENING_BALANCE = "OPENING_BALANCE"
+    TRADE_FILL = "TRADE_FILL"
+    FEE = "FEE"
+    FUNDING = "FUNDING"
+    BORROW_ACCRUAL = "BORROW_ACCRUAL"
+    BORROW_REPAY = "BORROW_REPAY"
+    TRANSFER = "TRANSFER"
+    DEPOSIT = "DEPOSIT"
+    WITHDRAWAL = "WITHDRAWAL"
+    VALUATION_ADJUSTMENT = "VALUATION_ADJUSTMENT"
+    REVERSAL = "REVERSAL"
+
+
+# Categories in the equity identity. Types without a generator yet.
+NOT_MODELLED = {
+    EconomicEventType.FUNDING: "FUNDING",
+    EconomicEventType.BORROW_ACCRUAL: "BORROW",
+    EconomicEventType.BORROW_REPAY: "BORROW",
+    EconomicEventType.TRANSFER: "TRANSFER",
+}
+
+
+class EventSource(StrEnum):
+    SIMULATED = "SIMULATED"   # produced by the platform's own execution simulation
+    OBSERVED = "OBSERVED"     # reported by a venue
+    CONFIGURED = "CONFIGURED"  # operator-supplied (opening balances, manual flows)
+    ASSUMED = "ASSUMED"       # derived from an unverified assumption (e.g. fee tier)
+
+
+@dataclass(frozen=True, slots=True)
+class Posting:
+    venue: str
+    account: str
+    asset: str
+    quantity: Decimal
+
+    @property
+    def key(self) -> tuple[str, str, str]:
+        return (self.venue, self.account, self.asset)
+
+
+@dataclass(frozen=True, slots=True)
+class EconomicEvent:
+    event_type: EconomicEventType
+    idempotency_key: str
+    ts_ns: int
+    postings: tuple[Posting, ...]
+    effective_ts_ns: int | None = None
+    venue: str = ""
+    account: str = "main"
+    instrument_id: str = ""
+    source: EventSource = EventSource.SIMULATED
+    order_id: str = ""
+    fill_id: str = ""
+    reference_id: str = ""
+    reverses: str = ""
+    # Reporting-currency value of the event when it occurred (e.g. a fee's
+    # cost at fill time), with the price/FX used and where it came from.
+    reporting_value: Decimal | None = None
+    valuation_price: Decimal | None = None
+    valuation_source: str = ""
+    details: tuple[tuple[str, str], ...] = ()
+
+    @property
+    def effective(self) -> int:
+        return self.ts_ns if self.effective_ts_ns is None else self.effective_ts_ns
+
+    @property
+    def event_id(self) -> str:
+        return sha256(f"economic-event|{self.idempotency_key}".encode()).hexdigest()[:32]
+
+    def fingerprint(self) -> str:
+        """Payload identity used to tell a duplicate from a conflicting re-use of a key."""
+        row = self.to_dict()
+        row.pop("event_id", None)
+        return sha256(json.dumps(row, sort_keys=True).encode()).hexdigest()
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "event_id": self.event_id,
+            "event_type": self.event_type.value,
+            "idempotency_key": self.idempotency_key,
+            "ts_ns": self.ts_ns,
+            "effective_ts_ns": self.effective,
+            "venue": self.venue,
+            "account": self.account,
+            "instrument_id": self.instrument_id,
+            "source": self.source.value,
+            "order_id": self.order_id,
+            "fill_id": self.fill_id,
+            "reference_id": self.reference_id,
+            "reverses": self.reverses,
+            "postings": [
+                {"venue": p.venue, "account": p.account, "asset": p.asset, "quantity": str(p.quantity)}
+                for p in self.postings
+            ],
+            "reporting_value": None if self.reporting_value is None else str(self.reporting_value),
+            "valuation_price": None if self.valuation_price is None else str(self.valuation_price),
+            "valuation_source": self.valuation_source,
+            "details": dict(self.details),
+        }
+
+
+class ConflictingEventError(ValueError):
+    """The same idempotency key arrived with a different payload."""
+
+
+@dataclass(slots=True)
+class _Booked:
+    ordinal: int
+    event: EconomicEvent
+    late: bool
+
+
+class EconomicLedger:
+    def __init__(self, reporting_currency: str = "USDT") -> None:
+        self.reporting_currency = reporting_currency
+        self._booked: list[_Booked] = []
+        self._by_key: dict[str, tuple[str, int]] = {}
+        self._reversed: set[str] = set()
+        self._balances: dict[tuple[str, str, str], Decimal] = {}
+        self._max_effective: int | None = None
+        self.duplicates_ignored = 0
+        self.late_events = 0
+
+    # -- booking ---------------------------------------------------------------
+    def apply(self, event: EconomicEvent) -> bool:
+        """Book ``event`` once. Returns False for an identical duplicate."""
+        if not event.idempotency_key:
+            raise ValueError("economic event needs an idempotency_key")
+        fingerprint = event.fingerprint()
+        existing = self._by_key.get(event.idempotency_key)
+        if existing is not None:
+            if existing[0] == fingerprint:
+                self.duplicates_ignored += 1
+                return False
+            raise ConflictingEventError(
+                f"idempotency key {event.idempotency_key!r} re-used with a different payload"
+            )
+        if event.event_type == EconomicEventType.REVERSAL:
+            target = self._event_by_id(event.reverses)
+            if target is None:
+                raise ValueError(f"reversal of unknown event {event.reverses!r}")
+            if event.reverses in self._reversed:
+                raise ValueError(f"event {event.reverses!r} is already reversed")
+            expected = {(p.key, -p.quantity) for p in target.postings}
+            if {(p.key, p.quantity) for p in event.postings} != expected:
+                raise ValueError("a reversal must negate exactly the original postings")
+            self._reversed.add(event.reverses)
+        late = self._max_effective is not None and event.effective < self._max_effective
+        if late:
+            self.late_events += 1
+        self._max_effective = event.effective if self._max_effective is None else max(
+            self._max_effective, event.effective
+        )
+        ordinal = len(self._booked) + 1
+        self._booked.append(_Booked(ordinal, event, late))
+        self._by_key[event.idempotency_key] = (fingerprint, ordinal)
+        for posting in event.postings:
+            if posting.quantity:
+                self._balances[posting.key] = self._balances.get(posting.key, ZERO) + posting.quantity
+        return True
+
+    def reverse(self, event_id: str, ts_ns: int, reason: str) -> EconomicEvent:
+        target = self._event_by_id(event_id)
+        if target is None:
+            raise ValueError(f"unknown event {event_id!r}")
+        reversal = EconomicEvent(
+            event_type=EconomicEventType.REVERSAL,
+            idempotency_key=f"reversal|{event_id}",
+            ts_ns=ts_ns,
+            postings=tuple(
+                Posting(p.venue, p.account, p.asset, -p.quantity) for p in target.postings
+            ),
+            venue=target.venue, account=target.account, instrument_id=target.instrument_id,
+            source=target.source, order_id=target.order_id, reverses=event_id,
+            reporting_value=None if target.reporting_value is None else -target.reporting_value,
+            details=(("reason", reason), ("reversed_type", target.event_type.value)),
+        )
+        self.apply(reversal)
+        return reversal
+
+    def _event_by_id(self, event_id: str) -> EconomicEvent | None:
+        return next((b.event for b in self._booked if b.event.event_id == event_id), None)
+
+    # -- queries ---------------------------------------------------------------
+    @property
+    def events(self) -> list[EconomicEvent]:
+        return [b.event for b in self._booked]
+
+    def ordered(self, as_of_ns: int | None = None) -> list[EconomicEvent]:
+        rows = sorted(self._booked, key=lambda b: (b.event.effective, b.ordinal))
+        return [b.event for b in rows if as_of_ns is None or b.event.effective <= as_of_ns]
+
+    def balance(self, venue: str, asset: str, account: str = "main", as_of_ns: int | None = None) -> Decimal:
+        if as_of_ns is None:
+            return self._balances.get((venue, account, asset), ZERO)
+        total = ZERO
+        for event in self.ordered(as_of_ns):
+            for p in event.postings:
+                if p.key == (venue, account, asset):
+                    total += p.quantity
+        return total
+
+    def balances(self, as_of_ns: int | None = None) -> dict[tuple[str, str, str], Decimal]:
+        if as_of_ns is None:
+            return dict(self._balances)
+        totals: dict[tuple[str, str, str], Decimal] = {}
+        for event in self.ordered(as_of_ns):
+            for p in event.postings:
+                totals[p.key] = totals.get(p.key, ZERO) + p.quantity
+        return totals
+
+    def has_opening_balances(self) -> bool:
+        return any(b.event.event_type == EconomicEventType.OPENING_BALANCE for b in self._booked)
+
+    def postings_by_type(self, as_of_ns: int | None = None) -> dict[EconomicEventType, dict[tuple[str, str, str], Decimal]]:
+        """Net postings per event type (a REVERSAL nets against its original's type)."""
+        types: dict[str, EconomicEventType] = {b.event.event_id: b.event.event_type for b in self._booked}
+        out: dict[EconomicEventType, dict[tuple[str, str, str], Decimal]] = {}
+        for event in self.ordered(as_of_ns):
+            kind = types.get(event.reverses, event.event_type) if event.reverses else event.event_type
+            bucket = out.setdefault(kind, {})
+            for p in event.postings:
+                bucket[p.key] = bucket.get(p.key, ZERO) + p.quantity
+        return out
+
+    def summary(self) -> dict[str, Any]:
+        counts: dict[str, int] = {}
+        for b in self._booked:
+            counts[b.event.event_type.value] = counts.get(b.event.event_type.value, 0) + 1
+        return {
+            "schema_version": ECONOMICS_SCHEMA_VERSION,
+            "reporting_currency": self.reporting_currency,
+            "events": len(self._booked),
+            "events_by_type": dict(sorted(counts.items())),
+            "duplicates_ignored": self.duplicates_ignored,
+            "late_events": self.late_events,
+            "reversed_events": len(self._reversed),
+            "balances": {
+                f"{v}:{a}:{asset}": str(q) for (v, a, asset), q in sorted(self._balances.items())
+            },
+        }
+
+    def write_jsonl(self, path: Path) -> None:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with path.open("w", encoding="utf-8") as handle:
+            for b in self._booked:
+                row = b.event.to_dict()
+                row["ordinal"] = b.ordinal
+                row["late"] = b.late
+                handle.write(json.dumps(row, sort_keys=True) + "\n")
+
+
+# -- valuation and reconciliation ------------------------------------------------
+@dataclass(slots=True)
+class Valuation:
+    """Prices of assets in the reporting currency, per venue.
+
+    ``prices[(venue, asset)]``; the reporting currency itself is always 1.
+    A missing price is reported, never assumed.
+    """
+
+    reporting_currency: str
+    prices: dict[tuple[str, str], Decimal] = field(default_factory=dict)
+    sources: dict[tuple[str, str], str] = field(default_factory=dict)
+
+    def price(self, venue: str, asset: str) -> Decimal | None:
+        if asset == self.reporting_currency:
+            return Decimal("1")
+        return self.prices.get((venue, asset))
+
+
+def _value(postings: Mapping[tuple[str, str, str], Decimal], valuation: Valuation, venue: str, missing: set) -> Decimal:
+    total = ZERO
+    for (v, _account, asset), quantity in postings.items():
+        if v != venue or not quantity:
+            continue
+        price = valuation.price(v, asset)
+        if price is None:
+            missing.add(f"{v}:{asset}")
+            continue
+        total += quantity * price
+    return total
+
+
+def reconcile(
+    ledger: EconomicLedger,
+    *,
+    opening: Valuation,
+    closing: Valuation,
+    trade_pnl_by_venue: Mapping[str, Decimal] | None = None,
+    legacy_fees_by_venue: Mapping[str, Decimal] | None = None,
+    plan_net_pnl: Decimal | None = None,
+    plan_tolerance: Decimal = Decimal("1"),
+    venue_reported_equity: Mapping[str, Decimal] | None = None,
+    venue_tolerance: Decimal = Decimal("0.01"),
+    product_types: Mapping[str, str] | None = None,
+) -> dict[str, Any]:
+    """Closing equity = opening + inventory revaluation + trading + fees/rebates
+    + funding - borrow + transfers + external flows + valuation adjustments.
+
+    Every component is valued at closing prices so the identity is exact; fees
+    are also reported at their fill-time value with the fee-asset revaluation
+    shown separately. The identity is a consistency check of the event
+    ledger; the gating checks compare it with independent computations: the
+    trade ledger's realized + unrealized PnL, the trade ledger's fees, the
+    sum of plan net PnL, and venue-reported equity where available.
+    """
+    by_type = ledger.postings_by_type()
+    opening_postings = by_type.get(EconomicEventType.OPENING_BALANCE, {})
+    closing_balances = ledger.balances()
+    venues = sorted({v for (v, _a, _s) in closing_balances} | {v for (v, _a, _s) in opening_postings})
+    fee_events = [e for e in ledger.events if e.event_type == EconomicEventType.FEE]
+    reversed_ids = {e.reverses for e in ledger.events if e.event_type == EconomicEventType.REVERSAL}
+    product_types = dict(product_types or {})
+    rows: dict[str, Any] = {}
+    checks: list[dict[str, Any]] = []
+    missing_all: set[str] = set()
+    for venue in venues:
+        missing: set[str] = set()
+        opening_equity = _value(opening_postings, opening, venue, missing)
+        closing_equity = _value(closing_balances, closing, venue, missing)
+        revaluation = ZERO
+        for (v, _a, asset), qty in opening_postings.items():
+            if v != venue or not qty:
+                continue
+            p0, p1 = opening.price(v, asset), closing.price(v, asset)
+            if p0 is None or p1 is None:
+                missing.add(f"{v}:{asset}")
+                continue
+            revaluation += qty * (p1 - p0)
+        components = {
+            name: _value(by_type.get(kind, {}), closing, venue, missing)
+            for name, kind in (
+                ("trading_pnl", EconomicEventType.TRADE_FILL),
+                ("fees_and_rebates_at_close", EconomicEventType.FEE),
+                ("funding", EconomicEventType.FUNDING),
+                ("borrow_accrual", EconomicEventType.BORROW_ACCRUAL),
+                ("borrow_repay", EconomicEventType.BORROW_REPAY),
+                ("transfers", EconomicEventType.TRANSFER),
+                ("deposits", EconomicEventType.DEPOSIT),
+                ("withdrawals", EconomicEventType.WITHDRAWAL),
+                ("valuation_adjustments", EconomicEventType.VALUATION_ADJUSTMENT),
+            )
+        }
+        venue_fees = [
+            e for e in fee_events
+            if e.venue == venue and e.event_id not in reversed_ids
+        ]
+        fee_cost = sum((e.reporting_value or ZERO for e in venue_fees if (e.reporting_value or ZERO) > 0), ZERO)
+        rebates = -sum((e.reporting_value or ZERO for e in venue_fees if (e.reporting_value or ZERO) < 0), ZERO)
+        fee_unvalued = [
+            e.event_id for e in venue_fees
+            if e.reporting_value is None or dict(e.details).get("fee_quantity_unknown") == "true"
+        ]
+        explained = opening_equity + revaluation + sum(components.values(), ZERO)
+        residual = closing_equity - explained
+        equity_pnl = closing_equity - opening_equity - revaluation - components["deposits"] - components["withdrawals"]
+        rows[venue] = {
+            "opening_equity": str(opening_equity),
+            "inventory_revaluation": str(revaluation),
+            **{name: str(value) for name, value in components.items()},
+            "fees_at_fill_time": str(-fee_cost),
+            "rebates_at_fill_time": str(rebates),
+            "fee_asset_revaluation": str(components["fees_and_rebates_at_close"] - (rebates - fee_cost)),
+            "closing_equity": str(closing_equity),
+            "strategy_equity_pnl": str(equity_pnl),
+            "identity_residual": str(residual),
+            "not_modelled": sorted({
+                label for kind, label in NOT_MODELLED.items()
+                if not by_type.get(kind) and not (label == "FUNDING" and product_types.get(venue) == "SPOT")
+            }),
+            "not_applicable": ["FUNDING"] if product_types.get(venue) == "SPOT" else [],
+            "missing_prices": sorted(missing),
+            "unvalued_fee_events": fee_unvalued,
+        }
+        missing_all |= missing
+        checks.append({"check": f"{venue}_identity_exact", "passed": residual == 0,
+                       "detail": f"residual {residual}"})
+        if trade_pnl_by_venue is not None:
+            expected = trade_pnl_by_venue.get(venue, ZERO)
+            difference = components["trading_pnl"] - expected
+            checks.append({
+                "check": f"{venue}_trading_pnl_matches_trade_ledger",
+                # The trade ledger divides to get average cost (28-digit
+                # Decimal), so it can differ in the last digits; 1e-9 is far
+                # below any monetary unit and still catches a real mismatch.
+                "passed": abs(difference) <= TRADE_PNL_ROUNDING_TOLERANCE,
+                "detail": (
+                    f"economic {components['trading_pnl']} vs trade ledger {expected} "
+                    f"(difference {difference}; tolerance {TRADE_PNL_ROUNDING_TOLERANCE} for "
+                    "average-cost division rounding)"
+                ),
+            })
+        if legacy_fees_by_venue is not None:
+            legacy = legacy_fees_by_venue.get(venue, ZERO)
+            checks.append({
+                "check": f"{venue}_fees_match_trade_ledger",
+                "passed": (fee_cost - rebates) == legacy,
+                "detail": f"economic net fees {fee_cost - rebates} vs trade ledger {legacy}",
+            })
+        if venue_reported_equity is not None and venue in venue_reported_equity:
+            difference = closing_equity - venue_reported_equity[venue]
+            checks.append({
+                "check": f"{venue}_matches_venue_reported_equity",
+                "passed": abs(difference) <= venue_tolerance,
+                "detail": f"ledger - venue = {difference} (tolerance {venue_tolerance})",
+            })
+    total_equity_pnl = sum((Decimal(row["strategy_equity_pnl"]) for row in rows.values()), ZERO)
+    if plan_net_pnl is not None:
+        difference = plan_net_pnl - total_equity_pnl
+        checks.append({
+            "check": "plan_net_pnl_matches_equity_pnl",
+            "passed": abs(difference) <= plan_tolerance,
+            "detail": (
+                f"plans {plan_net_pnl} vs equity {total_equity_pnl} (difference {difference}, "
+                f"tolerance {plan_tolerance}: plans mark residuals at close-time mids)"
+            ),
+        })
+    failed = [c for c in checks if not c["passed"]]
+    status = "FAIL" if failed else "INCOMPLETE" if missing_all or any(
+        row["unvalued_fee_events"] for row in rows.values()
+    ) else "RECONCILED"
+    return {
+        "schema_version": ECONOMICS_SCHEMA_VERSION,
+        "reporting_currency": ledger.reporting_currency,
+        "status": status,
+        "venue_reported_equity": "AVAILABLE" if venue_reported_equity else "NOT_AVAILABLE (paper/simulation)",
+        "venues": rows,
+        "consolidated": {
+            key: str(sum((Decimal(row[key]) for row in rows.values()), ZERO))
+            for key in ("opening_equity", "inventory_revaluation", "trading_pnl", "fees_at_fill_time",
+                        "rebates_at_fill_time", "deposits", "withdrawals", "valuation_adjustments",
+                        "closing_equity", "strategy_equity_pnl", "identity_residual")
+        },
+        "checks": checks,
+        "ledger": ledger.summary(),
+    }
+
+
+def opening_balance_events(
+    balances: Iterable[tuple[str, str, Decimal]], *, account: str = "main", ts_ns: int = 0,
+) -> list[EconomicEvent]:
+    """``(venue, asset, quantity)`` -> OPENING_BALANCE events (configured, not flows)."""
+    return [
+        EconomicEvent(
+            event_type=EconomicEventType.OPENING_BALANCE,
+            idempotency_key=f"opening|{venue}|{account}|{asset}",
+            ts_ns=ts_ns, effective_ts_ns=ts_ns,
+            postings=(Posting(venue, account, asset, quantity),),
+            venue=venue, account=account, source=EventSource.CONFIGURED,
+        )
+        for venue, asset, quantity in balances
+    ]

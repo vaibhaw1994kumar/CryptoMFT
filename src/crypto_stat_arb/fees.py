@@ -1,9 +1,15 @@
-"""Effective-dated maker/taker/rebate fee schedule (MR-09).
+"""Effective-dated maker/taker/rebate fee schedule (MR-09, ECO01).
 
 A rule applies from ``effective_from_ns`` until the next rule for the same
 venue and instrument scope. Positive bps are costs; negative bps are rebates.
 ``instrument_id="*"`` is a venue-wide rule; an instrument-specific rule always
 wins over the venue-wide rule effective at the same time.
+
+``fee_asset`` is the asset the venue charges in: ``QUOTE`` (default), ``BASE``
+or an explicit token symbol (e.g. ``BNB``). ``source`` says whether the rate is
+``VERIFIED`` for this account or ``ASSUMED`` (e.g. a default tier). With
+``conservative_unverified`` an assumed maker *rebate* is not credited (booked
+at 0 bps) until the tier is verified; assumed costs are kept as configured.
 """
 
 from __future__ import annotations
@@ -18,6 +24,11 @@ from typing import Any, Iterable
 class Liquidity(StrEnum):
     MAKER = "MAKER"
     TAKER = "TAKER"
+
+
+class FeeSource(StrEnum):
+    VERIFIED = "VERIFIED"
+    ASSUMED = "ASSUMED"
 
 
 def parse_effective_ns(value: Any) -> int:
@@ -43,12 +54,25 @@ class FeeRule:
     effective_from_ns: int = 0
     instrument_id: str = "*"
     tier: str = ""
+    fee_asset: str = "QUOTE"
+    source: FeeSource = FeeSource.ASSUMED
+    conservative_unverified: bool = False
 
     def to_dict(self) -> dict[str, Any]:
         row = asdict(self)
         row["maker_bps"] = str(self.maker_bps)
         row["taker_bps"] = str(self.taker_bps)
+        row["source"] = self.source.value
         return row
+
+    def effective_bps(self, liquidity: "Liquidity") -> tuple[Decimal, str]:
+        """Rate actually booked for ``liquidity`` and the label for its source."""
+        bps = self.maker_bps if liquidity == Liquidity.MAKER else self.taker_bps
+        if self.source == FeeSource.VERIFIED:
+            return bps, FeeSource.VERIFIED.value
+        if self.conservative_unverified and bps < 0:
+            return Decimal("0"), "CONSERVATIVE_ASSUMED"
+        return bps, FeeSource.ASSUMED.value
 
 
 class FeeSchedule:
@@ -122,6 +146,9 @@ class FeeSchedule:
                 taker_bps=Decimal(str(row["taker_fee_bps"])),
                 effective_from_ns=parse_effective_ns(row.get("effective_from")),
                 tier=str(row.get("tier", "")),
+                fee_asset=str(row.get("fee_asset", "QUOTE")).upper(),
+                source=FeeSource(str(row.get("fee_source", "ASSUMED")).upper()),
+                conservative_unverified=bool(row.get("conservative_unverified", False)),
             )
             for row in rows
         )

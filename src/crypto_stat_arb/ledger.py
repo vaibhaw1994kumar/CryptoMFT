@@ -6,7 +6,13 @@ from decimal import Decimal
 from pathlib import Path
 import json
 
+from .economics import EconomicEvent, EconomicEventType, EconomicLedger, EventSource, Posting
 from .models import ChildOrder, ParentPlan, json_default, stable_id
+
+
+def _parse_assets(venue: str, instrument_id: str) -> tuple[str, str]:
+    parts = instrument_id.split("-")
+    return (parts[0], parts[1]) if len(parts) >= 2 else (instrument_id, "USDT")
 
 
 @dataclass(slots=True)
@@ -61,6 +67,11 @@ class Ledger:
         self._fill_cumulative: dict[str, Decimal] = {}
         self._fill_notional_cumulative: dict[str, Decimal] = {}
         self._fee_cumulative: dict[str, Decimal] = {}
+        self._fee_quantity_cumulative: dict[str, Decimal] = {}
+        # Asset-level economics of the same fills (see economics.py). The trade
+        # bookkeeping above stays; risk reads asset balances from here.
+        self.economics = EconomicLedger()
+        self.asset_resolver = _parse_assets
 
     def record(self, event_type: str, ts_ns: int, **payload: object) -> None:
         ordinal = len(self.events) + 1
@@ -148,8 +159,11 @@ class Ledger:
         previous_fee = self._fee_cumulative.get(order.order_id, Decimal("0"))
         if order.filled_quantity < previous_fill:
             raise ValueError(f"fill quantity regressed for {order.order_id}")
-        if order.fee < previous_fee:
+        # Rebates are negative and grow more negative: compare magnitudes.
+        if abs(order.fee) < abs(previous_fee) or order.fee * previous_fee < 0:
             raise ValueError(f"fee regressed for {order.order_id}")
+        base_asset, quote_asset = self.asset_resolver(order.venue, order.instrument_id)
+        fee_asset = order.fee_asset or quote_asset
         fill_delta = order.filled_quantity - previous_fill
         cumulative_notional = order.filled_quantity * order.average_price
         notional_delta = cumulative_notional - previous_notional
@@ -166,12 +180,23 @@ class Ledger:
             )
             self._fill_cumulative[order.order_id] = order.filled_quantity
             self._fill_notional_cumulative[order.order_id] = cumulative_notional
+            fill_id = stable_id("fill", order.order_id, order.filled_quantity, order.average_price)
+            self.economics.apply(EconomicEvent(
+                event_type=EconomicEventType.TRADE_FILL,
+                idempotency_key=f"fill|{order.order_id}|{order.filled_quantity}|{cumulative_notional}",
+                ts_ns=ts_ns,
+                postings=(
+                    Posting(order.venue, "main", base_asset, signed),
+                    Posting(order.venue, "main", quote_asset, signed_cash),
+                ),
+                venue=order.venue, instrument_id=order.instrument_id,
+                order_id=order.order_id, fill_id=fill_id, reference_id=order.parent_id,
+                valuation_price=notional_delta / fill_delta, valuation_source="fill price",
+                details=(("side", order.side.value), ("liquidity", order.liquidity)),
+            ))
             self.record(
                 "FILL", ts_ns,
-                fill_id=stable_id(
-                    "fill", order.order_id, order.filled_quantity,
-                    order.average_price,
-                ),
+                fill_id=fill_id,
                 parent_id=order.parent_id,
                 opportunity_id=order.opportunity_id,
                 order_id=order.order_id,
@@ -198,6 +223,15 @@ class Ledger:
                 self.cash_deltas.get(order.venue, Decimal("0")) + signed_cash
             )
             self._fill_notional_cumulative[order.order_id] = cumulative_notional
+            self.economics.apply(EconomicEvent(
+                event_type=EconomicEventType.TRADE_FILL,
+                idempotency_key=f"fill-adjust|{order.order_id}|{order.filled_quantity}|{cumulative_notional}",
+                ts_ns=ts_ns,
+                postings=(Posting(order.venue, "main", quote_asset, signed_cash),),
+                venue=order.venue, instrument_id=order.instrument_id,
+                order_id=order.order_id, reference_id=order.parent_id,
+                details=(("adjustment", "notional"),),
+            ))
             self.record(
                 "FILL_NOTIONAL_ADJUSTMENT", ts_ns,
                 parent_id=order.parent_id,
@@ -210,9 +244,36 @@ class Ledger:
                 average_price=order.average_price,
             )
         if fee_delta:
-            self.cash_deltas[order.venue] = (
-                self.cash_deltas.get(order.venue, Decimal("0")) - fee_delta
-            )
+            fee_quantity = order.fee_quantity if order.fee_asset else order.fee
+            previous_quantity = self._fee_quantity_cumulative.get(order.order_id, Decimal("0"))
+            quantity_delta = fee_quantity - previous_quantity
+            unpriced = "FEE_ASSET_UNPRICED" in order.fee_source
+            self.economics.apply(EconomicEvent(
+                event_type=EconomicEventType.FEE,
+                idempotency_key=f"fee|{order.order_id}|{order.fee}|{fee_quantity}",
+                ts_ns=ts_ns,
+                # Cost: the fee asset leaves the account; rebate: it arrives.
+                postings=() if unpriced else (Posting(order.venue, "main", fee_asset, -quantity_delta),),
+                venue=order.venue, instrument_id=order.instrument_id,
+                order_id=order.order_id, reference_id=order.parent_id,
+                source=EventSource.ASSUMED if "ASSUMED" in order.fee_source else EventSource.SIMULATED,
+                reporting_value=fee_delta,
+                valuation_price=(fee_delta / quantity_delta) if quantity_delta and not unpriced else None,
+                valuation_source="fill price" if fee_asset in (base_asset, quote_asset) else "asset_prices",
+                details=(
+                    ("fee_asset", fee_asset), ("fee_quantity_delta", str(quantity_delta)),
+                    ("fee_rate_bps", "" if order.fee_rate_bps is None else str(order.fee_rate_bps)),
+                    ("liquidity", order.liquidity), ("fee_source", order.fee_source),
+                    ("fee_quantity_unknown", "true" if unpriced else "false"),
+                ),
+            ))
+            self._fee_quantity_cumulative[order.order_id] = fee_quantity
+            if fee_asset == quote_asset:
+                # Legacy venue cash is the quote currency; a fee charged in
+                # base or another token does not come out of it.
+                self.cash_deltas[order.venue] = (
+                    self.cash_deltas.get(order.venue, Decimal("0")) - fee_delta
+                )
             self._fee_cumulative[order.order_id] = order.fee
             if not fill_delta:
                 self.record(

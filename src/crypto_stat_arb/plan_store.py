@@ -80,6 +80,13 @@ def _restore_plan(payload: str) -> ParentPlan:
         order_type=str(child.get("order_type", "LIMIT")),
         time_in_force=str(child.get("time_in_force", "IOC")),
         post_only=bool(child.get("post_only", False)),
+        fee_asset=str(child.get("fee_asset", "")),
+        fee_quantity=Decimal(str(child.get("fee_quantity", "0"))),
+        fee_rate_bps=(
+            Decimal(str(child["fee_rate_bps"])) if child.get("fee_rate_bps") is not None else None
+        ),
+        liquidity=str(child.get("liquidity", "")),
+        fee_source=str(child.get("fee_source", "")),
     ) for child in row["children"]]
     return ParentPlan(
         parent_id=row["parent_id"],

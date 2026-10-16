@@ -140,6 +140,14 @@ class OMS:
         self.ledger = ledger
         if getattr(risk, "ledger", None) is None:
             risk.ledger = ledger  # live balances for inventory admission
+        # Economic ledger: which assets an instrument's fills and fees move.
+        ledger.asset_resolver = self._assets
+        # Fee pricing per fill delta (ECO01): what has been priced already,
+        # the liquidity of each order's latest fill, and reporting-currency
+        # prices for fees charged in a third token (e.g. BNB).
+        self._fee_priced: dict[str, tuple[Decimal, Decimal]] = {}
+        self._order_liquidity: dict[str, str] = {}
+        self.asset_prices: dict[tuple[str, str], Decimal] = {}
         self.matcher = matcher or DeterministicMatcher()
         self.router = router or StrategyDirectedRouter(instruments)
         self.plan_store = plan_store
@@ -192,6 +200,12 @@ class OMS:
             ) + 1
             self._last_execution_ts_ns = recovery_ts_ns
             self.ledger.rebuild_from_plans(self.plans, recovery_ts_ns)
+            for plan in self.plans.values():
+                for order in plan.children:
+                    # Recovered fees are already on the order: never price them twice.
+                    self._fee_priced[order.order_id] = (
+                        order.filled_quantity, order.filled_quantity * order.average_price
+                    )
             for plan in self.plans.values():
                 if plan.state in {PlanState.CREATED, PlanState.CLOSED}:
                     continue
@@ -1131,7 +1145,7 @@ class OMS:
                     reason=reason,
                 ))
             if order.filled_quantity:
-                order.fee = self._fee_for(order, callback_ts)
+                self._price_fills(order, callback_ts)
                 self.ledger.apply_fill(order, callback_ts)
                 self._update_exposure_control(callback_ts)
             self._recompute_plan_economics(plan, callback_ts)
@@ -1421,7 +1435,7 @@ class OMS:
                     )
                     self.ingest_execution_callback(callback, callback_ts)
             if order.filled_quantity:
-                order.fee = self._fee_for(order, fill_ts)
+                self._price_fills(order, fill_ts)
                 self.ledger.apply_fill(order, self._next_execution_ts(fill_ts))
                 self._update_exposure_control(fill_ts)
             self._assess_legging_risk(plan, self._next_execution_ts(now_ns), self._books)
@@ -1444,6 +1458,59 @@ class OMS:
         return released
 
     # ---- time progression, venue queries and execution realism ------------
+
+    def _assets(self, venue: str, instrument_id: str) -> tuple[str, str]:
+        try:
+            spec = self.instruments.get(venue, instrument_id)
+            return spec.base, spec.quote
+        except (KeyError, ValueError):
+            parts = instrument_id.split("-")
+            return (parts[0], parts[1]) if len(parts) >= 2 else (instrument_id, "USDT")
+
+    def _price_fills(self, order: ChildOrder, ts_ns: int) -> None:
+        """Price only the newly filled delta, at that fill's liquidity (ECO01).
+
+        A GTC order can fill partly as taker on arrival and later as maker from
+        its resting remainder; each delta is charged at its own rate. Fees are
+        booked in the rule's fee asset (QUOTE, BASE or a token); ``order.fee``
+        stays the reporting-currency value (cost positive, rebate negative).
+        """
+        priced_qty, priced_notional = self._fee_priced.get(order.order_id, (Decimal("0"), Decimal("0")))
+        notional = order.filled_quantity * order.average_price
+        delta_qty = order.filled_quantity - priced_qty
+        delta_notional = notional - priced_notional
+        if delta_qty <= 0 and delta_notional == 0:
+            return
+        liquidity = self._order_liquidity.get(order.order_id) or (
+            Liquidity.MAKER.value if order.post_only else Liquidity.TAKER.value
+        )
+        rule = self.instruments.fee_rule(order.venue, order.instrument_id, ts_ns)
+        bps, source = rule.effective_bps(Liquidity(liquidity))
+        base, quote = self._assets(order.venue, order.instrument_id)
+        value = delta_notional * bps / Decimal("10000")
+        quantity: Decimal | None
+        if rule.fee_asset == "QUOTE":
+            asset, quantity = quote, value
+        elif rule.fee_asset == "BASE":
+            asset, quantity = base, max(delta_qty, Decimal("0")) * bps / Decimal("10000")
+            if delta_qty > 0:
+                value = quantity * (delta_notional / delta_qty)
+        else:
+            asset = rule.fee_asset
+            price = self.asset_prices.get((order.venue, asset)) or self.asset_prices.get(("*", asset))
+            quantity = value / price if price else None
+            if quantity is None:
+                source = f"{source}|FEE_ASSET_UNPRICED"
+        order.fee += value
+        if quantity is not None:
+            order.fee_quantity += quantity
+        order.fee_asset = asset
+        order.fee_rate_bps = bps
+        order.fee_source = source
+        order.liquidity = (
+            liquidity if order.liquidity in ("", liquidity) else "MIXED"
+        )
+        self._fee_priced[order.order_id] = (order.filled_quantity, notional)
 
     def _fee_for(self, order: ChildOrder, ts_ns: int) -> Decimal:
         liquidity = Liquidity.MAKER if order.post_only else Liquidity.TAKER
@@ -1602,7 +1669,7 @@ class OMS:
             venue_order_id=status.venue_order_id,
         ))
         if order.filled_quantity:
-            order.fee = self._fee_for(order, ts_ns)
+            self._price_fills(order, ts_ns)
             self.ledger.apply_fill(order, ts_ns)
             self._update_exposure_control(ts_ns)
 
@@ -1866,12 +1933,17 @@ class OMS:
         )
         order.filled_quantity = Decimal(str(fill_winner["cumulative_filled_quantity"]))
         order.average_price = Decimal(str(fill_winner["average_price"]))
-        # Fees never regress: the OMS may have priced a fill before a venue
-        # snapshot without fee data arrives.
-        order.fee = max(
-            order.fee,
-            max(Decimal(str(item["fee"])) for item in order.state_updates),
-        )
+        # Fees never regress in magnitude: the OMS may have priced a fill
+        # before a venue snapshot without fee data arrives. Compared by
+        # magnitude so a rebate (negative fee) is not replaced by zero.
+        reported = [Decimal(str(item["fee"])) for item in order.state_updates if Decimal(str(item["fee"]))]
+        if reported:
+            venue_fee = max(reported, key=abs)
+            if abs(venue_fee) > abs(order.fee):
+                order.fee = venue_fee
+                order.fee_source = "VENUE_REPORTED"
+        if update.liquidity:
+            self._order_liquidity[order.order_id] = update.liquidity
         order.reject_reason = str(winner.get("reason") or "") or None
 
         terminal_claims = sorted({
@@ -2278,7 +2350,7 @@ class OMS:
                 filled_quantity=order.filled_quantity,
             )
             if order.filled_quantity:
-                order.fee = self._fee_for(order, dispatch_completed_ts)
+                self._price_fills(order, dispatch_completed_ts)
                 fill_ts = callback_timestamps[-1] if callback_timestamps else dispatch_completed_ts
                 self.ledger.apply_fill(order, fill_ts)
                 self._update_exposure_control(fill_ts)
@@ -2361,7 +2433,7 @@ class OMS:
 
         for order in plan.children:
             if order.filled_quantity and order.fee == 0:
-                order.fee = self._fee_for(order, now_ns)
+                self._price_fills(order, now_ns)
                 self.ledger.apply_fill(order, now_ns)
         self._recompute_plan_economics(plan, now_ns)
         if unresolved:

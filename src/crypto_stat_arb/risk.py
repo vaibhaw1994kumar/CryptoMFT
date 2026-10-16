@@ -683,10 +683,25 @@ class RiskEngine:
             "inventory": self.inventory_snapshot(),
         }
 
+    def _economic_balance(self, venue: str, which: int) -> Decimal | None:
+        """Asset balance from the economic ledger once opening balances are booked.
+
+        It includes fees charged in base (which the trade position does not),
+        so a venue cannot sell base it paid away in fees.
+        """
+        economics = getattr(self.ledger, "economics", None)
+        if economics is None or not economics.has_opening_balances():
+            return None
+        asset = self.ledger.asset_resolver(venue, self.inventory.instrument_id)[which]
+        return economics.balance(venue, asset)
+
     def held_base(self, venue: str) -> Decimal:
         opening = self.inventory.initial_base_by_venue.get(venue, Decimal("0"))
         if self.ledger is None:
             return opening
+        economic = self._economic_balance(venue, 0)
+        if economic is not None:
+            return economic
         return opening + self.ledger.positions.get(
             (venue, self.inventory.instrument_id), Decimal("0")
         )
@@ -695,6 +710,9 @@ class RiskEngine:
         opening = self.inventory.initial_quote_by_venue.get(venue, Decimal("0"))
         if self.ledger is None:
             return opening
+        economic = self._economic_balance(venue, 1)
+        if economic is not None:
+            return economic
         return opening + self.ledger.cash_deltas.get(venue, Decimal("0"))
 
     def inventory_snapshot(self) -> dict[str, Any]:

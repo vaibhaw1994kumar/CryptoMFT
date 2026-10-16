@@ -251,6 +251,13 @@ class ChildOrder:
     order_type: str = "LIMIT"
     time_in_force: str = "IOC"
     post_only: bool = False
+    # Fee economics (ECO01). ``fee`` stays the reporting-currency value (cost
+    # positive, rebate negative); these record what was actually charged.
+    fee_asset: str = ""
+    fee_quantity: Decimal = Decimal("0")
+    fee_rate_bps: Decimal | None = None
+    liquidity: str = ""          # MAKER / TAKER / MIXED
+    fee_source: str = ""         # VERIFIED / ASSUMED / CONSERVATIVE_ASSUMED / VENUE_REPORTED
 
 
 @dataclass(slots=True)

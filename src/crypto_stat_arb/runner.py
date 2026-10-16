@@ -8,6 +8,7 @@ from pathlib import Path
 import time
 
 from .config import load_config
+from .economics import Valuation, reconcile
 from .canonical import CallbackEventSink, CanonicalEventDispatcher, CanonicalEventRecorder
 from .models import MarketEvent, canonical_json, utc_now_iso
 from .replay import deterministic_order
@@ -29,6 +30,61 @@ def file_sha256(path: Path) -> str:
 def load_events(path: Path) -> list[MarketEvent]:
     with path.open(encoding="utf-8") as handle:
         return [MarketEvent.from_dict(json.loads(line)) for line in handle if line.strip()]
+
+
+def _valuation(session: TradingSession, marks: dict, reporting: str) -> Valuation:
+    valuation = Valuation(reporting_currency=reporting)
+    for (venue, instrument_id), mark in marks.items():
+        spec = session.cfg.instruments.get(venue, instrument_id)
+        if spec.quote == reporting:
+            valuation.prices[(venue, spec.base)] = mark
+            valuation.sources[(venue, spec.base)] = f"mid {instrument_id}"
+    for (venue, asset), price in session.oms.asset_prices.items():
+        for target in (session.cfg.venues if venue == "*" else (venue,)):
+            valuation.prices.setdefault((target, asset), price)
+            valuation.sources.setdefault((target, asset), "configured asset price")
+    return valuation
+
+
+def write_economic_artifacts(
+    session: TradingSession, closing_marks: dict, account_state: dict, output_dir: Path,
+    reporting_currency: str = "USDT",
+) -> dict:
+    """Economic event log + closing-equity reconciliation (ECO06 gate)."""
+    ledger = session.ledger.economics
+    ledger.write_jsonl(output_dir / "economic_events.jsonl")
+    venues = account_state.get("venues", {})
+    report = reconcile(
+        ledger,
+        opening=_valuation(session, session.opening_marks, reporting_currency),
+        closing=_valuation(session, closing_marks, reporting_currency),
+        trade_pnl_by_venue={
+            venue: Decimal(row["realized_pnl"]) + Decimal(row["unrealized_pnl"])
+            for venue, row in venues.items()
+        },
+        legacy_fees_by_venue={venue: Decimal(row["fees"]) for venue, row in venues.items()},
+        plan_net_pnl=sum((plan.net_pnl for plan in session.oms.plans.values()), Decimal("0")),
+        product_types={
+            venue: session.cfg.instruments.get(venue, session.cfg.instrument_id).product_type
+            for venue in session.cfg.venues
+        },
+    )
+    report["limitations"] = [
+        "Funding, borrow and transfers are not modelled: no events are generated (reported NOT_MODELLED, not zero).",
+        "The maker dry-run simulator's fills are a separate harness and are not booked in this ledger.",
+        "Venue-reported equity is not available in simulation or internal paper mode.",
+    ]
+    (output_dir / "economic_reconciliation.json").write_text(
+        json.dumps(report, indent=2, sort_keys=True), encoding="utf-8"
+    )
+    return {
+        "status": report["status"],
+        "report": "economic_reconciliation.json",
+        "events": "economic_events.jsonl",
+        "identity_residual": report["consolidated"]["identity_residual"],
+        "strategy_equity_pnl": report["consolidated"]["strategy_equity_pnl"],
+        "failed_checks": [c["check"] for c in report["checks"] if not c["passed"]],
+    }
 
 
 def write_session_artifacts(
@@ -95,6 +151,7 @@ def write_session_artifacts(
         mark_prices=mark_prices,
         initial_capital_by_venue=cfg.initial_capital_by_venue,
     )
+    economics = write_economic_artifacts(session, mark_prices, account_state, output_dir)
     exposure_utilization = risk.update_exposure_state(
         plans=oms.plans, ledger=ledger,
         now_ns=(events[-1].receive_ts_ns if events else 0),
@@ -252,6 +309,7 @@ def write_session_artifacts(
         "net_pnl": str(sum((x.net_pnl for x in plans), start=0)),
         "gross_pnl": str(sum((x.gross_pnl for x in plans), start=0)),
         "fees": str(sum((x.fees for x in plans), start=0)),
+        "economics": economics,
         # Which inventory assumption produced these results (pre-funded spot
         # balances, or unconstrained selling that implies shorting).
         "inventory": oms.risk.inventory_snapshot(),

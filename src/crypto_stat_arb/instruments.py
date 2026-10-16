@@ -107,6 +107,20 @@ class InstrumentMaster:
             return spec.maker_fee_bps
         return spec.taker_fee_bps
 
+    def fee_rule(self, venue: str, instrument_id: str, at_ns: int | None = None):
+        """The effective schedule rule, or a synthetic one from instrument fields."""
+        from .fees import FeeRule
+
+        rule = self.fee_schedule.rule(venue, instrument_id, at_ns)
+        if rule is not None:
+            return rule
+        spec = self.get(venue, instrument_id, at_ns)
+        return FeeRule(
+            venue=venue, instrument_id=instrument_id,
+            maker_bps=spec.maker_fee_bps if spec.maker_fee_bps is not None else spec.taker_fee_bps,
+            taker_bps=spec.taker_fee_bps, tier="instrument-default",
+        )
+
     def fee(
         self, venue: str, instrument_id: str, notional: Decimal,
         liquidity: Liquidity = Liquidity.TAKER, at_ns: int | None = None,

@@ -213,6 +213,8 @@ class ExecutionCallback:
     average_price: Decimal = Decimal("0")
     reason: str = ""
     native: dict[str, Any] | None = None
+    # MAKER (a resting order filled later) / TAKER (filled on arrival) / "" unknown.
+    liquidity: str = ""
 
     def to_dict(self) -> dict[str, Any]:
         row = asdict(self)
@@ -241,6 +243,7 @@ class CanonicalOrderUpdate:
     fee: Decimal = Decimal("0")
     reason: str = ""
     venue_order_id: str = ""
+    liquidity: str = ""
 
     def to_dict(self) -> dict[str, Any]:
         row = asdict(self)
@@ -266,6 +269,7 @@ class CanonicalOrderUpdate:
             cumulative_filled_quantity=callback.cumulative_filled_quantity,
             average_price=callback.average_price,
             reason=callback.reason,
+            liquidity=callback.liquidity,
         )
 
 
@@ -501,6 +505,7 @@ class DeterministicVenueAdapter:
         last_fill: Decimal = Decimal("0"),
         average_price: Decimal = Decimal("0"),
         reason: str = "",
+        liquidity: str = "",
     ) -> ExecutionCallback:
         return ExecutionCallback(
             schema_version=ORDER_API_SCHEMA_VERSION,
@@ -519,6 +524,7 @@ class DeterministicVenueAdapter:
             last_fill_quantity=last_fill,
             average_price=average_price,
             reason=reason,
+            liquidity=liquidity,
             native={"adapter": "deterministic-venue-adapter-v2"},
         )
 
@@ -706,6 +712,7 @@ class DeterministicVenueAdapter:
                 filled=filled,
                 last_fill=filled,
                 average_price=average_price,
+                liquidity="TAKER",
             ))
         if filled > 0:
             if request.time_in_force == TimeInForce.GTC:
@@ -714,7 +721,7 @@ class DeterministicVenueAdapter:
                 return (acknowledged, self._callback(
                     request, ExecutionEventType.PARTIAL, filled=filled,
                     last_fill=filled, average_price=average_price,
-                    reason="remaining quantity resting",
+                    reason="remaining quantity resting", liquidity="TAKER",
                 ))
             self.terminal_orders.add(request.order_id)
             return (
@@ -722,7 +729,7 @@ class DeterministicVenueAdapter:
                 self._callback(
                     request, ExecutionEventType.PARTIAL, filled=filled,
                     last_fill=filled, average_price=average_price,
-                    reason="remaining quantity cancelled by IOC",
+                    reason="remaining quantity cancelled by IOC", liquidity="TAKER",
                 ),
                 self._callback(
                     request, ExecutionEventType.CANCELLED, filled=filled,
@@ -776,7 +783,7 @@ class DeterministicVenueAdapter:
             callback = self._callback(
                 request, event_type, filled=cumulative, last_fill=filled,
                 average_price=notional / cumulative,
-                reason="resting order traded through by book",
+                reason="resting order traded through by book", liquidity="MAKER",
             )
             self._remember((callback,))
             produced.append((request, callback))
