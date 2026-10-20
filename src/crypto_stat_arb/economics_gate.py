@@ -78,6 +78,8 @@ def economics_gate(run_dir: Path, *, allow_incomplete: Mapping[str, str] | None 
         "failures": [],
         # Reconciled but valued from approximations: reported, not failed.
         "estimated": [] if report is None else report.get("estimated", []),
+        # What the result rests on that is assumed or missing: reported, not failed.
+        "warnings": [] if report is None else report.get("warnings", []),
         "incomplete_reasons": {},
         "allowed_incomplete": {},
     }

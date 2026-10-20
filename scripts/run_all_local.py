@@ -272,6 +272,7 @@ def main() -> None:
         "paper_net_pnl": paper_result["net_pnl"] if paper_result else None,
         "paper_release_id": release_id,
         "economics_gate": paper_economics["decision"] if paper_economics else None,
+        "economics_warnings": paper_economics["warnings"] if paper_economics else None,
         "public_network_checks": options.public_network,
     }
     (run_root / "local_acceptance_summary.json").write_text(

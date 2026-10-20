@@ -217,6 +217,10 @@ class Instrument:
     settlement_asset: str = ""
     funding_interval_ns: int = 0
     funding_anchor_ns: int = 0
+    # Venue funding-rate bounds (contract master adjustedFundingRateCap/Floor,
+    # upperFundingRate/lowerFundingRate); records outside them are rejected.
+    funding_rate_cap: Decimal | None = None
+    funding_rate_floor: Decimal | None = None
     # Spot margin eligibility of the instrument (contract master
     # ``borrow_applicable``). Account authorization is a separate borrow line.
     borrow_applicable: bool = False

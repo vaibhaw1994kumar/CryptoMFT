@@ -504,6 +504,10 @@ def reconcile(
             # Fees priced without a dated schedule rule or a venue-reported
             # maker/taker label: counted, and the run is INCOMPLETE (audit P1).
             "fee_fallbacks": fee_fallbacks,
+            "fee_sources": {
+                source: sum(1 for e in venue_fees if dict(e.details).get("fee_source", "") == source)
+                for source in sorted({dict(e.details).get("fee_source", "") for e in venue_fees})
+            },
         }
         missing_all |= missing
         checks.append({"check": f"{venue}_identity_exact", "passed": residual == 0,

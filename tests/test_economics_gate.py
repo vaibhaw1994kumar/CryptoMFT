@@ -38,6 +38,14 @@ class EconomicsGateTests(unittest.TestCase):
         result = economics_gate(self.run_dir)
         self.assertEqual((result["decision"], result["reconciliation"]), ("PASS", "RECONCILED"))
 
+    def test_warnings_say_what_the_result_rests_on(self):
+        result = economics_gate(self.run_dir)
+        self.assertEqual(result["decision"], "PASS")               # warnings never fail the gate
+        self.assertTrue(any("ASSUMED tier (research-default" in w for w in result["warnings"]))
+        report = json.loads((self.run_dir / "economic_reconciliation.json").read_text())
+        self.assertEqual(report["fee_profile"]["BINANCE"]["tier"], "research-default")
+        self.assertEqual(report["venues"]["BINANCE"]["fee_sources"], {"ASSUMED": 1})
+
     def test_failed_check_fails_the_gate(self):
         def break_identity(name, row):
             if name == "economic_reconciliation.json":

@@ -53,6 +53,57 @@ def _valuation(session: TradingSession, marks: dict, reporting: str) -> Valuatio
     return valuation
 
 
+def _fee_profile(session: TradingSession) -> dict:
+    """The fee rule in force at the end of the run, per venue (tier, source, rates)."""
+    schedule = session.cfg.instruments.fee_schedule
+    out = {}
+    for venue in session.cfg.venues:
+        rule = session.cfg.instruments.fee_rule(venue, session.cfg.instrument_id)
+        out[venue] = {
+            "tier": rule.tier or "(none)", "source": rule.source.value,
+            "maker_bps": str(rule.maker_bps), "taker_bps": str(rule.taker_bps),
+            "fee_asset": rule.fee_asset, "conservative_unverified": rule.conservative_unverified,
+            "from_schedule": schedule.rule(venue, session.cfg.instrument_id) is not None,
+        }
+    return out
+
+
+def _economic_warnings(report: dict, funding: dict, borrow: dict) -> list[str]:
+    """Plain-language warnings: what the numbers rest on that is assumed or missing."""
+    warnings = []
+    for venue, profile in sorted(report.get("fee_profile", {}).items()):
+        if profile["source"] != "VERIFIED":
+            booked = sum(report["venues"].get(venue, {}).get("fee_sources", {}).values())
+            warnings.append(
+                f"{venue}: fees use an ASSUMED tier ({profile['tier']}, maker {profile['maker_bps']} / "
+                f"taker {profile['taker_bps']} bps) for {booked} fee event(s); verify the account tier"
+            )
+        if not profile["from_schedule"]:
+            warnings.append(f"{venue}: no dated fee schedule rule; fees come from the instrument default")
+    for venue, row in sorted(report.get("venues", {}).items()):
+        if row.get("fee_fallbacks"):
+            warnings.append(f"{venue}: fee fallbacks {row['fee_fallbacks']} (see fee_fallbacks)")
+    if funding.get("status") != "NOT_CONFIGURED":
+        for item in funding.get("unscheduled_instruments", []):
+            warnings.append(f"funding: {item} has no funding schedule; missing settlements cannot be detected")
+        if funding.get("data_gaps_while_flat"):
+            warnings.append(f"funding: {funding['data_gaps_while_flat']} settlement(s) without rate data "
+                            "while flat (missing history; no P&L effect)")
+        if funding.get("rejected_records"):
+            warnings.append(f"funding: {funding['rejected_records']} rate record(s) rejected "
+                            f"{funding.get('rejected_by_reason', {})}")
+        if funding.get("records_off_schedule"):
+            warnings.append(f"funding: {len(funding['records_off_schedule'])} rate record(s) off the "
+                            "configured schedule; check the funding interval")
+        if funding.get("mark_basis") == "ESTIMATED":
+            warnings.append(f"funding: {funding.get('settlements_on_book_mid', 0)} settlement(s) used the "
+                            "book mid as the mark price; funding P&L is estimated")
+    for key, line in sorted(borrow.get("lines", {}).items()):
+        if line.get("terms_source") == "ASSUMED":
+            warnings.append(f"borrow: {key} terms (rate, interval, limit) are ASSUMED; verify against the account")
+    return warnings
+
+
 def write_economic_artifacts(
     session: TradingSession, closing_marks: dict, account_state: dict, output_dir: Path,
     reporting_currency: str = "USDT",
@@ -95,6 +146,8 @@ def write_economic_artifacts(
         estimated_by_venue=session.funding.estimated_by_venue(),
     )
     report["borrow"] = {"status": borrow["status"], "report": "borrow_report.json"}
+    report["fee_profile"] = _fee_profile(session)
+    report["warnings"] = _economic_warnings(report, funding, borrow)
     report["funding"] = {
         "status": funding["status"],
         "settlements_booked": funding.get("settlements_booked", 0),
@@ -134,6 +187,7 @@ def write_economic_artifacts(
         "funding": funding["status"],
         "borrow": borrow["status"],
         "estimated": report["estimated"],
+        "warnings": report["warnings"],
     }
 
 

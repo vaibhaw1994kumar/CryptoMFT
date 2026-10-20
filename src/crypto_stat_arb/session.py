@@ -23,7 +23,7 @@ from .latency import LatencyModel, latency_model_from_config
 from .economics import opening_balance_events
 from .borrow import BorrowEngine, BorrowLine, BorrowRecall
 from .financing_journal import FinancingJournal
-from .funding import FundingEngine, FundingRate, FundingRateBook, FundingSpec, is_perpetual
+from .funding import FundingEngine, FundingRateBook, FundingSpec, is_perpetual
 from .risk import InventoryModel
 from .ledger import Ledger
 from .models import EventType, MarketEvent, Opportunity, PlanState
@@ -107,18 +107,21 @@ def funding_engine(cfg: AppConfig, ledger: Ledger) -> FundingEngine:
                 settlement_asset=spec.settlement_asset or spec.quote,
                 multiplier=spec.contract_multiplier, inverse=spec.inverse,
                 interval_ns=spec.funding_interval_ns, anchor_ns=spec.funding_anchor_ns,
+                rate_cap=spec.funding_rate_cap, rate_floor=spec.funding_rate_floor,
             ))
     rates = FundingRateBook()
     if section.get("rates_path"):
         from pathlib import Path
         rates = FundingRateBook.from_jsonl(Path(section["rates_path"]))
-    rates.extend(FundingRate.from_dict(row) for row in section.get("rates", []))
+    for number, row in enumerate(section.get("rates", []), 1):
+        rates.add_row(row, f"config funding.rates[{number}]")
     max_age = section.get("max_rate_age_ms")
     return FundingEngine(
         ledger, specs, rates,
         settle_lag_ns=int(section.get("settle_lag_ms", 5_000)) * 1_000_000,
         max_rate_age_ns=None if max_age is None else int(max_age) * 1_000_000,
         mark_fallback=str(section.get("mark_fallback", "none")),
+        max_abs_rate=Decimal(str(section.get("max_abs_rate", "0.05"))),
     )
 
 

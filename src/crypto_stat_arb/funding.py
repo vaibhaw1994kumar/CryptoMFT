@@ -98,6 +98,8 @@ class FundingSpec:
     inverse: bool = False
     interval_ns: int = 0      # 0 = no schedule; settlement times come from records only
     anchor_ns: int = 0
+    rate_cap: Decimal | None = None
+    rate_floor: Decimal | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -141,6 +143,19 @@ class FundingRateBook:
     realized: dict[tuple[str, str, int], FundingRate] = field(default_factory=dict)
     predicted: dict[tuple[str, str], FundingRate] = field(default_factory=dict)
     duplicates_ignored: int = 0
+    # Records that could not be used, kept with the reason for diagnostics
+    # (audit P2); a rejected record is never booked.
+    rejected: list[dict[str, Any]] = field(default_factory=list)
+
+    def add_row(self, row: dict[str, Any], origin: str = "") -> None:
+        """Parse a raw record; an unparseable one is rejected, not fatal."""
+        try:
+            record = FundingRate.from_dict(row)
+        except (KeyError, ValueError, TypeError, ArithmeticError) as exc:
+            self.rejected.append({"origin": origin, "reason": "UNPARSEABLE",
+                                  "detail": f"{type(exc).__name__}: {exc}"[:200], "record": row})
+            return
+        self.add(record)
 
     def add(self, record: FundingRate) -> None:
         if record.predicted:
@@ -169,10 +184,50 @@ class FundingRateBook:
     def from_jsonl(cls, path: Path) -> "FundingRateBook":
         book = cls()
         with path.open(encoding="utf-8") as handle:
-            for line in handle:
-                if line.strip():
-                    book.add(FundingRate.from_dict(json.loads(line)))
+            for number, line in enumerate(handle, 1):
+                if not line.strip():
+                    continue
+                try:
+                    row = json.loads(line)
+                except json.JSONDecodeError as exc:
+                    book.rejected.append({"origin": f"{path.name}:{number}", "reason": "UNPARSEABLE",
+                                          "detail": str(exc)[:200], "record": line[:200]})
+                    continue
+                book.add_row(row, f"{path.name}:{number}")
         return book
+
+    def validated(self, specs: dict[tuple[str, str], "FundingSpec"], max_abs_rate: Decimal) -> "FundingRateBook":
+        """A copy holding only usable records; the rest are rejected with a reason.
+
+        * the venue/instrument must be a configured perpetual;
+        * the rate must lie within the venue's floor/cap when configured,
+          else within +/- ``max_abs_rate``;
+        * a mark price, when given, must be positive.
+        """
+        out = FundingRateBook(duplicates_ignored=self.duplicates_ignored, rejected=list(self.rejected))
+        for record in [*self.realized.values(), *self.predicted.values()]:
+            spec = specs.get((record.venue, record.instrument_id))
+            reason, detail = "", ""
+            if spec is None:
+                reason, detail = "UNKNOWN_INSTRUMENT", f"{record.venue}:{record.instrument_id} is not a configured perpetual"
+            elif spec.rate_cap is not None and spec.rate_floor is not None and not (
+                spec.rate_floor <= record.rate <= spec.rate_cap
+            ):
+                reason, detail = "RATE_OUT_OF_BOUNDS", f"{record.rate} outside venue floor/cap [{spec.rate_floor}, {spec.rate_cap}]"
+            elif (spec.rate_cap is None or spec.rate_floor is None) and abs(record.rate) > max_abs_rate:
+                reason, detail = "RATE_OUT_OF_BOUNDS", f"|{record.rate}| > max_abs_rate {max_abs_rate}"
+            elif record.mark_price is not None and record.mark_price <= 0:
+                reason, detail = "INVALID_MARK", f"mark price {record.mark_price}"
+            if reason:
+                out.rejected.append({
+                    "origin": "", "reason": reason, "detail": detail,
+                    "record": {"venue": record.venue, "instrument_id": record.instrument_id,
+                               "funding_ts_ns": record.funding_ts_ns, "rate": str(record.rate),
+                               "predicted": record.predicted},
+                })
+            else:
+                out.add(record)
+        return out
 
 
 class FundingEngine(PeriodicSettlement):
@@ -181,12 +236,13 @@ class FundingEngine(PeriodicSettlement):
     def __init__(
         self, ledger: "Ledger", specs: Iterable[FundingSpec], rates: FundingRateBook | None = None, *,
         settle_lag_ns: int = 5_000_000_000, max_rate_age_ns: int | None = None,
-        mark_fallback: str = "none",
+        mark_fallback: str = "none", max_abs_rate: Decimal = Decimal("0.05"),
     ) -> None:
         super().__init__(settle_lag_ns=settle_lag_ns)
         self.ledger = ledger
         self.specs = {(s.venue, s.instrument_id): s for s in specs}
-        self.rates = rates or FundingRateBook()
+        self.max_abs_rate = max_abs_rate
+        self.rates = (rates or FundingRateBook()).validated(self.specs, max_abs_rate)
         self.max_rate_age_ns = max_rate_age_ns
         if mark_fallback not in ("none", "book_mid"):
             raise ValueError("funding mark_fallback must be 'none' or 'book_mid'")
@@ -375,6 +431,19 @@ class FundingEngine(PeriodicSettlement):
         data_gaps = [f for f in self.flags if f["code"] != "LATE_FILL_REBOOKED"]
         estimated = [e for e in self.settled_events() if "approximation" in e.valuation_source]
         marks = closing_marks or {}
+        rate_sources: dict[str, int] = {}
+        mark_sources: dict[str, int] = {}
+        revisions: dict[str, int] = {}
+        for event in self.settled_events():
+            rate_sources[event.source.value] = rate_sources.get(event.source.value, 0) + 1
+            mark_sources[event.valuation_source] = mark_sources.get(event.valuation_source, 0) + 1
+            label = f"r{dict(event.details).get('revision', '0')}"
+            revisions[label] = revisions.get(label, 0) + 1
+        off_schedule = sorted(
+            f"{v}:{i}@{ts}" for (v, i, ts) in self.rates.realized
+            if (v, i) in self.specs and self.specs[(v, i)].interval_ns > 0
+            and (ts - self.specs[(v, i)].anchor_ns) % self.specs[(v, i)].interval_ns
+        )
         return {
             # Three separate questions (audit P0): is the booked funding complete
             # for every position held; did every expected settlement have data;
@@ -382,10 +451,23 @@ class FundingEngine(PeriodicSettlement):
             # ``status``, which the acceptance gate reads.
             "status": "INCOMPLETE" if blocking or unscheduled else "COMPLETE",
             "economic_status": "INCOMPLETE" if blocking else "COMPLETE",
-            "data_coverage": "GAPS" if data_gaps else "COMPLETE",
+            "data_coverage": "GAPS" if data_gaps or self.rates.rejected else "COMPLETE",
             "data_gaps": len(data_gaps),
             "data_gaps_while_flat": sum(1 for f in data_gaps if not f["blocking"]),
             "configuration": "INVALID" if unscheduled else "VALID",
+            # Provenance of what was booked (audit P2).
+            "rate_sources": dict(sorted(rate_sources.items())),
+            "mark_sources": dict(sorted(mark_sources.items())),
+            "settlement_revisions": dict(sorted(revisions.items())),
+            # Usable but not on the configured schedule: a venue may have changed
+            # the interval; check the instrument's funding_interval.
+            "records_off_schedule": off_schedule[:50],
+            "rejected_records": len(self.rates.rejected),
+            "rejected_by_reason": {
+                reason: sum(1 for r in self.rates.rejected if r["reason"] == reason)
+                for reason in sorted({r["reason"] for r in self.rates.rejected})
+            },
+            "rejected_samples": self.rates.rejected[:20],
             # EXCHANGE_MARK when every booked settlement used the venue's mark;
             # ESTIMATED when any used the book mid instead (audit P1).
             "mark_basis": "ESTIMATED" if estimated else ("EXCHANGE_MARK" if self._settled else "NONE"),

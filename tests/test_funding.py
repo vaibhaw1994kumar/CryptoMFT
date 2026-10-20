@@ -1,5 +1,6 @@
 """ECO02 perpetual funding settlement: sign, timing, data quality and reconciliation."""
 
+from dataclasses import replace
 from decimal import Decimal
 import json
 from pathlib import Path
@@ -397,6 +398,61 @@ class FundingDataTests(unittest.TestCase):
             book = FundingRateBook.from_jsonl(path)
         self.assertEqual(set(book.realized), {("BINANCE", PERP, T), ("BYBIT", PERP, T)})
         self.assertEqual(book.realized[("BYBIT", PERP, T)].source, EventSource.SIMULATED)
+
+
+class FundingRecordValidationTests(unittest.TestCase):
+    def test_invalid_records_are_rejected_with_reasons_and_never_booked(self):
+        capped = replace(spec(), rate_cap=Decimal("0.003"), rate_floor=Decimal("-0.003"))
+        book = FundingRateBook().extend([
+            rate(T, "0.004"),                                         # outside the venue cap
+            rate(T, "0.0001", venue="KRAKEN"),                        # not a configured perpetual
+            rate(T + 8 * HOUR, "0.0001", mark=Decimal("-1")),          # bad mark
+            rate(T + 16 * HOUR, "0.0001"),                            # fine
+        ])
+        book.add_row({"venue": "BINANCE", "instrument_id": PERP, "rate": "0.0001"}, "row-5")  # no time
+        book.add_row({"venue": "BINANCE", "instrument_id": PERP, "funding_ts_ns": T, "rate": "x"}, "row-6")
+        ledger = perp_ledger()
+        trade(ledger, "o", Side.BUY, "0.1", match_ts=T - HOUR)
+        eng = FundingEngine(ledger, [capped], book, settle_lag_ns=0)
+        eng.observe("BINANCE", PERP, 1, MARK)
+        eng.settle_until(T + 16 * HOUR)
+        report = eng.report()
+        self.assertEqual(report["rejected_by_reason"],
+                         {"INVALID_MARK": 1, "RATE_OUT_OF_BOUNDS": 1, "UNKNOWN_INSTRUMENT": 1, "UNPARSEABLE": 2})
+        self.assertEqual(len(funding_events(ledger)), 1)              # only the valid 16h record
+        # The rejected 0h/8h records leave those settlements without data: blocking.
+        self.assertEqual(report["economic_status"], "INCOMPLETE")
+        self.assertEqual(report["data_coverage"], "GAPS")
+        self.assertEqual({r["origin"] for r in report["rejected_samples"] if r["origin"]}, {"row-5", "row-6"})
+
+    def test_default_rate_bound_applies_without_venue_cap(self):
+        book = FundingRateBook().extend([rate(T, "0.06"), rate(T + 8 * HOUR, "-0.05")])
+        valid = book.validated({("BINANCE", PERP): spec()}, Decimal("0.05"))
+        self.assertEqual([r["reason"] for r in valid.rejected], ["RATE_OUT_OF_BOUNDS"])
+        self.assertEqual(set(valid.realized), {("BINANCE", PERP, T + 8 * HOUR)})
+
+    def test_unparseable_jsonl_lines_are_kept_not_fatal(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "rates.jsonl"
+            path.write_text("{not json}\n" + json.dumps({"venue": "BINANCE", "instrument_id": PERP,
+                                                          "funding_ts_ns": T, "rate": "0.0001",
+                                                          "source": "MADE_UP"}) + "\n", encoding="utf-8")
+            book = FundingRateBook.from_jsonl(path)
+        self.assertEqual([(r["origin"], r["reason"]) for r in book.rejected],
+                         [("rates.jsonl:1", "UNPARSEABLE"), ("rates.jsonl:2", "UNPARSEABLE")])
+
+    def test_report_shows_provenance_revisions_and_off_schedule_records(self):
+        ledger = perp_ledger()
+        trade(ledger, "o1", Side.BUY, "0.1", match_ts=T - HOUR)
+        eng = engine(ledger, [rate(T, "0.0001"), rate(T + 4 * HOUR, "0.0001")])   # 8h schedule
+        eng.settle_until(T + 4 * HOUR)
+        trade(ledger, "late", Side.BUY, "0.1", match_ts=T - 5, report_ts=T + 4 * HOUR + 1)
+        report = eng.report()
+        self.assertEqual(report["rate_sources"], {"OBSERVED": 2})
+        self.assertEqual(report["mark_sources"], {"funding record mark price": 2})
+        # The late fill (matched before both) moved both settlements to revision 1.
+        self.assertEqual(report["settlement_revisions"], {"r1": 2})
+        self.assertEqual(report["records_off_schedule"], [f"BINANCE:{PERP}@{T + 4 * HOUR}"])
 
 
 class FundingReconciliationTests(unittest.TestCase):

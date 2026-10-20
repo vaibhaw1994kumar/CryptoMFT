@@ -161,6 +161,22 @@ On spot, funding is reported `N/A`.
   carry an observation time (`FUNDING_RATE_ASOF_MISSING`) no older than the
   limit (`FUNDING_RATE_STALE`). Venue funding-history records are final
   settled rates and are exempt; mark them `settlement_history: true`.
+* **Record validation.** Records are checked on load, and a bad record
+  is rejected with its reason, never booked and never fatal:
+  - `UNPARSEABLE`: bad JSON, no timestamp, bad number or unknown source;
+  - `UNKNOWN_INSTRUMENT`: not a configured perpetual;
+  - `RATE_OUT_OF_BOUNDS`: outside the venue's `funding_rate_floor` /
+    `funding_rate_cap` (instrument config, from the contract master), or
+    beyond `funding.max_abs_rate` (default 0.05) when those aren't set;
+  - `INVALID_MARK`: a mark price that isn't positive.
+
+  The report gives counts by reason and samples with their file and line.
+  A rejected record leaves its settlement without data, so a held position
+  still makes the run INCOMPLETE. Records off the configured schedule are
+  kept and listed (`records_off_schedule`), since venues change intervals.
+* **Provenance.** The report also gives `rate_sources` (OBSERVED /
+  SIMULATED), `mark_sources` (venue mark or book mid) and
+  `settlement_revisions` (r0, r1, ...) for what was booked.
 * **Mark basis.** `funding_report.json` → `mark_basis` is `EXCHANGE_MARK`
   when every booked settlement used the venue's mark and `ESTIMATED` when any
   used the book mid. The reconciliation, the run summary and the gate result
@@ -289,6 +305,21 @@ independent computations:
 | `<venue>_funding_matches_trade_ledger` | economic funding = `account_state` funding (perpetual venues) |
 | `plan_net_pnl_matches_equity_pnl` | sum of plan net PnL vs strategy equity PnL excluding funding/borrow (tolerance 1 USDT: plans mark residuals at close-time mids) |
 | `<venue>_matches_venue_reported_equity` | when venue equity is supplied (`NOT_AVAILABLE` in simulation/internal paper) |
+
+**Fee profile and warnings.** The reconciliation carries `fee_profile` per
+venue: the rule in force (tier, VERIFIED/ASSUMED, maker/taker bps, fee
+asset, whether it comes from the dated schedule), plus `fee_sources`, a
+count of fee events by source. Its `warnings` list (repeated in the run
+summary, the gate result and `run_all_local`) says in plain language what
+the result rests on that is assumed or missing:
+- assumed fee tiers and missing schedule rules;
+- fee fallbacks;
+- perpetuals without a funding schedule, missing history while flat,
+  rejected and off-schedule rate records, and estimated marks;
+- assumed borrow terms.
+
+Warnings never fail the gate. The current research and paper-watch configs
+get two: both venues' fee tiers (`research-default`) are ASSUMED.
 
 Status: `RECONCILED` (all checks pass), `INCOMPLETE` (a price/FX is missing,
 a fee asset is unpriced or funding data is missing/stale for a held position;

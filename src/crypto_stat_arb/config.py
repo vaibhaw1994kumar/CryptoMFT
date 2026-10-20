@@ -117,6 +117,8 @@ def _perpetual_fields(x: dict) -> dict[str, Any]:
         "settlement_asset": str(x.get("settlement_asset") or x["quote"]),
         "funding_interval_ns": int(d(interval_minutes or 0) * 60 * 1_000_000_000),
         "funding_anchor_ns": parse_effective_ns(x.get("funding_anchor")),
+        "funding_rate_cap": d(x["funding_rate_cap"]) if x.get("funding_rate_cap") not in (None, "") else None,
+        "funding_rate_floor": d(x["funding_rate_floor"]) if x.get("funding_rate_floor") not in (None, "") else None,
     }
 
 
