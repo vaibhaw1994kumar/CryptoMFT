@@ -166,6 +166,7 @@ class _RecallState:
     recall: BorrowRecall
     announced: bool = False
     resolved: bool = False
+    price_missing_flagged: bool = False
 
 
 class BorrowEngine(PeriodicSettlement):
@@ -270,7 +271,8 @@ class BorrowEngine(PeriodicSettlement):
             self._flag(line, ts_ns, "BORROW_PRICE_MISSING", "interest booked in the asset; no price to value it")
         return EconomicEvent(
             event_type=EconomicEventType.BORROW_ACCRUAL, idempotency_key=key,
-            ts_ns=max(booked_ns, ts_ns), effective_ts_ns=ts_ns,
+            # Stamped at the charge time so a re-run after a restart is an identical duplicate.
+            ts_ns=ts_ns, effective_ts_ns=ts_ns,
             postings=(Posting(line.venue, INTEREST, line.asset, -interest),),
             venue=line.venue, source=line.source,
             reporting_value=None if price is None else -interest * price,
@@ -300,6 +302,7 @@ class BorrowEngine(PeriodicSettlement):
         )
         if not self.ledger.apply_borrow(event):
             return
+        self._dirty = True
         if line.charge_on_open:
             charge = self._accrual(line, effective_ns, quantity, f"borrow-open-interest|{event.event_id}",
                                    reported_ns, "OPEN")
@@ -344,7 +347,9 @@ class BorrowEngine(PeriodicSettlement):
         self._repaid[(venue, asset)] = cumulative
         if repay_id is not None:
             self._repay_ids.add(repay_id)
+        self._dirty = True
         self.on_change((venue, asset), when, ts_ns, f"repay {repay_id or cumulative}")
+        self.checkpoint()
         return True
 
     # -- periodic interest ---------------------------------------------------------------
@@ -382,6 +387,53 @@ class BorrowEngine(PeriodicSettlement):
     def _flag(self, line: BorrowLine | tuple[str, str], ts_ns: int, code: str, detail: str) -> None:
         venue, asset = (line.venue, line.asset) if isinstance(line, BorrowLine) else line
         self.flags.append({"venue": venue, "asset": asset, "ts_ns": ts_ns, "code": code, "detail": detail})
+        self._dirty = True
+
+    # -- durability ----------------------------------------------------------------------
+    def _line_of(self, event: EconomicEvent):
+        details = dict(event.details)
+        if event.event_type != EconomicEventType.BORROW_ACCRUAL or details.get("charge") != "INTERVAL":
+            return None
+        key = (event.venue, details.get("asset", ""))
+        if key not in self.lines:
+            return None
+        return key, event.effective, int(details.get("revision", 0)), Decimal(details.get("basis_quantity", "0"))
+
+    def _extra_state(self) -> dict[str, Any]:
+        return {
+            "flags": self.flags, "notes": self.notes, "now_ns": self.now_ns,
+            "forced_closes": self.forced_closes,
+            "resolved_recalls": sorted(s.recall.recall_id for s in self._recalls if s.resolved),
+            "price_missing_flagged": sorted(s.recall.recall_id for s in self._recalls if s.price_missing_flagged),
+            "prices": [[v, a, None if m is None else str(m), None if k is None else str(k)]
+                       for (v, a), (m, k) in sorted(self._prices.items())],
+        }
+
+    def _restore_extra(self, state: dict[str, Any], events: list[EconomicEvent]) -> None:
+        self.flags = list(state.get("flags", []))
+        self.notes = list(state.get("notes", []))
+        self.now_ns = int(state.get("now_ns") or 0)
+        self.forced_closes = list(state.get("forced_closes", []))
+        self._prices = {
+            (v, a): (None if m is None else Decimal(m), None if k is None else Decimal(k))
+            for v, a, m, k in state.get("prices", [])
+        }
+        # Repayments and recall notices are facts in the ledger.
+        repays = [e for e in events if e.event_type == EconomicEventType.BORROW_REPAY]
+        for event in repays:
+            key = (event.venue, dict(event.details).get("asset", ""))
+            self._repaid[key] = self._repaid.get(key, ZERO) + Decimal(dict(event.details).get("repaid", "0"))
+            if event.reference_id:
+                self._repay_ids.add(event.reference_id)
+        announced = {e.reference_id for e in events if e.event_type == EconomicEventType.BORROW_RECALL}
+        resolved = set(state.get("resolved_recalls", [])) | {
+            e.reference_id.removeprefix("recall:") for e in repays if e.reference_id.startswith("recall:")
+        }
+        flagged = set(state.get("price_missing_flagged", []))
+        for item in self._recalls:
+            item.announced = item.recall.recall_id in announced
+            item.resolved = item.recall.recall_id in resolved
+            item.price_missing_flagged = item.recall.recall_id in flagged
 
     # -- fills ---------------------------------------------------------------------------
     def on_trade_fill(self, event: EconomicEvent) -> None:
@@ -415,11 +467,13 @@ class BorrowEngine(PeriodicSettlement):
             if amount > 0:
                 self.repay(venue, base, amount, event.ts_ns, repay_id=f"auto:{event.event_id}",
                            effective_ns=event.effective)
+        self.checkpoint()
 
     def _unfinanced(self, venue: str, asset: str, held: Decimal, event: EconomicEvent, code: str) -> None:
         row = {"venue": venue, "asset": asset, "ts_ns": event.effective, "code": f"UNFINANCED_SHORT:{code}",
                "detail": f"{venue} {asset} main balance {held} after fill {event.fill_id}"}
         (self.flags if self.unfinanced_short_policy == "FAIL" else self.notes).append(row)
+        self._dirty = True
 
     # -- recalls -------------------------------------------------------------------------
     def process(self, now_ns: int) -> None:
@@ -440,6 +494,8 @@ class BorrowEngine(PeriodicSettlement):
                 ))
             if state.announced and not state.resolved and recall.deadline_ns <= now_ns:
                 self._enforce(state, now_ns)
+                self._dirty = True
+        self.checkpoint()
 
     def _enforce(self, state: _RecallState, now_ns: int) -> None:
         recall = state.recall
@@ -456,8 +512,10 @@ class BorrowEngine(PeriodicSettlement):
             price, source = (recall.forced_close_price, EventSource.OBSERVED) if recall.forced_close_price else (
                 mid_ask[1], EventSource.SIMULATED)
             if price is None:
-                self._flag((venue, asset), now_ns, "FORCED_CLOSE_PRICE_MISSING",
-                           f"recall {recall.recall_id} overdue; no record price and no best ask")
+                if not state.price_missing_flagged:
+                    state.price_missing_flagged = True
+                    self._flag((venue, asset), now_ns, "FORCED_CLOSE_PRICE_MISSING",
+                               f"recall {recall.recall_id} overdue; no record price and no best ask")
                 return
             self._buy_in(recall, shortfall, price, source, now_ns)
         self.repay(venue, asset, due, now_ns, repay_id=f"recall:{recall.recall_id}", source=recall.source)

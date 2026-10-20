@@ -310,7 +310,7 @@ def main() -> None:
     gate.add_argument("--run-dir", type=Path, required=True)
     gate.add_argument(
         "--allow-incomplete", action="append", default=[], metavar="REASON=JUSTIFICATION",
-        help="accept an INCOMPLETE reason (MISSING_PRICE, FEE_ASSET_UNPRICED, FUNDING_DATA, "
+        help="accept an INCOMPLETE reason (MISSING_PRICE, FEE_ASSET_UNPRICED, FEE_RULE_FALLBACK, FUNDING_DATA, "
              "BORROW_DATA) with a written justification; listed in the result",
     )
     benchmark = sub.add_parser("benchmark", help="MR-14 replay and paper performance baseline")

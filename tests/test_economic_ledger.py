@@ -62,9 +62,12 @@ def child(order_id="o1", post_only=True, side=Side.BUY) -> ChildOrder:
     )
 
 
-def fill(oms: OMS, order: ChildOrder, cumulative: str, price="60000", ts=10) -> None:
+def fill(oms: OMS, order: ChildOrder, cumulative: str, price="60000", ts=10, *, labelled=True) -> None:
+    """A venue fill report; ``labelled`` means the venue said maker or taker."""
     order.filled_quantity = Decimal(cumulative)
     order.average_price = Decimal(price)
+    if labelled:
+        oms._order_liquidity.setdefault(order.order_id, "MAKER" if order.post_only else "TAKER")
     oms._price_fills(order, ts)
     oms.ledger.apply_fill(order, ts)
 
@@ -224,6 +227,19 @@ class FeeAccountingTests(unittest.TestCase):
         (event,) = fee_events(oms.ledger, "o2")
         self.assertEqual(event.source, EventSource.ASSUMED)
 
+    def test_fee_fallbacks_are_flagged_not_silent(self):
+        # No dated schedule rule (instrument default) and no venue maker/taker label.
+        oms = oms_with(instrument_master(), opening=[("BINANCE", "USDT", Decimal("10000"))])
+        order = child(post_only=False)
+        fill(oms, order, "0.01", labelled=False)
+        self.assertEqual(order.fee, Decimal("0.24"))
+        self.assertEqual(order.fee_source, "ASSUMED|NO_SCHEDULE_RULE|LIQUIDITY_INFERRED")
+        prices = Valuation("USDT", {("BINANCE", "BTC"): Decimal("60000")})
+        report = reconcile(oms.ledger.economics, opening=prices, closing=prices)
+        self.assertEqual(report["status"], "INCOMPLETE")
+        self.assertEqual(report["venues"]["BINANCE"]["fee_fallbacks"],
+                         {"NO_SCHEDULE_RULE": 1, "LIQUIDITY_INFERRED": 1})
+
     def test_mixed_liquidity_order_is_priced_per_fill(self):
         oms = oms_with(fee_master(maker_bps=Decimal("2"), taker_bps=Decimal("5"), source=FeeSource.VERIFIED))
         order = child(post_only=False)
@@ -285,7 +301,7 @@ class ReconciliationTests(unittest.TestCase):
 
     def test_one_leg_residual_marks_into_equity_and_matches_plan_pnl(self):
         oms = oms_with(
-            instrument_master(), adapters={"BYBIT": RejectingAdapter()},
+            fee_master(maker_bps=Decimal("4"), taker_bps=Decimal("4")), adapters={"BYBIT": RejectingAdapter()},
             opening=[(v, a, Decimal("10000") if a == "USDT" else Decimal("0"))
                      for v in ("BINANCE", "BYBIT") for a in ("USDT", "BTC")],
             residual=ResidualPolicy(max_residual_base=Decimal("0.02"), max_residual_age_ns=0,

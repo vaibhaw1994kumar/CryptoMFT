@@ -154,6 +154,32 @@ class EconomicEvent:
         }
 
 
+def event_from_dict(row: dict[str, Any]) -> EconomicEvent:
+    """Inverse of ``EconomicEvent.to_dict`` (journal replay after a restart)."""
+    def dec(value: Any) -> Decimal | None:
+        return None if value is None else Decimal(str(value))
+
+    event = EconomicEvent(
+        event_type=EconomicEventType(row["event_type"]),
+        idempotency_key=row["idempotency_key"],
+        ts_ns=int(row["ts_ns"]),
+        postings=tuple(
+            Posting(p["venue"], p["account"], p["asset"], Decimal(p["quantity"])) for p in row["postings"]
+        ),
+        effective_ts_ns=int(row["effective_ts_ns"]),
+        venue=row.get("venue", ""), account=row.get("account", "main"),
+        instrument_id=row.get("instrument_id", ""), source=EventSource(row.get("source", "SIMULATED")),
+        order_id=row.get("order_id", ""), fill_id=row.get("fill_id", ""),
+        reference_id=row.get("reference_id", ""), reverses=row.get("reverses", ""),
+        reporting_value=dec(row.get("reporting_value")), valuation_price=dec(row.get("valuation_price")),
+        valuation_source=row.get("valuation_source", ""),
+        details=tuple((str(k), str(v)) for k, v in (row.get("details") or {}).items()),
+    )
+    if event.event_id != row.get("event_id", event.event_id):
+        raise ValueError(f"journal event {row.get('event_id')} does not match its key")
+    return event
+
+
 class ConflictingEventError(ValueError):
     """The same idempotency key arrived with a different payload."""
 
@@ -356,6 +382,7 @@ def reconcile(
     borrow_flags_by_venue: Mapping[str, list[str]] | None = None,
     borrow_notes_by_venue: Mapping[str, list[str]] | None = None,
     legacy_borrow_cost_by_venue: Mapping[str, Decimal] | None = None,
+    estimated_by_venue: Mapping[str, list[str]] | None = None,
 ) -> dict[str, Any]:
     """Closing equity = opening + inventory revaluation + trading + fees/rebates
     + funding - borrow + transfers + external flows + valuation adjustments.
@@ -421,6 +448,11 @@ def reconcile(
         ]
         fee_cost = sum((e.reporting_value or ZERO for e in venue_fees if (e.reporting_value or ZERO) > 0), ZERO)
         rebates = -sum((e.reporting_value or ZERO for e in venue_fees if (e.reporting_value or ZERO) < 0), ZERO)
+        fee_fallbacks: dict[str, int] = {}
+        for e in venue_fees:
+            for marker in ("NO_SCHEDULE_RULE", "LIQUIDITY_INFERRED"):
+                if marker in dict(e.details).get("fee_source", ""):
+                    fee_fallbacks[marker] = fee_fallbacks.get(marker, 0) + 1
         fee_unvalued = [
             e.event_id for e in venue_fees
             if e.reporting_value is None or dict(e.details).get("fee_quantity_unknown") == "true"
@@ -460,12 +492,18 @@ def reconcile(
             "borrow_flags": borrow_flags.get(venue, []),
             "borrow_notes": borrow_notes.get(venue, []),
             "unvalued_borrow_accruals": unvalued_accruals,
+            # Components valued from an approximation (e.g. book mid as mark):
+            # they reconcile, but they are estimates, not venue-confirmed.
+            "estimated": list((estimated_by_venue or {}).get(venue, [])),
             "not_applicable": sorted(
                 (["FUNDING"] if product_types.get(venue) == "SPOT" else [])
                 + (["BORROW"] if borrow_status.get(venue) == "NOT_APPLICABLE" else [])
             ),
             "missing_prices": sorted(missing),
             "unvalued_fee_events": fee_unvalued,
+            # Fees priced without a dated schedule rule or a venue-reported
+            # maker/taker label: counted, and the run is INCOMPLETE (audit P1).
+            "fee_fallbacks": fee_fallbacks,
         }
         missing_all |= missing
         checks.append({"check": f"{venue}_identity_exact", "passed": residual == 0,
@@ -543,6 +581,7 @@ def reconcile(
     failed = [c for c in checks if not c["passed"]]
     status = "FAIL" if failed else "INCOMPLETE" if missing_all or any(
         row["unvalued_fee_events"] or row["funding_flags"] or row["unvalued_borrow_accruals"]
+        or row["fee_fallbacks"]
         or any(not f.startswith("UNFINANCED_SHORT") for f in row["borrow_flags"])
         for row in rows.values()
     ) else "RECONCILED"
@@ -550,6 +589,7 @@ def reconcile(
         "schema_version": ECONOMICS_SCHEMA_VERSION,
         "reporting_currency": ledger.reporting_currency,
         "status": status,
+        "estimated": sorted({item for row in rows.values() for item in row["estimated"]}),
         "venue_reported_equity": "AVAILABLE" if venue_reported_equity else "NOT_AVAILABLE (paper/simulation)",
         "venues": rows,
         "consolidated": {

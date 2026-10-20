@@ -81,6 +81,12 @@ Fee rules (`fees` in config) accept (comments for illustration only):
   a rebate growing more negative across partial fills is accepted, and a
   venue-reported fee replaces the computed one only if larger in magnitude.
 * Entries, exits, hedges and unwinds are all fills, so all pay fees.
+* **No silent substitution.** A fill priced from the instrument's default
+  fee (no dated schedule rule) has `|NO_SCHEDULE_RULE` in its fee source.
+  One whose maker/taker status the venue didn't report has
+  `|LIQUIDITY_INFERRED` (inferred from `post_only`). The reconciliation
+  counts them in `fee_fallbacks` and is `INCOMPLETE`; the gate reason is
+  `FEE_RULE_FALLBACK`.
 * **One rate path.** `FeeRule.effective_bps`, `FeeSchedule.rate_bps` and
   `InstrumentMaster.fee_bps` all return the rate the ledger books, with the
   dated rule and the conservative policy applied. The arb and
@@ -113,7 +119,8 @@ On spot, funding is reported `N/A`.
 // a rate record (one JSON object per line)
 {"venue": "BINANCE", "instrument_id": "BTC-USDT-PERP", "funding_ts_ms": 1760947200000,
  "rate": "0.0001", "mark_price": "60000", "source": "OBSERVED", "asof_ts_ms": 1760947200000,
- "predicted": false}
+ "predicted": false,
+ "settlement_history": false}   // true for a venue funding-history record (final settled rate)
 ```
 
 * **Amount.** Linear: `-contracts × multiplier × mark × rate` in the
@@ -144,6 +151,16 @@ On spot, funding is reported `N/A`.
   (`FUNDING_MARK_MISSING`) books nothing and makes the reconciliation
   `INCOMPLETE`. The same flags while flat are informational. Duplicate
   identical records are ignored; conflicting ones raise.
+* **Observation time.** A live observation of a rate (not
+  `settlement_history`) must not have been observed after it is used
+  (`FUNDING_RATE_ASOF_IN_FUTURE`). With `max_rate_age_ms` set, it must also
+  carry an observation time (`FUNDING_RATE_ASOF_MISSING`) no older than the
+  limit (`FUNDING_RATE_STALE`). Venue funding-history records are final
+  settled rates and are exempt; mark them `settlement_history: true`.
+* **Mark basis.** `funding_report.json` → `mark_basis` is `EXCHANGE_MARK`
+  when every booked settlement used the venue's mark and `ESTIMATED` when any
+  used the book mid. The reconciliation, the run summary and the gate result
+  carry an `estimated` list. Estimated runs pass the gate, but are labelled.
 * **No double settlement.** Each settlement is processed once per revision,
   and re-running settlement on the same ledger is ignored by the idempotency
   key. A perpetual without a funding interval is rejected at load (and
@@ -273,6 +290,28 @@ Status: `RECONCILED` (all checks pass), `INCOMPLETE` (a price/FX is missing,
 a fee asset is unpriced or funding data is missing/stale for a held position;
 nothing is assumed), `FAIL` (a check failed).
 
+## Restarts (`financing_journal.py`)
+
+With a plan store, the session journals every FUNDING / BORROW_* event and
+reversal, plus venue buy-in fills, in the same SQLite WAL database. On
+restart:
+
+1. the OMS rebuilds trade fills from the plans;
+2. the journal is replayed into the rebuilt ledger (legacy cash and equity
+   included) without triggering the engines;
+3. each engine restores a small checkpoint (session start, data flags,
+   settlements processed while flat, recall state, last prices) and
+   re-derives booked settlements and revisions from the ledger.
+
+Funding and interest events are stamped at their settlement time, so a
+settlement re-run after a crash, between its event and its checkpoint,
+reproduces the same key and payload and is ignored.
+`tests/test_financing_restart.py` covers funding and borrow sessions run
+three ways: uninterrupted, killed and restarted mid-session, and killed
+inside that crash window. All three end with identical balances, funding,
+borrow cost, equity and financing events. The opening marks for inventory
+revaluation are re-taken after a restart.
+
 ## Economics acceptance gate (`economics_gate.py`)
 
 P&L is accepted only if the economics reconcile.
@@ -286,7 +325,7 @@ audit (`economics` component, paper run and replay).
   reconciliation, or an unfinanced short.
 * **INCOMPLETE fails too**, unless *every* reason is accepted with a written
   justification: `--allow-incomplete FUNDING_DATA="venue history gap ..."`.
-  Reasons are `MISSING_PRICE`, `FEE_ASSET_UNPRICED`, `FUNDING_DATA` and
+  Reasons are `MISSING_PRICE`, `FEE_ASSET_UNPRICED`, `FEE_RULE_FALLBACK`, `FUNDING_DATA` and
   `BORROW_DATA`. An unclassified INCOMPLETE can't be accepted. Accepted
   reasons and their justifications are listed in the result.
 * Sessions recorded before the economic ledger existed have no
@@ -298,14 +337,12 @@ audit (`economics` component, paper run and replay).
   end-to-end perpetual backtest on relabelled sample data. **It has not been
   run on recorded perpetual data**: every recorded cycle is spot, where
   funding is `N/A`. A public funding-history fetcher is not included yet.
-* Funding is not yet persisted or rebuilt on an OMS restart:
-  `rebuild_from_plans` replays fills only.
-* Stale-rate detection is off unless `max_rate_age_ms` is set.
+* Stale-rate *age* checks are off unless `max_rate_age_ms` is set. The
+  observed-in-the-future check is always on.
 * Borrowing is implemented and unit-tested (`tests/test_borrow.py`), with
   end-to-end backtests on the sample data (borrow, interest, recall and
   buy-in). **No recorded cycle uses a borrow line**, and the configured
-  terms are assumptions until verified against an account. Funding and
-  borrow state are not rebuilt on an OMS restart. Quote borrowing for
+  terms are assumptions until verified against an account. Quote borrowing for
   margin buys (the buy-side `margin_enabled` path) is not modelled (ECO04).
   Borrowing is spot-only; perpetuals report it N/A.
 * Perpetuals: inverse contracts and multipliers other than 1 are rejected at

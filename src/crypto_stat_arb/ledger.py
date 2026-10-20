@@ -92,6 +92,9 @@ class Ledger:
         # Called with each booked TRADE_FILL (the funding engine rebooks a
         # settlement when a fill effective before it is reported late).
         self.trade_fill_listeners: list = []
+        # FinancingJournal when a plan store is attached: funding and borrow
+        # events (and venue buy-ins) are written durably as they are booked.
+        self.journal = None
 
     def record(self, event_type: str, ts_ns: int, **payload: object) -> None:
         ordinal = len(self.events) + 1
@@ -222,6 +225,8 @@ class Ledger:
                 details=(("side", order.side.value), ("liquidity", order.liquidity)),
             )
             if self.economics.apply(fill_event):
+                if economic_type != EconomicEventType.TRADE_FILL and self.journal is not None:
+                    self.journal.append_forced_fill(order, ts_ns)
                 for listener in self.trade_fill_listeners:
                     listener(fill_event)
             self.record(
@@ -322,11 +327,13 @@ class Ledger:
         if not self.economics.apply(event):
             return False
         self._record_funding(event, reversal=False)
+        self._journal(event)
         return True
 
     def reverse_funding(self, event_id: str, ts_ns: int, reason: str) -> EconomicEvent:
         reversal = self.economics.reverse(event_id, ts_ns, reason)
         self._record_funding(reversal, reversal=True)
+        self._journal(reversal)
         return reversal
 
     def apply_borrow(self, event: EconomicEvent) -> bool:
@@ -334,12 +341,29 @@ class Ledger:
         if not self.economics.apply(event):
             return False
         self._record_borrow(event, reversal=False)
+        self._journal(event)
         return True
 
     def reverse_borrow(self, event_id: str, ts_ns: int, reason: str) -> EconomicEvent:
         reversal = self.economics.reverse(event_id, ts_ns, reason)
         self._record_borrow(reversal, reversal=True)
+        self._journal(reversal)
         return reversal
+
+    def _journal(self, event: EconomicEvent) -> None:
+        if self.journal is not None:
+            self.journal.append_event(event)
+
+    def replay_financing(self, event: EconomicEvent) -> None:
+        """Re-book a journaled FUNDING/BORROW_* event or reversal after a restart."""
+        reversal = event.event_type == EconomicEventType.REVERSAL
+        kind = dict(event.details).get("reversed_type", "") if reversal else event.event_type.value
+        if not self.economics.apply(event):
+            return
+        if kind == EconomicEventType.FUNDING.value:
+            self._record_funding(event, reversal=reversal)
+        else:
+            self._record_borrow(event, reversal=reversal)
 
     def _record_borrow(self, event: EconomicEvent, *, reversal: bool) -> None:
         kind = dict(event.details).get("reversed_type", "") if reversal else event.event_type.value

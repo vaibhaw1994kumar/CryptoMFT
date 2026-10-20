@@ -11,6 +11,8 @@ PASS or FAIL:
 
   ``MISSING_PRICE``      a balance could not be valued at the opening/closing mark
   ``FEE_ASSET_UNPRICED`` a fee in a third token had no price
+  ``FEE_RULE_FALLBACK``  a fill was priced from the instrument default (no dated
+                         schedule rule) or its maker/taker status was inferred
   ``FUNDING_DATA``       a settlement with a position had no rate / stale rate / no mark,
                          or a perpetual has no funding schedule
   ``BORROW_DATA``        borrow interest could not be valued, or a buy-in had no price
@@ -25,7 +27,7 @@ import json
 from pathlib import Path
 from typing import Any, Mapping
 
-REASONS = ("MISSING_PRICE", "FEE_ASSET_UNPRICED", "FUNDING_DATA", "BORROW_DATA")
+REASONS = ("MISSING_PRICE", "FEE_ASSET_UNPRICED", "FEE_RULE_FALLBACK", "FUNDING_DATA", "BORROW_DATA")
 
 
 def _read(path: Path) -> Any:
@@ -39,6 +41,8 @@ def incomplete_reasons(report: dict[str, Any], funding: dict[str, Any] | None) -
             reasons.setdefault("MISSING_PRICE", []).append(item)
         for item in row.get("unvalued_fee_events", []):
             reasons.setdefault("FEE_ASSET_UNPRICED", []).append(f"{venue}:{item}")
+        for marker, count in (row.get("fee_fallbacks") or {}).items():
+            reasons.setdefault("FEE_RULE_FALLBACK", []).append(f"{venue}:{marker} x{count}")
         for item in row.get("funding_flags", []):
             reasons.setdefault("FUNDING_DATA", []).append(f"{venue}:{item}")
         for item in row.get("unvalued_borrow_accruals", []):
@@ -72,6 +76,8 @@ def economics_gate(run_dir: Path, *, allow_incomplete: Mapping[str, str] | None 
         "funding_data_coverage": None if funding is None else funding.get("data_coverage"),
         "borrow": None if borrow is None else borrow.get("status"),
         "failures": [],
+        # Reconciled but valued from approximations: reported, not failed.
+        "estimated": [] if report is None else report.get("estimated", []),
         "incomplete_reasons": {},
         "allowed_incomplete": {},
     }

@@ -1485,11 +1485,19 @@ class OMS:
         delta_notional = notional - priced_notional
         if delta_qty <= 0 and delta_notional == 0:
             return
-        liquidity = self._order_liquidity.get(order.order_id) or (
+        reported = self._order_liquidity.get(order.order_id)
+        liquidity = reported or (
             Liquidity.MAKER.value if order.post_only else Liquidity.TAKER.value
         )
         rule = self.instruments.fee_rule(order.venue, order.instrument_id, ts_ns)
         bps, source = rule.effective_bps(Liquidity(liquidity))
+        # Never substitute silently (audit P1): say when the rate came from the
+        # instrument default rather than a dated schedule rule, or when the
+        # venue did not report whether the fill was maker or taker.
+        if self.instruments.fee_schedule.rule(order.venue, order.instrument_id, ts_ns) is None:
+            source = f"{source}|NO_SCHEDULE_RULE"
+        if not reported:
+            source = f"{source}|LIQUIDITY_INFERRED"
         base, quote = self._assets(order.venue, order.instrument_id)
         value = delta_notional * bps / Decimal("10000")
         quantity: Decimal | None

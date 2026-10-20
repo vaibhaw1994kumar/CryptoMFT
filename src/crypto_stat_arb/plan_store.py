@@ -41,25 +41,9 @@ def _plan_json(plan: ParentPlan) -> str:
     )
 
 
-def _restore_plan(payload: str) -> ParentPlan:
-    row = json.loads(payload)
-    opportunity_row = row["opportunity"]
-    opportunity = Opportunity(
-        opportunity_id=opportunity_row["opportunity_id"],
-        strategy_id=opportunity_row["strategy_id"],
-        instrument_id=opportunity_row["instrument_id"],
-        observed_ts_ns=int(opportunity_row["observed_ts_ns"]),
-        buy_venue=opportunity_row["buy_venue"],
-        sell_venue=opportunity_row["sell_venue"],
-        buy_price=Decimal(opportunity_row["buy_price"]),
-        sell_price=Decimal(opportunity_row["sell_price"]),
-        quantity=Decimal(opportunity_row["quantity"]),
-        gross_edge_bps=Decimal(opportunity_row["gross_edge_bps"]),
-        estimated_net_edge_bps=Decimal(opportunity_row["estimated_net_edge_bps"]),
-        source_event_ids=tuple(opportunity_row["source_event_ids"]),
-        eligibility_fingerprint=opportunity_row.get("eligibility_fingerprint", ""),
-    )
-    children = [ChildOrder(
+def restore_child(child: dict[str, Any]) -> ChildOrder:
+    """A ``ChildOrder`` from its JSON form (plan snapshots, financing journal)."""
+    return ChildOrder(
         order_id=child["order_id"],
         parent_id=child["parent_id"],
         opportunity_id=child["opportunity_id"],
@@ -87,7 +71,28 @@ def _restore_plan(payload: str) -> ParentPlan:
         ),
         liquidity=str(child.get("liquidity", "")),
         fee_source=str(child.get("fee_source", "")),
-    ) for child in row["children"]]
+    )
+
+
+def _restore_plan(payload: str) -> ParentPlan:
+    row = json.loads(payload)
+    opportunity_row = row["opportunity"]
+    opportunity = Opportunity(
+        opportunity_id=opportunity_row["opportunity_id"],
+        strategy_id=opportunity_row["strategy_id"],
+        instrument_id=opportunity_row["instrument_id"],
+        observed_ts_ns=int(opportunity_row["observed_ts_ns"]),
+        buy_venue=opportunity_row["buy_venue"],
+        sell_venue=opportunity_row["sell_venue"],
+        buy_price=Decimal(opportunity_row["buy_price"]),
+        sell_price=Decimal(opportunity_row["sell_price"]),
+        quantity=Decimal(opportunity_row["quantity"]),
+        gross_edge_bps=Decimal(opportunity_row["gross_edge_bps"]),
+        estimated_net_edge_bps=Decimal(opportunity_row["estimated_net_edge_bps"]),
+        source_event_ids=tuple(opportunity_row["source_event_ids"]),
+        eligibility_fingerprint=opportunity_row.get("eligibility_fingerprint", ""),
+    )
+    children = [restore_child(child) for child in row["children"]]
     return ParentPlan(
         parent_id=row["parent_id"],
         opportunity=opportunity,

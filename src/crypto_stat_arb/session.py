@@ -22,6 +22,7 @@ from .execution import StrategyDirectedRouter, VenueExecutionAdapter
 from .latency import LatencyModel, latency_model_from_config
 from .economics import opening_balance_events
 from .borrow import BorrowEngine, BorrowLine, BorrowRecall
+from .financing_journal import FinancingJournal
 from .funding import FundingEngine, FundingRate, FundingRateBook, FundingSpec, is_perpetual
 from .risk import InventoryModel
 from .ledger import Ledger
@@ -218,6 +219,16 @@ class TradingSession:
         self.funding = funding_engine(cfg, self.ledger)
         self.borrow = borrow_engine(cfg, self.ledger, self._borrow_forced_close)
         self.risk.borrow = self.borrow
+        self.financing_journal: FinancingJournal | None = None
+        if plan_store is not None:
+            # Fills were rebuilt from the plan store above; funding and borrow
+            # come back from their journal in the same database.
+            self.financing_journal = FinancingJournal(plan_store)
+            self.financing_journal.replay(self.ledger)
+            for engine in (self.funding, self.borrow):
+                engine.journal = self.financing_journal
+                engine.restore(self.ledger.economics.events)
+            self.ledger.journal = self.financing_journal
         settings = cfg.strategies or {}
         if strategies is None:
             strategies = []

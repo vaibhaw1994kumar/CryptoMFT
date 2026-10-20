@@ -315,6 +315,48 @@ class FundingDataTests(unittest.TestCase):
         self.assertEqual(funding_events(ledger), [])
         self.assertEqual(eng.flags[0]["code"], "FUNDING_RATE_STALE")
 
+    def test_f04_rate_without_observation_time_is_flagged_when_stale_check_is_on(self):
+        ledger = perp_ledger()
+        trade(ledger, "o", Side.BUY, "0.1", match_ts=T - HOUR)
+        eng = engine(ledger, [rate(T, "0.0001")], max_rate_age_ns=HOUR)     # no asof_ns
+        eng.settle_until(T)
+        self.assertEqual(funding_events(ledger), [])
+        self.assertEqual(eng.flags[0]["code"], "FUNDING_RATE_ASOF_MISSING")
+        self.assertEqual(eng.report()["economic_status"], "INCOMPLETE")
+
+    def test_rate_observed_after_it_was_used_is_flagged(self):
+        ledger = perp_ledger()
+        trade(ledger, "o", Side.BUY, "0.1", match_ts=T - HOUR)
+        eng = engine(ledger, [rate(T, "0.0001", asof_ns=T + HOUR)])
+        eng.settle_until(T)
+        self.assertEqual(funding_events(ledger), [])
+        self.assertEqual(eng.flags[0]["code"], "FUNDING_RATE_ASOF_IN_FUTURE")
+
+    def test_venue_settlement_history_is_exempt_from_observation_checks(self):
+        ledger = perp_ledger()
+        trade(ledger, "o", Side.BUY, "0.1", match_ts=T - HOUR)
+        history = rate(T, "0.0001", settlement_history=True)                 # no asof, fetched later
+        eng = engine(ledger, [history], max_rate_age_ns=HOUR)
+        eng.settle_until(T)
+        self.assertEqual(len(funding_events(ledger)), 1)
+        self.assertTrue(FundingRate.from_dict({"venue": "BINANCE", "instrument_id": PERP, "funding_ts_ns": T,
+                                               "rate": "0.0001", "settlement_history": True}).settlement_history)
+
+    def test_book_mid_marks_label_the_run_estimated(self):
+        ledger = perp_ledger()
+        trade(ledger, "o", Side.BUY, "0.1", match_ts=T - HOUR)
+        eng = engine(ledger, [rate(T, "0.0001", mark=None)], mark_fallback="book_mid")
+        eng.settle_until(T)
+        report = eng.report()
+        self.assertEqual((report["mark_basis"], report["settlements_on_book_mid"]), ("ESTIMATED", 1))
+        self.assertIn("BINANCE", eng.estimated_by_venue())
+        reconciled = reconcile(ledger.economics, opening=Valuation("USDT", {("BINANCE", PERP): MARK}),
+                               closing=Valuation("USDT", {("BINANCE", PERP): MARK}),
+                               estimated_by_venue=eng.estimated_by_venue())
+        self.assertTrue(reconciled["estimated"])
+        exchange = engine(perp_ledger(), [rate(T, "0.0001")])
+        self.assertEqual(exchange.report()["mark_basis"], "NONE")
+
     def test_missing_mark_is_flagged_unless_mid_fallback_is_enabled(self):
         ledger = perp_ledger()
         trade(ledger, "o", Side.BUY, "0.1", match_ts=T - HOUR)
@@ -399,6 +441,8 @@ class PerpetualConfigTests(unittest.TestCase):
         raw["risk"]["inventory"] = {"model": "unconstrained"}
         for row in raw["instruments"]:
             row.update(instrument_id=PERP, product_type="PERP", funding_interval_hours=8)
+        for row in raw.get("fees", []):
+            row["instrument_id"] = PERP   # dated fee rules for the perp, not the spot instrument
         mutate(raw)
         path = Path(directory) / "perp.json"
         path.write_text(json.dumps(raw), encoding="utf-8")

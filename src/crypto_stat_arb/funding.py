@@ -28,8 +28,11 @@ Rules (all regression-tested in ``tests/test_funding.py``):
   reported afterwards, that settlement is reversed (``REVERSAL``) and rebooked
   as the next revision; history is never rewritten.
 * **No double settlement.** Each settlement is processed once per revision,
-  and re-running settlement on the same ledger is ignored by the idempotency
-  key. Funding is not yet persisted or rebuilt on an OMS restart.
+  and re-running settlement is ignored by the idempotency key (events are
+  stamped at the settlement time, so a re-run is byte-identical).
+* **Restarts.** With a plan store, every FUNDING event and reversal is
+  journaled (financing_journal.py) and replayed into the rebuilt ledger;
+  the engine re-derives booked settlements and revisions from it.
 * **Predicted funding** (the venue's current/next rate) is reported by
   ``predict`` and never booked.
 * **Horizon.** Settlements are booked only up to the last market event; none
@@ -107,6 +110,9 @@ class FundingRate:
     source: EventSource = EventSource.OBSERVED
     asof_ns: int | None = None    # when the rate was published/observed
     predicted: bool = False       # a forecast (current/next rate), never booked
+    # A final settled rate from the venue's funding history: its timestamp is
+    # the settlement itself, so observation-time checks do not apply.
+    settlement_history: bool = False
 
     @classmethod
     def from_dict(cls, row: dict[str, Any]) -> "FundingRate":
@@ -122,6 +128,7 @@ class FundingRate:
             source=EventSource(str(row.get("source", "OBSERVED")).upper()),
             asof_ns=asof,
             predicted=bool(row.get("predicted", False)),
+            settlement_history=bool(row.get("settlement_history", False)),
         )
 
 
@@ -256,13 +263,23 @@ class FundingEngine(PeriodicSettlement):
             self._flag(spec, ts_ns, "FUNDING_RATE_MISSING", position,
                        "no realized rate record for this settlement time")
             return None
-        if (
-            self.max_rate_age_ns is not None and record.asof_ns is not None
-            and ts_ns - record.asof_ns > self.max_rate_age_ns
-        ):
-            self._flag(spec, ts_ns, "FUNDING_RATE_STALE", position,
-                       f"rate observed {ts_ns - record.asof_ns} ns before settlement")
-            return None
+        if not record.settlement_history:
+            # A live observation of the rate: it must say when it was seen, not
+            # be seen after we use it, and not be too old (audit P1).
+            if record.asof_ns is not None and record.asof_ns > max(booked_ns, ts_ns):
+                self._flag(spec, ts_ns, "FUNDING_RATE_ASOF_IN_FUTURE", position,
+                           f"rate observed at {record.asof_ns}, after it was used at {max(booked_ns, ts_ns)}")
+                return None
+            if self.max_rate_age_ns is not None:
+                if record.asof_ns is None:
+                    self._flag(spec, ts_ns, "FUNDING_RATE_ASOF_MISSING", position,
+                               "stale-rate protection is on and the record has no observation time "
+                               "(mark venue history records settlement_history)")
+                    return None
+                if ts_ns - record.asof_ns > self.max_rate_age_ns:
+                    self._flag(spec, ts_ns, "FUNDING_RATE_STALE", position,
+                               f"rate observed {ts_ns - record.asof_ns} ns before settlement")
+                    return None
         if position == 0:
             return None
         mark, mark_source = record.mark_price, "funding record mark price"
@@ -282,7 +299,9 @@ class FundingEngine(PeriodicSettlement):
         return EconomicEvent(
             event_type=EconomicEventType.FUNDING,
             idempotency_key=f"funding|{spec.venue}|{spec.instrument_id}|{ts_ns}|r{revision}",
-            ts_ns=max(booked_ns, ts_ns), effective_ts_ns=ts_ns,
+            # Stamped at the settlement time, not the booking time, so a
+            # settlement re-run after a restart is an identical duplicate.
+            ts_ns=ts_ns, effective_ts_ns=ts_ns,
             postings=(Posting(spec.venue, "main", spec.settlement_asset, amount),),
             venue=spec.venue, instrument_id=spec.instrument_id, source=record.source,
             reporting_value=amount if spec.settlement_asset == self.ledger.economics.reporting_currency else None,
@@ -294,6 +313,26 @@ class FundingEngine(PeriodicSettlement):
                 ("rate_asof_ns", "" if record.asof_ns is None else str(record.asof_ns)),
             ),
         )
+
+    # -- durability ----------------------------------------------------------------
+    def _line_of(self, event: EconomicEvent):
+        if event.event_type != EconomicEventType.FUNDING or (event.venue, event.instrument_id) not in self.specs:
+            return None
+        details = dict(event.details)
+        return ((event.venue, event.instrument_id), event.effective,
+                int(details.get("revision", 0)), Decimal(details.get("position", "0")))
+
+    def _extra_state(self) -> dict[str, Any]:
+        return {
+            "flags": self.flags,
+            "last_mid": [[v, i, ts, str(mid)] for (v, i), (ts, mid) in sorted(self._last_mid.items())],
+            "mid_at": [[v, i, ts, str(mid)] for (v, i, ts), mid in sorted(self._mid_at.items())],
+        }
+
+    def _restore_extra(self, state: dict[str, Any], events: list[EconomicEvent]) -> None:
+        self.flags = list(state.get("flags", []))
+        self._last_mid = {(v, i): (int(ts), Decimal(mid)) for v, i, ts, mid in state.get("last_mid", [])}
+        self._mid_at = {(v, i, int(ts)): Decimal(mid) for v, i, ts, mid in state.get("mid_at", [])}
 
     def on_trade_fill(self, event: EconomicEvent) -> None:
         """A fill effective before a booked settlement: reverse and rebook it."""
@@ -334,6 +373,7 @@ class FundingEngine(PeriodicSettlement):
         blocking = [f for f in self.flags if f["blocking"]]
         unscheduled = sorted(f"{v}:{i}" for (v, i), s in self.specs.items() if s.interval_ns <= 0)
         data_gaps = [f for f in self.flags if f["code"] != "LATE_FILL_REBOOKED"]
+        estimated = [e for e in self.settled_events() if "approximation" in e.valuation_source]
         marks = closing_marks or {}
         return {
             # Three separate questions (audit P0): is the booked funding complete
@@ -346,6 +386,10 @@ class FundingEngine(PeriodicSettlement):
             "data_gaps": len(data_gaps),
             "data_gaps_while_flat": sum(1 for f in data_gaps if not f["blocking"]),
             "configuration": "INVALID" if unscheduled else "VALID",
+            # EXCHANGE_MARK when every booked settlement used the venue's mark;
+            # ESTIMATED when any used the book mid instead (audit P1).
+            "mark_basis": "ESTIMATED" if estimated else ("EXCHANGE_MARK" if self._settled else "NONE"),
+            "settlements_on_book_mid": len(estimated),
             "unscheduled_instruments": unscheduled,
             "horizon_ns": self.horizon_ns,
             "settlements_booked": len(self._settled),
@@ -365,6 +409,15 @@ class FundingEngine(PeriodicSettlement):
                 "stale_detection": "on" if self.max_rate_age_ns is not None else "off (max_rate_age_ms not set)",
             },
         }
+
+    def estimated_by_venue(self) -> dict[str, list[str]]:
+        out: dict[str, list[str]] = {}
+        for event in self.settled_events():
+            if "approximation" in event.valuation_source:
+                out.setdefault(event.venue, []).append(
+                    f"FUNDING@{event.effective}: book mid used as the mark price"
+                )
+        return out
 
     def blocking_flags_by_venue(self) -> dict[str, list[str]]:
         out: dict[str, list[str]] = {}

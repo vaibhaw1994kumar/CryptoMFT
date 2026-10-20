@@ -40,6 +40,10 @@ class PeriodicSettlement:
         self._processed: set[tuple[Hashable, int]] = set()
         self._settled: dict[tuple[Hashable, int], Settled] = {}
         self._revisions: dict[tuple[Hashable, int], int] = {}
+        # Durable checkpoint (financing_journal.FinancingJournal), set by the session.
+        self.journal: Any = None
+        self.journal_name = type(self).__name__
+        self._dirty = False
 
     # -- subclass hooks --------------------------------------------------------------
     def _lines(self) -> Iterable[Hashable]:
@@ -65,6 +69,16 @@ class PeriodicSettlement:
 
     def _note_rebook(self, line: Hashable, ts_ns: int, quantity: Decimal, detail: str) -> None:
         """Record that a settlement was revisited; also clear its earlier data flags."""
+
+    def _line_of(self, event: EconomicEvent) -> tuple[Hashable, int, int, Decimal] | None:
+        """(line, ts, revision, quantity) when ``event`` is one of this engine's settlements."""
+        return None
+
+    def _extra_state(self) -> dict[str, Any]:
+        return {}
+
+    def _restore_extra(self, state: dict[str, Any], events: list[EconomicEvent]) -> None:
+        pass
 
     # -- engine ------------------------------------------------------------------------
     @staticmethod
@@ -92,7 +106,9 @@ class PeriodicSettlement:
             for ts in self._times(line, self.start_ns, cutoff):
                 if (line, ts) not in self._processed:
                     self._processed.add((line, ts))
+                    self._dirty = True
                     self._settle(line, ts, now_ns)
+        self.checkpoint()
 
     def _settle(self, line: Hashable, ts_ns: int, booked_ns: int) -> None:
         quantity = self._quantity(line, ts_ns)
@@ -106,6 +122,7 @@ class PeriodicSettlement:
 
     def on_change(self, line: Hashable, effective_ns: int, reported_ns: int, detail: str) -> None:
         """A change to ``line`` effective at ``effective_ns`` was just booked."""
+        rebooked_before = self.rebooked
         for (item, ts_ns), settled in sorted(self._settled.items(), key=lambda kv: kv[0][1]):
             if item != line or effective_ns >= ts_ns:
                 continue
@@ -125,6 +142,60 @@ class PeriodicSettlement:
             self.rebooked += 1
             self._note_rebook(line, ts_ns, ZERO, detail)
             self._settle(line, ts_ns, reported_ns)
+        self._dirty = self._dirty or self.rebooked != rebooked_before
+        self.checkpoint()
+
+    # -- durability ----------------------------------------------------------------------
+    @staticmethod
+    def _line_key(line: Hashable) -> Any:
+        return list(line) if isinstance(line, tuple) else line
+
+    @staticmethod
+    def _line_from(value: Any) -> Hashable:
+        return tuple(value) if isinstance(value, list) else value
+
+    def state(self) -> dict[str, Any]:
+        return {
+            "start_ns": self.start_ns, "horizon_ns": self.horizon_ns, "rebooked": self.rebooked,
+            "processed": sorted([self._line_key(line), ts] for line, ts in self._processed),
+            **self._extra_state(),
+        }
+
+    def checkpoint(self) -> None:
+        if self.journal is not None and self._dirty:
+            self.journal.save_state(self.journal_name, self.state())
+        self._dirty = False
+
+    def restore(self, events: list[EconomicEvent]) -> None:
+        """Resume after a restart: checkpointed state, then what the ledger says was booked.
+
+        Booked settlements and revisions come from the (replayed) ledger, not the
+        checkpoint, so a crash between an event and its checkpoint cannot leave
+        them disagreeing.
+        """
+        state = self.journal.load_state(self.journal_name) if self.journal is not None else None
+        if state:
+            self.start_ns = state.get("start_ns")
+            self.horizon_ns = int(state.get("horizon_ns") or 0)
+            self.rebooked = int(state.get("rebooked") or 0)
+            self._processed = {(self._line_from(line), int(ts)) for line, ts in state.get("processed", [])}
+        reversed_ids = {e.reverses for e in events if e.reverses}
+        for event in events:
+            found = self._line_of(event)
+            if found is None:
+                continue
+            line, ts_ns, revision, quantity = found
+            key = (line, ts_ns)
+            self._processed.add(key)
+            self._revisions[key] = max(self._revisions.get(key, 0), revision + 1)
+            if event.event_id in reversed_ids:
+                continue
+            current = self._settled.get(key)
+            if current is None or revision > current.revision:
+                self._settled[key] = Settled(event, quantity, revision)
+            if self.start_ns is None or ts_ns < self.start_ns:
+                self.start_ns = ts_ns
+        self._restore_extra(state or {}, events)
 
     def settled_events(self) -> list[EconomicEvent]:
         return [s.event for s in self._settled.values()]

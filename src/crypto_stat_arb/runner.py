@@ -92,6 +92,7 @@ def write_economic_artifacts(
         borrow_flags_by_venue=session.borrow.blocking_flags_by_venue(),
         borrow_notes_by_venue=session.borrow.notes_by_venue(),
         legacy_borrow_cost_by_venue={venue: Decimal(row.get("borrow_cost", "0")) for venue, row in venues.items()},
+        estimated_by_venue=session.funding.estimated_by_venue(),
     )
     report["borrow"] = {"status": borrow["status"], "report": "borrow_report.json"}
     report["funding"] = {
@@ -132,6 +133,7 @@ def write_economic_artifacts(
         "failed_checks": [c["check"] for c in report["checks"] if not c["passed"]],
         "funding": funding["status"],
         "borrow": borrow["status"],
+        "estimated": report["estimated"],
     }
 
 
