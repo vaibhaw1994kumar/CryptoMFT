@@ -184,6 +184,8 @@ class ModeTests(unittest.TestCase):
     def test_isolated_mode_needs_allocations(self):
         with self.assertRaisesRegex(ValueError, "isolated_margin"):
             margin_config(BINANCE={"mode": "ISOLATED"})
+        with self.assertRaisesRegex(ValueError, "one tiered instrument per venue"):
+            margin_config(BINANCE={"tiers": {PERP: TIERS, "ETH-USDT-PERP": TIERS}})
 
     def test_venue_reported_margin_lower_than_local(self):
         ledger, risk = setup()
@@ -288,6 +290,9 @@ class LiquidationSessionTests(unittest.TestCase):
             report = json.loads((out / "economic_reconciliation.json").read_text())
             state = json.loads((out / "account_state.json").read_text())
             kill = json.loads((out / "kill_switch_status.json").read_text())
+            rms = json.loads((out / "rms_reconciliation_report.json").read_text())
+        # Liquidation fills belong to no plan by design; the RMS reconciliation knows them.
+        self.assertEqual(rms["decision"], "APPROVED", rms["issues"])
         liquidations = [e for e in margin["liquidations"] if e["code"].startswith("LIQUIDAT")]
         self.assertEqual([e["code"] for e in liquidations], ["LIQUIDATION_RESIDUAL", "LIQUIDATED"])
         first, second = liquidations
@@ -305,6 +310,25 @@ class LiquidationSessionTests(unittest.TestCase):
         self.assertEqual(Decimal(binance["out_of_plan_fees"]), -Decimal("7.24925"))   # 2.9 + 4.34925 fees
         self.assertLess(Decimal(binance["strategy_equity_pnl"]), Decimal("-20"))
         self.assertTrue(all(check["passed"] for check in report["checks"]), report["checks"])
+
+    def test_gap_move_leaves_a_bankruptcy_deficit_recorded_once(self):
+        rows = self.rows()[:2] + [
+            # A gap: BINANCE drops 6000, far beyond the 40 USDT collateral.
+            snapshot("BINANCE", 2 * SECOND, 101, [["54000.00", "1"]], [["54000.10", "1"]]),
+            snapshot("BYBIT", 2 * SECOND + 10**6, 901, [["54000.00", "1"]], [["54000.10", "1"]]),
+        ] + [snapshot(v, (3 + n) * SECOND + i * 10**6, 102 + n if v == "BINANCE" else 902 + n,
+                      [["54000.00", "1"]], [["54000.10", "1"]])
+             for n in range(4) for i, v in enumerate(("BINANCE", "BYBIT"))]
+        with tempfile.TemporaryDirectory() as directory:
+            config, events = write_session(Path(directory), rows)
+            out = Path(directory) / "out"
+            run_backtest(config, events, out)
+            margin = json.loads((out / "margin_status.json").read_text())
+        codes = [e["code"] for e in margin["liquidations"]]
+        self.assertEqual(codes, ["LIQUIDATED", "BANKRUPTCY_DEFICIT"])
+        deficit = margin["liquidations"][1]
+        self.assertGreater(Decimal(deficit["deficit"]), 0)
+        self.assertIn("UNSUPPORTED", deficit["detail"])
 
     def test_liquidation_fill_survives_a_restart_with_its_type(self):
         from crypto_stat_arb.config import load_config
@@ -326,6 +350,12 @@ class LiquidationSessionTests(unittest.TestCase):
             self.assertNotIn(EconomicEventType.BORROW_FORCED_CLOSE, kinds)
             self.assertEqual(second.ledger.economics.balances(), before)
             self.assertEqual(second.ledger.positions[("BINANCE", PERP)], first.ledger.positions[("BINANCE", PERP)])
+            # The residual is still under liquidation after the restart and is
+            # finished on the next book update.
+            self.assertIn(("BINANCE", PERP), second.liquidation.active)
+            for event in self.rows()[4:]:
+                second.on_event(event)
+            self.assertEqual(second.ledger.positions[("BINANCE", PERP)], 0)
             store.close()
 
 

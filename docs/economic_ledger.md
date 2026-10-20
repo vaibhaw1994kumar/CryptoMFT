@@ -293,15 +293,16 @@ This extends `RiskEngine.evaluate_margin` for venues listed under
 ```
 
 * **During the session, not only at the end.** Margin is evaluated on
-  market-data time every `evaluate_interval_ms`, and after any fill on a
-  margin venue. It only runs where margin applies (a margin config, a
+  market-data time every `evaluate_interval_ms`, and at the next market
+  event after any fill on a margin venue (`tick()` does not evaluate). It only runs where margin applies (a margin config, a
   perpetual or `margin_enabled`), so spot sessions are unchanged. A new
   breach goes through the OMS kill switch, which cancels open orders.
 * **Risk tiers per position.** The position's notional selects the tier.
   MM = notional × mmr − deduction; IM = notional × imr − initial deduction.
   Use the deduction to keep tiers continuous (Binance `cum`). A position
   above the last tier is a BREACH (`POSITION_ABOVE_RISK_LIMIT`), and
-  admission above it is refused. The contract master only has flat rates,
+  admission above it is refused. One tiered instrument per venue (reserved
+  package exposure is tracked per venue). The contract master only has flat rates,
   so tier schedules come from config and are labelled `ASSUMED` unless
   marked VERIFIED.
 * **Collateral from the economic ledger, per venue.**
@@ -338,11 +339,19 @@ This extends `RiskEngine.evaluate_margin` for venues listed under
     venue's liquidity consumption, and charge `fee_rate` on the notional.
   - Residual: unfilled quantity (`LIQUIDATION_RESIDUAL`) stays under
     liquidation and is retried on each new book update until flat.
-  - Bankruptcy: equity below zero afterwards is `BANKRUPTCY_DEFICIT`.
+  - Bankruptcy: equity below zero afterwards is `BANKRUPTCY_DEFICIT`,
+    recorded once per liquidation episode.
   - Accounting: fills are `LIQUIDATION` events outside every plan (journaled
     for restarts with their type). They are counted with trading PnL against
     the trade ledger and, with their fees, excluded from the plan-PnL check.
   - Stopping: the kill switch is activated.
+  - Reconciliation: liquidation fills and borrow buy-ins are known
+    out-of-plan fills in the RMS fill audit (`parent_id`
+    `venue-liquidation` / `borrow-forced-close`, booked as such in the
+    economic ledger). They are still checked for duplicates, and plans keep
+    closing after one.
+  - Restart: liquidation history is rebuilt from the journal, and a
+    position with quantity left stays under liquidation.
   - Simplifications: a full close rather than the venues' stepwise partial
     liquidation, and a book walk rather than takeover at the bankruptcy
     price.

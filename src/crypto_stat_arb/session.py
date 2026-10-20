@@ -264,6 +264,7 @@ class TradingSession:
         )
         if self.margin_venues:
             self.ledger.trade_fill_listeners.append(self._margin_fill)
+            self.liquidation.restore(self.ledger)
         settings = cfg.strategies or {}
         if strategies is None:
             strategies = []
@@ -578,7 +579,10 @@ class TradingSession:
                 )
                 if result is not None:
                     self._margin_dirty = True
-            if self.liquidation.events and self.liquidation.events[-1]["venue"] == row.venue:
+            last = next((e for e in reversed(self.liquidation.events) if e["venue"] == row.venue), None)
+            if last is not None and last["code"] != "BANKRUPTCY_DEFICIT":
+                # Checked once per liquidation episode: after the latest
+                # liquidation on this venue, not on every later evaluation.
                 after = self.risk.evaluate_margin(
                     ledger=self.ledger, now_ns=now, mark_prices=marks,
                     open_orders=self.oms.open_risk_orders(), dry_run=True,

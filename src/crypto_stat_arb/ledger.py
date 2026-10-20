@@ -15,6 +15,11 @@ def _parse_assets(venue: str, instrument_id: str) -> tuple[str, str]:
     return (parts[0], parts[1]) if len(parts) >= 2 else (instrument_id, "USDT")
 
 
+# parent_id of fills outside every plan: venue buy-in of a recalled loan
+# (borrow.py) and simulated venue liquidation (margin.py).
+OUT_OF_PLAN_PARENTS = frozenset({"borrow-forced-close", "venue-liquidation"})
+
+
 def _match_ts(order: ChildOrder, report_ts_ns: int) -> int:
     """Venue time at which the order's current cumulative fill was first reached.
 
@@ -611,13 +616,21 @@ class Ledger:
             })
         fill_ids: set[str] = set()
         fill_totals: dict[str, Decimal] = {}
+        # Fills that belong to no plan by design (venue buy-ins, simulated
+        # liquidations): known when the economic ledger booked them as such.
+        out_of_plan = {
+            e.order_id for e in self.economics.events
+            if e.event_type in (EconomicEventType.BORROW_FORCED_CLOSE, EconomicEventType.LIQUIDATION)
+        }
         for event in self.events:
             order_id = str(event.get("order_id") or "")
             if event["event_type"] in {
                 "ORDER_LIFECYCLE", "FILL", "FEE_ADJUSTMENT",
                 "FILL_NOTIONAL_ADJUSTMENT",
             }:
-                if not order_id or order_id not in orders:
+                if order_id in out_of_plan and str(event.get("parent_id", "")) in OUT_OF_PLAN_PARENTS:
+                    pass                       # still checked for duplicates below
+                elif not order_id or order_id not in orders:
                     issues.append({
                         "code": "ORPHAN_LEDGER_EVENT", "severity": "ERROR",
                         "ledger_event_id": event["ledger_event_id"],

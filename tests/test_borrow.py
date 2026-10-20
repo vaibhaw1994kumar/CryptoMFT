@@ -330,7 +330,7 @@ class ConfigAndBacktestTests(unittest.TestCase):
                                   ROOT / "data/samples/two_venue_books.jsonl", out)
             files = {name: json.loads((out / name).read_text())
                      for name in ("economic_reconciliation.json", "borrow_report.json", "account_state.json",
-                                  "kill_switch_status.json")}
+                                  "kill_switch_status.json", "rms_reconciliation_report.json")}
         return result, files
 
     def test_backtest_without_a_line_refuses_the_short(self):
@@ -363,6 +363,8 @@ class ConfigAndBacktestTests(unittest.TestCase):
         self.assertEqual(len(borrow["forced_closes"]), 1)
         self.assertEqual(Decimal(borrow["lines"]["BYBIT:BTC"]["principal"]), 0)
         self.assertEqual(files["kill_switch_status.json"]["state"], "ACTIVE")
+        rms = files["rms_reconciliation_report.json"]
+        self.assertEqual(rms["decision"], "APPROVED", rms["issues"])     # the buy-in is a known out-of-plan fill
         self.assertTrue(all(check["passed"] for check in report["checks"]), report["checks"])
 
 

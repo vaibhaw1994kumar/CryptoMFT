@@ -147,6 +147,9 @@ class MarginConfig:
                         initial_deduction=Decimal(str(t.get("initial_deduction", "0"))),
                     ) for t in rows
                 ), source=str(items.get("source", "ASSUMED")).upper() if isinstance(items, dict) else "ASSUMED")
+            if len(tiers) > 1:
+                # Reserved package exposure is tracked per venue, not per instrument.
+                raise ValueError(f"margin tiers for {venue}: one tiered instrument per venue is supported")
             collateral = row.get("collateral")
             isolated = {str(i): Decimal(str(q)) for i, q in (row.get("isolated_margin") or {}).items()}
             if mode == "ISOLATED":
@@ -234,6 +237,22 @@ class LiquidationEngine:
     active: set[tuple[str, str]] = field(default_factory=set)
     _attempted: dict[tuple[str, str], tuple[int, int]] = field(default_factory=dict)
     _sequence: int = 0
+
+    def restore(self, ledger: "Ledger") -> None:
+        """After a restart: liquidation history from the (journaled) LIQUIDATION fills,
+        and a position with a liquidation behind it and quantity left is still
+        under liquidation."""
+        for event in ledger.economics.events:
+            if event.event_type != EconomicEventType.LIQUIDATION:
+                continue
+            key = (event.venue, event.instrument_id)
+            self.events.append({"venue": event.venue, "instrument_id": event.instrument_id,
+                                "ts_ns": event.effective, "code": "LIQUIDATION_RESTORED",
+                                "order_id": event.order_id, "detail": "replayed from the financing journal"})
+            if ledger.positions.get(key, ZERO):
+                self.active.add(key)
+            else:
+                self.active.discard(key)
 
     def liquidate(self, venue: str, instrument_id: str, book: Any, now_ns: int, reason: str) -> dict[str, Any] | None:
         policy = self.config.venues[venue].liquidation
