@@ -26,6 +26,7 @@ import re
 import time
 from typing import Any, Callable
 
+from .economics_gate import economics_gate
 from .calibration import compare_runs
 from .config import load_config
 from .live_feed import verify_wire_file
@@ -373,6 +374,28 @@ def audit_session(
         c.check("paper_session_saw_every_stored_event", paper_events == len(stored_events),
                 f"{paper_events} paper vs {len(stored_events)} stored", severity="WARN")
 
+    # -- economics -------------------------------------------------------------
+    def economics(c: Component) -> None:
+        """P&L is accepted only if the economics reconcile (economics_gate)."""
+        runs = [("paper", paper_dir), ("backtest_replay", output_dir / "backtest_replay")]
+        present = [(label, path) for label, path in runs if (path / "economic_reconciliation.json").exists()]
+        if not present:
+            c.missing("economic_reconciliation_present",
+                      [path / "economic_reconciliation.json" for _, path in runs])
+            return
+        for label, path in runs:
+            if (path / "economic_reconciliation.json").exists():
+                result = economics_gate(path)
+                c.metrics[label] = {key: result[key] for key in (
+                    "decision", "reconciliation", "funding", "funding_data_coverage", "borrow",
+                    "incomplete_reasons")}
+                c.check(f"{label}_economics_reconcile", result["decision"] == "PASS",
+                        "; ".join(result["failures"])[:500],
+                        ok_detail=f"reconciliation {result['reconciliation']}")
+            else:
+                # Sessions recorded before the economic ledger have no report.
+                c.missing(f"{label}_economic_reconciliation_present", [path / "economic_reconciliation.json"])
+
     # -- backtest replay -------------------------------------------------------
     def backtest_replay(c: Component) -> None:
         required = [paper_dir / "canonical_events.jsonl", paper_dir / "paper_timestamps.jsonl"]
@@ -648,7 +671,8 @@ def audit_session(
     for name, body in (
         ("feed", feed), ("order_books", order_books), ("time_integrity", time_integrity),
         ("historical_storage", historical_storage), ("orderbook_replay", orderbook_replay),
-        ("backtest_replay", backtest_replay), ("simulation", simulation),
+        ("backtest_replay", backtest_replay), ("economics", economics),
+        ("simulation", simulation),
         ("dry_run", dry_run), ("strategies", strategies),
         ("security_master", security_master), ("errors", errors),
     ):

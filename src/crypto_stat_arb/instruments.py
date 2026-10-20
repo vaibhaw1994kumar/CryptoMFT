@@ -99,13 +99,9 @@ class InstrumentMaster:
         self, venue: str, instrument_id: str,
         liquidity: Liquidity = Liquidity.TAKER, at_ns: int | None = None,
     ) -> Decimal:
-        scheduled = self.fee_schedule.rate_bps(venue, instrument_id, liquidity, at_ns)
-        if scheduled is not None:
-            return scheduled
-        spec = self.get(venue, instrument_id, at_ns)
-        if liquidity == Liquidity.MAKER and spec.maker_fee_bps is not None:
-            return spec.maker_fee_bps
-        return spec.taker_fee_bps
+        """The rate booked for a fill: the dated schedule rule (or the instrument
+        default) with the conservative-rebate policy applied, as in the OMS."""
+        return self.fee_rule(venue, instrument_id, at_ns).effective_bps(liquidity)[0]
 
     def fee_rule(self, venue: str, instrument_id: str, at_ns: int | None = None):
         """The effective schedule rule, or a synthetic one from instrument fields."""

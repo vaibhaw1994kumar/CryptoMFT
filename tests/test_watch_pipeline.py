@@ -162,7 +162,7 @@ class SessionAuditTests(unittest.IsolatedAsyncioTestCase):
         components = audit["components"]
         self.assertEqual(set(components), {
             "feed", "order_books", "time_integrity", "historical_storage",
-            "orderbook_replay", "backtest_replay", "simulation", "dry_run",
+            "orderbook_replay", "backtest_replay", "economics", "simulation", "dry_run",
             "strategies", "security_master", "errors",
         })
         for name, component in components.items():
@@ -178,6 +178,10 @@ class SessionAuditTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(replay_checks["BINANCE_processing_order_rebuilds_live_book"], "OK")
         self.assertEqual(replay_checks["BYBIT_processing_order_rebuilds_live_book"], "OK")
         self.assertEqual(components["dry_run"]["status"], "OK")
+        # Both the forward paper run and its replay must reconcile.
+        economics = {check["check"]: check["status"] for check in components["economics"]["checks"]}
+        self.assertEqual(economics, {"paper_economics_reconcile": "OK",
+                                     "backtest_replay_economics_reconcile": "OK"})
 
 
 if __name__ == "__main__":

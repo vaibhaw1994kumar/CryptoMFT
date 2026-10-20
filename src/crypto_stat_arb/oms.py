@@ -1516,13 +1516,6 @@ class OMS:
         )
         self._fee_priced[order.order_id] = (order.filled_quantity, notional)
 
-    def _fee_for(self, order: ChildOrder, ts_ns: int) -> Decimal:
-        liquidity = Liquidity.MAKER if order.post_only else Liquidity.TAKER
-        return self.instruments.fee(
-            order.venue, order.instrument_id,
-            order.filled_quantity * order.average_price, liquidity, ts_ns,
-        )
-
     def _ingest_request_callback(
         self, plan: ParentPlan, order: ChildOrder, request: CanonicalOrderRequest,
         callback: ExecutionCallback, observed_ts_ns: int,

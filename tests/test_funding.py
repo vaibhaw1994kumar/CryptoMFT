@@ -151,6 +151,37 @@ class FundingTimingTests(unittest.TestCase):
         state = ledger.recalculate_account_state(mark_prices={("BINANCE", PERP): MARK})
         self.assertEqual(Decimal(state["venues"]["BINANCE"]["funding"]), Decimal("-1.2"))
 
+    def test_partial_reduction_pays_on_the_remaining_position(self):
+        # Long 0.1, reduce to 0.04 before T: 0.04 x 60000 x 0.0001 = 0.24 paid.
+        ledger = perp_ledger()
+        trade(ledger, "open", Side.BUY, "0.1", match_ts=T - HOUR)
+        trade(ledger, "reduce", Side.SELL, "0.06", match_ts=T - 10)
+        engine(ledger, [rate(T, "0.0001")]).settle_until(T)
+        [event] = funding_events(ledger)
+        self.assertEqual(event.postings[0].quantity, Decimal("-0.24"))
+        self.assertEqual(dict(event.details)["position"], "0.04")
+
+    def test_several_late_fills_on_one_settlement_net_to_the_true_amount(self):
+        # Booked at +0.1; then three late reports (matched before T) move the
+        # position to +0.1 +0.05 -0.2 +0.01 = -0.04, which receives 0.24.
+        ledger = perp_ledger()
+        trade(ledger, "o1", Side.BUY, "0.1", match_ts=T - HOUR)
+        eng = engine(ledger, [rate(T, "0.0001")])
+        eng.settle_until(T)
+        for n, (side, qty) in enumerate(((Side.BUY, "0.05"), (Side.SELL, "0.2"), (Side.BUY, "0.01"))):
+            trade(ledger, f"late{n}", side, qty, match_ts=T - 100 + n, report_ts=T + 1_000 + n)
+        events = funding_events(ledger)
+        reversals = [e for e in ledger.economics.events if e.event_type == EconomicEventType.REVERSAL]
+        net = sum(e.postings[0].quantity for e in events) + sum(r.postings[0].quantity for r in reversals)
+        self.assertEqual(net, Decimal("0.24"))
+        self.assertEqual(len(events), 4)               # r0 .. r3
+        self.assertEqual(len(reversals), 3)            # every superseded revision reversed exactly once
+        self.assertEqual(len({r.reverses for r in reversals}), 3)
+        self.assertTrue(events[-1].idempotency_key.endswith("|r3"))
+        state = ledger.recalculate_account_state(mark_prices={("BINANCE", PERP): MARK})
+        self.assertEqual(Decimal(state["venues"]["BINANCE"]["funding"]), Decimal("0.24"))
+        self.assertEqual(eng.report()["rebooked_after_late_fills"], 3)
+
     def test_late_fill_after_a_flat_settlement_books_it(self):
         ledger = perp_ledger()
         eng = engine(ledger, [rate(T, "0.0001")])
@@ -260,8 +291,21 @@ class FundingDataTests(unittest.TestCase):
         ledger = perp_ledger()
         eng = engine(ledger, [])
         eng.settle_until(T)
-        self.assertEqual(eng.report()["status"], "COMPLETE")
+        report = eng.report()
+        # Economically complete (no position was held), but the data has a gap.
+        self.assertEqual((report["status"], report["economic_status"]), ("COMPLETE", "COMPLETE"))
+        self.assertEqual((report["data_coverage"], report["data_gaps_while_flat"]), ("GAPS", 1))
+        self.assertEqual(report["configuration"], "VALID")
         self.assertFalse(eng.flags[0]["blocking"])
+
+    def test_missing_rate_with_a_position_is_economically_incomplete(self):
+        ledger = perp_ledger()
+        trade(ledger, "o", Side.BUY, "0.1", match_ts=T - HOUR)
+        eng = engine(ledger, [])
+        eng.settle_until(T)
+        report = eng.report()
+        self.assertEqual((report["status"], report["economic_status"], report["data_coverage"]),
+                         ("INCOMPLETE", "INCOMPLETE", "GAPS"))
 
     def test_stale_rate_is_flagged_and_not_booked(self):
         ledger = perp_ledger()

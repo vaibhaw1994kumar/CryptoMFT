@@ -131,6 +131,11 @@ def main() -> None:
         ),
         json_result=True,
     )
+    paper_economics = run(
+        "economics gate: end-to-end session",
+        cli("economics-gate", "--run-dir", str(paper)),
+        json_result=True,
+    )
     run("Strategy SDK paper port", [sys.executable, "examples/strategy_sdk.py"])
     benchmark = run(
         "MR-14 replay/paper performance baseline",
@@ -229,6 +234,11 @@ def main() -> None:
                 ),
                 json_result=True,
             )
+            replay_economics = run(
+                "economics gate: replay of the live paper period",
+                cli("economics-gate", "--run-dir", str(run_root / "live_paper_replay")),
+                json_result=True,
+            )
             run(
                 "replay-vs-paper comparison",
                 cli(
@@ -257,6 +267,7 @@ def main() -> None:
         "paper_closed_plans": paper_result["closed_plans"] if paper_result else None,
         "paper_net_pnl": paper_result["net_pnl"] if paper_result else None,
         "paper_release_id": release_id,
+        "economics_gate": paper_economics["decision"] if paper_economics else None,
         "public_network_checks": options.public_network,
     }
     (run_root / "local_acceptance_summary.json").write_text(

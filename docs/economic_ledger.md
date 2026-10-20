@@ -81,6 +81,13 @@ Fee rules (`fees` in config) accept (comments for illustration only):
   a rebate growing more negative across partial fills is accepted, and a
   venue-reported fee replaces the computed one only if larger in magnitude.
 * Entries, exits, hedges and unwinds are all fills, so all pay fees.
+* **One rate path.** `FeeRule.effective_bps`, `FeeSchedule.rate_bps` and
+  `InstrumentMaster.fee_bps` all return the rate the ledger books, with the
+  dated rule and the conservative policy applied. The arb and
+  mean-reversion edge filters and the maker dry-run simulator use it, so
+  opportunity selection and booking can't disagree. `raw_rate_bps` shows
+  the configured number, for reporting only. Conservative mode zeroes any
+  *assumed negative* rate (maker or taker) until verified.
 
 ## Funding settlement (ECO02, `src/crypto_stat_arb/funding.py`)
 
@@ -146,6 +153,12 @@ On spot, funding is reported `N/A`.
 * **Predicted funding** (records with `predicted: true`, i.e. the venue's
   current or next rate) is reported in `funding_report.json` → `predicted`
   and is never booked.
+* **Status, three ways.** `economic_status` asks whether every settlement
+  with a position was booked. `data_coverage` asks whether every expected
+  settlement had data, gaps while flat included. `configuration` asks
+  whether every perpetual has a schedule. `status` (which the gate reads)
+  is INCOMPLETE if the economics or the configuration are; data gaps while
+  flat are reported, not gated.
 * **Artifacts.** `funding_report.json` holds status, settlements, flags,
   realized by venue, predictions and rules. `economic_reconciliation.json`
   has a `funding` row per venue and a `<venue>_funding_matches_trade_ledger`
@@ -258,6 +271,25 @@ independent computations:
 Status: `RECONCILED` (all checks pass), `INCOMPLETE` (a price/FX is missing,
 a fee asset is unpriced or funding data is missing/stale for a held position;
 nothing is assumed), `FAIL` (a check failed).
+
+## Economics acceptance gate (`economics_gate.py`)
+
+P&L is accepted only if the economics reconcile.
+`crypto_stat_arb.cli economics-gate --run-dir <run>` exits 1 on FAIL. It is
+part of `run_all_local` (the end-to-end session and, with
+`--public-network`, the replay of the live paper period) and of the session
+audit (`economics` component, paper run and replay).
+
+* **FAIL, always:** a failed reconciliation check (identity, trading PnL,
+  fees, funding or borrow vs the account state, plan vs equity), a missing
+  reconciliation, or an unfinanced short.
+* **INCOMPLETE fails too**, unless *every* reason is accepted with a written
+  justification: `--allow-incomplete FUNDING_DATA="venue history gap ..."`.
+  Reasons are `MISSING_PRICE`, `FEE_ASSET_UNPRICED`, `FUNDING_DATA` and
+  `BORROW_DATA`. An unclassified INCOMPLETE can't be accepted. Accepted
+  reasons and their justifications are listed in the result.
+* Sessions recorded before the economic ledger existed have no
+  reconciliation. The audit reports them `INPUT_MISSING`, not PASS.
 
 ## Not yet covered
 

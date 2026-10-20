@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from decimal import Decimal
 
+from .fees import Liquidity
 from .instruments import InstrumentMaster
 from .models import Opportunity, Side, stable_id
 from .orderbook import OrderBook
@@ -50,8 +51,9 @@ class CrossVenueSpreadStrategy:
         if pair_key in self._seen_pairs:
             return None
         gross_bps = (sell_book.best_bid - buy_book.best_ask) / buy_book.best_ask * Decimal("10000")
-        buy_fee = self.instruments.get(buy_book.venue, self.instrument_id).taker_fee_bps
-        sell_fee = self.instruments.get(sell_book.venue, self.instrument_id).taker_fee_bps
+        # The dated, effective rate the ledger will book, not the instrument default.
+        buy_fee = self.instruments.fee_bps(buy_book.venue, self.instrument_id, Liquidity.TAKER, now_ns)
+        sell_fee = self.instruments.fee_bps(sell_book.venue, self.instrument_id, Liquidity.TAKER, now_ns)
         net_bps = gross_bps - buy_fee - sell_fee
         if gross_bps < self.entry_bps or net_bps < self.min_net_edge_bps:
             return None

@@ -8,8 +8,14 @@ wins over the venue-wide rule effective at the same time.
 ``fee_asset`` is the asset the venue charges in: ``QUOTE`` (default), ``BASE``
 or an explicit token symbol (e.g. ``BNB``). ``source`` says whether the rate is
 ``VERIFIED`` for this account or ``ASSUMED`` (e.g. a default tier). With
-``conservative_unverified`` an assumed maker *rebate* is not credited (booked
-at 0 bps) until the tier is verified; assumed costs are kept as configured.
+``conservative_unverified`` an assumed *negative* rate is not credited (booked
+at 0 bps) until the tier is verified. That covers maker rebates and any
+negative taker rate alike; assumed costs are kept as configured.
+
+There is one rate path: ``FeeRule.effective_bps`` / ``FeeSchedule.rate_bps``
+/ ``InstrumentMaster.fee_bps`` all return the rate that is booked, so edge
+filters, simulators and the ledger cannot disagree. ``raw_rate_bps`` exposes
+the configured number for reporting only.
 """
 
 from __future__ import annotations
@@ -122,6 +128,17 @@ class FeeSchedule:
         self, venue: str, instrument_id: str, liquidity: Liquidity,
         at_ns: int | None = None,
     ) -> Decimal | None:
+        """The rate actually booked (conservative policy applied); None without a rule."""
+        rule = self.rule(venue, instrument_id, at_ns)
+        if rule is None:
+            return None
+        return rule.effective_bps(liquidity)[0]
+
+    def raw_rate_bps(
+        self, venue: str, instrument_id: str, liquidity: Liquidity,
+        at_ns: int | None = None,
+    ) -> Decimal | None:
+        """The configured rate before the conservative policy. For reporting only."""
         rule = self.rule(venue, instrument_id, at_ns)
         if rule is None:
             return None

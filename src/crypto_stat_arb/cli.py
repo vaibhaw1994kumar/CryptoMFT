@@ -11,6 +11,7 @@ import time
 from .runner import run_backtest
 from .benchmark import run_benchmark
 from .calibration import calibrate_latency, compare_runs
+from .economics_gate import economics_gate
 from .config import load_config
 from .instrument_status import InstrumentStatusPoller
 from .paper_live import LivePaperSession
@@ -302,6 +303,16 @@ def main() -> None:
     compare.add_argument("--paper", type=Path, required=True)
     compare.add_argument("--output", type=Path, required=True)
     compare.add_argument("--min-opportunities", type=int, default=30)
+    gate = sub.add_parser(
+        "economics-gate",
+        help="fail unless a run's economics reconcile (exit 1 on FAIL)",
+    )
+    gate.add_argument("--run-dir", type=Path, required=True)
+    gate.add_argument(
+        "--allow-incomplete", action="append", default=[], metavar="REASON=JUSTIFICATION",
+        help="accept an INCOMPLETE reason (MISSING_PRICE, FEE_ASSET_UNPRICED, FUNDING_DATA, "
+             "BORROW_DATA) with a written justification; listed in the result",
+    )
     benchmark = sub.add_parser("benchmark", help="MR-14 replay and paper performance baseline")
     benchmark.add_argument("--config", type=Path, required=True)
     benchmark.add_argument("--output", type=Path, required=True)
@@ -486,6 +497,15 @@ def main() -> None:
             args.replay, args.paper, args.output,
             min_opportunities=args.min_opportunities,
         ), indent=2))
+    elif args.command == "economics-gate":
+        allow = {}
+        for item in args.allow_incomplete:
+            reason, _, why = item.partition("=")
+            allow[reason.strip().upper()] = why.strip()
+        result = economics_gate(args.run_dir, allow_incomplete=allow)
+        print(json.dumps(result, indent=2))
+        if result["decision"] != "PASS":
+            raise SystemExit(1)
     elif args.command == "benchmark":
         print(json.dumps(run_benchmark(
             args.config, args.output, events_path=args.events,

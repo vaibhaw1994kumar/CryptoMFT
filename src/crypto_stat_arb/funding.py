@@ -333,9 +333,19 @@ class FundingEngine(PeriodicSettlement):
             by_venue[event.venue] = by_venue.get(event.venue, ZERO) + event.postings[0].quantity
         blocking = [f for f in self.flags if f["blocking"]]
         unscheduled = sorted(f"{v}:{i}" for (v, i), s in self.specs.items() if s.interval_ns <= 0)
+        data_gaps = [f for f in self.flags if f["code"] != "LATE_FILL_REBOOKED"]
         marks = closing_marks or {}
         return {
+            # Three separate questions (audit P0): is the booked funding complete
+            # for every position held; did every expected settlement have data;
+            # is the configuration able to tell? Only the first two feed
+            # ``status``, which the acceptance gate reads.
             "status": "INCOMPLETE" if blocking or unscheduled else "COMPLETE",
+            "economic_status": "INCOMPLETE" if blocking else "COMPLETE",
+            "data_coverage": "GAPS" if data_gaps else "COMPLETE",
+            "data_gaps": len(data_gaps),
+            "data_gaps_while_flat": sum(1 for f in data_gaps if not f["blocking"]),
+            "configuration": "INVALID" if unscheduled else "VALID",
             "unscheduled_instruments": unscheduled,
             "horizon_ns": self.horizon_ns,
             "settlements_booked": len(self._settled),
