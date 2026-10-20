@@ -107,5 +107,22 @@ class FeePathTests(unittest.TestCase):
                           simulator.maker_fee_rate(cfg.venues[0], 1_000)), (2.0, 1.0))
 
 
+class TestnetLiquidityTests(unittest.TestCase):
+    def test_testnet_fills_carry_the_venue_maker_flag(self):
+        from crypto_stat_arb.sdk import TestnetVenueAdapter, _native_liquidity
+        from test_execution_realism import submit
+
+        self.assertEqual(_native_liquidity({"liquidity": "maker"}), "MAKER")
+        self.assertEqual(_native_liquidity({"m": True}), "MAKER")          # Binance execution report
+        self.assertEqual(_native_liquidity({"isMaker": "false"}), "TAKER")  # Bybit execution
+        self.assertEqual(_native_liquidity({}), "")                         # unknown: OMS flags it
+        adapter = TestnetVenueAdapter("BINANCE", lambda payload: [{
+            "event_type": "FILLED", "cumulative_filled_quantity": "0.001", "last_fill_quantity": "0.001",
+            "average_price": "60000", "isMaker": False,
+        }])
+        (callback,) = adapter.handle(submit("t1", "60000.00", "0.001"), None)
+        self.assertEqual(callback.liquidity, "TAKER")
+
+
 if __name__ == "__main__":
     unittest.main()

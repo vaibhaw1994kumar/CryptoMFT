@@ -140,5 +140,42 @@ class FinancingRestartTests(unittest.TestCase):
         self.assertEqual(crashed, straight)
 
 
+class SilentVenue:
+    """A venue that accepts the order and never reports: the plan stays open."""
+
+    def handle(self, request, book):
+        return ()
+
+
+class OpenPlanRestartTests(unittest.TestCase):
+    def test_open_plan_with_a_borrowed_leg_re_reserves_after_restart(self):
+        rows = events("BTC-USDT-SPOT")
+        with tempfile.TemporaryDirectory() as directory:
+            base = Path(directory)
+            cfg, _ = load_config(write_config(base, "borrow"))
+            store = ParentPlanStore(base / "open.sqlite")
+            first = TradingSession(cfg, plan_store=store, adapters={"BINANCE": SilentVenue()})
+            for event in rows[:2]:                       # the arb: BYBIT sell fills on borrowed BTC
+                first.on_event(event)
+            first.tick(rows[1].receive_ts_ns + 10_000_000)  # the sell's fill report arrives
+            [plan] = first.oms.plans.values()
+            self.assertNotEqual(plan.state.value, "CLOSED")
+            self.assertEqual(first.borrow.principal("BYBIT", "BTC"), Decimal("0.010"))
+            store.close()                                # crash with the buy leg unanswered
+
+            store = ParentPlanStore(base / "open.sqlite")
+            second = TradingSession(cfg, plan_store=store)
+            events_logged = [row["event_type"] for row in second.ledger.events]
+            self.assertIn("RECOVERY_RISK_RESERVATION_REHYDRATED", events_logged)
+            self.assertNotIn("RECOVERY_RISK_RESERVATION_FAILED", events_logged)
+            self.assertFalse(second.risk.kill_switch)
+            # The loan came back from the journal, once, and was not re-opened.
+            self.assertEqual(second.borrow.principal("BYBIT", "BTC"), Decimal("0.010"))
+            opens = [e for e in second.ledger.economics.events if e.event_type == EconomicEventType.BORROW_OPEN]
+            self.assertEqual(len(opens), 1)
+            self.assertEqual(second.ledger.economics.balance("BYBIT", "BTC"), Decimal("0"))
+            store.close()
+
+
 if __name__ == "__main__":
     unittest.main()

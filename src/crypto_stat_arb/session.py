@@ -210,25 +210,32 @@ class TradingSession:
         self.router = StrategyDirectedRouter(
             cfg.instruments, adapters=adapters, latency_model=router_latency
         )
-        self.oms = OMS(
-            cfg.instruments, self.risk, self.ledger,
-            eligibility_policy=self.alignment_policy, router=self.router,
-            residual_policy=cfg.residual_policy, plan_store=plan_store,
-            order_timeout_policy=cfg.order_timeout_policy,
-        )
+        # Financing engines and their journal come before the OMS: on a restart
+        # the OMS re-reserves risk for open plans, and a sell leg financed by a
+        # borrow needs the loan (journal) and the borrow line (engine) to exist.
         self.funding = funding_engine(cfg, self.ledger)
         self.borrow = borrow_engine(cfg, self.ledger, self._borrow_forced_close)
         self.risk.borrow = self.borrow
         self.financing_journal: FinancingJournal | None = None
         if plan_store is not None:
-            # Fills were rebuilt from the plan store above; funding and borrow
-            # come back from their journal in the same database.
             self.financing_journal = FinancingJournal(plan_store)
             self.financing_journal.replay(self.ledger)
             for engine in (self.funding, self.borrow):
                 engine.journal = self.financing_journal
                 engine.restore(self.ledger.economics.events)
-            self.ledger.journal = self.financing_journal
+        # Fills rebuilt from the plan store are history, not new fills: the
+        # engines must not open loans or rebook settlements for them again.
+        listeners, self.ledger.trade_fill_listeners = self.ledger.trade_fill_listeners, []
+        try:
+            self.oms = OMS(
+                cfg.instruments, self.risk, self.ledger,
+                eligibility_policy=self.alignment_policy, router=self.router,
+                residual_policy=cfg.residual_policy, plan_store=plan_store,
+                order_timeout_policy=cfg.order_timeout_policy,
+            )
+        finally:
+            self.ledger.trade_fill_listeners = listeners
+        self.ledger.journal = self.financing_journal
         settings = cfg.strategies or {}
         if strategies is None:
             strategies = []

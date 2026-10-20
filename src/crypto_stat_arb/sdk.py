@@ -167,6 +167,26 @@ class TestnetTransport(Protocol):
     ) -> Iterable[dict[str, Any]]: ...
 
 
+def _native_liquidity(native: dict[str, Any]) -> str:
+    """MAKER/TAKER from a venue fill report, or "" when the venue did not say.
+
+    Accepts a normalized ``liquidity`` field or the venues' own maker flags:
+    Binance ``m`` / ``isMaker`` (execution reports and user trades) and Bybit
+    ``isMaker``. Without one the OMS infers from post_only and flags the fee
+    as LIQUIDITY_INFERRED.
+    """
+    label = str(native.get("liquidity", "")).upper()
+    if label in ("MAKER", "TAKER"):
+        return label
+    for key in ("isMaker", "is_maker", "m"):
+        value = native.get(key)
+        if isinstance(value, bool):
+            return "MAKER" if value else "TAKER"
+        if isinstance(value, str) and value.lower() in ("true", "false"):
+            return "MAKER" if value.lower() == "true" else "TAKER"
+    return ""
+
+
 class TestnetVenueAdapter:
     """Synchronous testnet boundary translating native responses to callbacks.
 
@@ -241,6 +261,7 @@ class TestnetVenueAdapter:
                 last_fill_quantity=last_fill,
                 average_price=average,
                 reason=str(native.get("reason", "")),
+                liquidity=_native_liquidity(native),
                 native={"adapter": "strategy-sdk-testnet-v1", "response": dict(native)},
             ))
         return tuple(callbacks)

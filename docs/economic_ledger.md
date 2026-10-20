@@ -84,7 +84,11 @@ Fee rules (`fees` in config) accept (comments for illustration only):
 * **No silent substitution.** A fill priced from the instrument's default
   fee (no dated schedule rule) has `|NO_SCHEDULE_RULE` in its fee source.
   One whose maker/taker status the venue didn't report has
-  `|LIQUIDITY_INFERRED` (inferred from `post_only`). The reconciliation
+  `|LIQUIDITY_INFERRED` (inferred from `post_only`). The simulated venue
+  labels every fill; the testnet adapter maps the venue's own flag
+  (`liquidity`, Binance `m` / `isMaker`, Bybit `isMaker`) from the
+  transport's response, so a transport that omits it produces flagged
+  fills. The reconciliation
   counts them in `fee_fallbacks` and is `INCOMPLETE`; the gate reason is
   `FEE_RULE_FALLBACK`.
 * **One rate path.** `FeeRule.effective_bps`, `FeeSchedule.rate_bps` and
@@ -296,12 +300,15 @@ With a plan store, the session journals every FUNDING / BORROW_* event and
 reversal, plus venue buy-in fills, in the same SQLite WAL database. On
 restart:
 
-1. the OMS rebuilds trade fills from the plans;
-2. the journal is replayed into the rebuilt ledger (legacy cash and equity
-   included) without triggering the engines;
-3. each engine restores a small checkpoint (session start, data flags,
+1. the journal is replayed into the ledger (legacy cash and equity
+   included);
+2. each engine restores a small checkpoint (session start, data flags,
    settlements processed while flat, recall state, last prices) and
-   re-derives booked settlements and revisions from the ledger.
+   re-derives booked settlements and revisions from the ledger;
+3. only then does the OMS rebuild trade fills from the plans and re-reserve
+   risk for open plans, so a sell leg financed by a borrow finds its loan
+   and borrow line. Fill listeners are off during the rebuild, so recovered
+   fills don't open loans or rebook settlements again.
 
 Funding and interest events are stamped at their settlement time, so a
 settlement re-run after a crash, between its event and its checkpoint,
@@ -309,8 +316,14 @@ reproduces the same key and payload and is ignored.
 `tests/test_financing_restart.py` covers funding and borrow sessions run
 three ways: uninterrupted, killed and restarted mid-session, and killed
 inside that crash window. All three end with identical balances, funding,
-borrow cost, equity and financing events. The opening marks for inventory
-revaluation are re-taken after a restart.
+borrow cost, equity and financing events. A further test restarts with a
+plan still open whose sell leg was borrowed: the reservation is
+re-established, with no kill switch and no second loan.
+
+Not covered: the plan store and the journal commit separately, so a crash
+*between* a fill's plan save and its `BORROW_OPEN` journal entry would
+leave the restarted session with the fill but not the loan. The opening
+marks for inventory revaluation are re-taken after a restart.
 
 ## Economics acceptance gate (`economics_gate.py`)
 
