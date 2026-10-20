@@ -100,6 +100,10 @@ class VenueMarginState:
     required_liquidation_buffer: Decimal
     maintenance_margin_utilization: Decimal
     alert_codes: tuple[str, ...]
+    # Tiered venues (margin.py): free margin after initial margin on the
+    # worst-case exposure, and the per-position / collateral breakdown.
+    available_margin: Decimal | None = None
+    details: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
         row = asdict(self)
@@ -369,6 +373,13 @@ class RiskEngine:
         # beyond held base needs available borrow, never a margin flag.
         self.borrow: Any | None = None
         self.reserved_borrow: dict[str, Decimal] = {}
+        # MarginConfig (margin.py) for tiered venues; instruments and the last
+        # marks/open orders let admission compute free margin fresh.
+        self.margin_config: Any | None = None
+        self.instruments: Any | None = None
+        self.margin_marks: dict[tuple[str, str], Decimal] = {}
+        self.margin_open_orders: dict[tuple[str, str], tuple[Decimal, Decimal]] = {}
+        self.asset_prices: dict[tuple[str, str], Decimal] = {}
         self.reserved_gross = Decimal("0")
         self.reserved_cash: dict[str, Decimal] = {}
         self.reserved_margin: dict[str, Decimal] = {}
@@ -526,9 +537,21 @@ class RiskEngine:
         instruments: Any | None = None,
         venue_risk: tuple[VenueRiskSnapshot, ...] = (),
         enforce_controls: bool = True,
+        open_orders: dict[tuple[str, str], tuple[Decimal, Decimal]] | None = None,
+        dry_run: bool = False,
     ) -> MarginReport:
-        """Mark derivative collateral and warn before maintenance is breached."""
+        """Mark derivative collateral and warn before maintenance is breached.
+
+        ``dry_run`` computes without changing margin state or the last report
+        (admission checks). ``open_orders`` maps (venue, instrument) to the
+        remaining (buy, sell) quantity of open hedge/unwind orders.
+        """
         marks = mark_prices or {}
+        instruments = instruments if instruments is not None else self.instruments
+        if not dry_run:
+            self.margin_marks = dict(marks)
+            if open_orders is not None:
+                self.margin_open_orders = dict(open_orders)
         initial = initial_capital_by_venue or {}
         account_state = ledger.recalculate_account_state(
             mark_prices=marks,
@@ -575,6 +598,17 @@ class RiskEngine:
                 for row in margin_positions
             ), Decimal("0"))
             venue_row = account_state["venues"].get(venue, {})
+            tiered = self.margin_config is not None and venue in self.margin_config.venues
+            if tiered:
+                row = self._tiered_margin_row(
+                    venue, ledger=ledger, positions=positions, marks=marks, instruments=instruments,
+                    reported=reported_by_venue.get(venue), account=account,
+                    open_orders=open_orders if open_orders is not None else self.margin_open_orders,
+                    legacy_balance=Decimal(str(venue_row.get("equity", "0"))),
+                )
+                rows.append(row)
+                self._margin_transition(row, ledger, now_ns, enforce_controls and not dry_run, dry_run)
+                continue
             if account.collateral_balance.is_finite():
                 margin_balance = (
                     account.collateral_balance
@@ -632,33 +666,7 @@ class RiskEngine:
                 alert_codes=alert_codes,
             )
             rows.append(row)
-            previous = self.margin_states.get(venue, MarginState.NOT_APPLICABLE)
-            self.margin_states[venue] = state
-            if enforce_controls and previous != state:
-                ledger.record(
-                    "MARGIN_STATE_TRANSITION", now_ns,
-                    transition_id=stable_id(
-                        "margin-state", venue, now_ns, previous.value, state.value
-                    ),
-                    venue=venue, previous_state=previous.value, state=state.value,
-                    alert_codes=list(alert_codes),
-                    liquidation_buffer=str(liquidation_buffer),
-                    required_liquidation_buffer=str(required_buffer),
-                )
-                if state in {MarginState.WARNING, MarginState.BREACH}:
-                    ledger.record(
-                        "MARGIN_BUFFER_ALERT", now_ns, venue=venue,
-                        state=state.value, alert_codes=list(alert_codes),
-                        margin_balance=str(effective_balance),
-                        maintenance_margin_required=str(maintenance_required),
-                        liquidation_buffer=str(liquidation_buffer),
-                        required_liquidation_buffer=str(required_buffer),
-                    )
-                if state == MarginState.BREACH:
-                    self.activate_kill_switch(
-                        now_ns=now_ns, reason=f"margin breach: {venue}",
-                        source="RMS_MARGIN", ledger=ledger,
-                    )
+            self._margin_transition(row, ledger, now_ns, enforce_controls and not dry_run, dry_run)
         overall = max(
             (row.state for row in rows),
             key=lambda state: severity[state],
@@ -671,8 +679,258 @@ class RiskEngine:
             ),
             ts_ns=now_ns, state=overall, venues=tuple(rows),
         )
-        self.last_margin_report = report
+        if not dry_run:
+            self.last_margin_report = report
         return report
+
+    def _margin_transition(
+        self, row: VenueMarginState, ledger: Any, now_ns: int, enforce: bool, dry_run: bool,
+    ) -> None:
+        if dry_run:
+            return
+        venue, state = row.venue, row.state
+        previous = self.margin_states.get(venue, MarginState.NOT_APPLICABLE)
+        self.margin_states[venue] = state
+        if not enforce or previous == state:
+            return
+        ledger.record(
+            "MARGIN_STATE_TRANSITION", now_ns,
+            transition_id=stable_id("margin-state", venue, now_ns, previous.value, state.value),
+            venue=venue, previous_state=previous.value, state=state.value,
+            alert_codes=list(row.alert_codes),
+            liquidation_buffer=str(row.liquidation_buffer),
+            required_liquidation_buffer=str(row.required_liquidation_buffer),
+        )
+        if state in {MarginState.WARNING, MarginState.BREACH}:
+            ledger.record(
+                "MARGIN_BUFFER_ALERT", now_ns, venue=venue,
+                state=state.value, alert_codes=list(row.alert_codes),
+                margin_balance=str(row.effective_margin_balance),
+                maintenance_margin_required=str(row.maintenance_margin_required),
+                liquidation_buffer=str(row.liquidation_buffer),
+                required_liquidation_buffer=str(row.required_liquidation_buffer),
+            )
+        if state == MarginState.BREACH:
+            self.activate_kill_switch(
+                now_ns=now_ns, reason=f"margin breach: {venue}",
+                source="RMS_MARGIN", ledger=ledger,
+            )
+
+    def _tiered_perp(self, venue: str, instrument_id: str) -> bool:
+        if self.margin_config is None or venue not in self.margin_config.venues or self.instruments is None:
+            return False
+        from .funding import is_perpetual
+        try:
+            return is_perpetual(self.instruments.get(venue, instrument_id).product_type)
+        except (KeyError, ValueError):
+            return False
+
+    def _tiered_initial_increment(
+        self, venue: str, instrument_id: str, delta: Decimal, price: Decimal, now_ns: int,
+    ) -> tuple[Decimal, Decimal]:
+        """(initial-margin increment for this leg at its tier, free margin now).
+
+        Worst case: position plus open hedge/unwind orders plus reserved legs,
+        then this leg on top. Free margin is computed fresh from the ledger at
+        the leg's price (other marks: last evaluation).
+        """
+        schedule = self.margin_config.venues[venue].tiers.get(instrument_id)
+        if schedule is None:
+            raise ValueError(f"insufficient margin: {venue} (no risk tiers for {instrument_id})")
+        multiplier = self.instruments.get(venue, instrument_id).contract_multiplier
+        quantity = self.ledger.positions.get((venue, instrument_id), Decimal("0")) if self.ledger else Decimal("0")
+        buys, sells = self.margin_open_orders.get((venue, instrument_id), (Decimal("0"), Decimal("0")))
+        before = max(abs(quantity + buys), abs(quantity - sells)) + abs(self.reserved_position.get(venue, Decimal("0")))
+        after = before + abs(delta)
+        initial_before = schedule.initial(before * price * multiplier)
+        initial_after = schedule.initial(after * price * multiplier)
+        if initial_after is None:
+            raise ValueError(f"insufficient margin: {venue} (exposure above the last risk tier for {instrument_id})")
+        increment = initial_after - (initial_before or Decimal("0"))
+        if self.ledger is None:
+            return increment, Decimal("Infinity")
+        report = self.evaluate_margin(
+            ledger=self.ledger, now_ns=now_ns,
+            mark_prices={**self.margin_marks, (venue, instrument_id): price},
+            enforce_controls=False, dry_run=True,
+        )
+        row = next((r for r in report.venues if r.venue == venue), None)
+        free = row.available_margin if row is not None and row.available_margin is not None else Decimal("0")
+        return increment, free
+
+    def _tiered_margin_row(
+        self, venue: str, *, ledger: Any, positions: list[dict[str, Any]],
+        marks: dict[tuple[str, str], Decimal], instruments: Any, reported: Any,
+        account: AccountRiskSnapshot, open_orders: dict[tuple[str, str], tuple[Decimal, Decimal]],
+        legacy_balance: Decimal,
+    ) -> VenueMarginState:
+        """Risk tiers, collateral haircuts and cross/isolated mode for one venue (margin.py)."""
+        from .funding import is_perpetual
+        from .margin import collateral_value
+
+        config = self.margin_config.venues[venue]
+        alerts: list[str] = []
+        quote, contract_assets, prices = "USDT", {}, {}
+        for (v, instrument_id), mark in marks.items():
+            if v != venue or instruments is None:
+                continue
+            try:
+                spec = instruments.get(venue, instrument_id)
+            except (KeyError, ValueError):
+                continue
+            quote = spec.quote
+            if is_perpetual(spec.product_type):
+                contract_assets[instrument_id] = mark * spec.contract_multiplier
+            else:
+                prices[spec.base] = mark
+        for (v, asset), price in self.asset_prices.items():
+            if v in (venue, "*"):
+                prices.setdefault(asset, price)
+        economics = getattr(ledger, "economics", None)
+        if economics is not None and economics.has_opening_balances():
+            margin_balance, collateral_rows, collateral_alerts = collateral_value(
+                economics.balances(), venue, config, quote=quote, prices=prices, contract_assets=contract_assets,
+            )
+            alerts += collateral_alerts
+            basis = "ECONOMIC_LEDGER_COLLATERAL"
+        else:
+            margin_balance, collateral_rows, basis = legacy_balance, [], "ACCOUNT_EQUITY (no opening balances)"
+        reported_balance = reported.margin_balance if reported is not None else None
+        effective = min(margin_balance, reported_balance) if reported_balance is not None else margin_balance
+        if reported_balance is not None and margin_balance - reported_balance > config.reported_tolerance:
+            alerts.append("VENUE_MARGIN_BELOW_LOCAL")
+        reserved = abs(self.reserved_position.get(venue, Decimal("0")))
+        position_rows = []
+        gross = maintenance_total = initial_total = Decimal("0")
+        isolated_rows = []
+        breach_positions: list[str] = []
+        # Every tiered instrument counts, positioned or not: reserved legs and
+        # open orders consume initial margin before any position exists.
+        held = {str(row["instrument_id"]) for row in positions}
+        positions = list(positions) + [
+            {"instrument_id": instrument_id, "quantity": "0", "unrealized_pnl": "0",
+             "mark_price": str(marks.get((venue, instrument_id), Decimal("0")))}
+            for instrument_id in sorted(config.tiers) if instrument_id not in held
+        ]
+        for row in positions:
+            instrument_id = str(row["instrument_id"])
+            quantity = Decimal(str(row["quantity"]))
+            mark = marks.get((venue, instrument_id), Decimal(str(row["mark_price"])))
+            multiplier = Decimal("1")
+            if instruments is not None:
+                try:
+                    multiplier = instruments.get(venue, instrument_id).contract_multiplier
+                except (KeyError, ValueError):
+                    pass
+            schedule = config.tiers.get(instrument_id)
+            buys, sells = open_orders.get((venue, instrument_id), (Decimal("0"), Decimal("0")))
+            worst_quantity = max(abs(quantity + buys), abs(quantity - sells)) + reserved
+            notional = abs(quantity) * mark * multiplier
+            worst_notional = worst_quantity * mark * multiplier
+            gross += notional
+            if schedule is None:
+                if quantity:
+                    alerts.append(f"TIERS_MISSING:{instrument_id}")
+                maintenance = notional * account.maintenance_margin_rate
+                initial = worst_notional * account.initial_margin_rate
+                tier_index = None
+            else:
+                found = schedule.tier(notional)
+                maintenance = schedule.maintenance(notional)
+                initial = schedule.initial(worst_notional)
+                tier_index = None if found is None else found[0]
+                if maintenance is None:
+                    alerts.append(f"POSITION_ABOVE_RISK_LIMIT:{instrument_id}")
+                    maintenance = Decimal("Infinity")
+                if initial is None:
+                    alerts.append(f"EXPOSURE_ABOVE_RISK_LIMIT:{instrument_id}")
+                    initial = Decimal("Infinity")
+            maintenance_total += maintenance
+            initial_total += initial
+            item = {
+                "instrument_id": instrument_id, "quantity": str(quantity), "mark": str(mark),
+                "notional": str(notional), "tier": tier_index,
+                "tier_source": schedule.source if schedule else "ACCOUNT_FIXED_RATE",
+                "maintenance_margin": str(maintenance),
+                "worst_case_quantity": str(worst_quantity), "worst_case_notional": str(worst_notional),
+                "initial_margin": str(initial),
+                "open_orders": {"buy": str(buys), "sell": str(sells)}, "reserved_position": str(reserved),
+            }
+            if config.mode == "ISOLATED" and quantity:
+                allocation = config.isolated_margin.get(instrument_id, Decimal("0"))
+                equity = allocation + Decimal(str(row.get("unrealized_pnl", "0")))
+                state = (
+                    MarginState.BREACH if equity < maintenance
+                    else MarginState.WARNING if equity - maintenance < maintenance * account.liquidation_buffer_rate
+                    else MarginState.HEALTHY
+                )
+                item.update(isolated_allocation=str(allocation), allocation_source="ASSUMED (config)",
+                            isolated_equity=str(equity), isolated_state=state.value)
+                isolated_rows.append((instrument_id, state, equity, maintenance))
+                if state == MarginState.BREACH:
+                    breach_positions.append(instrument_id)
+            position_rows.append(item)
+        if config.mode == "ISOLATED":
+            # Each isolated position stands alone; the cross wallet is what is
+            # left after allocations and isolated PnL, and cannot rescue them.
+            # Committed = each isolated position's allocation plus its PnL.
+            committed = sum((equity for _, _, equity, _ in isolated_rows), Decimal("0"))
+            wallet_left = effective - committed
+            states = [state for _, state, _, _ in isolated_rows]
+            if wallet_left < 0:
+                alerts.append("ISOLATED_ALLOCATIONS_EXCEED_WALLET")
+                states.append(MarginState.BREACH)
+            severity = {MarginState.HEALTHY: 1, MarginState.WARNING: 2, MarginState.BREACH: 3}
+            state = max(states, key=severity.get, default=MarginState.HEALTHY)
+            buffer = min((equity - mm for _, _, equity, mm in isolated_rows), default=effective)
+            required_buffer = maintenance_total * account.liquidation_buffer_rate
+            available = wallet_left
+        else:
+            buffer = effective - maintenance_total
+            required_buffer = maintenance_total * account.liquidation_buffer_rate
+            unpriced_liability = any(r["kind"] == "UNPRICED_LIABILITY" for r in collateral_rows)
+            above_limit = any(a.startswith("POSITION_ABOVE_RISK_LIMIT") for a in alerts)
+            if unpriced_liability or above_limit:
+                state = MarginState.BREACH          # fail closed: the requirement cannot be met or known
+            elif effective < maintenance_total:
+                state = MarginState.BREACH
+            elif buffer < required_buffer:
+                state = MarginState.WARNING
+            else:
+                state = MarginState.HEALTHY
+            if state == MarginState.BREACH:
+                breach_positions = [p["instrument_id"] for p in position_rows if Decimal(p["quantity"])]
+            available = effective - initial_total
+        codes = list(dict.fromkeys(alerts))
+        if state == MarginState.BREACH and "MARGIN_BELOW_MAINTENANCE" not in codes:
+            codes.insert(0, "MARGIN_BELOW_MAINTENANCE")
+        elif state == MarginState.WARNING:
+            codes.insert(0, "LIQUIDATION_BUFFER_LOW")
+        utilization = (
+            Decimal("0") if maintenance_total == 0
+            else Decimal("Infinity") if effective <= 0 else maintenance_total / effective
+        )
+        liquidation = config.liquidation
+        return VenueMarginState(
+            venue=venue, state=state, margin_enabled=True, gross_notional=gross,
+            margin_balance=margin_balance, venue_reported_margin_balance=reported_balance,
+            effective_margin_balance=effective, initial_margin_required=initial_total,
+            maintenance_margin_required=maintenance_total, liquidation_buffer=buffer,
+            required_liquidation_buffer=required_buffer, maintenance_margin_utilization=utilization,
+            alert_codes=tuple(codes), available_margin=available,
+            details={
+                "mode": config.mode, "balance_basis": basis, "collateral": collateral_rows,
+                "collateral_rule": "configured list" if config.collateral is not None
+                else "settlement/quote asset only (no collateral list)",
+                "positions": position_rows, "breached_positions": breach_positions,
+                "liquidation": (
+                    f"SIMULATED (simplified: full close by book walk, fee {liquidation.fee_rate} {liquidation.source})"
+                    if liquidation.enabled else "UNSUPPORTED (not simulated for this venue)"
+                ),
+                "adl": "UNSUPPORTED", "insurance_fund": "UNSUPPORTED",
+                "spot_margin_liquidation": "UNSUPPORTED (borrow-recall buy-in only)",
+            },
+        )
 
     def venue_is_suspended(self, venue: str) -> bool:
         return venue in self.suspended_venues
@@ -1281,9 +1539,15 @@ class RiskEngine:
             raise ValueError("max gross notional exceeded")
 
         buy_account = self._account(opportunity.buy_venue)
+        tiered = {
+            venue for venue in (opportunity.buy_venue, opportunity.sell_venue)
+            if self._tiered_perp(venue, opportunity.instrument_id)
+        }
         cash = {
             opportunity.buy_venue: (
-                Decimal("0") if buy_account.margin_enabled else buy_notional
+                # A margined perp leg reserves initial margin, not notional cash.
+                Decimal("0") if buy_account.margin_enabled or opportunity.buy_venue in tiered
+                else buy_notional
             )
         }
         margin: dict[str, Decimal] = {}
@@ -1295,9 +1559,20 @@ class RiskEngine:
         )
         for venue, position_delta, notional in legs:
             account = self._account(venue)
-            margin[venue] = margin.get(venue, Decimal("0")) + (
-                notional * account.initial_margin_rate
-            )
+            if venue in tiered:
+                price = opportunity.buy_price if position_delta > 0 else opportunity.sell_price
+                increment, free = self._tiered_initial_increment(
+                    venue, opportunity.instrument_id, position_delta, price, opportunity.observed_ts_ns,
+                )
+                if increment > free:
+                    raise ValueError(
+                        f"insufficient margin: {venue} (initial margin +{increment} at tier, free {free})"
+                    )
+                margin[venue] = margin.get(venue, Decimal("0")) + increment
+            else:
+                margin[venue] = margin.get(venue, Decimal("0")) + (
+                    notional * account.initial_margin_rate
+                )
             positions[venue] = positions.get(venue, Decimal("0")) + position_delta
             messages[venue] = messages.get(venue, 0) + 1
 

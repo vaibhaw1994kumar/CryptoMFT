@@ -119,6 +119,19 @@ class DeterministicMatcher:
             order.state = OrderState.FILLED
 
 
+def instrument_assets(instruments: InstrumentMaster, venue: str, instrument_id: str) -> tuple[str, str]:
+    """(position asset, quote asset) a fill moves: base for spot, the contract for a perp."""
+    try:
+        spec = instruments.get(venue, instrument_id)
+        if is_perpetual(spec.product_type):
+            # A perp position is a contract balance, never spot base.
+            return spec.instrument_id, spec.settlement_asset or spec.quote
+        return spec.base, spec.quote
+    except (KeyError, ValueError):
+        parts = instrument_id.split("-")
+        return (parts[0], parts[1]) if len(parts) >= 2 else (instrument_id, "USDT")
+
+
 class OMS:
     def __init__(
         self,
@@ -143,6 +156,8 @@ class OMS:
             risk.ledger = ledger  # live balances for inventory admission
         # Economic ledger: which assets an instrument's fills and fees move.
         ledger.asset_resolver = self._assets
+        if getattr(risk, "instruments", None) is None:
+            risk.instruments = instruments   # tiered margin admission (margin.py)
         # Fee pricing per fill delta (ECO01): what has been priced already,
         # the liquidity of each order's latest fill, and reporting-currency
         # prices for fees charged in a third token (e.g. BNB).
@@ -547,20 +562,41 @@ class OMS:
             )
         return report
 
-    def write_margin_status(
-        self,
-        path: Path,
-        *,
-        now_ns: int,
+    def open_risk_orders(self) -> dict[tuple[str, str], tuple[Decimal, Decimal]]:
+        """Remaining (buy, sell) quantity of open hedge/unwind orders per venue and instrument.
+
+        Primary package legs are covered by their risk reservation; hedges and
+        unwinds are not, so margin counts them here (ECO04).
+        """
+        out: dict[tuple[str, str], tuple[Decimal, Decimal]] = {}
+        for plan in self.plans.values():
+            for order in plan.children:
+                if order.order_role == "PRIMARY" or order.state not in {
+                    OrderState.CREATED, OrderState.ACKNOWLEDGED, OrderState.PARTIAL,
+                }:
+                    continue
+                remaining = order.quantity - order.filled_quantity
+                buys, sells = out.get((order.venue, order.instrument_id), (Decimal("0"), Decimal("0")))
+                if order.side == Side.BUY:
+                    buys += remaining
+                else:
+                    sells += remaining
+                out[(order.venue, order.instrument_id)] = (buys, sells)
+        return out
+
+    def evaluate_margin(
+        self, *, now_ns: int,
         mark_prices: dict[tuple[str, str], Decimal] | None = None,
         initial_capital_by_venue: dict[str, Decimal] | None = None,
         venue_risk: tuple[VenueRiskSnapshot, ...] = (),
-    ) -> dict[str, object]:
+    ):
+        """Evaluate margin now; a new breach cancels open orders through the kill switch."""
         was_active = self.risk.kill_switch
         report = self.risk.evaluate_margin(
             ledger=self.ledger, now_ns=now_ns, mark_prices=mark_prices,
             initial_capital_by_venue=initial_capital_by_venue,
             instruments=self.instruments, venue_risk=venue_risk,
+            open_orders=self.open_risk_orders(),
         )
         if self.risk.kill_switch and not was_active:
             cancelled = self.cancel_open_orders("RMS margin breach", now_ns)
@@ -571,6 +607,21 @@ class OMS:
                     self.residual_policy.allow_risk_reducing_under_stop
                 ),
             )
+        return report
+
+    def write_margin_status(
+        self,
+        path: Path,
+        *,
+        now_ns: int,
+        mark_prices: dict[tuple[str, str], Decimal] | None = None,
+        initial_capital_by_venue: dict[str, Decimal] | None = None,
+        venue_risk: tuple[VenueRiskSnapshot, ...] = (),
+    ) -> dict[str, object]:
+        report = self.evaluate_margin(
+            now_ns=now_ns, mark_prices=mark_prices,
+            initial_capital_by_venue=initial_capital_by_venue, venue_risk=venue_risk,
+        )
         report.write(path)
         return report.to_dict()
 
@@ -1461,15 +1512,7 @@ class OMS:
     # ---- time progression, venue queries and execution realism ------------
 
     def _assets(self, venue: str, instrument_id: str) -> tuple[str, str]:
-        try:
-            spec = self.instruments.get(venue, instrument_id)
-            if is_perpetual(spec.product_type):
-                # A perp position is a contract balance, never spot base.
-                return spec.instrument_id, spec.settlement_asset or spec.quote
-            return spec.base, spec.quote
-        except (KeyError, ValueError):
-            parts = instrument_id.split("-")
-            return (parts[0], parts[1]) if len(parts) >= 2 else (instrument_id, "USDT")
+        return instrument_assets(self.instruments, venue, instrument_id)
 
     def _price_fills(self, order: ChildOrder, ts_ns: int) -> None:
         """Price only the newly filled delta, at that fill's liquidity (ECO01).

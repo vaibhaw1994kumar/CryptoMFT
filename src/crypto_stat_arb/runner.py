@@ -271,6 +271,16 @@ def write_session_artifacts(
         mark_prices=mark_prices,
         initial_capital_by_venue=cfg.initial_capital_by_venue,
     )
+    if session.margin_venues:
+        margin_status["evaluated_during_session"] = True
+        margin_status["liquidations"] = session.liquidation.events
+        margin_status["unsupported"] = {
+            "adl": "UNSUPPORTED", "insurance_fund": "UNSUPPORTED",
+            "spot_margin_liquidation": "UNSUPPORTED (borrow-recall buy-in only)",
+        }
+        (output_dir / "margin_status.json").write_text(
+            json.dumps(margin_status, indent=2, sort_keys=True, default=str), encoding="utf-8"
+        )
     if risk.last_pretrade_validation is not None:
         risk.last_pretrade_validation.write(
             output_dir / "pretrade_validation.json"

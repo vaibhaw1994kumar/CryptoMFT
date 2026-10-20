@@ -47,6 +47,8 @@ class AppConfig:
     funding: dict[str, Any] = field(default_factory=dict)
     # ``risk.borrow``: spot borrow lines and recalls (ECO03, see borrow.py).
     borrow: dict[str, Any] = field(default_factory=dict)
+    # ``risk.margin``: risk tiers, collateral, cross/isolated, liquidation (ECO04, margin.py).
+    margin: Any = None
 
 
 def _optional_decimal(value: Any, default: str | None) -> Decimal | None:
@@ -392,8 +394,23 @@ def load_config(path: Path) -> tuple[AppConfig, dict]:
         strategies=dict(raw.get("strategies", {})),
         funding=dict(raw.get("funding", {})),
         borrow=_borrow_section(raw),
+        margin=_margin_section(raw, instruments),
     )
     return cfg, raw
+
+
+def _margin_section(raw: dict, instruments: list[Instrument]):
+    from .margin import MarginConfig
+
+    config = MarginConfig.from_config(raw.get("risk", {}).get("margin"))
+    known = {(i.venue, i.instrument_id) for i in instruments}
+    for venue, row in config.venues.items():
+        if venue not in raw["strategy"]["venues"]:
+            raise ValueError(f"margin config for {venue}, which is not a strategy venue")
+        for instrument_id in row.tiers:
+            if (venue, instrument_id) not in known:
+                raise ValueError(f"margin tiers for unknown instrument {venue}:{instrument_id}")
+    return config
 
 
 def _borrow_section(raw: dict) -> dict[str, Any]:

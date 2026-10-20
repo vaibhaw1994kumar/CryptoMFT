@@ -356,7 +356,8 @@ class ConfigAndBacktestTests(unittest.TestCase):
                  "daily_rate": "0.0024", "interval_hours": 1}
         recall = {"recall_id": "rc", "venue": "BYBIT", "asset": "BTC", "effective_from": 1_050_000_000,
                   "deadline_ms": 40, "forced_close_price": "60100"}
-        result, files = self.run_sample({"lines": [line_], "recalls": [recall], "settle_lag_ms": 0})
+        result, files = self.run_sample({"lines": [line_], "recalls": [recall], "settle_lag_ms": 0,
+                                         "forced_close_fee_bps": "10"})
         report, borrow = files["economic_reconciliation.json"], files["borrow_report.json"]
         self.assertEqual(result["economics"]["status"], "RECONCILED", report["checks"])
         self.assertEqual(len(borrow["forced_closes"]), 1)

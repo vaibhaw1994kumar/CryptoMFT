@@ -5,7 +5,8 @@ of any plan. This journal lives in the same SQLite WAL database as the plan
 store and holds:
 
 * every FUNDING / BORROW_* event and their REVERSALs, in booking order;
-* venue buy-in fills (BORROW_FORCED_CLOSE), which belong to no plan;
+* fills that belong to no plan, with their economic type: venue buy-ins
+  (BORROW_FORCED_CLOSE) and simulated venue liquidations (LIQUIDATION);
 * a checkpoint per engine for state the ledger cannot tell (session start,
   data flags, settlements processed while flat, last prices).
 
@@ -63,8 +64,12 @@ class FinancingJournal:
                 ("event", event.idempotency_key, json.dumps(event.to_dict(), sort_keys=True)),
             )
 
-    def append_forced_fill(self, order: ChildOrder, ts_ns: int) -> None:
-        payload = json.dumps({"order": asdict(order), "ts_ns": ts_ns}, default=json_default, sort_keys=True)
+    def append_forced_fill(self, order: ChildOrder, ts_ns: int, economic_type: EconomicEventType) -> None:
+        """A fill outside every plan (borrow buy-in, venue liquidation), with its economic type."""
+        payload = json.dumps(
+            {"order": asdict(order), "ts_ns": ts_ns, "economic_type": economic_type.value},
+            default=json_default, sort_keys=True,
+        )
         with self.connection:
             self.connection.execute(
                 "INSERT OR IGNORE INTO financing_events(kind, event_key, payload_json) VALUES (?, ?, ?)",
@@ -101,7 +106,10 @@ class FinancingJournal:
                 if kind == "forced_fill":
                     ledger.apply_fill(
                         restore_child(row["order"]), int(row["ts_ns"]),
-                        economic_type=EconomicEventType.BORROW_FORCED_CLOSE,
+                        # Rows written before the type was stored are borrow buy-ins.
+                        economic_type=EconomicEventType(
+                            row.get("economic_type", EconomicEventType.BORROW_FORCED_CLOSE.value)
+                        ),
                     )
                 else:
                     ledger.replay_financing(event_from_dict(row))

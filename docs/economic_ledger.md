@@ -2,9 +2,9 @@
 
 The economics work so far: an asset-level economic ledger, fee and rebate
 accounting (ECO01), perpetual funding settlement (ECO02), spot borrowing
-(ECO03) and a closing-equity reconciliation (ECO06 gate). Margin tiers and
-liquidation (ECO04), transfers (ECO05), queue calibration and the CI build are
-later milestones.
+(ECO03), margin tiers, collateral and simulated liquidation (ECO04) and a
+closing-equity reconciliation (ECO06 gate). Transfers (ECO05), queue
+calibration and the CI build are later milestones.
 
 ## Model (`src/crypto_stat_arb/economics.py`)
 
@@ -270,6 +270,96 @@ no authorized borrow line can no longer sell base it does not hold.
   `account_state.json` adds `borrow_cost`. Forced closes count with trading
   PnL against the trade ledger, and are excluded, like funding and interest,
   from the plan-PnL comparison.
+
+## Margin (ECO04, `src/crypto_stat_arb/margin.py`)
+
+This extends `RiskEngine.evaluate_margin` for venues listed under
+`risk.margin`. Venues without a margin config keep the fixed-rate path
+(`initial_margin_rate` / `maintenance_margin_rate`).
+
+```jsonc
+"risk": {"margin": {
+  "evaluate_interval_ms": 1000,
+  "venues": {"BINANCE": {
+    "mode": "CROSS",                       // or ISOLATED (then isolated_margin per instrument)
+    "tiers": {"BTC-USDT-PERP": {"source": "ASSUMED", "tiers": [
+      {"max_notional": "50000",  "maintenance_rate": "0.004", "initial_rate": "0.008"},
+      {"max_notional": "250000", "maintenance_rate": "0.005", "initial_rate": "0.01",
+       "maintenance_deduction": "50", "initial_deduction": "100"}]}},
+    "collateral": [{"asset": "USDT", "haircut": "0"}, {"asset": "BTC", "haircut": "0.05"}],
+    "isolated_margin": {"BTC-USDT-PERP": "500"},
+    "liquidation": {"enabled": true, "fee_rate": "0.0125"},
+    "reported_tolerance": "0.01"}}}}
+```
+
+* **During the session, not only at the end.** Margin is evaluated on
+  market-data time every `evaluate_interval_ms`, and after any fill on a
+  margin venue. It only runs where margin applies (a margin config, a
+  perpetual or `margin_enabled`), so spot sessions are unchanged. A new
+  breach goes through the OMS kill switch, which cancels open orders.
+* **Risk tiers per position.** The position's notional selects the tier.
+  MM = notional × mmr − deduction; IM = notional × imr − initial deduction.
+  Use the deduction to keep tiers continuous (Binance `cum`). A position
+  above the last tier is a BREACH (`POSITION_ABOVE_RISK_LIMIT`), and
+  admission above it is refused. The contract master only has flat rates,
+  so tier schedules come from config and are labelled `ASSUMED` unless
+  marked VERIFIED.
+* **Collateral from the economic ledger, per venue.**
+  - Eligible assets count at price × (1 − haircut); unlisted assets are
+    ineligible (0).
+  - The perp contract counts at mark × multiplier, never haircut.
+  - Negative balances (loans, interest, the USDT spent by the
+    fully-funded perp representation) count at full value.
+  - An unpriced liability fails closed (BREACH,
+    `COLLATERAL_PRICE_MISSING`).
+  - With no collateral list, only the quote asset is eligible.
+  - Collateral is never shared between venues: a hedged book can breach on
+    one venue while flat overall.
+* **Cross vs isolated.** In ISOLATED mode each position's margin is its
+  configured allocation (labelled ASSUMED) plus its unrealized PnL. It
+  breaches alone, the wallet cannot rescue it, and allocations above the
+  wallet raise `ISOLATED_ALLOCATIONS_EXCEED_WALLET`.
+* **Reserved and open-order margin.**
+  - Initial margin is computed on the worst-case exposure: the position
+    plus reserved package legs plus open hedge/unwind orders.
+  - A margined perp leg reserves its tiered IM increment, not notional
+    cash.
+  - Free margin is computed fresh at admission; the leg's price is
+    current, other marks come from the last evaluation.
+  - The report shows `available_margin`.
+* **Venue-reported margin.** The lower of local and venue is used, and a
+  venue figure lower than local by more than `reported_tolerance` raises
+  `VENUE_MARGIN_BELOW_LOCAL`.
+* **Liquidation (simulated, simplified)**, when `liquidation.enabled`:
+  - Trigger: a breached cross venue liquidates its positions; a breached
+    isolated position liquidates alone. The mark is the book mid, an
+    approximation of the venue mark.
+  - Execution: walk the opposite side of the book, through the simulated
+    venue's liquidity consumption, and charge `fee_rate` on the notional.
+  - Residual: unfilled quantity (`LIQUIDATION_RESIDUAL`) stays under
+    liquidation and is retried on each new book update until flat.
+  - Bankruptcy: equity below zero afterwards is `BANKRUPTCY_DEFICIT`.
+  - Accounting: fills are `LIQUIDATION` events outside every plan (journaled
+    for restarts with their type). They are counted with trading PnL against
+    the trade ledger and, with their fees, excluded from the plan-PnL check.
+  - Stopping: the kill switch is activated.
+  - Simplifications: a full close rather than the venues' stepwise partial
+    liquidation, and a book walk rather than takeover at the bankruptcy
+    price.
+* **Unsupported, and reported as such** in `margin_status.json`: ADL,
+  insurance fund, and spot-margin liquidation (only the borrow-recall buy-in
+  exists). After a liquidation, the surviving leg on the other venue is
+  reported (`positions`) but not flattened automatically; the kill switch
+  stops new risk.
+* **Artifacts.** `margin_status.json` has per-venue state, alerts,
+  `available_margin` and `details` (mode, balance basis, collateral rows,
+  per-position tier / MM / worst-case IM / isolated equity, breached
+  positions). With margin venues it also carries `liquidations`,
+  `evaluated_during_session` and `unsupported`.
+
+Tiers, haircuts, isolated allocations and liquidation fees are config
+assumptions, and none of this has run on recorded perpetual data. Tests
+are in `tests/test_margin_tiers.py`.
 
 ## Reconciliation (`economic_reconciliation.json`)
 

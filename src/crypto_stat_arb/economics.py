@@ -54,6 +54,7 @@ class EconomicEventType(StrEnum):
     BORROW_REPAY = "BORROW_REPAY"
     BORROW_RECALL = "BORROW_RECALL"
     BORROW_FORCED_CLOSE = "BORROW_FORCED_CLOSE"
+    LIQUIDATION = "LIQUIDATION"
     TRANSFER = "TRANSFER"
     DEPOSIT = "DEPOSIT"
     WITHDRAWAL = "WITHDRAWAL"
@@ -409,6 +410,12 @@ def reconcile(
     borrow_flags = dict(borrow_flags_by_venue or {})
     borrow_notes = dict(borrow_notes_by_venue or {})
     accrual_events = [e for e in ledger.events if e.event_type == EconomicEventType.BORROW_ACCRUAL]
+    # Fills outside every plan (venue buy-ins, simulated liquidations) and the
+    # fees charged on them: excluded from the plan-PnL comparison together.
+    out_of_plan_orders = {
+        e.order_id for e in ledger.events
+        if e.event_type in (EconomicEventType.BORROW_FORCED_CLOSE, EconomicEventType.LIQUIDATION)
+    }
     rows: dict[str, Any] = {}
     checks: list[dict[str, Any]] = []
     missing_all: set[str] = set()
@@ -436,6 +443,7 @@ def reconcile(
                 ("borrow_repay", EconomicEventType.BORROW_REPAY),
                 ("borrow_recall", EconomicEventType.BORROW_RECALL),
                 ("borrow_forced_close", EconomicEventType.BORROW_FORCED_CLOSE),
+                ("liquidation", EconomicEventType.LIQUIDATION),
                 ("transfers", EconomicEventType.TRANSFER),
                 ("deposits", EconomicEventType.DEPOSIT),
                 ("withdrawals", EconomicEventType.WITHDRAWAL),
@@ -464,6 +472,12 @@ def reconcile(
         # borrowed asset's price since then is reported separately.
         borrow_cost = sum((-(e.reporting_value or ZERO) for e in venue_accruals), ZERO)
         unvalued_accruals = [e.event_id for e in venue_accruals if e.reporting_value is None]
+        out_of_plan_fee_postings: dict[tuple[str, str, str], Decimal] = {}
+        for e in venue_fees:
+            if e.order_id in out_of_plan_orders:
+                for posting in e.postings:
+                    out_of_plan_fee_postings[posting.key] = out_of_plan_fee_postings.get(posting.key, ZERO) + posting.quantity
+        out_of_plan_fees = _value(out_of_plan_fee_postings, closing, venue, missing)
         explained = opening_equity + revaluation + sum(components.values(), ZERO)
         residual = closing_equity - explained
         equity_pnl = closing_equity - opening_equity - revaluation - components["deposits"] - components["withdrawals"]
@@ -474,6 +488,7 @@ def reconcile(
             "fees_at_fill_time": str(-fee_cost),
             "rebates_at_fill_time": str(rebates),
             "fee_asset_revaluation": str(components["fees_and_rebates_at_close"] - (rebates - fee_cost)),
+            "out_of_plan_fees": str(out_of_plan_fees),
             "borrow_cost_at_accrual_time": str(borrow_cost),
             "borrow_interest_revaluation": str(components["borrow_accrual"] + borrow_cost),
             "closing_equity": str(closing_equity),
@@ -515,7 +530,8 @@ def reconcile(
         if trade_pnl_by_venue is not None:
             expected = trade_pnl_by_venue.get(venue, ZERO)
             # A venue buy-in of a recalled loan is a fill in the trade ledger.
-            traded = components["trading_pnl"] + components["borrow_forced_close"]
+            # Venue buy-ins and simulated liquidations are fills in the trade ledger.
+            traded = components["trading_pnl"] + components["borrow_forced_close"] + components["liquidation"]
             difference = traded - expected
             checks.append({
                 "check": f"{venue}_trading_pnl_matches_trade_ledger",
@@ -570,7 +586,7 @@ def reconcile(
     carry = sum((
         Decimal(row[name]) for row in rows.values()
         for name in ("funding", "borrow_open", "borrow_accrual", "borrow_repay",
-                     "borrow_recall", "borrow_forced_close")
+                     "borrow_recall", "borrow_forced_close", "liquidation", "out_of_plan_fees")
     ), ZERO)
     if plan_net_pnl is not None:
         difference = plan_net_pnl - (total_equity_pnl - carry)
@@ -578,7 +594,7 @@ def reconcile(
             "check": "plan_net_pnl_matches_equity_pnl",
             "passed": abs(difference) <= plan_tolerance,
             "detail": (
-                f"plans {plan_net_pnl} vs equity excluding funding/borrow/forced closes {total_equity_pnl - carry} "
+                f"plans {plan_net_pnl} vs equity excluding funding/borrow/buy-ins/liquidations {total_equity_pnl - carry} "
                 f"(difference {difference}, tolerance {plan_tolerance}: plans mark residuals at close-time mids)"
             ),
         })
@@ -600,7 +616,7 @@ def reconcile(
             key: str(sum((Decimal(row[key]) for row in rows.values()), ZERO))
             for key in ("opening_equity", "inventory_revaluation", "trading_pnl", "fees_at_fill_time",
                         "rebates_at_fill_time", "funding", "borrow_accrual", "borrow_cost_at_accrual_time",
-                        "borrow_forced_close", "deposits", "withdrawals", "valuation_adjustments",
+                        "borrow_forced_close", "liquidation", "deposits", "withdrawals", "valuation_adjustments",
                         "closing_equity", "strategy_equity_pnl", "identity_residual")
         },
         "checks": checks,

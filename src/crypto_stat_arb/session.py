@@ -24,10 +24,11 @@ from .economics import opening_balance_events
 from .borrow import BorrowEngine, BorrowLine, BorrowRecall
 from .financing_journal import FinancingJournal
 from .funding import FundingEngine, FundingRateBook, FundingSpec, is_perpetual
+from .margin import LiquidationEngine, MarginConfig
 from .risk import InventoryModel
 from .ledger import Ledger
 from .models import EventType, MarketEvent, Opportunity, PlanState
-from .oms import OMS
+from .oms import OMS, instrument_assets
 from .orderbook import OrderBook
 from .plan_store import ParentPlanStore
 from .risk import RiskEngine
@@ -221,6 +222,11 @@ class TradingSession:
         self.risk.borrow = self.borrow
         self.financing_journal: FinancingJournal | None = None
         if plan_store is not None:
+            # Journal fills (buy-ins, liquidations) need the same asset mapping
+            # the OMS installs, before the OMS exists.
+            self.ledger.asset_resolver = lambda venue, instrument_id: instrument_assets(
+                cfg.instruments, venue, instrument_id
+            )
             self.financing_journal = FinancingJournal(plan_store)
             self.financing_journal.replay(self.ledger)
             for engine in (self.funding, self.borrow):
@@ -239,6 +245,25 @@ class TradingSession:
         finally:
             self.ledger.trade_fill_listeners = listeners
         self.ledger.journal = self.financing_journal
+        # Margin is evaluated during the session, not only at the end (ECO04):
+        # on market-data time every ``evaluate_interval_ms`` and after any fill
+        # on a margin venue; only where margin applies, so spot runs are unchanged.
+        self.margin_config: MarginConfig = cfg.margin or MarginConfig()
+        self.risk.margin_config = self.margin_config if self.margin_config.configured else None
+        self.margin_venues = {
+            venue for venue in cfg.venues
+            if venue in self.margin_config.venues
+            or is_perpetual(cfg.instruments.get(venue, cfg.instrument_id).product_type)
+            or self.risk._account(venue).margin_enabled
+        }
+        self._margin_due_ns: int | None = None
+        self._margin_dirty = False
+        self.liquidation = LiquidationEngine(
+            self.ledger, self.margin_config,
+            adapter_for=self._venue_adapter, on_liquidation=self._liquidation_stop,
+        )
+        if self.margin_venues:
+            self.ledger.trade_fill_listeners.append(self._margin_fill)
         settings = cfg.strategies or {}
         if strategies is None:
             strategies = []
@@ -342,6 +367,15 @@ class TradingSession:
         if self.borrow.configured:
             self.borrow.process(now)
             self.borrow.settle_until(now)
+        if self.margin_venues:
+            if (event.venue, event.instrument_id) in self.liquidation.active:
+                # A new book update: keep liquidating the residual until flat.
+                if self.liquidation.liquidate(
+                    event.venue, event.instrument_id, self.books.get(book_key), now,
+                    reason="continuing liquidation of the residual",
+                ) is not None:
+                    self._margin_dirty = True
+            self._evaluate_margin(now)
         self._notify_closed_plans()
         if gate_allowed is None:
             required = tuple(
@@ -503,6 +537,59 @@ class TradingSession:
             if self.borrow.configured:
                 self.borrow.process(self.last_event_ts_ns)
                 self.borrow.settle_until(self.last_event_ts_ns, final=True)
+
+    # -- margin (ECO04) -------------------------------------------------------------
+    def _venue_adapter(self, venue: str):
+        from .execution import DeterministicVenueAdapter
+
+        return self.router.adapters.setdefault(venue, DeterministicVenueAdapter(venue))
+
+    def _margin_fill(self, event) -> None:
+        if event.venue in self.margin_venues:
+            self._margin_dirty = True
+
+    def _liquidation_stop(self, reason: str, now_ns: int) -> None:
+        if not self.risk.kill_switch:
+            self.oms.activate_kill_switch(
+                reason=reason, now_ns=now_ns, operator_id="liquidation-engine", source="LIQUIDATION",
+            )
+
+    def _evaluate_margin(self, now: int) -> None:
+        due = self._margin_due_ns is None or now >= self._margin_due_ns
+        if not (due or self._margin_dirty):
+            return
+        self._margin_dirty = False
+        self._margin_due_ns = now + self.margin_config.evaluate_interval_ns
+        marks = {
+            key: (book.best_bid + book.best_ask) / Decimal("2")
+            for key, book in self.books.items()
+            if book.state.value == "VALID" and book.bids and book.asks
+        }
+        report = self.oms.evaluate_margin(
+            now_ns=now, mark_prices=marks, initial_capital_by_venue=self.cfg.initial_capital_by_venue,
+        )
+        for row in report.venues:
+            if row.state.value != "BREACH" or row.venue not in self.margin_config.venues:
+                continue
+            for instrument_id in row.details.get("breached_positions", []):
+                result = self.liquidation.liquidate(
+                    row.venue, instrument_id, self.books.get((row.venue, instrument_id)), now,
+                    reason=f"margin {row.state.value}: {','.join(row.alert_codes)}",
+                )
+                if result is not None:
+                    self._margin_dirty = True
+            if self.liquidation.events and self.liquidation.events[-1]["venue"] == row.venue:
+                after = self.risk.evaluate_margin(
+                    ledger=self.ledger, now_ns=now, mark_prices=marks,
+                    open_orders=self.oms.open_risk_orders(), dry_run=True,
+                )
+                venue_after = next((r for r in after.venues if r.venue == row.venue), None)
+                if venue_after is not None and venue_after.effective_margin_balance < 0:
+                    self.liquidation.events.append({
+                        "venue": row.venue, "ts_ns": now, "code": "BANKRUPTCY_DEFICIT",
+                        "deficit": str(-venue_after.effective_margin_balance),
+                        "detail": "equity below zero after liquidation; insurance fund and ADL are UNSUPPORTED",
+                    })
 
     def _borrow_forced_close(self, reason: str, now_ns: int) -> None:
         """A venue buy-in leaves the other leg unhedged: stop trading."""

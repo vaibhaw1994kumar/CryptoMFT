@@ -226,7 +226,7 @@ class Ledger:
             )
             if self.economics.apply(fill_event):
                 if economic_type != EconomicEventType.TRADE_FILL and self.journal is not None:
-                    self.journal.append_forced_fill(order, ts_ns)
+                    self.journal.append_forced_fill(order, ts_ns, economic_type)
                 for listener in self.trade_fill_listeners:
                     listener(fill_event)
             self.record(
