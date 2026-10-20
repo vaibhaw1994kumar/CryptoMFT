@@ -87,6 +87,24 @@ class FeePathTests(unittest.TestCase):
         )
         simulator = maker_simulator_from_config(cfg)
         self.assertEqual(simulator.maker_fee_bps, {v: 0.0 for v in cfg.venues})
+        self.assertEqual(simulator.maker_fee_rate(cfg.venues[0], 10), 0.0)
+
+    def test_maker_simulator_charges_the_rate_dated_at_each_fill(self):
+        from dataclasses import replace
+        from pathlib import Path
+        from crypto_stat_arb.config import load_config
+
+        cfg, _ = load_config(Path(__file__).parents[1] / "config/research.json")
+        cfg = replace(cfg, strategies={"maker_simulation": {"enabled": True}})
+        cfg.instruments.fee_schedule = FeeSchedule(
+            rule for v in cfg.venues for rule in (
+                FeeRule(v, Decimal("2"), Decimal("4"), 0, instrument_id=cfg.instrument_id),
+                FeeRule(v, Decimal("1"), Decimal("4"), 1_000, instrument_id=cfg.instrument_id),
+            )
+        )
+        simulator = maker_simulator_from_config(cfg)
+        self.assertEqual((simulator.maker_fee_rate(cfg.venues[0], 999),
+                          simulator.maker_fee_rate(cfg.venues[0], 1_000)), (2.0, 1.0))
 
 
 if __name__ == "__main__":

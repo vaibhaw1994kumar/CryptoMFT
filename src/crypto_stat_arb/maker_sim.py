@@ -49,7 +49,7 @@ from hashlib import sha256
 import heapq
 import json
 from pathlib import Path
-from typing import Any, Iterable, Mapping
+from typing import Any, Callable, Iterable, Mapping
 
 from .canonical import CanonicalEventDispatcher
 from .config import load_config
@@ -162,6 +162,7 @@ class MakerDryRunSimulator:
         max_inventory: float = 0.01,
         initial_inventory: float | None = None,
         maker_fee_bps: Mapping[str, float] | None = None,
+        maker_fee_rate: Callable[[str, int], float] | None = None,
         depth: int = 50,
         engine: str = "auto",
         clock: SimulationClock | None = None,
@@ -181,6 +182,9 @@ class MakerDryRunSimulator:
         self.max_inventory = max_inventory
         self.initial_inventory = max_inventory / 2 if initial_inventory is None else initial_inventory
         self.maker_fee_bps = {venue: float(bps) for venue, bps in (maker_fee_bps or {}).items()}
+        # (venue, fill time) -> effective maker bps from the dated fee schedule;
+        # when set it replaces the fixed per-venue rates.
+        self.maker_fee_rate = maker_fee_rate
         self.depth = depth
         self.clock = clock or SimulationClock()
         self.max_fill_records = max_fill_records
@@ -424,7 +428,11 @@ class MakerDryRunSimulator:
     def _record_fill(self, state: _VenueState, stats: _VenueStats, fill, trade: TradeEvent, now: int) -> None:
         order = self.orders[fill.client_order_id]
         quantity, price = fill.quantity, fill.price
-        fee = quantity * price * self.maker_fee_bps.get(order.venue, 0.0) / 10_000
+        bps = (
+            self.maker_fee_rate(order.venue, now) if self.maker_fee_rate is not None
+            else self.maker_fee_bps.get(order.venue, 0.0)
+        )
+        fee = quantity * price * bps / 10_000
         self._check_fill(order, stats, quantity, price)
         order.filled += quantity
         signed = quantity if order.side == "BUY" else -quantity
@@ -689,6 +697,10 @@ def maker_simulator_from_config(cfg, *, engine: str | None = None) -> MakerDryRu
             venue: float(cfg.instruments.fee_bps(venue, cfg.instrument_id, Liquidity.MAKER))
             for venue in venues
         },
+        # Each fill is charged the effective maker rate in force at its time.
+        maker_fee_rate=lambda venue, ts_ns: float(
+            cfg.instruments.fee_bps(venue, cfg.instrument_id, Liquidity.MAKER, ts_ns)
+        ),
         depth=int(settings.get("depth", 50)),
         engine=engine or str(settings.get("engine", "auto")),
         queue_position_frac=float(settings.get("queue_position_frac", 1.0)),

@@ -29,12 +29,16 @@ def run(name: str, args: list[str], *, json_result: bool = False) -> dict | None
         env=env,
         text=True,
         stdout=subprocess.PIPE if json_result else None,
-        check=True,
+        check=False,
     )
+    # Print the step's output before failing, so a gate's reasons are visible.
+    if json_result and completed.stdout:
+        print(completed.stdout, end="")
+    if completed.returncode != 0:
+        raise subprocess.CalledProcessError(completed.returncode, args, output=completed.stdout)
     if not json_result:
         return None
     assert completed.stdout is not None
-    print(completed.stdout, end="")
     return json.loads(completed.stdout)
 
 

@@ -84,8 +84,9 @@ Fee rules (`fees` in config) accept (comments for illustration only):
 * **One rate path.** `FeeRule.effective_bps`, `FeeSchedule.rate_bps` and
   `InstrumentMaster.fee_bps` all return the rate the ledger books, with the
   dated rule and the conservative policy applied. The arb and
-  mean-reversion edge filters and the maker dry-run simulator use it, so
-  opportunity selection and booking can't disagree. `raw_rate_bps` shows
+  mean-reversion edge filters (at decision time) and the maker dry-run
+  simulator (at each fill's time) use it, so opportunity selection,
+  simulation and booking can't disagree. `raw_rate_bps` shows
   the configured number, for reporting only. Conservative mode zeroes any
   *assumed negative* rate (maker or taker) until verified.
 
