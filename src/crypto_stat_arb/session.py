@@ -21,7 +21,9 @@ from .config import AppConfig
 from .execution import StrategyDirectedRouter, VenueExecutionAdapter
 from .latency import LatencyModel, latency_model_from_config
 from .economics import opening_balance_events
+from .borrow import BorrowEngine, BorrowLine, BorrowRecall
 from .funding import FundingEngine, FundingRate, FundingRateBook, FundingSpec, is_perpetual
+from .risk import InventoryModel
 from .ledger import Ledger
 from .models import EventType, MarketEvent, Opportunity, PlanState
 from .oms import OMS
@@ -119,6 +121,32 @@ def funding_engine(cfg: AppConfig, ledger: Ledger) -> FundingEngine:
     )
 
 
+def borrow_engine(cfg: AppConfig, ledger: Ledger, on_forced_close=None) -> BorrowEngine:
+    """Spot borrow lines (ECO03); with no lines, every spot short is refused."""
+    section = cfg.borrow or {}
+    spot: dict[tuple[str, str], tuple[str, str]] = {}
+    eligible: dict[tuple[str, str], bool] = {}
+    for venue in cfg.venues:
+        spec = cfg.instruments.get(venue, cfg.instrument_id)
+        if not is_perpetual(spec.product_type):
+            spot[(venue, spec.instrument_id)] = (spec.base, spec.quote)
+            eligible[(venue, spec.base)] = spec.borrow_applicable
+    return BorrowEngine(
+        ledger, [BorrowLine.from_config(row) for row in section.get("lines", [])],
+        spot_instruments=spot, eligible=eligible,
+        recalls=[BorrowRecall.from_config(row) for row in section.get("recalls", [])],
+        repay_policy=str(section.get("repay_policy", "auto_on_buy")),
+        forced_close_fee_bps=Decimal(str(section.get("forced_close_fee_bps", "0"))),
+        settle_lag_ns=int(section.get("settle_lag_ms", 5_000)) * 1_000_000,
+        on_forced_close=on_forced_close,
+        # The legacy unconstrained model sells base it does not hold by design;
+        # report those shorts as unfinanced instead of failing the run.
+        unfinanced_short_policy=(
+            "NOTE" if cfg.inventory_policy.model == InventoryModel.UNCONSTRAINED else "FAIL"
+        ),
+    )
+
+
 class TradingSession:
     def __init__(
         self,
@@ -188,6 +216,8 @@ class TradingSession:
             order_timeout_policy=cfg.order_timeout_policy,
         )
         self.funding = funding_engine(cfg, self.ledger)
+        self.borrow = borrow_engine(cfg, self.ledger, self._borrow_forced_close)
+        self.risk.borrow = self.borrow
         settings = cfg.strategies or {}
         if strategies is None:
             strategies = []
@@ -280,6 +310,17 @@ class TradingSession:
             )
             self.funding.observe(event.venue, event.instrument_id, now, mid)
             self.funding.settle_until(now)
+        book = self.books.get(book_key)
+        if book is not None and book.state.value == "VALID" and book.bids and book.asks:
+            self.borrow.observe(
+                event.venue, event.instrument_id, now,
+                (book.best_bid + book.best_ask) / Decimal("2"), book.best_ask,
+            )
+        else:
+            self.borrow.observe(event.venue, event.instrument_id, now, None)
+        if self.borrow.configured:
+            self.borrow.process(now)
+            self.borrow.settle_until(now)
         self._notify_closed_plans()
         if gate_allowed is None:
             required = tuple(
@@ -438,6 +479,15 @@ class TradingSession:
         """Settle everything up to the last market event, never beyond the data."""
         if self.last_event_ts_ns:
             self.funding.settle_until(self.last_event_ts_ns, final=True)
+            if self.borrow.configured:
+                self.borrow.process(self.last_event_ts_ns)
+                self.borrow.settle_until(self.last_event_ts_ns, final=True)
+
+    def _borrow_forced_close(self, reason: str, now_ns: int) -> None:
+        """A venue buy-in leaves the other leg unhedged: stop trading."""
+        self.oms.activate_kill_switch(
+            reason=reason, now_ns=now_ns, operator_id="borrow-engine", source="BORROW",
+        )
 
     def silent_feeds(self) -> list[str]:
         """Configured venues with no data, or silent while others kept publishing."""

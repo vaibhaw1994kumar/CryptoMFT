@@ -70,10 +70,13 @@ class AdmissionTests(unittest.TestCase):
         venue = risk.inventory_snapshot()["venues"]["BYBIT"]
         self.assertEqual((venue["reserved_base"], venue["available_base"]), ("0.01", "0.005"))
 
-    def test_margin_enabled_sell_venue_needs_no_base(self):
+    def test_margin_flag_alone_does_not_authorize_a_short(self):
+        # ECO03: a margin-enabled account is not a borrow line. Without an
+        # authorized line with capacity, a sell beyond held base is refused.
         accounts = {"BYBIT": AccountRiskSnapshot(venue="BYBIT", margin_enabled=True)}
         risk = engine({"BINANCE": "0", "BYBIT": "0"}, {"BINANCE": "100000", "BYBIT": "100000"}, accounts)
-        self.assertEqual(risk.reserve(nth(1)).base_by_venue, {})
+        with self.assertRaisesRegex(ValueError, "^insufficient base inventory: BYBIT$"):
+            risk.reserve(nth(1))
 
     def test_unconstrained_model_keeps_the_legacy_behaviour(self):
         risk = RiskEngine(limits())

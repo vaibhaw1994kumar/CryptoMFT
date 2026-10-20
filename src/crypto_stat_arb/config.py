@@ -45,6 +45,8 @@ class AppConfig:
     inventory_policy: InventoryPolicy = field(default_factory=InventoryPolicy)
     # ``funding``: perpetual funding settlement (ECO02, see funding.py).
     funding: dict[str, Any] = field(default_factory=dict)
+    # ``risk.borrow``: spot borrow lines and recalls (ECO03, see borrow.py).
+    borrow: dict[str, Any] = field(default_factory=dict)
 
 
 def _optional_decimal(value: Any, default: str | None) -> Decimal | None:
@@ -140,6 +142,7 @@ def load_config(path: Path) -> tuple[AppConfig, dict]:
                 d(x["maker_fee_bps"]) if x.get("maker_fee_bps") is not None else None
             ),
             effective_from_ns=parse_effective_ns(x.get("effective_from")),
+            borrow_applicable=bool(x.get("borrow_applicable", False)),
             **_perpetual_fields(x),
         )
         for x in raw["instruments"]
@@ -386,5 +389,22 @@ def load_config(path: Path) -> tuple[AppConfig, dict]:
         execution_mode=str(raw.get("execution_mode", "INTERNAL_SIMULATION")).upper(),
         strategies=dict(raw.get("strategies", {})),
         funding=dict(raw.get("funding", {})),
+        borrow=_borrow_section(raw),
     )
     return cfg, raw
+
+
+def _borrow_section(raw: dict) -> dict[str, Any]:
+    """Validate ``risk.borrow`` at load so bad terms fail before a run starts."""
+    from .borrow import BorrowLine, BorrowRecall
+
+    section = dict(raw.get("risk", {}).get("borrow") or {})
+    lines = [BorrowLine.from_config(row) for row in section.get("lines", [])]
+    keys = [(line.venue, line.asset) for line in lines]
+    if len(keys) != len(set(keys)):
+        raise ValueError("duplicate borrow line for a venue/asset")
+    for row in section.get("recalls", []):
+        recall = BorrowRecall.from_config(row)
+        if (recall.venue, recall.asset) not in keys:
+            raise ValueError(f"recall {recall.recall_id} has no borrow line")
+    return section

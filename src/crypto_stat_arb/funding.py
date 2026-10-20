@@ -49,6 +49,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, Iterable
 
 from .economics import EconomicEvent, EconomicEventType, EventSource, Posting
+from .periodic import PeriodicSettlement
 
 if TYPE_CHECKING:
     from .ledger import Ledger
@@ -167,15 +168,7 @@ class FundingRateBook:
         return book
 
 
-@dataclass(slots=True)
-class _Settled:
-    event_id: str
-    position: Decimal
-    revision: int
-    amount: Decimal
-
-
-class FundingEngine:
+class FundingEngine(PeriodicSettlement):
     """Books FUNDING events for configured perpetuals from rate records."""
 
     def __init__(
@@ -183,23 +176,17 @@ class FundingEngine:
         settle_lag_ns: int = 5_000_000_000, max_rate_age_ns: int | None = None,
         mark_fallback: str = "none",
     ) -> None:
+        super().__init__(settle_lag_ns=settle_lag_ns)
         self.ledger = ledger
         self.specs = {(s.venue, s.instrument_id): s for s in specs}
         self.rates = rates or FundingRateBook()
-        self.settle_lag_ns = settle_lag_ns
         self.max_rate_age_ns = max_rate_age_ns
         if mark_fallback not in ("none", "book_mid"):
             raise ValueError("funding mark_fallback must be 'none' or 'book_mid'")
         self.mark_fallback = mark_fallback
-        self.start_ns: int | None = None
         self._last_mid: dict[tuple[str, str], tuple[int, Decimal]] = {}
         self._mid_at: dict[tuple[str, str, int], Decimal] = {}
-        self._processed: set[tuple[str, str, int]] = set()
-        self._settled: dict[tuple[str, str, int], _Settled] = {}
-        self._revisions: dict[tuple[str, str, int], int] = {}
         self.flags: list[dict[str, Any]] = []
-        self.rebooked = 0
-        self.horizon_ns = 0
         ledger.trade_fill_listeners.append(self.on_trade_fill)
 
     @property
@@ -212,49 +199,31 @@ class FundingEngine:
         key = (venue, instrument_id)
         if key not in self.specs:
             return
-        if self.start_ns is None:
-            self.start_ns = ts_ns
+        self.begin(ts_ns)
         last = self._last_mid.get(key)
         if last is not None:
-            for when in self._settlement_times(self.specs[key], ts_ns):
+            for when in self._times(key, self.start_ns, ts_ns):
                 if last[0] <= when < ts_ns:
                     self._mid_at.setdefault((venue, instrument_id, when), last[1])
         if mid is not None:
             self._last_mid[key] = (ts_ns, mid)
 
-    def _settlement_times(self, spec: FundingSpec, until_ns: int) -> list[int]:
-        start = self.start_ns if self.start_ns is not None else until_ns
+    # -- PeriodicSettlement hooks -------------------------------------------------
+    def _lines(self):
+        return self.specs.keys()
+
+    def _times(self, line, start_ns: int, until_ns: int) -> list[int]:
+        spec = self.specs[line]
         times = {
             ts for (v, i, ts) in self.rates.realized
-            if v == spec.venue and i == spec.instrument_id and start <= ts <= until_ns
+            if v == spec.venue and i == spec.instrument_id and start_ns <= ts <= until_ns
         }
-        if spec.interval_ns > 0:
-            k = -(-(start - spec.anchor_ns) // spec.interval_ns)  # ceil
-            ts = spec.anchor_ns + k * spec.interval_ns
-            while ts <= until_ns:
-                times.add(ts)
-                ts += spec.interval_ns
+        times.update(self.schedule(spec.anchor_ns, spec.interval_ns, start_ns, until_ns))
         return sorted(times)
 
-    # -- settlement --------------------------------------------------------------
-    def settle_until(self, now_ns: int, *, final: bool = False) -> None:
-        """Book every settlement at or before ``now - settle_lag`` (``now`` when final).
-
-        ``now_ns`` must be a market-data time: no settlement past the data is booked.
-        """
-        if not self.specs or self.start_ns is None:
-            return
-        self.horizon_ns = max(self.horizon_ns, now_ns)
-        cutoff = now_ns if final else now_ns - self.settle_lag_ns
-        for spec in self.specs.values():
-            for ts in self._settlement_times(spec, cutoff):
-                key = (spec.venue, spec.instrument_id, ts)
-                if key not in self._processed:
-                    self._processed.add(key)
-                    self._settle(spec, ts, now_ns)
-
-    def _position(self, spec: FundingSpec, ts_ns: int) -> Decimal:
+    def _quantity(self, line, ts_ns: int) -> Decimal:
         # Boundary: fills matched strictly before the settlement timestamp count.
+        spec = self.specs[line]
         return self.ledger.economics.balance(spec.venue, spec.contract_asset, as_of_ns=ts_ns - 1)
 
     def _flag(self, spec: FundingSpec, ts_ns: int, code: str, position: Decimal, detail: str = "") -> None:
@@ -265,22 +234,37 @@ class FundingEngine:
             "blocking": position != 0 and code != "LATE_FILL_REBOOKED",
         })
 
-    def _settle(self, spec: FundingSpec, ts_ns: int, booked_ns: int) -> None:
-        position = self._position(spec, ts_ns)
+    def _note_rebook(self, line, ts_ns: int, quantity: Decimal, detail: str) -> None:
+        spec = self.specs[line]
+        self.flags = [
+            f for f in self.flags
+            if (f["venue"], f["instrument_id"], f["funding_ts_ns"]) != (spec.venue, spec.instrument_id, ts_ns)
+            or f["code"] == "LATE_FILL_REBOOKED"
+        ]
+        self._flag(spec, ts_ns, "LATE_FILL_REBOOKED", quantity, detail)
+
+    def _book(self, event: EconomicEvent) -> None:
+        self.ledger.apply_funding(event)
+
+    def _unbook(self, event_id: str, ts_ns: int, reason: str) -> None:
+        self.ledger.reverse_funding(event_id, ts_ns, reason)
+
+    def _build(self, line, ts_ns: int, position: Decimal, revision: int, booked_ns: int) -> EconomicEvent | None:
+        spec = self.specs[line]
         record = self.rates.realized.get((spec.venue, spec.instrument_id, ts_ns))
         if record is None:
             self._flag(spec, ts_ns, "FUNDING_RATE_MISSING", position,
                        "no realized rate record for this settlement time")
-            return
+            return None
         if (
             self.max_rate_age_ns is not None and record.asof_ns is not None
             and ts_ns - record.asof_ns > self.max_rate_age_ns
         ):
             self._flag(spec, ts_ns, "FUNDING_RATE_STALE", position,
                        f"rate observed {ts_ns - record.asof_ns} ns before settlement")
-            return
+            return None
         if position == 0:
-            return
+            return None
         mark, mark_source = record.mark_price, "funding record mark price"
         if mark is None and self.mark_fallback == "book_mid":
             mark = self._mid_at.get((spec.venue, spec.instrument_id, ts_ns))
@@ -291,14 +275,11 @@ class FundingEngine:
         if mark is None or mark <= 0:
             self._flag(spec, ts_ns, "FUNDING_MARK_MISSING", position,
                        "no mark price in the record and no mid fallback")
-            return
+            return None
         amount = funding_amount(
             position, record.rate, mark, multiplier=spec.multiplier, inverse=spec.inverse
         )
-        settlement_key = (spec.venue, spec.instrument_id, ts_ns)
-        revision = self._revisions.get(settlement_key, 0)
-        self._revisions[settlement_key] = revision + 1
-        event = EconomicEvent(
+        return EconomicEvent(
             event_type=EconomicEventType.FUNDING,
             idempotency_key=f"funding|{spec.venue}|{spec.instrument_id}|{ts_ns}|r{revision}",
             ts_ns=max(booked_ns, ts_ns), effective_ts_ns=ts_ns,
@@ -313,45 +294,15 @@ class FundingEngine:
                 ("rate_asof_ns", "" if record.asof_ns is None else str(record.asof_ns)),
             ),
         )
-        self.ledger.apply_funding(event)
-        self._settled[(spec.venue, spec.instrument_id, ts_ns)] = _Settled(
-            event.event_id, position, revision, amount
-        )
 
     def on_trade_fill(self, event: EconomicEvent) -> None:
         """A fill effective before a booked settlement: reverse and rebook it."""
-        spec = self.specs.get((event.venue, event.instrument_id))
-        if spec is None:
-            return
-        for (venue, instrument_id, ts_ns), settled in sorted(self._settled.items()):
-            if (venue, instrument_id) != (spec.venue, spec.instrument_id) or event.effective >= ts_ns:
-                continue
-            if self._position(spec, ts_ns) == settled.position:
-                continue
-            self.ledger.reverse_funding(settled.event_id, event.ts_ns, "late fill changed the settlement position")
-            del self._settled[(venue, instrument_id, ts_ns)]
-            self.rebooked += 1
-            self._flag(spec, ts_ns, "LATE_FILL_REBOOKED", settled.position,
-                       f"fill {event.fill_id} effective {event.effective} reported at {event.ts_ns}")
-            self._settle(spec, ts_ns, event.ts_ns)
-        # A settlement processed while flat (nothing booked) now has a position:
-        # settle it for the first time (its earlier flags are re-evaluated).
-        for key in sorted(self._processed):
-            venue, instrument_id, ts_ns = key
-            if (
-                (venue, instrument_id) != (spec.venue, spec.instrument_id) or key in self._settled
-                or event.effective >= ts_ns or self._position(spec, ts_ns) == 0
-            ):
-                continue
-            self.flags = [
-                f for f in self.flags
-                if (f["venue"], f["instrument_id"], f["funding_ts_ns"]) != key
-                or f["code"] == "LATE_FILL_REBOOKED"
-            ]
-            self.rebooked += 1
-            self._flag(spec, ts_ns, "LATE_FILL_REBOOKED", ZERO,
-                       f"fill {event.fill_id} effective {event.effective} reported at {event.ts_ns}")
-            self._settle(spec, ts_ns, event.ts_ns)
+        line = (event.venue, event.instrument_id)
+        if line in self.specs:
+            self.on_change(
+                line, event.effective, event.ts_ns,
+                f"fill {event.fill_id} effective {event.effective} reported at {event.ts_ns}",
+            )
 
     # -- forecasts and report ----------------------------------------------------
     def predict(self, venue: str, instrument_id: str, *, mark_price: Decimal | None = None) -> dict[str, Any]:
@@ -378,8 +329,8 @@ class FundingEngine:
         if not self.specs:
             return {"status": "NOT_CONFIGURED", "detail": "no perpetual instruments configured"}
         by_venue: dict[str, Decimal] = {}
-        for (venue, _i, _ts), settled in self._settled.items():
-            by_venue[venue] = by_venue.get(venue, ZERO) + settled.amount
+        for event in self.settled_events():
+            by_venue[event.venue] = by_venue.get(event.venue, ZERO) + event.postings[0].quantity
         blocking = [f for f in self.flags if f["blocking"]]
         unscheduled = sorted(f"{v}:{i}" for (v, i), s in self.specs.items() if s.interval_ns <= 0)
         marks = closing_marks or {}

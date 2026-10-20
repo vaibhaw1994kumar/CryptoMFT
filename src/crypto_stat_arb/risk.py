@@ -310,6 +310,10 @@ class InventoryPolicy:
         return "UNCONSTRAINED_SPOT_SHORTING_ALLOWED"
 
 
+def _base_asset(instrument_id: str) -> str:
+    return instrument_id.split("-")[0]
+
+
 @dataclass(slots=True)
 class PackageReservation:
     reservation_id: str
@@ -322,12 +326,14 @@ class PackageReservation:
     residual_base: Decimal
     active: bool = True
     base_by_venue: dict[str, Decimal] = field(default_factory=dict)
+    # Base to be borrowed for the sell leg (ECO03), held against the line's limit.
+    borrow_by_venue: dict[str, Decimal] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
         row = asdict(self)
         for field_name in (
             "gross_notional", "cash_by_venue", "margin_by_venue",
-            "position_delta_by_venue", "residual_base", "base_by_venue",
+            "position_delta_by_venue", "residual_base", "base_by_venue", "borrow_by_venue",
         ):
             value = row[field_name]
             if isinstance(value, Decimal):
@@ -359,6 +365,10 @@ class RiskEngine:
         self.kill_switch_events: list[dict[str, Any]] = []
         self.kill_switch_last_reconciliation_id = ""
         self.account_snapshots = dict(account_snapshots or {})
+        # BorrowEngine (borrow.py) when borrow lines are configured; a sell
+        # beyond held base needs available borrow, never a margin flag.
+        self.borrow: Any | None = None
+        self.reserved_borrow: dict[str, Decimal] = {}
         self.reserved_gross = Decimal("0")
         self.reserved_cash: dict[str, Decimal] = {}
         self.reserved_margin: dict[str, Decimal] = {}
@@ -719,9 +729,15 @@ class RiskEngine:
         venues = sorted(
             set(self.inventory.initial_base_by_venue) | set(self.inventory.initial_quote_by_venue)
         )
+        borrow_lines = bool(self.borrow is not None and self.borrow.configured)
         return {
             "model": self.inventory.model.value,
-            "label": self.inventory.label,
+            "label": (
+                "PRE_FUNDED_INVENTORY_WITH_BORROW_LINES"
+                if borrow_lines and self.inventory.model == InventoryModel.PRE_FUNDED
+                else self.inventory.label
+            ),
+            "reserved_borrow": {venue: str(q) for venue, q in sorted(self.reserved_borrow.items())},
             "instrument_id": self.inventory.instrument_id,
             "venues": {
                 venue: {
@@ -1332,22 +1348,37 @@ class RiskEngine:
                 raise ValueError(f"message capacity exceeded: {venue}")
 
         base: dict[str, Decimal] = {}
+        borrow: dict[str, Decimal] = {}
         if self.inventory.model == InventoryModel.PRE_FUNDED:
-            sell_account = self._account(opportunity.sell_venue)
             if not buy_account.margin_enabled:
+                # Quote borrowing for margin buys is not modelled (ECO04).
                 needed = (
                     self.reserved_cash.get(opportunity.buy_venue, Decimal("0")) + buy_notional
                 )
                 if needed > self.held_quote(opportunity.buy_venue):
                     raise ValueError(f"insufficient quote inventory: {opportunity.buy_venue}")
-            if not sell_account.margin_enabled:
-                base[opportunity.sell_venue] = opportunity.quantity
-                needed = (
-                    self.reserved_base.get(opportunity.sell_venue, Decimal("0"))
-                    + opportunity.quantity
-                )
-                if needed > self.held_base(opportunity.sell_venue):
-                    raise ValueError(f"insufficient base inventory: {opportunity.sell_venue}")
+            # A spot sell needs held base or an available borrow line; a
+            # margin_enabled flag alone is not authorization to borrow.
+            sell_venue = opportunity.sell_venue
+            base[sell_venue] = opportunity.quantity
+            needed = self.reserved_base.get(sell_venue, Decimal("0")) + opportunity.quantity
+            held = max(self.held_base(sell_venue), Decimal("0"))
+            if needed > held:
+                already = self.reserved_borrow.get(sell_venue, Decimal("0"))
+                extra = needed - held - already
+                if extra > 0:
+                    asset = (
+                        self.ledger.asset_resolver(sell_venue, self.inventory.instrument_id)[0]
+                        if self.ledger is not None else _base_asset(self.inventory.instrument_id)
+                    )
+                    if self.borrow is None or not self.borrow.configured:
+                        # No borrow lines at all: borrowing is N/A here.
+                        raise ValueError(f"insufficient base inventory: {sell_venue}")
+                    try:
+                        self.borrow.require(sell_venue, asset, extra, reserved=already)
+                    except ValueError as refused:
+                        raise ValueError(f"insufficient base inventory: {sell_venue} ({refused})") from None
+                    borrow[sell_venue] = extra
 
         reservation = PackageReservation(
             reservation_id=stable_id("risk-reservation", opportunity.opportunity_id),
@@ -1359,6 +1390,7 @@ class RiskEngine:
             messages_by_venue=messages,
             residual_base=planned_residual,
             base_by_venue=base,
+            borrow_by_venue=borrow,
         )
         self.reserved_gross += package_gross
         self.reserved_residual += planned_residual
@@ -1366,6 +1398,8 @@ class RiskEngine:
             self.reserved_cash[venue] = self.reserved_cash.get(venue, Decimal("0")) + amount
         for venue, amount in base.items():
             self.reserved_base[venue] = self.reserved_base.get(venue, Decimal("0")) + amount
+        for venue, amount in borrow.items():
+            self.reserved_borrow[venue] = self.reserved_borrow.get(venue, Decimal("0")) + amount
         for venue, amount in margin.items():
             self.reserved_margin[venue] = self.reserved_margin.get(venue, Decimal("0")) + amount
         for venue, amount in positions.items():
@@ -1398,6 +1432,10 @@ class RiskEngine:
         for venue, amount in reservation.base_by_venue.items():
             self.reserved_base[venue] = max(
                 Decimal("0"), self.reserved_base.get(venue, Decimal("0")) - amount
+            )
+        for venue, amount in reservation.borrow_by_venue.items():
+            self.reserved_borrow[venue] = max(
+                Decimal("0"), self.reserved_borrow.get(venue, Decimal("0")) - amount
             )
         for venue, amount in reservation.position_delta_by_venue.items():
             self.reserved_position[venue] = (

@@ -59,6 +59,7 @@ class VenueCapitalState:
     unrealized_pnl: Decimal
     fees: Decimal
     funding: Decimal
+    borrow_cost: Decimal
     equity: Decimal
     reserved_cash: Decimal
     reserved_margin: Decimal
@@ -169,8 +170,15 @@ class Ledger:
             reason=reason,
         )
 
-    def apply_fill(self, order: ChildOrder, ts_ns: int) -> None:
-        """Apply only the unexplained cumulative delta; repeated reports are idempotent."""
+    def apply_fill(
+        self, order: ChildOrder, ts_ns: int, *,
+        economic_type: EconomicEventType = EconomicEventType.TRADE_FILL,
+    ) -> None:
+        """Apply only the unexplained cumulative delta; repeated reports are idempotent.
+
+        ``economic_type`` is TRADE_FILL except for a venue buy-in of a recalled
+        loan (BORROW_FORCED_CLOSE), which is a fill outside every plan.
+        """
         previous_fill = self._fill_cumulative.get(order.order_id, Decimal("0"))
         previous_notional = self._fill_notional_cumulative.get(
             order.order_id, Decimal("0")
@@ -201,7 +209,7 @@ class Ledger:
             self._fill_notional_cumulative[order.order_id] = cumulative_notional
             fill_id = stable_id("fill", order.order_id, order.filled_quantity, order.average_price)
             fill_event = EconomicEvent(
-                event_type=EconomicEventType.TRADE_FILL,
+                event_type=economic_type,
                 idempotency_key=f"fill|{order.order_id}|{order.filled_quantity}|{cumulative_notional}",
                 ts_ns=ts_ns, effective_ts_ns=_match_ts(order, ts_ns),
                 postings=(
@@ -321,6 +329,34 @@ class Ledger:
         self._record_funding(reversal, reversal=True)
         return reversal
 
+    def apply_borrow(self, event: EconomicEvent) -> bool:
+        """Book a BORROW_* event; accrued interest also enters legacy equity as a cost."""
+        if not self.economics.apply(event):
+            return False
+        self._record_borrow(event, reversal=False)
+        return True
+
+    def reverse_borrow(self, event_id: str, ts_ns: int, reason: str) -> EconomicEvent:
+        reversal = self.economics.reverse(event_id, ts_ns, reason)
+        self._record_borrow(reversal, reversal=True)
+        return reversal
+
+    def _record_borrow(self, event: EconomicEvent, *, reversal: bool) -> None:
+        kind = dict(event.details).get("reversed_type", "") if reversal else event.event_type.value
+        cost = (
+            -event.reporting_value
+            if kind == EconomicEventType.BORROW_ACCRUAL.value and event.reporting_value is not None
+            else ""
+        )
+        self.record(
+            "BORROW", event.effective,
+            economic_event_id=event.event_id, borrow_event_type=kind, reverses=event.reverses,
+            reversal=reversal, venue=event.venue, instrument_id=event.instrument_id,
+            borrow_cost=cost,
+            postings=[(p.account, p.asset, str(p.quantity)) for p in event.postings],
+            details=dict(event.details),
+        )
+
     def _record_funding(self, event: EconomicEvent, *, reversal: bool) -> None:
         reporting = self.economics.reporting_currency
         value = event.reporting_value
@@ -387,6 +423,7 @@ class Ledger:
         positions: dict[tuple[str, str], PositionAccountState] = {}
         fees_by_venue: dict[str, Decimal] = {}
         funding_by_venue: dict[str, Decimal] = {}
+        borrow_cost_by_venue: dict[str, Decimal] = {}
         for event in self.events:
             event_type = event["event_type"]
             if event_type == "FILL":
@@ -434,6 +471,11 @@ class Ledger:
                 funding_by_venue[venue] = funding_by_venue.get(
                     venue, Decimal("0")
                 ) + Decimal(str(event["amount"]))
+            elif event_type == "BORROW" and event.get("borrow_cost") not in (None, ""):
+                venue = str(event["venue"])
+                borrow_cost_by_venue[venue] = borrow_cost_by_venue.get(
+                    venue, Decimal("0")
+                ) + Decimal(str(event["borrow_cost"]))
             elif event_type == "FEE_ADJUSTMENT":
                 venue = str(event["venue"])
                 key = (venue, str(event["instrument_id"]))
@@ -459,7 +501,7 @@ class Ledger:
         reserved_messages = capacity.get("reserved_messages", {})
         reserved_gross = Decimal(str(capacity.get("reserved_gross", "0")))
         venues = sorted({
-            *initial, *self.cash_deltas, *fees_by_venue, *funding_by_venue,
+            *initial, *self.cash_deltas, *fees_by_venue, *funding_by_venue, *borrow_cost_by_venue,
             *(venue for venue, _ in positions),
             *getattr(reserved_cash, "keys", lambda: ())(),
             *getattr(reserved_margin, "keys", lambda: ())(),
@@ -492,7 +534,10 @@ class Ledger:
                 reserved_messages, "get", lambda *_: 0
             )(venue, 0))
             funding = funding_by_venue.get(venue, Decimal("0"))
-            equity = opening + realized + unrealized - fees + funding
+            borrow_cost = borrow_cost_by_venue.get(venue, Decimal("0"))
+            # Interest at its accrual-time value; the economic reconciliation
+            # reports the borrowed asset's later revaluation separately.
+            equity = opening + realized + unrealized - fees + funding - borrow_cost
             venue_states[venue] = VenueCapitalState(
                 venue=venue,
                 initial_capital=opening,
@@ -502,6 +547,7 @@ class Ledger:
                 unrealized_pnl=unrealized,
                 fees=fees,
                 funding=funding,
+                borrow_cost=borrow_cost,
                 equity=equity,
                 reserved_cash=cash_reserved,
                 reserved_margin=margin_reserved,

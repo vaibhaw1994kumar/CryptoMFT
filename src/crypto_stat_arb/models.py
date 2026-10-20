@@ -217,6 +217,9 @@ class Instrument:
     settlement_asset: str = ""
     funding_interval_ns: int = 0
     funding_anchor_ns: int = 0
+    # Spot margin eligibility of the instrument (contract master
+    # ``borrow_applicable``). Account authorization is a separate borrow line.
+    borrow_applicable: bool = False
 
 
 @dataclass(frozen=True, slots=True)

@@ -64,6 +64,10 @@ def write_economic_artifacts(
     (output_dir / "funding_report.json").write_text(
         json.dumps(funding, indent=2, sort_keys=True), encoding="utf-8"
     )
+    borrow = session.borrow.report()
+    (output_dir / "borrow_report.json").write_text(
+        json.dumps(borrow, indent=2, sort_keys=True), encoding="utf-8"
+    )
     venues = account_state.get("venues", {})
     report = reconcile(
         ledger,
@@ -82,7 +86,14 @@ def write_economic_artifacts(
         funding_modelled_venues=[venue for venue, _ in session.funding.specs],
         funding_flags_by_venue=session.funding.blocking_flags_by_venue(),
         legacy_funding_by_venue={venue: Decimal(row.get("funding", "0")) for venue, row in venues.items()},
+        borrow_status_by_venue=session.borrow.status_by_venue(
+            session.cfg.venues, [venue for venue, _ in session.funding.specs],
+        ),
+        borrow_flags_by_venue=session.borrow.blocking_flags_by_venue(),
+        borrow_notes_by_venue=session.borrow.notes_by_venue(),
+        legacy_borrow_cost_by_venue={venue: Decimal(row.get("borrow_cost", "0")) for venue, row in venues.items()},
     )
+    report["borrow"] = {"status": borrow["status"], "report": "borrow_report.json"}
     report["funding"] = {
         "status": funding["status"],
         "settlements_booked": funding.get("settlements_booked", 0),
@@ -94,7 +105,14 @@ def write_economic_artifacts(
             if session.funding.configured else
             "Funding does not apply: no perpetual instruments are configured."
         ),
-        "Borrow and transfers are not modelled: no events are generated (reported NOT_MODELLED, not zero).",
+        (
+            "Spot borrowing is booked for configured borrow lines (borrow_report.json); quote borrowing for margin buys is not modelled."
+            if session.borrow.configured else
+            "No borrow lines are configured: spot shorts beyond held base are refused (borrow N/A)."
+            if session.borrow.unfinanced_short_policy == "FAIL" else
+            "Unconstrained inventory: spot shorts are admitted without financing (borrow NOT_MODELLED)."
+        ),
+        "Transfers are not modelled: no events are generated (reported NOT_MODELLED, not zero).",
         *(
             ["Perpetual margin is not modelled: contract positions are valued at mid x multiplier (ECO04)."]
             if session.funding.configured else []
@@ -113,6 +131,7 @@ def write_economic_artifacts(
         "strategy_equity_pnl": report["consolidated"]["strategy_equity_pnl"],
         "failed_checks": [c["check"] for c in report["checks"] if not c["passed"]],
         "funding": funding["status"],
+        "borrow": borrow["status"],
     }
 
 
