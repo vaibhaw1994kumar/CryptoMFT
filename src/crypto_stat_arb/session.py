@@ -21,6 +21,7 @@ from .config import AppConfig
 from .execution import StrategyDirectedRouter, VenueExecutionAdapter
 from .latency import LatencyModel, latency_model_from_config
 from .economics import opening_balance_events
+from .funding import FundingEngine, FundingRate, FundingRateBook, FundingSpec, is_perpetual
 from .ledger import Ledger
 from .models import EventType, MarketEvent, Opportunity, PlanState
 from .oms import OMS
@@ -90,6 +91,34 @@ class StageTimer:
         return result
 
 
+def funding_engine(cfg: AppConfig, ledger: Ledger) -> FundingEngine:
+    """FUNDING generator for the configured perpetual venues (none for spot)."""
+    section = cfg.funding or {}
+    specs = []
+    for venue in cfg.venues:
+        spec = cfg.instruments.get(venue, cfg.instrument_id)
+        if is_perpetual(spec.product_type):
+            specs.append(FundingSpec(
+                venue=venue, instrument_id=spec.instrument_id,
+                contract_asset=spec.instrument_id,
+                settlement_asset=spec.settlement_asset or spec.quote,
+                multiplier=spec.contract_multiplier, inverse=spec.inverse,
+                interval_ns=spec.funding_interval_ns, anchor_ns=spec.funding_anchor_ns,
+            ))
+    rates = FundingRateBook()
+    if section.get("rates_path"):
+        from pathlib import Path
+        rates = FundingRateBook.from_jsonl(Path(section["rates_path"]))
+    rates.extend(FundingRate.from_dict(row) for row in section.get("rates", []))
+    max_age = section.get("max_rate_age_ms")
+    return FundingEngine(
+        ledger, specs, rates,
+        settle_lag_ns=int(section.get("settle_lag_ms", 5_000)) * 1_000_000,
+        max_rate_age_ns=None if max_age is None else int(max_age) * 1_000_000,
+        mark_fallback=str(section.get("mark_fallback", "none")),
+    )
+
+
 class TradingSession:
     def __init__(
         self,
@@ -123,6 +152,8 @@ class TradingSession:
         for venue in cfg.venues:
             spec = cfg.instruments.get(venue, cfg.instrument_id)
             opening_rows.append((venue, spec.quote, quote_opening.get(venue, Decimal("0"))))
+            if is_perpetual(spec.product_type):
+                continue  # no pre-funded contract positions
             opening_rows.append((
                 venue, spec.base, cfg.inventory_policy.initial_base_by_venue.get(venue, Decimal("0")),
             ))
@@ -156,6 +187,7 @@ class TradingSession:
             residual_policy=cfg.residual_policy, plan_store=plan_store,
             order_timeout_policy=cfg.order_timeout_policy,
         )
+        self.funding = funding_engine(cfg, self.ledger)
         settings = cfg.strategies or {}
         if strategies is None:
             strategies = []
@@ -239,6 +271,15 @@ class TradingSession:
             book = self.books.get(book_key)
             if book is not None and book.state.value == "VALID" and book.bids and book.asks:
                 self.opening_marks[book_key] = (book.best_bid + book.best_ask) / Decimal("2")
+        if self.funding.configured:
+            book = self.books.get(book_key)
+            mid = (
+                (book.best_bid + book.best_ask) / Decimal("2")
+                if book is not None and book.state.value == "VALID" and book.bids and book.asks
+                else None
+            )
+            self.funding.observe(event.venue, event.instrument_id, now, mid)
+            self.funding.settle_until(now)
         self._notify_closed_plans()
         if gate_allowed is None:
             required = tuple(
@@ -389,7 +430,14 @@ class TradingSession:
 
     def drain(self, horizon_ns: int | None = None) -> dict[str, Any]:
         horizon = self.cfg.drain_horizon_ns if horizon_ns is None else horizon_ns
-        return self.oms.drain(self.last_event_ts_ns + horizon)
+        result = self.oms.drain(self.last_event_ts_ns + horizon)
+        self.finalize_funding()
+        return result
+
+    def finalize_funding(self) -> None:
+        """Settle everything up to the last market event, never beyond the data."""
+        if self.last_event_ts_ns:
+            self.funding.settle_until(self.last_event_ts_ns, final=True)
 
     def silent_feeds(self) -> list[str]:
         """Configured venues with no data, or silent while others kept publishing."""

@@ -193,6 +193,7 @@ class LivePaperSession:
         self.session.oms.drain(
             max(stopped, self.session.last_event_ts_ns) + self.cfg.drain_horizon_ns
         )
+        self.session.finalize_funding()
         self._timestamps.close()
         canonical = self.output_dir / "canonical_events.jsonl"
         with canonical.open("w", encoding="utf-8") as handle:

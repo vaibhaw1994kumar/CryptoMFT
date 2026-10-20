@@ -15,6 +15,21 @@ def _parse_assets(venue: str, instrument_id: str) -> tuple[str, str]:
     return (parts[0], parts[1]) if len(parts) >= 2 else (instrument_id, "USDT")
 
 
+def _match_ts(order: ChildOrder, report_ts_ns: int) -> int:
+    """Venue time at which the order's current cumulative fill was first reached.
+
+    Fills reach the ledger after report latency; economics that depend on
+    *when* a position existed (funding) need the venue match time. Falls back
+    to the report time when no venue-timestamped update carries the fill.
+    """
+    times = [
+        int(item["event_ts_ns"]) for item in order.state_updates
+        if item.get("event_ts_ns") is not None
+        and Decimal(str(item.get("cumulative_filled_quantity", "0"))) >= order.filled_quantity
+    ]
+    return min([report_ts_ns, *times])
+
+
 @dataclass(slots=True)
 class PositionAccountState:
     venue: str
@@ -43,6 +58,7 @@ class VenueCapitalState:
     realized_pnl: Decimal
     unrealized_pnl: Decimal
     fees: Decimal
+    funding: Decimal
     equity: Decimal
     reserved_cash: Decimal
     reserved_margin: Decimal
@@ -72,6 +88,9 @@ class Ledger:
         # bookkeeping above stays; risk reads asset balances from here.
         self.economics = EconomicLedger()
         self.asset_resolver = _parse_assets
+        # Called with each booked TRADE_FILL (the funding engine rebooks a
+        # settlement when a fill effective before it is reported late).
+        self.trade_fill_listeners: list = []
 
     def record(self, event_type: str, ts_ns: int, **payload: object) -> None:
         ordinal = len(self.events) + 1
@@ -181,10 +200,10 @@ class Ledger:
             self._fill_cumulative[order.order_id] = order.filled_quantity
             self._fill_notional_cumulative[order.order_id] = cumulative_notional
             fill_id = stable_id("fill", order.order_id, order.filled_quantity, order.average_price)
-            self.economics.apply(EconomicEvent(
+            fill_event = EconomicEvent(
                 event_type=EconomicEventType.TRADE_FILL,
                 idempotency_key=f"fill|{order.order_id}|{order.filled_quantity}|{cumulative_notional}",
-                ts_ns=ts_ns,
+                ts_ns=ts_ns, effective_ts_ns=_match_ts(order, ts_ns),
                 postings=(
                     Posting(order.venue, "main", base_asset, signed),
                     Posting(order.venue, "main", quote_asset, signed_cash),
@@ -193,7 +212,10 @@ class Ledger:
                 order_id=order.order_id, fill_id=fill_id, reference_id=order.parent_id,
                 valuation_price=notional_delta / fill_delta, valuation_source="fill price",
                 details=(("side", order.side.value), ("liquidity", order.liquidity)),
-            ))
+            )
+            if self.economics.apply(fill_event):
+                for listener in self.trade_fill_listeners:
+                    listener(fill_event)
             self.record(
                 "FILL", ts_ns,
                 fill_id=fill_id,
@@ -287,6 +309,33 @@ class Ledger:
                     cumulative_fee=order.fee,
                 )
 
+    def apply_funding(self, event: EconomicEvent) -> bool:
+        """Book a FUNDING settlement in both ledgers (legacy cash and equity included)."""
+        if not self.economics.apply(event):
+            return False
+        self._record_funding(event, reversal=False)
+        return True
+
+    def reverse_funding(self, event_id: str, ts_ns: int, reason: str) -> EconomicEvent:
+        reversal = self.economics.reverse(event_id, ts_ns, reason)
+        self._record_funding(reversal, reversal=True)
+        return reversal
+
+    def _record_funding(self, event: EconomicEvent, *, reversal: bool) -> None:
+        reporting = self.economics.reporting_currency
+        value = event.reporting_value
+        if value is not None:
+            # Legacy venue cash is the reporting/quote currency.
+            self.cash_deltas[event.venue] = self.cash_deltas.get(event.venue, Decimal("0")) + value
+        self.record(
+            "FUNDING", event.effective,
+            economic_event_id=event.event_id, reverses=event.reverses,
+            reversal=reversal, venue=event.venue, instrument_id=event.instrument_id,
+            amount=value if value is not None else "",
+            postings=[(p.asset, str(p.quantity)) for p in event.postings],
+            reporting_currency=reporting, details=dict(event.details),
+        )
+
     def rebuild_from_plans(
         self, plans: dict[str, ParentPlan], ts_ns: int
     ) -> None:
@@ -337,6 +386,7 @@ class Ledger:
         initial = initial_capital_by_venue or {}
         positions: dict[tuple[str, str], PositionAccountState] = {}
         fees_by_venue: dict[str, Decimal] = {}
+        funding_by_venue: dict[str, Decimal] = {}
         for event in self.events:
             event_type = event["event_type"]
             if event_type == "FILL":
@@ -379,6 +429,11 @@ class Ledger:
                 fees_by_venue[key[0]] = fees_by_venue.get(
                     key[0], Decimal("0")
                 ) + fee_delta
+            elif event_type == "FUNDING" and event.get("amount") not in (None, ""):
+                venue = str(event["venue"])
+                funding_by_venue[venue] = funding_by_venue.get(
+                    venue, Decimal("0")
+                ) + Decimal(str(event["amount"]))
             elif event_type == "FEE_ADJUSTMENT":
                 venue = str(event["venue"])
                 key = (venue, str(event["instrument_id"]))
@@ -404,7 +459,7 @@ class Ledger:
         reserved_messages = capacity.get("reserved_messages", {})
         reserved_gross = Decimal(str(capacity.get("reserved_gross", "0")))
         venues = sorted({
-            *initial, *self.cash_deltas, *fees_by_venue,
+            *initial, *self.cash_deltas, *fees_by_venue, *funding_by_venue,
             *(venue for venue, _ in positions),
             *getattr(reserved_cash, "keys", lambda: ())(),
             *getattr(reserved_margin, "keys", lambda: ())(),
@@ -436,7 +491,8 @@ class Ledger:
             messages_reserved = int(getattr(
                 reserved_messages, "get", lambda *_: 0
             )(venue, 0))
-            equity = opening + realized + unrealized - fees
+            funding = funding_by_venue.get(venue, Decimal("0"))
+            equity = opening + realized + unrealized - fees + funding
             venue_states[venue] = VenueCapitalState(
                 venue=venue,
                 initial_capital=opening,
@@ -445,6 +501,7 @@ class Ledger:
                 realized_pnl=realized,
                 unrealized_pnl=unrealized,
                 fees=fees,
+                funding=funding,
                 equity=equity,
                 reserved_cash=cash_reserved,
                 reserved_margin=margin_reserved,

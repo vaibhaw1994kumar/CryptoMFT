@@ -7,6 +7,7 @@ import json
 from pathlib import Path
 import time
 
+from .funding import is_perpetual
 from .config import load_config
 from .economics import Valuation, reconcile
 from .canonical import CallbackEventSink, CanonicalEventDispatcher, CanonicalEventRecorder
@@ -36,7 +37,13 @@ def _valuation(session: TradingSession, marks: dict, reporting: str) -> Valuatio
     valuation = Valuation(reporting_currency=reporting)
     for (venue, instrument_id), mark in marks.items():
         spec = session.cfg.instruments.get(venue, instrument_id)
-        if spec.quote == reporting:
+        if spec.quote == reporting and is_perpetual(spec.product_type):
+            # A linear contract is worth mark x multiplier of the quote.
+            valuation.prices[(venue, spec.instrument_id)] = mark * spec.contract_multiplier
+            valuation.sources[(venue, spec.instrument_id)] = (
+                f"mid {instrument_id} x multiplier (approximation of the mark price)"
+            )
+        elif spec.quote == reporting:
             valuation.prices[(venue, spec.base)] = mark
             valuation.sources[(venue, spec.base)] = f"mid {instrument_id}"
     for (venue, asset), price in session.oms.asset_prices.items():
@@ -53,6 +60,10 @@ def write_economic_artifacts(
     """Economic event log + closing-equity reconciliation (ECO06 gate)."""
     ledger = session.ledger.economics
     ledger.write_jsonl(output_dir / "economic_events.jsonl")
+    funding = session.funding.report(closing_marks)
+    (output_dir / "funding_report.json").write_text(
+        json.dumps(funding, indent=2, sort_keys=True), encoding="utf-8"
+    )
     venues = account_state.get("venues", {})
     report = reconcile(
         ledger,
@@ -68,9 +79,26 @@ def write_economic_artifacts(
             venue: session.cfg.instruments.get(venue, session.cfg.instrument_id).product_type
             for venue in session.cfg.venues
         },
+        funding_modelled_venues=[venue for venue, _ in session.funding.specs],
+        funding_flags_by_venue=session.funding.blocking_flags_by_venue(),
+        legacy_funding_by_venue={venue: Decimal(row.get("funding", "0")) for venue, row in venues.items()},
     )
+    report["funding"] = {
+        "status": funding["status"],
+        "settlements_booked": funding.get("settlements_booked", 0),
+        "report": "funding_report.json",
+    }
     report["limitations"] = [
-        "Funding, borrow and transfers are not modelled: no events are generated (reported NOT_MODELLED, not zero).",
+        (
+            "Funding is settled from rate records for configured perpetuals (funding_report.json)."
+            if session.funding.configured else
+            "Funding does not apply: no perpetual instruments are configured."
+        ),
+        "Borrow and transfers are not modelled: no events are generated (reported NOT_MODELLED, not zero).",
+        *(
+            ["Perpetual margin is not modelled: contract positions are valued at mid x multiplier (ECO04)."]
+            if session.funding.configured else []
+        ),
         "The maker dry-run simulator's fills are a separate harness and are not booked in this ledger.",
         "Venue-reported equity is not available in simulation or internal paper mode.",
     ]
@@ -84,6 +112,7 @@ def write_economic_artifacts(
         "identity_residual": report["consolidated"]["identity_residual"],
         "strategy_equity_pnl": report["consolidated"]["strategy_equity_pnl"],
         "failed_checks": [c["check"] for c in report["checks"] if not c["passed"]],
+        "funding": funding["status"],
     }
 
 

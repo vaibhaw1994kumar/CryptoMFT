@@ -210,6 +210,13 @@ class Instrument:
     leverage: Decimal = Decimal("1")
     maker_fee_bps: Decimal | None = None
     effective_from_ns: int = 0
+    # Perpetuals (ECO02). The position is held in the contract (asset =
+    # instrument_id) and settled in ``settlement_asset`` (quote by default).
+    contract_multiplier: Decimal = Decimal("1")
+    inverse: bool = False
+    settlement_asset: str = ""
+    funding_interval_ns: int = 0
+    funding_anchor_ns: int = 0
 
 
 @dataclass(frozen=True, slots=True)

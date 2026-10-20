@@ -43,6 +43,8 @@ class AppConfig:
     execution_mode: str = "INTERNAL_SIMULATION"
     strategies: dict[str, Any] = field(default_factory=dict)
     inventory_policy: InventoryPolicy = field(default_factory=InventoryPolicy)
+    # ``funding``: perpetual funding settlement (ECO02, see funding.py).
+    funding: dict[str, Any] = field(default_factory=dict)
 
 
 def _optional_decimal(value: Any, default: str | None) -> Decimal | None:
@@ -76,6 +78,46 @@ def _inventory_policy(raw: dict) -> InventoryPolicy:
     return policy
 
 
+def _perpetual_fields(x: dict) -> dict[str, Any]:
+    """Contract terms of a perpetual; unsupported terms fail closed at load."""
+    from .funding import is_perpetual
+
+    product_type = str(x.get("product_type", "SPOT")).upper()
+    if not is_perpetual(product_type):
+        return {}
+    contract_type = str(x.get("contract_type", "LINEAR")).upper()
+    if contract_type not in ("LINEAR", "INVERSE"):
+        raise ValueError(f"{x['instrument_id']}: contract_type must be LINEAR or INVERSE")
+    if contract_type == "INVERSE":
+        raise ValueError(
+            f"{x['instrument_id']}: inverse perpetuals are not supported yet "
+            "(fill and position accounting is linear only)"
+        )
+    multiplier = d(x.get("contract_multiplier", "1"))
+    if multiplier != 1:
+        raise ValueError(
+            f"{x['instrument_id']}: contract_multiplier {multiplier} is not supported yet "
+            "(the trade ledger books quantity x price without a multiplier)"
+        )
+    interval_minutes = x.get("funding_interval_minutes")
+    if interval_minutes is None and x.get("funding_interval_hours") is not None:
+        interval_minutes = d(x["funding_interval_hours"]) * 60
+    if interval_minutes is None or d(interval_minutes) <= 0:
+        # Without a schedule a missing rate record leaves no trace, so missing
+        # funding data could not be detected.
+        raise ValueError(
+            f"{x['instrument_id']}: a perpetual needs funding_interval_hours or "
+            "funding_interval_minutes"
+        )
+    return {
+        "contract_multiplier": multiplier,
+        "inverse": False,
+        "settlement_asset": str(x.get("settlement_asset") or x["quote"]),
+        "funding_interval_ns": int(d(interval_minutes or 0) * 60 * 1_000_000_000),
+        "funding_anchor_ns": parse_effective_ns(x.get("funding_anchor")),
+    }
+
+
 def load_config(path: Path) -> tuple[AppConfig, dict]:
     raw = json.loads(path.read_text(encoding="utf-8"))
     reject_plaintext_credentials(raw)
@@ -98,9 +140,19 @@ def load_config(path: Path) -> tuple[AppConfig, dict]:
                 d(x["maker_fee_bps"]) if x.get("maker_fee_bps") is not None else None
             ),
             effective_from_ns=parse_effective_ns(x.get("effective_from")),
+            **_perpetual_fields(x),
         )
         for x in raw["instruments"]
     ]
+    inventory = _inventory_policy(raw)
+    if inventory.model == InventoryModel.PRE_FUNDED and any(
+        i.settlement_asset and i.instrument_id == raw["strategy"]["instrument_id"]
+        for i in instruments
+    ):
+        raise ValueError(
+            "pre_funded spot inventory does not apply to a perpetual instrument "
+            "(margin accounting is not modelled yet)"
+        )
     instrument_master = InstrumentMaster(
         instruments, FeeSchedule.from_config(raw.get("fees", []))
     )
@@ -135,7 +187,7 @@ def load_config(path: Path) -> tuple[AppConfig, dict]:
             str(venue): d(amount)
             for venue, amount in risk.get("initial_capital_by_venue", {}).items()
         },
-        inventory_policy=_inventory_policy(raw),
+        inventory_policy=inventory,
         risk_limits=RiskLimits(
             max_order_notional=d(risk["max_order_notional"]),
             max_gross_notional=d(risk["max_gross_notional"]),
@@ -333,5 +385,6 @@ def load_config(path: Path) -> tuple[AppConfig, dict]:
         performance=dict(raw.get("performance", {})),
         execution_mode=str(raw.get("execution_mode", "INTERNAL_SIMULATION")).upper(),
         strategies=dict(raw.get("strategies", {})),
+        funding=dict(raw.get("funding", {})),
     )
     return cfg, raw

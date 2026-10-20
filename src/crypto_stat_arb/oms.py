@@ -5,6 +5,7 @@ import json
 from pathlib import Path
 from collections.abc import Callable
 
+from .funding import is_perpetual
 from .fees import Liquidity
 from .instruments import InstrumentMaster
 from .ledger import Ledger
@@ -1462,6 +1463,9 @@ class OMS:
     def _assets(self, venue: str, instrument_id: str) -> tuple[str, str]:
         try:
             spec = self.instruments.get(venue, instrument_id)
+            if is_perpetual(spec.product_type):
+                # A perp position is a contract balance, never spot base.
+                return spec.instrument_id, spec.settlement_asset or spec.quote
             return spec.base, spec.quote
         except (KeyError, ValueError):
             parts = instrument_id.split("-")

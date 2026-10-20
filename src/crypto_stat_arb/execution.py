@@ -1326,6 +1326,20 @@ class StrategyDirectedRouter:
         candidates.extend(item.deliver_ts_ns for item in self._deliveries)
         return min(candidates) if candidates else None
 
+    @staticmethod
+    def _restamp_status(adapter: object, callbacks: tuple[ExecutionCallback, ...]) -> None:
+        """Keep the adapter's queryable order status on the venue match time."""
+        status = getattr(adapter, "order_status", None)
+        if status is None:
+            return
+        for callback in callbacks:
+            current = status.get(callback.order_id)
+            if (
+                current is not None and current.state == callback.event_type
+                and current.cumulative_filled_quantity == callback.cumulative_filled_quantity
+            ):
+                status[callback.order_id] = replace(current, venue_ts_ns=callback.event_ts_ns)
+
     def on_book_update(self, venue: str, book: OrderBook, now_ns: int) -> int:
         """Let the venue simulator fill resting orders against a new book."""
         hook = getattr(self.adapters.get(venue), "on_book_update", None)
@@ -1333,7 +1347,10 @@ class StrategyDirectedRouter:
             return 0
         produced = hook(book)
         for request, callback in produced:
+            # The venue matched now, not when the order was placed: stamp the
+            # report and the queryable order status with the match time.
             callback = replace(callback, event_ts_ns=now_ns)
+            self._restamp_status(self.adapters.get(venue), (callback,))
             self.trace.append({
                 "record_type": "EXECUTION_CALLBACK",
                 "ts_ns": now_ns,
@@ -1516,6 +1533,7 @@ class StrategyDirectedRouter:
             callbacks = tuple(
                 replace(callback, event_ts_ns=venue_ts_ns) for callback in callbacks
             )
+            self._restamp_status(adapter, callbacks)
         self._results[request.idempotency_key] = callbacks
         self._requests_by_idempotency[request.idempotency_key] = request
         for callback in callbacks:
