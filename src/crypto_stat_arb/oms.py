@@ -5,6 +5,7 @@ import json
 from pathlib import Path
 from collections.abc import Callable
 
+from .economics import EconomicEventType
 from .funding import is_perpetual
 from .fees import Liquidity
 from .instruments import InstrumentMaster
@@ -120,16 +121,23 @@ class DeterministicMatcher:
 
 
 def instrument_assets(instruments: InstrumentMaster, venue: str, instrument_id: str) -> tuple[str, str]:
-    """(position asset, quote asset) a fill moves: base for spot, the contract for a perp."""
+    """(position asset, quote asset) a fill moves: base for spot, the contract for a perp.
+
+    Raises ValueError for instruments absent from the master so that a fill
+    against an unknown or misconfigured instrument blocks accounting rather than
+    silently posting to a wrong asset.
+    """
     try:
         spec = instruments.get(venue, instrument_id)
-        if is_perpetual(spec.product_type):
-            # A perp position is a contract balance, never spot base.
-            return spec.instrument_id, spec.settlement_asset or spec.quote
-        return spec.base, spec.quote
     except (KeyError, ValueError):
-        parts = instrument_id.split("-")
-        return (parts[0], parts[1]) if len(parts) >= 2 else (instrument_id, "USDT")
+        raise ValueError(
+            f"instrument {venue}/{instrument_id} is not in the instrument master; "
+            "register it before accepting fills"
+        )
+    if is_perpetual(spec.product_type):
+        # A perp position is a contract balance, never spot base.
+        return spec.instrument_id, spec.settlement_asset or spec.quote
+    return spec.base, spec.quote
 
 
 class OMS:
@@ -158,6 +166,8 @@ class OMS:
         ledger.asset_resolver = self._assets
         if getattr(risk, "instruments", None) is None:
             risk.instruments = instruments   # tiered margin admission (margin.py)
+        if getattr(risk, "locked_provider", "absent") is None:
+            risk.locked_provider = self.locked_balances   # ECO05: open orders lock funds
         # Fee pricing per fill delta (ECO01): what has been priced already,
         # the liquidity of each order's latest fill, and reporting-currency
         # prices for fees charged in a third token (e.g. BNB).
@@ -207,6 +217,9 @@ class OMS:
         self.recovered_plans = sum(
             plan.state != PlanState.CLOSED for plan in self.plans.values()
         )
+        # Registered before recovery replays fills, so rebuilt fills consume too;
+        # reservations are only rehydrated (and then consumed) further below.
+        ledger.trade_fill_listeners.append(self._consume_reservation)
         if self.plans:
             recovery_ts_ns = max(
                 (
@@ -228,6 +241,13 @@ class OMS:
                     continue        # a flatten plan reduces risk and holds no reservation
                 try:
                     reservation = self.risk.rehydrate_reservation(plan.opportunity)
+                    # Filled legs already moved the balances: hold only the remainder.
+                    for order in plan.children:
+                        if order.order_role == "PRIMARY" and order.filled_quantity and order.quantity:
+                            self.risk.consume(
+                                plan.opportunity.opportunity_id, order.venue,
+                                order.filled_quantity / order.quantity,
+                            )
                     self.ledger.record(
                         "RECOVERY_RISK_RESERVATION_REHYDRATED", recovery_ts_ns,
                         parent_id=plan.parent_id,
@@ -520,6 +540,7 @@ class OMS:
         position_tolerance: Decimal = Decimal("0"),
         balance_tolerance: Decimal = Decimal("0"),
         report_path: Path | None = None,
+        venue_balances: tuple = (),
     ) -> ReconciliationReport:
         """Run the RMS release gate against testnet REST/private-stream state."""
         was_active = self.risk.kill_switch
@@ -529,7 +550,7 @@ class OMS:
             require_venue_orders=require_venue_orders,
             require_complete_opportunities=require_complete_opportunities,
             position_tolerance=position_tolerance,
-            balance_tolerance=balance_tolerance,
+            balance_tolerance=balance_tolerance, venue_balances=venue_balances,
             instruments=self.instruments,
         )
 
@@ -610,6 +631,42 @@ class OMS:
         )
         self._persist(plan, now_ns, "RISK_FLATTEN_OPENED", venue=venue, exposure=exposure, reason=reason)
         return self._finalize_plan(plan, now_ns, self._books)
+
+    def locked_balances(self) -> dict[tuple[str, str], Decimal]:
+        """Funds held by open hedge/unwind orders at the venue (ECO05 "locked").
+
+        A sell locks base, a buy locks quote (remaining x limit price, plus the
+        taker fee when it is charged in quote). Primary legs are covered by
+        their package reservation instead, so nothing is counted twice.
+        """
+        out: dict[tuple[str, str], Decimal] = {}
+        for (venue, instrument_id), (buys, sells) in self.open_risk_orders().items():
+            base, quote = self._assets(venue, instrument_id)
+            if sells:
+                out[(venue, base)] = out.get((venue, base), Decimal("0")) + sells
+            if buys:
+                price = max((
+                    order.limit_price for plan in self.plans.values() for order in plan.children
+                    if order.venue == venue and order.instrument_id == instrument_id and order.side == Side.BUY
+                    and order.order_role != "PRIMARY"
+                    and order.state in {OrderState.CREATED, OrderState.ACKNOWLEDGED, OrderState.PARTIAL}
+                ), default=Decimal("0"))
+                fee, fee_asset = self.risk._reserve_fee(venue, instrument_id, 0) if hasattr(self.risk, "_reserve_fee") else (Decimal("0"), "QUOTE")
+                amount = buys * price * (Decimal("1") + (fee if fee_asset == "QUOTE" else Decimal("0")))
+                out[(venue, quote)] = out.get((venue, quote), Decimal("0")) + amount
+        return out
+
+    def _consume_reservation(self, event) -> None:
+        """A primary leg filled (partly): its reservation now holds only the remainder."""
+        if event.event_type != EconomicEventType.TRADE_FILL:
+            return
+        plan = self.plans.get(event.reference_id)
+        if plan is None:
+            return
+        order = next((o for o in plan.children if o.order_id == event.order_id), None)
+        if order is None or order.order_role != "PRIMARY" or not order.quantity:
+            return
+        self.risk.consume(plan.opportunity.opportunity_id, order.venue, order.filled_quantity / order.quantity)
 
     def open_risk_orders(self) -> dict[tuple[str, str], tuple[Decimal, Decimal]]:
         """Remaining (buy, sell) quantity of open hedge/unwind orders per venue and instrument.

@@ -387,6 +387,48 @@ Tiers, haircuts, isolated allocations and liquidation fees are config
 assumptions, and none of this has run on recorded perpetual data. Tests
 are in `tests/test_margin_tiers.py`.
 
+## Balances and reservations (ECO05)
+
+* **One balance view per venue and asset** (`RiskEngine.balance_view`, and
+  `inventory_snapshot()["balances"]`). Each unit of funds sits in exactly
+  one bucket:
+  - **total**: the economic ledger's `main` balance;
+  - **reserved**: what is left of package reservations;
+  - **locked**: open hedge/unwind orders at the venue (a sell locks base; a
+    buy locks quote, remaining × limit price plus a quote fee);
+  - **unavailable**: transfers in flight;
+  - **free** = total − reserved − locked − unavailable.
+
+  Primary legs are covered by their reservation and are never also
+  "locked".
+* **Fee-inclusive reservations.** A buy leg reserves notional × (1 + taker
+  fee) when the fee is charged in quote. A sell leg reserves quantity ×
+  (1 + fee) when it is charged in base. A fee in a third token must be priced
+  (`fee token unpriced`) and payable from that token's balance
+  (`insufficient fee token`). The rate is the effective, dated one;
+  rebates never reduce a reservation.
+* **Admission uses free funds.** Held − locked − unavailable must cover
+  the reserved total. Two strategies drawing on one balance therefore cannot
+  both spend it.
+* **Fills consume their reservation.**
+  - The balance-backed parts (cash, base, borrow) of a primary leg drop to
+    the unfilled remainder as fills land, so filled funds are never counted
+    as both spent and reserved.
+  - The remainder is released at plan close, e.g. after a partial fill and
+    the cancel of the rest.
+  - Position and margin reservations stay until release: the position-limit
+    and fixed-rate margin checks don't see ledger positions.
+  - After a restart, a partly filled plan re-reserves only its remainder.
+* **Venue-reported balances.** `reconcile_risk_state(venue_balances=...)`
+  compares a venue's total (and free, when reported) per asset with the
+  ledger. A mismatch beyond `balance_tolerance` is `BALANCE_TOTAL_MISMATCH`
+  or `BALANCE_FREE_MISMATCH`, and the decision is REJECTED.
+* **Exhaustion is visible.** `inventory_snapshot()` reports `exhausted`
+  per venue (`BASE_EXHAUSTED` when free base is below the venue's minimum
+  quantity, `QUOTE_EXHAUSTED` when free quote is below its minimum
+  notional) and `refusals_by_reason`. Both appear in the run summary under
+  `inventory`.
+
 ## Reconciliation (`economic_reconciliation.json`)
 
 Written by every backtest and paper run, summarised in `summary.json`

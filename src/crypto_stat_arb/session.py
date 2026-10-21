@@ -243,7 +243,10 @@ class TradingSession:
                 order_timeout_policy=cfg.order_timeout_policy,
             )
         finally:
-            self.ledger.trade_fill_listeners = listeners
+            # Keep what the OMS registered (reservation consumption) after the
+            # engines' listeners, which were held back during the rebuild.
+            registered = [l for l in self.ledger.trade_fill_listeners if l not in listeners]
+            self.ledger.trade_fill_listeners = listeners + registered
         self.ledger.journal = self.financing_journal
         # Margin is evaluated during the session, not only at the end (ECO04):
         # on market-data time every ``evaluate_interval_ms`` and after any fill

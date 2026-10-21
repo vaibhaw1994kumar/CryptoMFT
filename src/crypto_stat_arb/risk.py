@@ -223,6 +223,18 @@ TRADE_BREAK_CODES = {
 
 
 @dataclass(frozen=True, slots=True)
+class VenueBalanceSnapshot:
+    """A venue-reported asset balance (REST / private stream), per account (ECO05)."""
+
+    venue: str
+    asset: str
+    total: Decimal
+    free: Decimal | None = None
+    account: str = "main"
+    observed_ts_ns: int = 0
+
+
+@dataclass(frozen=True, slots=True)
 class VenueRiskSnapshot:
     """REST/private-stream account state relative to the reconciliation session."""
 
@@ -332,9 +344,13 @@ class PackageReservation:
     base_by_venue: dict[str, Decimal] = field(default_factory=dict)
     # Base to be borrowed for the sell leg (ECO03), held against the line's limit.
     borrow_by_venue: dict[str, Decimal] = field(default_factory=dict)
+    # Each venue leg's amounts when reserved (ECO05): fills consume the
+    # reservation down to the unfilled remainder. Not part of the record.
+    original: dict[str, dict[str, Decimal]] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
         row = asdict(self)
+        row.pop("original", None)
         for field_name in (
             "gross_notional", "cash_by_venue", "margin_by_venue",
             "position_delta_by_venue", "residual_base", "base_by_venue", "borrow_by_venue",
@@ -380,6 +396,11 @@ class RiskEngine:
         self.margin_marks: dict[tuple[str, str], Decimal] = {}
         self.margin_open_orders: dict[tuple[str, str], tuple[Decimal, Decimal]] = {}
         self.asset_prices: dict[tuple[str, str], Decimal] = {}
+        # ECO05 balance view: open hedge/unwind orders lock funds (set by the
+        # OMS); transfers in flight make funds unavailable (set by the session).
+        self.locked_provider: Any | None = None
+        self.unavailable_provider: Any | None = None
+        self.refusals: dict[str, int] = {}
         self.reserved_gross = Decimal("0")
         self.reserved_cash: dict[str, Decimal] = {}
         self.reserved_margin: dict[str, Decimal] = {}
@@ -716,6 +737,60 @@ class RiskEngine:
                 source="RMS_MARGIN", ledger=ledger,
             )
 
+    def _reserve_fee(self, venue: str, instrument_id: str, at_ns: int) -> tuple[Decimal, str]:
+        """(taker fee as a fraction, fee asset) for a reservation; rebates reserve nothing."""
+        if self.instruments is None:
+            return Decimal("0"), "QUOTE"
+        from .fees import Liquidity
+
+        try:
+            rule = self.instruments.fee_rule(venue, instrument_id, at_ns)
+        except (KeyError, ValueError):
+            return Decimal("0"), "QUOTE"
+        bps, _ = rule.effective_bps(Liquidity.TAKER)
+        return max(bps, Decimal("0")) / Decimal("10000"), rule.fee_asset
+
+    def _inventory_assets(self, venue: str) -> tuple[str, str]:
+        if self.ledger is not None:
+            return self.ledger.asset_resolver(venue, self.inventory.instrument_id)
+        parts = self.inventory.instrument_id.split("-")
+        return (parts[0], parts[1] if len(parts) > 1 else "USDT")
+
+    def _economic_asset(self, venue: str, asset: str) -> Decimal:
+        economics = getattr(self.ledger, "economics", None)
+        return economics.balance(venue, asset) if economics is not None else Decimal("0")
+
+    def unavailable(self, venue: str, asset: str) -> Decimal:
+        """Funds of this venue that exist but cannot be used (e.g. a transfer in flight)."""
+        return self.unavailable_provider(venue, asset) if self.unavailable_provider is not None else Decimal("0")
+
+    def consume(self, opportunity_id: str, venue: str, filled_fraction: Decimal) -> None:
+        """A leg on ``venue`` is ``filled_fraction`` filled: hold only the remainder.
+
+        Filled funds have left (or entered) the balance already; keeping them
+        reserved as well would count them twice. Only balance-backed dimensions
+        are consumed (cash, base, borrow): position and margin reservations stay
+        until release, because the position limit and fixed-rate margin checks
+        do not see ledger positions. Idempotent: the remainder is set from the
+        cumulative fraction, never decremented.
+        """
+        reservation = self.reservations.get(opportunity_id)
+        if reservation is None or not reservation.active or venue not in reservation.original:
+            return
+        left = max(Decimal("1") - min(filled_fraction, Decimal("1")), Decimal("0"))
+        original = reservation.original[venue]
+        for key, by_venue, totals in (
+            ("cash", reservation.cash_by_venue, self.reserved_cash),
+            ("base", reservation.base_by_venue, self.reserved_base),
+            ("borrow", reservation.borrow_by_venue, self.reserved_borrow),
+        ):
+            if venue not in by_venue:
+                continue
+            target = original[key] * left
+            change = target - by_venue[venue]
+            by_venue[venue] = target
+            totals[venue] = totals.get(venue, Decimal("0")) + change
+
     def _tiered_perp(self, venue: str, instrument_id: str) -> bool:
         if self.margin_config is None or venue not in self.margin_config.venues or self.instruments is None:
             return False
@@ -983,12 +1058,61 @@ class RiskEngine:
             return economic
         return opening + self.ledger.cash_deltas.get(venue, Decimal("0"))
 
+    def balance_view(self, venue: str, asset: str) -> dict[str, Decimal]:
+        """total / reserved / locked / unavailable / free for one venue asset (ECO05).
+
+        total = the economic ledger's ``main`` balance; reserved = what is left
+        of package reservations; locked = open hedge/unwind orders; unavailable
+        = transfers in flight; free = total - reserved - locked - unavailable.
+        Each unit of funds is in exactly one of those buckets.
+        """
+        base, quote = self._inventory_assets(venue)
+        total = self._economic_asset(venue, asset) if self.ledger is not None and getattr(
+            self.ledger, "economics", None) is not None and self.ledger.economics.has_opening_balances() else (
+            self.held_base(venue) if asset == base else self.held_quote(venue) if asset == quote else Decimal("0"))
+        reserved = (
+            self.reserved_base.get(venue, Decimal("0")) if asset == base
+            else self.reserved_cash.get(venue, Decimal("0")) if asset == quote else Decimal("0")
+        )
+        locked = (self.locked_provider() if self.locked_provider is not None else {}).get((venue, asset), Decimal("0"))
+        unavailable = self.unavailable(venue, asset)
+        return {"total": total, "reserved": reserved, "locked": locked, "unavailable": unavailable,
+                "free": total - reserved - locked - unavailable}
+
+    def inventory_state(self, venue: str) -> list[str]:
+        """EXHAUSTED flags: free base below the venue minimum quantity, or free quote below its minimum notional."""
+        if self.instruments is None:
+            return []
+        try:
+            spec = self.instruments.get(venue, self.inventory.instrument_id)
+        except (KeyError, ValueError):
+            return []
+        base, quote = self._inventory_assets(venue)
+        flags = []
+        if self.balance_view(venue, base)["free"] < spec.min_quantity:
+            flags.append("BASE_EXHAUSTED")
+        if self.balance_view(venue, quote)["free"] < spec.min_notional:
+            flags.append("QUOTE_EXHAUSTED")
+        return flags
+
     def inventory_snapshot(self) -> dict[str, Any]:
         venues = sorted(
             set(self.inventory.initial_base_by_venue) | set(self.inventory.initial_quote_by_venue)
         )
         borrow_lines = bool(self.borrow is not None and self.borrow.configured)
+        balances = {
+            venue: {
+                asset: {key: str(value) for key, value in self.balance_view(venue, asset).items()}
+                for asset in dict.fromkeys(self._inventory_assets(venue))
+            }
+            for venue in venues
+        }
+        states = {venue: self.inventory_state(venue) for venue in venues}
         return {
+            # ECO05: the balance buckets, exhaustion flags and refusals by reason.
+            "balances": balances,
+            "exhausted": {venue: flags for venue, flags in states.items() if flags},
+            "refusals_by_reason": dict(sorted(self.refusals.items())),
             "model": self.inventory.model.value,
             "label": (
                 "PRE_FUNDED_INVENTORY_WITH_BORROW_LINES"
@@ -1516,6 +1640,15 @@ class RiskEngine:
         return report
 
     def reserve(self, opportunity: Opportunity) -> PackageReservation:
+        """Admit a package or raise; refusals are counted by reason for monitoring."""
+        try:
+            return self._reserve_package(opportunity)
+        except ValueError as exc:
+            reason = str(exc).split(":")[0].split(" (")[0]
+            self.refusals[reason] = self.refusals.get(reason, 0) + 1
+            raise
+
+    def _reserve_package(self, opportunity: Opportunity) -> PackageReservation:
         if self.kill_switch:
             raise ValueError("strategy kill switch active")
         blocked = sorted({
@@ -1543,11 +1676,14 @@ class RiskEngine:
             venue for venue in (opportunity.buy_venue, opportunity.sell_venue)
             if self._tiered_perp(venue, opportunity.instrument_id)
         }
+        buy_fee = self._reserve_fee(opportunity.buy_venue, opportunity.instrument_id, opportunity.observed_ts_ns)
+        sell_fee = self._reserve_fee(opportunity.sell_venue, opportunity.instrument_id, opportunity.observed_ts_ns)
         cash = {
             opportunity.buy_venue: (
                 # A margined perp leg reserves initial margin, not notional cash.
                 Decimal("0") if buy_account.margin_enabled or opportunity.buy_venue in tiered
-                else buy_notional
+                # Spend includes the fee when it is charged in quote (ECO05).
+                else buy_notional * (Decimal("1") + (buy_fee[0] if buy_fee[1] == "QUOTE" else Decimal("0")))
             )
         }
         margin: dict[str, Decimal] = {}
@@ -1625,19 +1761,43 @@ class RiskEngine:
         base: dict[str, Decimal] = {}
         borrow: dict[str, Decimal] = {}
         if self.inventory.model == InventoryModel.PRE_FUNDED:
+            locked = self.locked_provider() if self.locked_provider is not None else {}
+            quote_asset = self._inventory_assets(opportunity.buy_venue)[1]
             if not buy_account.margin_enabled:
                 # Quote borrowing for margin buys is not modelled (ECO04).
                 needed = (
-                    self.reserved_cash.get(opportunity.buy_venue, Decimal("0")) + buy_notional
+                    self.reserved_cash.get(opportunity.buy_venue, Decimal("0")) + cash[opportunity.buy_venue]
                 )
-                if needed > self.held_quote(opportunity.buy_venue):
+                free_quote = (
+                    self.held_quote(opportunity.buy_venue)
+                    - locked.get((opportunity.buy_venue, quote_asset), Decimal("0"))
+                    - self.unavailable(opportunity.buy_venue, quote_asset)
+                )
+                if needed > free_quote:
                     raise ValueError(f"insufficient quote inventory: {opportunity.buy_venue}")
+            for venue, (bps, fee_asset) in ((opportunity.buy_venue, buy_fee), (opportunity.sell_venue, sell_fee)):
+                if fee_asset in ("QUOTE", "BASE") or bps <= 0:
+                    continue
+                # A fee charged in a third token must be payable from that token.
+                notional = buy_notional if venue == opportunity.buy_venue else sell_notional
+                price = self.asset_prices.get((venue, fee_asset)) or self.asset_prices.get(("*", fee_asset))
+                if price is None:
+                    raise ValueError(f"fee token unpriced: {venue} {fee_asset}")
+                if notional * bps / price > self._economic_asset(venue, fee_asset):
+                    raise ValueError(f"insufficient fee token: {venue} {fee_asset}")
             # A spot sell needs held base or an available borrow line; a
             # margin_enabled flag alone is not authorization to borrow.
             sell_venue = opportunity.sell_venue
-            base[sell_venue] = opportunity.quantity
-            needed = self.reserved_base.get(sell_venue, Decimal("0")) + opportunity.quantity
-            held = max(self.held_base(sell_venue), Decimal("0"))
+            base_asset = self._inventory_assets(sell_venue)[0]
+            base[sell_venue] = opportunity.quantity * (
+                Decimal("1") + (sell_fee[0] if sell_fee[1] == "BASE" else Decimal("0"))
+            )
+            needed = self.reserved_base.get(sell_venue, Decimal("0")) + base[sell_venue]
+            held = max(
+                self.held_base(sell_venue) - locked.get((sell_venue, base_asset), Decimal("0"))
+                - self.unavailable(sell_venue, base_asset),
+                Decimal("0"),
+            )
             if needed > held:
                 already = self.reserved_borrow.get(sell_venue, Decimal("0"))
                 extra = needed - held - already
@@ -1667,6 +1827,12 @@ class RiskEngine:
             base_by_venue=base,
             borrow_by_venue=borrow,
         )
+        for venue in {*cash, *margin, *positions, *base, *borrow}:
+            reservation.original[venue] = {
+                "cash": cash.get(venue, Decimal("0")), "margin": margin.get(venue, Decimal("0")),
+                "position": positions.get(venue, Decimal("0")), "base": base.get(venue, Decimal("0")),
+                "borrow": borrow.get(venue, Decimal("0")),
+            }
         self.reserved_gross += package_gross
         self.reserved_residual += planned_residual
         for venue, amount in cash.items():
@@ -1773,9 +1939,27 @@ class RiskEngine:
         position_tolerance: Decimal = Decimal("0"),
         balance_tolerance: Decimal = Decimal("0"),
         instruments: Any | None = None,
+        venue_balances: tuple[VenueBalanceSnapshot, ...] = (),
     ) -> ReconciliationReport:
         """Reconcile OMS, fill ledger and testnet REST/private account state."""
         issues = list(ledger.audit_order_fills(plans))
+        economics = getattr(ledger, "economics", None)
+        for snapshot in venue_balances:
+            # Venue-reported asset balances against the economic ledger (ECO05).
+            local_total = economics.balance(snapshot.venue, snapshot.asset, snapshot.account) if economics else Decimal("0")
+            if abs(local_total - snapshot.total) > balance_tolerance:
+                issues.append({
+                    "code": "BALANCE_TOTAL_MISMATCH", "severity": "ERROR", "venue": snapshot.venue,
+                    "asset": snapshot.asset, "account": snapshot.account,
+                    "local": str(local_total), "venue_reported": str(snapshot.total),
+                })
+            if snapshot.free is not None and snapshot.account == "main":
+                local_free = self.balance_view(snapshot.venue, snapshot.asset)["free"]
+                if abs(local_free - snapshot.free) > balance_tolerance:
+                    issues.append({
+                        "code": "BALANCE_FREE_MISMATCH", "severity": "ERROR", "venue": snapshot.venue,
+                        "asset": snapshot.asset, "local": str(local_free), "venue_reported": str(snapshot.free),
+                    })
         local_orders = {
             order.order_id: order
             for plan in plans.values() for order in plan.children
