@@ -44,6 +44,7 @@ from typing import Iterator
 
 from .event_loader import RawEvent, iter_venue_events
 from .latency_model import LatencyBook
+from .quality_preflight import run_preflight
 
 
 @dataclass(slots=True)
@@ -79,6 +80,8 @@ class CrossVenueFeed:
         trust_local_ts: dict[str, bool] | None = None,
         include_deltas: bool = True,
         venue_roots: dict[str, Path | str] | None = None,
+        quality_preflight: bool = False,
+        quality_report_only: bool = True,
     ) -> None:
         self.data_root = Path(data_root)
         self.pair = pair
@@ -89,6 +92,8 @@ class CrossVenueFeed:
         self.trust_local_ts = trust_local_ts or {v: True for v in venues}
         self.include_deltas = include_deltas
         self.venue_roots = venue_roots or {}
+        self._run_quality_preflight = quality_preflight
+        self._quality_report_only = quality_report_only
 
         # Diagnostics — reported at end of run so feed quality is auditable.
         self.counts: dict[str, int] = {v: 0 for v in venues}
@@ -99,6 +104,8 @@ class CrossVenueFeed:
         # Latency relative to the HOST clock, i.e. after removing clock offset —
         # the number that is actually comparable across venues.
         self.host_latency_sum: dict[str, float] = {v: 0.0 for v in venues}
+        # Quality gate reports, keyed by venue; populated when quality_preflight=True
+        self.preflight_reports: dict[str, dict] = {}
 
     def _timed_stream(self, venue: str) -> Iterator[TimedEvent]:
         root = self.venue_roots.get(venue, self.data_root)
@@ -125,6 +132,15 @@ class CrossVenueFeed:
             yield TimedEvent(recv, ev.exchange_ts, venue, ev.pair, ev.kind, ev.payload)
 
     def __iter__(self) -> Iterator[TimedEvent]:
+        if self._run_quality_preflight:
+            for venue in self.venues:
+                root = self.venue_roots.get(venue, self.data_root)
+                self.preflight_reports[venue] = run_preflight(
+                    root, venue, self.pair, self.start_day, self.end_day,
+                    report_only=self._quality_report_only,
+                    scope=f"{venue}/{self.pair}/{self.start_day}:{self.end_day}",
+                )
+
         counter = itertools.count()
         heap: list[tuple[float, str, int, TimedEvent, Iterator[TimedEvent]]] = []
 
@@ -153,6 +169,8 @@ class CrossVenueFeed:
                 "duplicates_dropped": float(self.loader_stats[v].get("duplicates_dropped", 0)),
                 "mean_feed_latency_vs_host_ms": self.host_latency_sum[v] / n * 1000.0,
             }
+        if self.preflight_reports:
+            out["_quality_preflight"] = self.preflight_reports  # type: ignore[assignment]
         return out
 
 
