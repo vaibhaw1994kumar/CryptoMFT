@@ -46,11 +46,15 @@ from __future__ import annotations
 
 import itertools
 from dataclasses import dataclass, field
+from typing import TYPE_CHECKING
 
 from .config import VenueSpec
 from .models import Side
 from .order_book import OrderBook
 from .venue_state import VenueState
+
+if TYPE_CHECKING:
+    from .fill_model_v1 import FillModelV1
 
 
 TAKER_TAKER = "taker_taker"
@@ -95,6 +99,12 @@ class ArbConfig:
 
     # Pacing
     min_resignal_gap_s: float = 0.0      # throttle repeat fires on one edge
+
+    # Phase 1 fill-probability gate (MAKER_TAKER only)
+    # Set min_fill_prob > 0 to skip quotes where the fitted model predicts a low
+    # fill probability.  fill_gate_horizon_s selects which trained horizon to use.
+    min_fill_prob: float = 0.0           # 0 = gate disabled
+    fill_gate_horizon_s: int = 15
 
 
 @dataclass
@@ -164,6 +174,7 @@ class CrossVenueArbStrategy:
         pair: str,
         venues: dict[str, VenueSpec],
         config: ArbConfig | None = None,
+        fill_model_v1: "FillModelV1 | None" = None,
     ) -> None:
         self.pair = pair
         self.venues = venues
@@ -171,13 +182,14 @@ class CrossVenueArbStrategy:
         self.venue_names = tuple(sorted(venues))
         self._ids = itertools.count(1)
         self._last_signal_ts = 0.0
+        self.fill_model_v1 = fill_model_v1
 
-        # Rejection accounting — the reason distribution is usually more
-        # informative than the PnL, because it says which constraint binds.
         self.rejects: dict[str, int] = {
             "not_ready": 0, "stale": 0, "crossed": 0, "wide_spread": 0,
             "toxic": 0, "no_edge": 0, "stale_touch": 0, "no_depth": 0,
             "inventory": 0, "clip_too_small": 0, "throttled": 0,
+            "maker_limit": 0,
+            "low_fill_prob": 0,  # Phase 1 gate: P(fill) < min_fill_prob
         }
         self.evaluations = 0
         self.signals = 0
@@ -244,12 +256,18 @@ class CrossVenueArbStrategy:
         states: dict[str, VenueState],
         inventory: InventoryBook,
         now: float,
+        live_maker_orders: int = 0,
     ) -> ArbSignal | None:
         cfg = self.config
         self.evaluations += 1
 
         if cfg.min_resignal_gap_s > 0 and now - self._last_signal_ts < cfg.min_resignal_gap_s:
             self.rejects["throttled"] += 1
+            return None
+
+        # A7: enforce maker_max_live_orders before even computing the signal.
+        if cfg.mode == MAKER_TAKER and live_maker_orders >= cfg.maker_max_live_orders:
+            self.rejects["maker_limit"] += 1
             return None
 
         tradeable = [
@@ -264,7 +282,9 @@ class CrossVenueArbStrategy:
             for sell_venue in tradeable:
                 if buy_venue == sell_venue:
                     continue
-                sig = self._evaluate_direction(buy_venue, sell_venue, books, inventory, now)
+                sig = self._evaluate_direction(
+                    buy_venue, sell_venue, books, states, inventory, now,
+                )
                 if sig is not None and (best is None or sig.net_edge_bps > best.net_edge_bps):
                     best = sig
 
@@ -278,6 +298,7 @@ class CrossVenueArbStrategy:
         buy_venue: str,
         sell_venue: str,
         books: dict[str, OrderBook],
+        states: dict[str, VenueState],
         inventory: InventoryBook,
         now: float,
     ) -> ArbSignal | None:
@@ -286,7 +307,9 @@ class CrossVenueArbStrategy:
         buy_fees, sell_fees = self.venues[buy_venue].fees, self.venues[sell_venue].fees
 
         if cfg.mode == MAKER_TAKER:
-            return self._evaluate_maker_taker(buy_venue, sell_venue, books, inventory, now)
+            return self._evaluate_maker_taker(
+                buy_venue, sell_venue, books, states, inventory, now,
+            )
 
         buy_px = buy_book.best_ask      # we lift the offer
         sell_px = sell_book.best_bid    # we hit the bid
@@ -351,16 +374,11 @@ class CrossVenueArbStrategy:
         maker_venue: str,
         taker_venue: str,
         books: dict[str, OrderBook],
+        states: dict[str, VenueState],
         inventory: InventoryBook,
         now: float,
     ) -> ArbSignal | None:
-        """Rest a passive bid on maker_venue, hedge by selling on taker_venue.
-
-        The passive price is set from the hedge price backwards: whatever we can
-        sell for on the taker venue, minus both fees and the buffer, is the most
-        we can afford to bid. If that price is not competitive with the maker
-        venue's own touch, there is no trade.
-        """
+        """Rest a passive bid on maker_venue, hedge by selling on taker_venue."""
         cfg = self.config
         maker_book, taker_book = books[maker_venue], books[taker_venue]
         maker_fees, taker_fees = self.venues[maker_venue].fees, self.venues[taker_venue].fees
@@ -404,6 +422,31 @@ class CrossVenueArbStrategy:
         if qty * max_bid < cfg.min_clip_notional:
             self.rejects["clip_too_small"] += 1
             return None
+
+        # Phase 1 fill-probability gate ─────────────────────────────────────
+        # Skip quotes where the calibrated model predicts low fill probability.
+        # queue_ahead=0 is an approximation: the order hasn't been placed yet,
+        # so there is no queue snapshot; using 0 biases toward over-estimating
+        # fill probability, which is conservative (gates fewer signals).
+        if (cfg.min_fill_prob > 0.0
+                and self.fill_model_v1 is not None
+                and self.fill_model_v1.horizon_s == cfg.fill_gate_horizon_s):
+            ms = states[maker_venue]
+            mb = books[maker_venue]
+            top_depth = mb.best_bid_size + mb.best_ask_size
+            p_fill = self.fill_model_v1.predict(
+                queue_ahead=0.0,
+                local_depth=top_depth,
+                local_depth_baseline=ms.top_depth_baseline,
+                spread_pct=mb.spread_bps / 100.0,
+                short_vol=ms.short_vol,
+                trade_count=ms.trade_rate,
+                trade_sign=ms.trade_sign,
+                regime_bucket=ms.last_regime.bucket.value,
+            )
+            if p_fill < cfg.min_fill_prob:
+                self.rejects["low_fill_prob"] += 1
+                return None
 
         slack = hedge_px * cfg.max_walk_bps / 10_000.0
         return ArbSignal(

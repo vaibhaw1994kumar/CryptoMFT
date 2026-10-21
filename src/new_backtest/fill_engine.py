@@ -139,6 +139,7 @@ class MakerOrder:
     size: float
     remaining: float
     queue_ahead: float
+    initial_queue_ahead: float       # snapshot at placement for unbiased label feature
     placed_ts: float
     active_ts: float                 # placed_ts + entry latency
     signal_id: int = 0
@@ -221,10 +222,11 @@ class MakerExecutor:
             rel_ticks = int(round(delta / tick_size))
             rel_ticks = max(-3, min(3, rel_ticks))
 
+        initial_q = level_size * max(0.0, self.config.queue_stress_multiplier)
         order = MakerOrder(
             order_id=next(self._ids), venue=venue, pair=pair, symbol=symbol,
             side=side, price=price, size=size, remaining=size,
-            queue_ahead=level_size * max(0.0, self.config.queue_stress_multiplier),
+            queue_ahead=initial_q, initial_queue_ahead=initial_q,
             placed_ts=now, active_ts=active_ts, signal_id=signal_id,
             relative_to_touch_ticks=rel_ticks,
             local_depth=state.top_depth,
@@ -244,7 +246,7 @@ class MakerExecutor:
         order = self.orders.pop(order_id, None)
         if order is None:
             return None
-        self._record_outcome(order)
+        self._record_outcome(order, end_ts=now)
         self.orders_cancelled += 1
         return order
 
@@ -387,25 +389,55 @@ class MakerExecutor:
                 return lv_size
         return 0.0
 
-    def _record_outcome(self, order: MakerOrder) -> None:
+    def _record_outcome(self, order: MakerOrder, end_ts: float | None = None) -> None:
         """Feed the completed order to EmpiricalFillModel, one event per horizon.
 
         `filled` is horizon-conditional: an order that filled after 12s counts as
-        filled at the 15s horizon but not at 1s or 5s. That is what lets the
-        posterior express how fill probability decays with holding time.
+        filled at the 15s horizon but not at 1s or 5s.
+
+        Censoring: pass end_ts=now when cancelling. An observation at horizon h is
+        emitted only if the order filled before h OR survived for at least h seconds.
+        Without end_ts (full fills routed from _consume), fill_ts is finite and
+        life_s is computed from it correctly.
+
+        Feature: queue_ahead is snapshotted at placement (initial_queue_ahead) not at
+        close, because _consume() decrements it as fills arrive.
         """
         fill_ts = order.first_fill_ts if order.first_fill_ts is not None else math.inf
         adverse_ts = order.adverse_ts if order.adverse_ts is not None else math.inf
         ratio = order.filled_qty / max(order.size, 1e-9)
 
+        if order.filled_qty >= order.size - 1e-9:
+            terminal_reason = "full_fill"
+        elif order.filled_qty > 0:
+            terminal_reason = "partial_then_cancel"
+        else:
+            terminal_reason = "cancel"
+
+        # life_s: how long the order was observable.
+        # For fills: time-to-first-fill (fill_ts is finite).
+        # For cancels: end_ts is the cancel timestamp; fall back to fill_ts if
+        #   partially filled (partial_then_cancel), else None if neither is known.
+        if fill_ts < math.inf:
+            life_s: float | None = fill_ts - order.placed_ts
+        elif end_ts is not None:
+            life_s = end_ts - order.placed_ts
+        else:
+            life_s = None
+
         for horizon in self.config.fill_horizons_s:
+            filled_by_h = fill_ts - order.placed_ts <= horizon
+            # Censoring guard: skip h when the order ended before h and did not fill.
+            if not filled_by_h and life_s is not None and life_s < horizon:
+                continue
+
             self.fill_model.record_order_event(
                 LoggedOrderEvent(
                     timestamp=order.placed_ts,
                     symbol=order.symbol,
                     side=order.side,
                     relative_to_touch_ticks=order.relative_to_touch_ticks,
-                    queue_ahead=max(0.0, order.queue_ahead),
+                    queue_ahead=max(0.0, order.initial_queue_ahead),  # placement snapshot
                     local_depth=order.local_depth,
                     local_depth_baseline=order.local_depth_baseline,
                     spread_pct=order.spread_pct,
@@ -414,13 +446,14 @@ class MakerExecutor:
                     trade_sign=order.trade_sign,
                     regime_bucket=order.regime_bucket,
                     horizon_s=horizon,
-                    filled=(fill_ts - order.placed_ts) <= horizon,
+                    filled=filled_by_h,
                     price_moved_through=(adverse_ts - order.placed_ts) <= horizon,
                     filled_qty=order.filled_qty,
                     fill_ratio=ratio,
                     trade_fill_qty=order.trade_fill_qty,
                     book_event_fill_qty=order.delta_fill_qty,
                     snapshot_fill_qty=order.snapshot_fill_qty,
+                    terminal_reason=terminal_reason,
                 )
             )
 

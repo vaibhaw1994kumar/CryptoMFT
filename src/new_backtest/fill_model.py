@@ -495,6 +495,7 @@ class EmpiricalFillModel:
             "trade_fill_qty": event.trade_fill_qty,
             "book_event_fill_qty": event.book_event_fill_qty,
             "snapshot_fill_qty": event.snapshot_fill_qty,
+            "terminal_reason": event.terminal_reason,
         }
 
     @staticmethod
@@ -520,6 +521,7 @@ class EmpiricalFillModel:
             trade_fill_qty=float(payload.get("trade_fill_qty", 0.0)),
             book_event_fill_qty=float(payload.get("book_event_fill_qty", 0.0)),
             snapshot_fill_qty=float(payload.get("snapshot_fill_qty", 0.0)),
+            terminal_reason=str(payload.get("terminal_reason", "")),
         )
 
     def bucket_stats_snapshot(self) -> list[dict[str, str | int]]:
@@ -575,7 +577,18 @@ class EmpiricalFillModel:
                 handle.write(json.dumps(self._event_to_dict(event), sort_keys=True))
                 handle.write("\n")
 
-    def load_event_log(self, path: str | Path) -> None:
+    def load_event_log(
+        self, path: str | Path, until_ts: float | None = None
+    ) -> None:
+        """Load a serialised event log into this model's posterior.
+
+        Args:
+            path: Path to the fill_events.jsonl written by save_event_log.
+            until_ts: If set, only load events whose label has matured by this
+                epoch timestamp.  An event with placement time T and horizon H
+                matures at T + H; loading events with maturity > until_ts would
+                inject future information into the prior (temporal leakage).
+        """
         target = Path(path)
         if not target.exists():
             return
@@ -584,7 +597,10 @@ class EmpiricalFillModel:
                 stripped = line.strip()
                 if not stripped:
                     continue
-                self.record_order_event(self._event_from_dict(json.loads(stripped)))
+                ev = self._event_from_dict(json.loads(stripped))
+                if until_ts is not None and ev.timestamp + ev.horizon_s > until_ts:
+                    continue  # label not yet matured at until_ts — skip to avoid leakage
+                self.record_order_event(ev)
 
     def save_bucket_stats(self, path: str | Path) -> None:
         target = Path(path)

@@ -74,6 +74,14 @@ class ArbBacktestConfig:
 
     output_dir: str | None = None
     warm_start_fill_events: str | None = None
+    # If set, only load fill-log events whose label has matured by this epoch second.
+    # Prevents temporal leakage when the calibration window overlaps the eval window.
+    warm_start_until_ts: float | None = None
+    # Path to a FillModelV1 JSON checkpoint.  When set, the strategy gates maker
+    # quotes on P(fill) >= arb.min_fill_prob.  The model's trained_until_ts must
+    # be <= epoch(start_date); the backtester raises ValueError otherwise to
+    # prevent forward-looking model use.
+    fill_model_v1_path: str | None = None
     markout_horizons_s: tuple[float, ...] = (1.0, 5.0, 30.0)
     progress_every: int = 0          # print every N events; 0 = silent
     max_trade_log: int = 200_000     # cap in-memory fill log on long runs
@@ -106,7 +114,9 @@ class ArbBacktestResult:
     fees_paid: float
     unhedged_loss: float
     realized_pnl: float
-    mark_to_market_pnl: float
+    open_position_value: float   # A10: unrealised – base inventory marked at end-of-run mids
+    ending_equity: float         # A10: total_cash + open_position_value (does not assume zero start)
+    mark_to_market_pnl: float    # legacy alias == ending_equity; kept for back-compat
 
     # Gross-to-gross: what share of the spread visible at fire time did the
     # matched legs actually collect. Latency and slippage push it below 1.
@@ -192,12 +202,35 @@ class CrossVenueArbBacktester:
 
         self.fill_model = EmpiricalFillModel()
         if config.warm_start_fill_events:
-            self.fill_model.load_event_log(config.warm_start_fill_events)
+            self.fill_model.load_event_log(
+                config.warm_start_fill_events,
+                until_ts=config.warm_start_until_ts,
+            )
 
         if config.arb.max_position_base <= 0:
             config.arb.max_position_base = max_position_for(config.pair)
 
-        self.strategy = CrossVenueArbStrategy(config.pair, self.venue_specs, config.arb)
+        fill_model_v1 = None
+        if config.fill_model_v1_path:
+            from .fill_model_v1 import FillModelV1  # noqa: PLC0415
+            import datetime as _dt  # noqa: PLC0415
+            fill_model_v1 = FillModelV1.load_json(config.fill_model_v1_path)
+            # Leakage guard: model must not have been trained on data from the
+            # eval window.  Convert start_date "YYYY-MM-DD" to midnight UTC.
+            start_epoch = _dt.datetime.fromisoformat(config.start_date).replace(
+                tzinfo=_dt.timezone.utc
+            ).timestamp()
+            if fill_model_v1.trained_until_ts > start_epoch:
+                raise ValueError(
+                    f"FillModelV1 trained_until_ts={fill_model_v1.trained_until_ts:.0f} "
+                    f"is after start_date epoch {start_epoch:.0f} ({config.start_date!r}). "
+                    "Using a model trained on future data leaks labels into the backtest."
+                )
+
+        self.strategy = CrossVenueArbStrategy(
+            config.pair, self.venue_specs, config.arb,
+            fill_model_v1=fill_model_v1,
+        )
         self.taker = TakerExecutor(consume_liquidity=config.consume_liquidity)
         self.maker = MakerExecutor(self.fill_model, config.maker)
         self.pending = PendingOrderQueue()
@@ -394,7 +427,10 @@ class CrossVenueArbBacktester:
                     tracker.hedged_qty += fill.qty
                     tracker.legs_outstanding += 1
                     self._send_leg(hedge, sig, fill.ts)
-                # maker_resting stays True until cancel_all clears it
+                # Maker order fully consumed: order was removed from self.maker.orders
+                # in _consume(). Resolve immediately instead of waiting for cancel_all.
+                if fill.order_id not in self.maker.orders:
+                    tracker.maker_resting = False
 
         if len(self.trade_log) < self.config.max_trade_log:
             self.trade_log.append({
@@ -510,7 +546,10 @@ class CrossVenueArbBacktester:
                 # Trades can move the touch too, via trade-tape repair.
                 if self._touch_changed(ev.venue):
                     self.markouts.resolve(now, {v: b.mid for v, b in self.books.items()})
-                    signal = self.strategy.evaluate(self.books, self.states, self.inventory, now)
+                    signal = self.strategy.evaluate(
+                    self.books, self.states, self.inventory, now,
+                    live_maker_orders=len(self.maker.orders),
+                )
                     if signal is not None:
                         self._fire(signal, now)
 
@@ -547,9 +586,11 @@ class CrossVenueArbBacktester:
     def _build_result(self, feed: CrossVenueFeed, coverage, wall_s: float) -> ArbBacktestResult:
         cfg = self.config
         mids = {v: b.mid for v, b in self.books.items()}
-        mtm = self.inventory.total_cash + sum(
+        open_pos_value = sum(
             self.inventory.base.get(v, 0.0) * mids.get(v, 0.0) for v in cfg.venues
         )
+        ending_equity = self.inventory.total_cash + open_pos_value
+        mtm = ending_equity  # legacy alias
 
         n = max(1, self.edge_samples)
         mean_exp = self.expected_gross_sum / n
@@ -591,6 +632,8 @@ class CrossVenueArbBacktester:
             fees_paid=self.fees_paid,
             unhedged_loss=self.unhedged_loss,
             realized_pnl=self.gross_pnl - self.fees_paid - self.unhedged_loss,
+            open_position_value=open_pos_value,
+            ending_equity=ending_equity,
             mark_to_market_pnl=mtm,
             mean_expected_gross_edge_bps=mean_exp,
             mean_realized_gross_edge_bps=mean_real,

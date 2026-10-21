@@ -20,6 +20,7 @@ strategy result rather than missing data.
 from __future__ import annotations
 
 import argparse
+import datetime as _dt
 import json
 import math
 from dataclasses import asdict, dataclass, field
@@ -82,11 +83,19 @@ def _run_once(cfg: ArbBacktestConfig) -> ArbBacktestResult:
     return CrossVenueArbBacktester(cfg).run()
 
 
+def _date_to_epoch(date_str: str) -> float:
+    """Return UTC midnight epoch seconds for a YYYY-MM-DD string."""
+    return _dt.datetime.strptime(date_str, "%Y-%m-%d").replace(
+        tzinfo=_dt.timezone.utc
+    ).timestamp()
+
+
 def run_pair(
     pair: str,
     base: ArbBacktestConfig,
     output_root: Path,
     two_pass: bool,
+    calibration_days: int = 0,
 ) -> PairOutcome:
     coverage = check_coverage(
         base.data_root, pair, base.venues, base.start_date, base.end_date,
@@ -101,6 +110,52 @@ def run_pair(
 
     pair_dir = output_root / pair
     try:
+        # Walk-forward calibration: run a cold calibration pass on the first
+        # calibration_days, then evaluate on the remaining days warm-started
+        # from those labels.  until_ts prevents label leakage: events whose
+        # horizon crosses into the eval window are dropped from the warm-start.
+        if calibration_days > 0 and len(common) > calibration_days:
+            cal_days = common[:calibration_days]
+            eval_days = common[calibration_days:]
+            until_ts = _date_to_epoch(eval_days[0])
+
+            cfg_cal = _clone(base, pair=pair, start=cal_days[0], end=cal_days[-1],
+                             output_dir=str(pair_dir / "calibration"),
+                             warm_start=None, warm_start_until_ts=None)
+            r_cal = _run_once(cfg_cal)
+
+            # Fit Phase-1 FillModelV1 from the calibration log, leakage-guarded
+            # by until_ts.  One model per decision horizon; the eval run uses
+            # whichever horizon matches ArbConfig.fill_gate_horizon_s.
+            fill_model_v1_path: str | None = None
+            if (base.arb.mode == "maker_taker"
+                    and base.arb.min_fill_prob > 0.0
+                    and r_cal.fill_log_path):
+                from .fill_label import extract_labels   # noqa: PLC0415
+                from .fill_model_v1 import FillModelV1   # noqa: PLC0415
+                records = extract_labels(r_cal.fill_log_path, until_ts=until_ts)
+                if records:
+                    horizon_s = base.arb.fill_gate_horizon_s
+                    model = FillModelV1.fit(records, horizon_s=horizon_s,
+                                           trained_until_ts=until_ts)
+                    if model is not None:
+                        model_path = str(pair_dir / "calibration" / "fill_model_v1.json")
+                        model.save_json(model_path)
+                        fill_model_v1_path = model_path
+
+            cfg_eval = _clone(base, pair=pair, start=eval_days[0], end=eval_days[-1],
+                              output_dir=str(pair_dir / "eval"),
+                              warm_start=r_cal.fill_log_path,
+                              warm_start_until_ts=until_ts,
+                              fill_model_v1_path=fill_model_v1_path)
+            r_eval = _run_once(cfg_eval)
+            return PairOutcome(
+                pair, "ok",
+                detail=(f"cal={cal_days[0]}..{cal_days[-1]} "
+                        f"eval={eval_days[0]}..{eval_days[-1]}"),
+                pass1=asdict(r_cal), pass2=asdict(r_eval),
+            )
+
         # Clamp to the days both venues actually cover, so the window reported
         # is the window tested.
         cfg1 = _clone(base, pair=pair, start=common[0], end=common[-1],
@@ -124,6 +179,8 @@ def run_pair(
 def _clone(
     base: ArbBacktestConfig, pair: str, start: str, end: str,
     output_dir: str, warm_start: str | None,
+    warm_start_until_ts: float | None = None,
+    fill_model_v1_path: str | None = None,
 ) -> ArbBacktestConfig:
     arb = ArbConfig(**{**vars(base.arb), "max_position_base": max_position_for(pair)})
     return ArbBacktestConfig(
@@ -136,6 +193,8 @@ def _clone(
         consume_liquidity=base.consume_liquidity,
         include_deltas=base.include_deltas, seed=base.seed,
         output_dir=output_dir, warm_start_fill_events=warm_start,
+        warm_start_until_ts=warm_start_until_ts,
+        fill_model_v1_path=fill_model_v1_path,
         markout_horizons_s=base.markout_horizons_s,
         progress_every=base.progress_every,
     )
@@ -147,6 +206,7 @@ def run_batch(
     output_dir: str,
     two_pass: bool = True,
     verbose: bool = True,
+    calibration_days: int = 0,
 ) -> BatchSummary:
     out_root = Path(output_dir)
     out_root.mkdir(parents=True, exist_ok=True)
@@ -156,7 +216,8 @@ def run_batch(
     for i, pair in enumerate(pairs, 1):
         if verbose:
             print(f"\n[{i}/{len(pairs)}] {pair}", flush=True)
-        outcome = run_pair(pair, base, out_root, two_pass)
+        outcome = run_pair(pair, base, out_root, two_pass,
+                           calibration_days=calibration_days)
         outcomes.append(outcome)
         if verbose:
             if outcome.status != "ok":
@@ -310,6 +371,15 @@ def build_arg_parser() -> argparse.ArgumentParser:
     g.add_argument("--single-pass", dest="two_pass", action="store_false")
     p.add_argument("--force-two-pass", action="store_true",
                    help="run pass 2 even in taker_taker mode, where it is a no-op")
+    p.add_argument(
+        "--calibration-days", type=int, default=0, metavar="N",
+        help=(
+            "walk-forward: run a cold N-day calibration pass first, then evaluate "
+            "on the remaining days warm-started from those labels (A5 leakage fix). "
+            "Labels whose horizon crosses into the eval window are excluded. "
+            "Falls back to standard two-pass when fewer than N+1 days are available."
+        ),
+    )
     return p
 
 
@@ -338,7 +408,8 @@ def main(argv: Iterable[str] | None = None) -> int:
         include_deltas=not args.no_deltas, seed=args.seed,
         progress_every=args.progress_every,
     )
-    run_batch(args.pairs, base, args.output_dir, two_pass=two_pass)
+    run_batch(args.pairs, base, args.output_dir, two_pass=two_pass,
+              calibration_days=args.calibration_days)
     return 0
 
 

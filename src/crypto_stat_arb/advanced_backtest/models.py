@@ -118,6 +118,9 @@ class LoggedOrderEvent:
     trade_fill_qty: float = 0.0
     book_event_fill_qty: float = 0.0
     snapshot_fill_qty: float = 0.0
+    # terminal_reason: why the order ended (full_fill / partial_then_cancel / cancel)
+    # Enables censoring-aware training: skip horizon h if cancelled before h and not filled.
+    terminal_reason: str = ""
 
 
 @dataclass(frozen=True)

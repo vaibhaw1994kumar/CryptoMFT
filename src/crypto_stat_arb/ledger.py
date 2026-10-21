@@ -12,7 +12,12 @@ from .models import ChildOrder, ParentPlan, json_default, stable_id
 
 def _parse_assets(venue: str, instrument_id: str) -> tuple[str, str]:
     parts = instrument_id.split("-")
-    return (parts[0], parts[1]) if len(parts) >= 2 else (instrument_id, "USDT")
+    if len(parts) >= 2:
+        return parts[0], parts[1]
+    raise ValueError(
+        f"cannot classify assets for {venue}/{instrument_id}: no '-' separator; "
+        "set ledger.asset_resolver to a validated instrument-master lookup"
+    )
 
 
 # parent_id of fills outside every plan: venue buy-in of a recalled loan
@@ -540,6 +545,16 @@ class Ledger:
                 borrow_cost_by_venue[venue] = borrow_cost_by_venue.get(
                     venue, Decimal("0")
                 ) + Decimal(str(event["borrow_cost"]))
+            elif event_type == "FILL_NOTIONAL_ADJUSTMENT":
+                key = (str(event["venue"]), str(event["instrument_id"]))
+                state = positions.get(key)
+                if state is not None and state.quantity != 0:
+                    notional_adj = Decimal(str(event.get("notional_delta", "0")))
+                    # Spread the cost-basis correction over the held quantity.
+                    # For a long: higher notional → higher avg price (cost went up).
+                    # For a short: higher notional → higher avg price (proceeds went up).
+                    state.average_price += notional_adj / abs(state.quantity)
+                    state.gross_traded_notional += notional_adj
             elif event_type == "FEE_ADJUSTMENT":
                 venue = str(event["venue"])
                 key = (venue, str(event["instrument_id"]))

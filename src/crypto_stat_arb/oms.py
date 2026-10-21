@@ -107,10 +107,49 @@ ALLOWED_PLAN_TRANSITIONS = {
 
 
 class DeterministicMatcher:
+    """Simulated fill engine with intra-sequence liquidity overlay.
+
+    Two fill calls within the same book sequence cannot draw against the same
+    resting size. The overlay resets automatically when ``book.sequence`` advances,
+    and the canonical ``OrderBook`` is never mutated.
+    """
+
+    def __init__(self) -> None:
+        self._overlay: dict[tuple[str, str, int | None], dict[Decimal, Decimal]] = {}
+
     def fill(self, order: ChildOrder, book: OrderBook) -> None:
-        filled, average_price = book.walk(order.side, order.quantity, order.limit_price)
+        seq_key = (book.venue, book.instrument_id, book.sequence)
+        consumed = self._overlay.setdefault(seq_key, {})
+        # Evict stale sequences for this (venue, instrument_id) pair.
+        for stale in [
+            k for k in list(self._overlay)
+            if k[0] == book.venue and k[1] == book.instrument_id and k != seq_key
+        ]:
+            del self._overlay[stale]
+
+        levels = book.asks if order.side == Side.BUY else book.bids
+        prices = sorted(levels) if order.side == Side.BUY else sorted(levels, reverse=True)
+        remaining = order.quantity
+        notional = Decimal("0")
+        filled = Decimal("0")
+        for price in prices:
+            if order.side == Side.BUY and price > order.limit_price:
+                break
+            if order.side == Side.SELL and price < order.limit_price:
+                break
+            available = levels[price] - consumed.get(price, Decimal("0"))
+            if available <= 0:
+                continue
+            take = min(remaining, available)
+            consumed[price] = consumed.get(price, Decimal("0")) + take
+            filled += take
+            notional += take * price
+            remaining -= take
+            if remaining == 0:
+                break
+
         order.filled_quantity = filled
-        order.average_price = average_price
+        order.average_price = notional / filled if filled else Decimal("0")
         if filled == 0:
             order.state = OrderState.REJECTED
             order.reject_reason = "no executable liquidity"
@@ -192,10 +231,6 @@ class OMS:
         self._late_fill_alerted: set[str] = set()
         self._residual_breach_since: dict[str, int] = {}
         self._residual_next_check: dict[str, int] = {}
-        # Plans whose _release_and_close failed reconciliation: need a retry once
-        # the RMS issue clears.  Reconstructed at startup from non-closed plans
-        # whose children are all terminal (they are past HEDGE_UNWIND and waiting
-        # for a successful reconciliation before the reservation can be released).
         self._reconciliation_retry: set[str] = set()
         self._deferred_close: dict[str, tuple[str, tuple[str, ...]]] = {}
         self.realism_counters: dict[str, int] = {
@@ -290,17 +325,9 @@ class OMS:
                     ):
                         continue
                     self._watch_order(order, recovery_ts_ns, immediate=True)
-            # Reconstruct _residual_breach_since so that hold_new_risk_on_breach
-            # fires immediately rather than waiting for the first advance_time().
-            # Without this, a brief window after restart allows new risk while an
-            # open residual breach is active.
             for plan in self.plans.values():
                 if plan.state == PlanState.HEDGE_UNWIND:
                     self._residual_breach_since.setdefault(plan.parent_id, recovery_ts_ns)
-            # Reconstruct _reconciliation_retry for plans whose children are all
-            # terminal but that never reached CLOSED.  These were stuck after a
-            # failed RMS internal reconciliation; enforce_residual_limits will
-            # retry them once the RMS issue clears.
             for plan in self.plans.values():
                 if plan.state == PlanState.CLOSED:
                     continue
@@ -1404,8 +1431,6 @@ class OMS:
             issues=list(internal_report.issues),
         )
         if internal_report.issues:
-            # Schedule a retry via enforce_residual_limits so the plan is not
-            # permanently stuck once the RMS issue resolves.
             self._reconciliation_retry.add(plan.parent_id)
             return plan
         self._reconciliation_retry.discard(plan.parent_id)
@@ -1576,12 +1601,6 @@ class OMS:
                 continue
             self._residual_next_check[plan.parent_id] = now_ns + interval_ns
             affected.append(self._finalize_plan(plan, now_ns, self._books))
-        # Retry plans whose _release_and_close failed RMS reconciliation.  These
-        # are not in HEDGE_UNWIND (residual is within bound) but could not close
-        # because the risk engine reported an inconsistency.  Each attempt calls
-        # _release_and_close again; if the RMS issue has cleared it will succeed
-        # and remove the plan from this set.  The reservation remains active and
-        # the plan remains open until closure succeeds.
         for parent_id in list(self._reconciliation_retry):
             plan = self.plans.get(parent_id)
             if plan is None or plan.state == PlanState.CLOSED:
