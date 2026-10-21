@@ -35,6 +35,9 @@ from .market_data_output import (
     normalize_binance_trade,
     normalize_bybit_trades,
 )
+from .derivatives import (
+    BybitTickerMerger, normalize_binance_mark_price, validate_derivative_ticker, with_arrival,
+)
 from .orderbook import OrderBook
 from .raw_capture import GENESIS_HASH, RawCaptureWriter, RawFrame
 from .monitoring import PipelineMonitor
@@ -79,6 +82,9 @@ class WireFrame:
 
 @dataclass(slots=True)
 class VenueLiveStats:
+    derivative_connections: int = 0
+    derivative_ticks: int = 0
+    derivative_errors: int = 0
     connection_attempts: int = 0
     connections: int = 0
     disconnects: int = 0
@@ -124,6 +130,10 @@ class LiveFeedSettings:
     ohlc_interval_seconds: int = 60
     trade_streams_enabled: bool = False
     trade_stale_seconds: float = 30.0
+    # Perpetuals only: Binance markPrice / Bybit linear tickers (mark, index,
+    # current funding). Refused for spot markets.
+    derivative_streams_enabled: bool = False
+    derivative_stale_seconds: float = 30.0
     udp_enabled: bool = False
     udp_group: str = "239.255.77.77"
     udp_port: int = 19_001
@@ -143,6 +153,12 @@ class LiveFeedSettings:
             raise ValueError("binance_market must be spot or linear")
         if self.bybit_market not in ("spot", "linear"):
             raise ValueError("bybit_market must be spot or linear")
+        if self.derivative_streams_enabled and any(
+            market != "linear" for venue, market in (
+                ("BINANCE", self.binance_market), ("BYBIT", self.bybit_market)
+            ) if venue in self.venues
+        ):
+            raise ValueError("derivative streams need linear (perpetual) markets on every venue")
         if self.bybit_depth not in (1, 50, 200, 1000):
             raise ValueError("Bybit depth must be one of 1, 50, 200 or 1000")
         if self.http_timeout_seconds <= 0:
@@ -206,6 +222,8 @@ class RotatingLiveRecorder:
         self.wire_count = 0
         self.canonical_count = 0
         self.trade_count = 0
+        self.derivative_count = 0
+        self._derivative_handle: Any = None
         self.rejected_count = 0
         self.control_count = 0
         self.last_persisted_receive_ts_ns: int | None = None
@@ -410,6 +428,26 @@ class RotatingLiveRecorder:
         )
         self.trade_count += 1
 
+    def record_derivative(self, wire: WireFrame, raw: RawFrame, ticker: Any) -> None:
+        """Mark/index/funding ticker; ``derivatives.jsonl`` exists only in parts that have one."""
+        if self._derivative_handle is None:
+            self._derivative_handle = (self._part_dir / "derivatives.jsonl").open("x", encoding="utf-8")
+        self._derivative_handle.write(self._canonical_json(ticker.to_dict()) + "\n")
+        self._trace_handle.write(self._canonical_json({
+            "wire_ref": wire.wire_ref, "raw_ref": raw.raw_ref,
+            "canonical_event_id": ticker.event_id, "venue": ticker.venue,
+            "instrument_id": ticker.instrument_id, "receive_ts_ns": ticker.receive_ts_ns,
+            "arrival_ordinal": ticker.arrival_ordinal, "disposition": "DERIVATIVE",
+        }) + "\n")
+        self._flush(self._derivative_handle)
+        self._flush(self._trace_handle)
+        persisted_ns = self.clock_ns()
+        self.last_persisted_receive_ts_ns = ticker.receive_ts_ns
+        self.max_persistence_lag_ns = max(
+            self.max_persistence_lag_ns, max(0, persisted_ns - ticker.receive_ts_ns)
+        )
+        self.derivative_count += 1
+
     def record_control(self, wire: WireFrame, raw: RawFrame) -> None:
         self._trace_handle.write(self._canonical_json({
             "wire_ref": wire.wire_ref,
@@ -454,6 +492,9 @@ class RotatingLiveRecorder:
         ):
             self._flush(handle)
             handle.close()
+        if self._derivative_handle is not None:
+            self._flush(self._derivative_handle)
+            self._derivative_handle.close()
         raw_manifest = self._raw_writer.close()
         paths = {
             "wire": self._part_dir / "wire.jsonl",
@@ -463,6 +504,9 @@ class RotatingLiveRecorder:
             "trace": self._part_dir / "trace.jsonl",
             "quarantine": self._part_dir / "quarantine.jsonl",
         }
+        if self._derivative_handle is not None:
+            paths["derivatives"] = self._part_dir / "derivatives.jsonl"
+            self._derivative_handle = None
         part = {
             "part": self.part_number,
             "directory": str(self._part_dir),
@@ -492,6 +536,7 @@ class RotatingLiveRecorder:
             "wire_records": self.wire_count,
             "canonical_events": self.canonical_count,
             "trade_ticks": self.trade_count,
+            **({"derivative_ticks": self.derivative_count} if self.derivative_count else {}),
             "control_frames": self.control_count,
             "rejected_frames": self.rejected_count,
             "parts": [
@@ -576,12 +621,15 @@ class LiveOrderBookService:
         publisher: MarketDataPublisher | None = None,
         event_listener: Callable[[MarketEvent, OrderBook, BookState, bool], None] | None = None,
         trade_listener: Callable[[TradeTick], None] | None = None,
+        derivative_listener: Callable[[Any], None] | None = None,
         pre_event_listener: Callable[[MarketEvent], None] | None = None,
     ) -> None:
         self.pre_event_listener = pre_event_listener
         self.config, _ = load_config(config_path)
         self.event_listener = event_listener
         self.trade_listener = trade_listener
+        self.derivative_listener = derivative_listener
+        self.bybit_ticker_merger = BybitTickerMerger()
         self.settings = settings or LiveFeedSettings()
         self.settings.validate()
         configured = set(self.config.venues)
@@ -709,6 +757,13 @@ class LiveOrderBookService:
             tasks.extend(
                 asyncio.create_task(
                     self._trade_forever(venue), name=f"trades-{venue.lower()}"
+                )
+                for venue in self.settings.venues
+            )
+        if self.settings.derivative_streams_enabled:
+            tasks.extend(
+                asyncio.create_task(
+                    self._derivative_forever(venue), name=f"derivatives-{venue.lower()}"
                 )
                 for venue in self.settings.venues
             )
@@ -1019,6 +1074,97 @@ class LiveOrderBookService:
             except TimeoutError:
                 pass
             backoff = min(self.settings.reconnect_max_seconds, backoff * 2)
+
+    # -- derivatives (mark / index / funding) -------------------------------------
+    def _binance_mark_price_url(self) -> str:
+        depth_url, _ = self._binance_urls()
+        return depth_url.rsplit("@depth@100ms", 1)[0] + "@markPrice@1s"
+
+    async def _derivative_forever(self, venue: str) -> None:
+        stats = self.stats[venue]
+        backoff = self.settings.reconnect_min_seconds
+        while not self.stop_event.is_set():
+            try:
+                if venue == "BINANCE":
+                    url = self._binance_mark_price_url()
+                    async with self.websocket_connector(venue, url) as websocket:
+                        stats.derivative_connections += 1
+                        self._connector_log("DERIVATIVE_CONNECTED", StructuredLogLevel.INFO,
+                                            "derivatives connector established", venue=venue, host=self._host(url))
+                        backoff = self.settings.reconnect_min_seconds
+                        while not self.stop_event.is_set():
+                            frame = await asyncio.wait_for(
+                                websocket.recv(), timeout=self.settings.derivative_stale_seconds)
+                            self._process_derivative_frame(venue, url, frame, channel="markPrice")
+                else:
+                    url = self._bybit_url()
+                    topic = f"tickers.{self.symbols[venue]}"
+                    async with self.websocket_connector(venue, url) as websocket:
+                        stats.derivative_connections += 1
+                        self.bybit_ticker_merger.reset()          # deltas only after a new snapshot
+                        self._connector_log("DERIVATIVE_CONNECTED", StructuredLogLevel.INFO,
+                                            "derivatives connector established", venue=venue, host=self._host(url))
+                        await websocket.send(json.dumps({"op": "subscribe", "args": [topic]}))
+                        backoff = self.settings.reconnect_min_seconds
+                        while not self.stop_event.is_set():
+                            frame = await asyncio.wait_for(
+                                websocket.recv(), timeout=self.settings.derivative_stale_seconds)
+                            self._process_derivative_frame(venue, url, frame, channel=topic)
+                if not self.stop_event.is_set():
+                    raise ConnectionError("derivatives feed connection closed")
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                stats.last_error = f"{type(exc).__name__}: {exc}"
+                self._connector_log("DERIVATIVE_CONNECTOR_ERROR", StructuredLogLevel.ERROR,
+                                    stats.last_error, venue=venue)
+            if self.stop_event.is_set():
+                break
+            try:
+                await asyncio.wait_for(self.stop_event.wait(), timeout=backoff)
+            except TimeoutError:
+                pass
+            backoff = min(self.settings.reconnect_max_seconds, backoff * 2)
+
+    def _process_derivative_frame(
+        self, venue: str, url: str, original_frame: str | bytes, *, channel: str,
+    ) -> int:
+        receive_ts_ns = self.clock_ns()
+        adapter_version = "binance-mark-price-v1" if venue == "BINANCE" else "bybit-linear-ticker-v1"
+        captured = self._capture_and_parse(
+            venue, url, channel, "WEBSOCKET", original_frame, receive_ts_ns, adapter_version,
+            trade_stream=True,
+        )
+        if captured is None:
+            return 0
+        wire, raw, payload = captured
+        is_ticker = (
+            payload.get("e") == "markPriceUpdate" if venue == "BINANCE"
+            else str(payload.get("topic", "")).startswith("tickers.")
+        )
+        if not is_ticker:
+            self.stats[venue].control_frames += 1
+            self.recorder.record_control(wire, raw)
+            return 0
+        try:
+            if venue == "BINANCE":
+                ticker = normalize_binance_mark_price(payload, receive_ts_ns, self.config.instrument_id, raw.raw_ref)
+            else:
+                ticker = self.bybit_ticker_merger.normalize(
+                    payload, receive_ts_ns, self.config.instrument_id, raw.raw_ref)
+            self._resolve(venue, ticker.symbol)
+            validate_derivative_ticker(ticker)
+        except (KeyError, TypeError, ValueError, ArithmeticError) as exc:
+            self.stats[venue].derivative_errors += 1
+            self.recorder.record_rejection(wire, exc, raw_ref=raw.raw_ref, stage="DERIVATIVE_NORMALIZE")
+            return 0
+        self.arrival_ordinal += 1
+        ticker = with_arrival(ticker, self.arrival_ordinal)
+        if self.derivative_listener is not None:
+            self.derivative_listener(ticker)
+        self.recorder.record_derivative(wire, raw, ticker)
+        self.stats[venue].derivative_ticks += 1
+        return 1
 
     async def _run_binance_trade_connection(self) -> None:
         venue = "BINANCE"

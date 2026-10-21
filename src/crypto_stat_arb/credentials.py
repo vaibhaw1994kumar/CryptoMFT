@@ -463,6 +463,7 @@ class CredentialedTestnetTransport:
         permission = {
             "CANCEL": CredentialPermission.CANCEL,
             "QUERY": CredentialPermission.READ_ACCOUNT,
+            "VERIFY_ACCOUNT": CredentialPermission.READ_ACCOUNT,
         }.get(str(request.get("action")), CredentialPermission.TRADE)
         return self.broker.inject(
             self.credential_id, actor=self.actor, venue=self.venue,

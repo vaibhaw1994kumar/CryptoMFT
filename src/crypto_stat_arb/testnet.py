@@ -1,4 +1,4 @@
-"""Venue testnet execution: Binance Spot Testnet and Bybit v5 testnet.
+"""Venue testnet execution: Binance Spot / USDⓈ-M Futures testnets and Bybit v5 testnet.
 
 Transports implement the ``CredentialedTestnetTransport`` contract
 ``(canonical_request_dict, secret) -> native events``. The secret is injected
@@ -13,6 +13,13 @@ Safety properties:
 * a transport/network failure raises, which the adapter turns into "no
   answer" -> the OMS queries the order later and never resends it;
 * Bybit's create response carries no fill, so fills come from order queries.
+* perpetuals (Binance USDⓈ-M futures testnet, Bybit ``category=linear``):
+  reduce-only is sent, post-only is ``GTX`` / ``PostOnly``, maker/taker and
+  the venue commission of each fill come from the venue's trade/execution
+  lists (``/fapi/v1/userTrades``, ``/v5/execution/list``), and
+  ``verify_account`` refuses to trade unless the account is in one-way
+  position mode (and, on Bybit, in the expected margin mode). Account
+  settings are only read, never changed.
 
 These transports are verified against recorded/fake HTTP responses in the
 test suite only; running them against the real testnets requires testnet
@@ -37,8 +44,9 @@ from .sdk import TestnetVenueAdapter
 
 
 BINANCE_SPOT_TESTNET_URL = "https://testnet.binance.vision"
+BINANCE_FUTURES_TESTNET_URL = "https://testnet.binancefuture.com"
 BYBIT_TESTNET_URL = "https://api-testnet.bybit.com"
-TESTNET_HOSTS = frozenset({"testnet.binance.vision", "api-testnet.bybit.com"})
+TESTNET_HOSTS = frozenset({"testnet.binance.vision", "testnet.binancefuture.com", "api-testnet.bybit.com"})
 
 HttpCall = Callable[[str, str, dict[str, str], bytes | None, float], tuple[int, str]]
 
@@ -148,6 +156,8 @@ class VenueTestnetTransport:
         except KeyError as exc:
             raise ValueError(f"no {self.venue} symbol for {request['instrument_id']}") from exc
         action = str(request["action"])
+        if action == "VERIFY_ACCOUNT":
+            return self.verify_account(request, symbol, key, secret_bytes)
         if action in {"SUBMIT", "REPLACE"}:
             return self.submit(request, symbol, key, secret_bytes)
         if action == "CANCEL":
@@ -164,6 +174,17 @@ class VenueTestnetTransport:
 
     def query(self, request, symbol, key, secret):  # pragma: no cover - abstract
         raise NotImplementedError
+
+    def verify_account(self, request, symbol, key, secret) -> tuple[dict[str, Any], ...]:
+        """Spot accounts have no position mode or margin settings to check."""
+        return ({"event_type": "ACCOUNT_VERIFIED", "market": "spot"},)
+
+
+def _liquidity(maker_flags: list[bool]) -> str:
+    """One label per order update: MAKER only if every fill was maker (TAKER otherwise, the dearer)."""
+    if not maker_flags:
+        return ""
+    return "MAKER" if all(maker_flags) else "TAKER"
 
 
 class BinanceSpotTestnetTransport(VenueTestnetTransport):
@@ -340,6 +361,7 @@ class BybitV5TestnetTransport(VenueTestnetTransport):
         if request["order_type"] != "MARKET":
             body["price"] = decimal_text(request["price"])
             body["timeInForce"] = "PostOnly" if request.get("post_only") else request["time_in_force"]
+        body.update(self._order_extras(request))
         payload = self._signed("POST", "/v5/order/create", key, secret, body=body)
         if payload.get("retCode") != 0:
             return ({
@@ -363,6 +385,10 @@ class BybitV5TestnetTransport(VenueTestnetTransport):
             if attempt + 1 < self.settle_queries:
                 self.sleep(self.settle_interval_seconds)
         return tuple(events)
+
+    def _order_extras(self, request: dict[str, Any]) -> dict[str, Any]:
+        """Category-specific order fields (none for spot)."""
+        return {}
 
     def query(self, request, symbol, key, secret):
         state = self._state(request["order_id"], symbol, key, secret)
@@ -389,7 +415,179 @@ class BybitV5TestnetTransport(VenueTestnetTransport):
         return map_order_state(kind, executed, average, common, submit=False)
 
 
-TRANSPORTS = {"BINANCE": BinanceSpotTestnetTransport, "BYBIT": BybitV5TestnetTransport}
+class BinanceFuturesTestnetTransport(BinanceSpotTestnetTransport):
+    """Binance USDⓈ-M futures testnet (one-way position mode only)."""
+
+    ORDER_PATH = "/fapi/v1/order"
+
+    def __init__(self, *, base_url: str = BINANCE_FUTURES_TESTNET_URL, **kwargs: Any) -> None:
+        super().__init__(base_url=base_url, **kwargs)
+
+    def _events(self, payload: dict[str, Any], *, submit: bool) -> tuple[dict[str, Any], ...]:
+        native_status = str(payload.get("status", ""))
+        executed = Decimal(str(payload.get("executedQty") or "0"))
+        average = Decimal(str(payload.get("avgPrice") or "0"))
+        if not average and executed and payload.get("cumQuote"):
+            average = Decimal(str(payload["cumQuote"])) / executed
+        common: dict[str, Any] = {
+            "venue_order_id": str(payload.get("orderId", "")),
+            "native_status": native_status,
+        }
+        venue_ms = payload.get("updateTime") or payload.get("time")
+        if venue_ms:
+            common["event_ts_ns"] = int(venue_ms) * 1_000_000
+        if executed and getattr(self, "_fills", None) is not None:
+            common.update(self._fills)
+        return map_order_state(
+            self.STATUS.get(native_status, native_status), executed, average, common, submit=submit,
+        )
+
+    def _fill_details(self, symbol: str, order_id: Any, key: str, secret: bytes) -> dict[str, Any]:
+        """Maker/taker and venue commission per fill (``/fapi/v1/userTrades``)."""
+        status, rows = self._signed("GET", "/fapi/v1/userTrades",
+                                    {"symbol": symbol, "orderId": order_id}, key, secret)
+        if status != 200 or not isinstance(rows, list):
+            return {}
+        return {
+            "liquidity": _liquidity([bool(row.get("maker")) for row in rows]),
+            "venue_commission": [
+                {"commission": str(row.get("commission")), "asset": str(row.get("commissionAsset")),
+                 "qty": str(row.get("qty")), "maker": bool(row.get("maker"))}
+                for row in rows
+            ],
+        }
+
+    def _with_fills(self, payload: dict[str, Any], symbol: str, key: str, secret: bytes, *, submit: bool):
+        self._fills = (
+            self._fill_details(symbol, payload.get("orderId"), key, secret)
+            if Decimal(str(payload.get("executedQty") or "0")) else None
+        )
+        try:
+            return self._events(payload, submit=submit)
+        finally:
+            self._fills = None
+
+    def submit(self, request, symbol, key, secret):
+        params: dict[str, Any] = {
+            "symbol": symbol, "side": request["side"],
+            "quantity": decimal_text(request["quantity"]),
+            "newClientOrderId": request["order_id"], "newOrderRespType": "RESULT",
+        }
+        if request.get("reduce_only"):
+            params["reduceOnly"] = "true"          # one-way mode only (verified at start-up)
+        if request["order_type"] == "MARKET":
+            params["type"] = "MARKET"
+        else:
+            params.update(
+                type="LIMIT", price=decimal_text(request["price"]),
+                timeInForce="GTX" if request.get("post_only") else request["time_in_force"],
+            )
+        status, payload = self._signed("POST", self.ORDER_PATH, params, key, secret)
+        if status != 200:
+            return ({"event_type": "REJECTED",
+                     "reason": f"binance {payload.get('code')}: {payload.get('msg')}"},)
+        return self._with_fills(payload, symbol, key, secret, submit=True)
+
+    def query(self, request, symbol, key, secret):
+        status, payload = self._signed("GET", self.ORDER_PATH, {
+            "symbol": symbol, "origClientOrderId": request["order_id"],
+        }, key, secret)
+        if status == 400 and payload.get("code") == -2013:
+            return ({"event_type": None, "reason": "order does not exist"},)
+        if status != 200:
+            raise ConnectionError(f"binance futures order query failed: {payload.get('msg')}")
+        return self._with_fills(payload, symbol, key, secret, submit=False)
+
+    def cancel(self, request, symbol, key, secret):
+        status, payload = self._signed("DELETE", self.ORDER_PATH, {
+            "symbol": symbol,
+            "origClientOrderId": request.get("target_order_id") or request["order_id"],
+        }, key, secret)
+        if status == 400 and payload.get("code") in {-2011, -2013}:
+            return ({"event_type": "REJECTED", "reason": "cancel target is not open"},)
+        if status != 200:
+            raise ConnectionError(f"binance futures cancel failed: {payload.get('msg')}")
+        return self._events(payload, submit=False)
+
+    def verify_account(self, request, symbol, key, secret):
+        status, payload = self._signed("GET", "/fapi/v1/positionSide/dual", {}, key, secret)
+        if status != 200:
+            raise ConnectionError(f"binance futures position-mode query failed: {payload.get('msg')}")
+        if payload.get("dualSidePosition") is not False:
+            raise ValueError("binance futures account is in hedge mode; the platform trades one-way mode only "
+                             "(change it in the account, not from code)")
+        return ({"event_type": "ACCOUNT_VERIFIED", "market": "linear", "position_mode": "ONE_WAY",
+                 "margin_mode": "NOT_VERIFIED (per-symbol margin type not checked)"},)
+
+
+class BybitV5LinearTestnetTransport(BybitV5TestnetTransport):
+    """Bybit v5 linear perpetuals on the testnet (one-way position mode only)."""
+
+    MARGIN_MODES = {"CROSS": "REGULAR_MARGIN", "ISOLATED": "ISOLATED_MARGIN"}
+
+    def __init__(self, *, expected_margin_mode: str | None = None, **kwargs: Any) -> None:
+        kwargs.setdefault("category", "linear")
+        super().__init__(**kwargs)
+        self.expected_margin_mode = expected_margin_mode
+
+    def _order_extras(self, request: dict[str, Any]) -> dict[str, Any]:
+        extras: dict[str, Any] = {"positionIdx": 0}          # one-way mode (verified at start-up)
+        if request.get("reduce_only"):
+            extras["reduceOnly"] = True
+        return extras
+
+    def submit(self, request, symbol, key, secret):
+        events = super().submit(request, symbol, key, secret)
+        return self._add_liquidity(events, request["order_id"], key, secret)
+
+    def query(self, request, symbol, key, secret):
+        return self._add_liquidity(super().query(request, symbol, key, secret), request["order_id"], key, secret)
+
+    def _add_liquidity(self, events, order_link_id: str, key: str, secret: bytes):
+        if not any(Decimal(str(e.get("cumulative_filled_quantity") or "0")) for e in events):
+            return events
+        payload = self._signed("GET", "/v5/execution/list", key, secret, params={
+            "category": self.category, "orderLinkId": order_link_id,
+        })
+        rows = payload.get("result", {}).get("list", []) if payload.get("retCode") == 0 else []
+        if not rows:
+            return events
+        liquidity = _liquidity([str(r.get("isMaker")).lower() == "true" for r in rows])
+        commission = [{"commission": str(r.get("execFee")), "asset": str(r.get("feeCurrency", "")),
+                       "qty": str(r.get("execQty")), "maker": str(r.get("isMaker")).lower() == "true"}
+                      for r in rows]
+        return tuple(
+            {**e, "liquidity": liquidity, "venue_commission": commission}
+            if Decimal(str(e.get("cumulative_filled_quantity") or "0")) else e
+            for e in events
+        )
+
+    def verify_account(self, request, symbol, key, secret):
+        info = self._signed("GET", "/v5/account/info", key, secret, params={})
+        if info.get("retCode") != 0:
+            raise ConnectionError(f"bybit account info failed: {info.get('retMsg')}")
+        margin_mode = str(info.get("result", {}).get("marginMode", ""))
+        expected = self.MARGIN_MODES.get(str(self.expected_margin_mode or "").upper())
+        if expected and margin_mode != expected:
+            raise ValueError(f"bybit account margin mode {margin_mode} does not match the configured "
+                             f"{self.expected_margin_mode} ({expected}); change it in the account, not from code")
+        positions = self._signed("GET", "/v5/position/list", key, secret,
+                                 params={"category": self.category, "symbol": symbol})
+        if positions.get("retCode") != 0:
+            raise ConnectionError(f"bybit position list failed: {positions.get('retMsg')}")
+        modes = {int(row.get("positionIdx", 0)) for row in positions.get("result", {}).get("list", [])}
+        if modes - {0}:
+            raise ValueError("bybit position is in hedge (both-side) mode; the platform trades one-way mode only")
+        return ({"event_type": "ACCOUNT_VERIFIED", "market": "linear", "position_mode": "ONE_WAY",
+                 "margin_mode": margin_mode or "UNKNOWN"},)
+
+
+TRANSPORTS = {
+    ("BINANCE", "spot"): BinanceSpotTestnetTransport,
+    ("BINANCE", "linear"): BinanceFuturesTestnetTransport,
+    ("BYBIT", "spot"): BybitV5TestnetTransport,
+    ("BYBIT", "linear"): BybitV5LinearTestnetTransport,
+}
 
 
 def build_testnet_adapters(
@@ -399,16 +597,39 @@ def build_testnet_adapters(
     *,
     http: HttpCall = urllib_http,
     clock_ns: Callable[[], int] = time.time_ns,
+    markets: dict[str, str] | None = None,
+    margin_modes: dict[str, str] | None = None,
+    verify_accounts: bool = True,
 ) -> dict[str, TestnetVenueAdapter]:
-    """One credentialed testnet adapter per venue (fails closed on gaps)."""
+    """One credentialed testnet adapter per venue (fails closed on gaps).
+
+    ``markets`` (venue -> ``spot`` | ``linear``) selects the transport; take it
+    from the instruments' product types with ``markets_for``. A futures
+    account is verified (one-way mode; Bybit margin mode) before any order.
+    """
     adapters = {}
     for venue, credential_id in sorted(credential_ids.items()):
-        transport_cls = TRANSPORTS.get(venue)
+        market = (markets or {}).get(venue, "spot")
+        transport_cls = TRANSPORTS.get((venue, market))
         if transport_cls is None:
-            raise ValueError(f"no testnet transport for venue {venue}")
-        transport = transport_cls(symbols=symbols[venue], http=http)
-        adapters[venue] = TestnetVenueAdapter(
-            venue, CredentialedTestnetTransport(broker, credential_id, venue, transport),
-            clock_ns=clock_ns,
-        )
+            raise ValueError(f"no testnet transport for {venue} {market}")
+        kwargs: dict[str, Any] = {"symbols": symbols[venue], "http": http}
+        if transport_cls is BybitV5LinearTestnetTransport:
+            kwargs["expected_margin_mode"] = (margin_modes or {}).get(venue)
+        transport = transport_cls(**kwargs)
+        credentialed = CredentialedTestnetTransport(broker, credential_id, venue, transport)
+        if verify_accounts and market == "linear":
+            instrument_id = next(iter(symbols[venue]))
+            credentialed({"action": "VERIFY_ACCOUNT", "instrument_id": instrument_id})
+        adapters[venue] = TestnetVenueAdapter(venue, credentialed, clock_ns=clock_ns)
     return adapters
+
+
+def markets_for(cfg) -> dict[str, str]:
+    """venue -> ``linear`` for perpetual instruments, ``spot`` otherwise."""
+    from .funding import is_perpetual
+
+    return {
+        venue: "linear" if is_perpetual(cfg.instruments.get(venue, cfg.instrument_id).product_type) else "spot"
+        for venue in cfg.venues
+    }

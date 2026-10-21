@@ -237,6 +237,7 @@ class FundingEngine(PeriodicSettlement):
         self, ledger: "Ledger", specs: Iterable[FundingSpec], rates: FundingRateBook | None = None, *,
         settle_lag_ns: int = 5_000_000_000, max_rate_age_ns: int | None = None,
         mark_fallback: str = "none", max_abs_rate: Decimal = Decimal("0.05"),
+        max_mark_age_ns: int = 60_000_000_000,
     ) -> None:
         super().__init__(settle_lag_ns=settle_lag_ns)
         self.ledger = ledger
@@ -244,9 +245,16 @@ class FundingEngine(PeriodicSettlement):
         self.max_abs_rate = max_abs_rate
         self.rates = (rates or FundingRateBook()).validated(self.specs, max_abs_rate)
         self.max_rate_age_ns = max_rate_age_ns
-        if mark_fallback not in ("none", "book_mid"):
-            raise ValueError("funding mark_fallback must be 'none' or 'book_mid'")
+        if mark_fallback not in ("none", "book_mid", "exchange_mark"):
+            raise ValueError("funding mark_fallback must be 'none', 'book_mid' or 'exchange_mark'")
         self.mark_fallback = mark_fallback
+        # exchange_mark: the venue's own mark price from the recorded
+        # derivatives stream, observed no more than max_mark_age before the
+        # settlement (not an approximation, unlike the book mid).
+        self.max_mark_age_ns = max_mark_age_ns
+        self._last_xmark: dict[tuple[str, str], tuple[int, Decimal]] = {}
+        self._xmark_at: dict[tuple[str, str, int], tuple[int, Decimal]] = {}
+        self.predictions_observed = 0
         self._last_mid: dict[tuple[str, str], tuple[int, Decimal]] = {}
         self._mid_at: dict[tuple[str, str, int], Decimal] = {}
         self.flags: list[dict[str, Any]] = []
@@ -270,6 +278,32 @@ class FundingEngine(PeriodicSettlement):
                     self._mid_at.setdefault((venue, instrument_id, when), last[1])
         if mid is not None:
             self._last_mid[key] = (ts_ns, mid)
+
+    def observe_exchange_mark(self, venue: str, instrument_id: str, ts_ns: int, mark: Decimal) -> None:
+        """The venue's mark price (derivatives stream) at ``ts_ns``."""
+        key = (venue, instrument_id)
+        if key not in self.specs:
+            return
+        self.begin(ts_ns)
+        last = self._last_xmark.get(key)
+        if last is not None:
+            for when in self._times(key, self.start_ns, ts_ns):
+                if last[0] <= when < ts_ns:
+                    self._xmark_at.setdefault((venue, instrument_id, when), last)
+        self._last_xmark[key] = (ts_ns, mark)
+
+    def observe_prediction(
+        self, venue: str, instrument_id: str, rate: Decimal, next_funding_ts_ns: int, asof_ns: int,
+        mark: Decimal | None = None,
+    ) -> None:
+        """The venue's current/predicted rate for its next settlement: for predict() only."""
+        if (venue, instrument_id) not in self.specs or abs(rate) > self.max_abs_rate:
+            return
+        self.rates.add(FundingRate(
+            venue, instrument_id, next_funding_ts_ns, rate, mark_price=mark,
+            source=EventSource.OBSERVED, asof_ns=asof_ns, predicted=True,
+        ))
+        self.predictions_observed += 1
 
     # -- PeriodicSettlement hooks -------------------------------------------------
     def _lines(self):
@@ -345,6 +379,14 @@ class FundingEngine(PeriodicSettlement):
             if mark is None and last is not None and last[0] <= ts_ns:
                 mark = last[1]
             mark_source = "book mid at settlement (approximation of the mark price)"
+        if mark is None and self.mark_fallback == "exchange_mark":
+            observed = self._xmark_at.get((spec.venue, spec.instrument_id, ts_ns))
+            last = self._last_xmark.get((spec.venue, spec.instrument_id))
+            if observed is None and last is not None and last[0] <= ts_ns:
+                observed = last
+            if observed is not None and ts_ns - observed[0] <= self.max_mark_age_ns:
+                mark = observed[1]
+                mark_source = "exchange mark price (recorded venue stream)"
         if mark is None or mark <= 0:
             self._flag(spec, ts_ns, "FUNDING_MARK_MISSING", position,
                        "no mark price in the record and no mid fallback")
@@ -382,6 +424,8 @@ class FundingEngine(PeriodicSettlement):
         return {
             "flags": self.flags,
             "last_mid": [[v, i, ts, str(mid)] for (v, i), (ts, mid) in sorted(self._last_mid.items())],
+            "last_xmark": [[v, i, ts, str(m)] for (v, i), (ts, m) in sorted(self._last_xmark.items())],
+            "xmark_at": [[v, i, when, ts, str(m)] for (v, i, when), (ts, m) in sorted(self._xmark_at.items())],
             "mid_at": [[v, i, ts, str(mid)] for (v, i, ts), mid in sorted(self._mid_at.items())],
         }
 
@@ -389,6 +433,8 @@ class FundingEngine(PeriodicSettlement):
         self.flags = list(state.get("flags", []))
         self._last_mid = {(v, i): (int(ts), Decimal(mid)) for v, i, ts, mid in state.get("last_mid", [])}
         self._mid_at = {(v, i, int(ts)): Decimal(mid) for v, i, ts, mid in state.get("mid_at", [])}
+        self._last_xmark = {(v, i): (int(ts), Decimal(m)) for v, i, ts, m in state.get("last_xmark", [])}
+        self._xmark_at = {(v, i, int(w)): (int(ts), Decimal(m)) for v, i, w, ts, m in state.get("xmark_at", [])}
 
     def on_trade_fill(self, event: EconomicEvent) -> None:
         """A fill effective before a booked settlement: reverse and rebook it."""
@@ -486,6 +532,8 @@ class FundingEngine(PeriodicSettlement):
             "rules": {
                 "position_boundary": "fills matched strictly before the settlement timestamp count",
                 "mark_fallback": self.mark_fallback,
+                "max_mark_age_ns": self.max_mark_age_ns,
+                "predictions_observed": self.predictions_observed,
                 "settle_lag_ns": self.settle_lag_ns,
                 "max_rate_age_ns": self.max_rate_age_ns,
                 "stale_detection": "on" if self.max_rate_age_ns is not None else "off (max_rate_age_ms not set)",
