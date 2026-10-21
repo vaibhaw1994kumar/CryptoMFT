@@ -23,7 +23,9 @@ from new_backtest.fill_label import (
     extract_labels,
 )
 from new_backtest.batch_backtest import (
+    _aggregate_fold_results,
     _date_to_epoch,
+    _days_in_window,
     run_batch,
     run_pair,
 )
@@ -596,6 +598,288 @@ class TestFillGate(unittest.TestCase):
             )
             with self.assertRaises(ValueError):
                 CrossVenueArbBacktester(cfg)
+
+
+# ── WalkForwardFold.fit() horizon filter ──────────────────────────────────────
+
+class TestWalkForwardFoldHorizonFilter(unittest.TestCase):
+    """fit(horizon_s=h) must train only on records with that horizon."""
+
+    def _make_fold(self, n_short: int = 60, n_long: int = 60) -> WalkForwardFold:
+        """Build a fold with two horizon groups having different fill rates."""
+        day_s = 86_400.0
+        records = []
+        # horizon=1: 20% fill rate (hard to fill quickly)
+        for i in range(n_short):
+            ts = float(i) * day_s / n_short
+            records.append(FillLabelRecord(
+                timestamp=ts, symbol="BTCUSDT", side="bid", horizon_s=1,
+                filled=(i % 5 == 0),  # 20%
+                relative_to_touch_ticks=0, queue_ahead=100.0, local_depth=500.0,
+                local_depth_baseline=800.0, spread_pct=0.001, short_vol=0.0002,
+                trade_count=5.0, trade_sign=0.1, regime_bucket="calm",
+                terminal_reason="full_fill" if (i % 5 == 0) else "cancel",
+            ))
+        # horizon=15: 80% fill rate (easy over 15s)
+        for i in range(n_long):
+            ts = float(i) * day_s / n_long
+            records.append(FillLabelRecord(
+                timestamp=ts, symbol="BTCUSDT", side="bid", horizon_s=15,
+                filled=(i % 5 != 0),  # 80%
+                relative_to_touch_ticks=0, queue_ahead=100.0, local_depth=500.0,
+                local_depth_baseline=800.0, spread_pct=0.001, short_vol=0.0002,
+                trade_count=5.0, trade_sign=0.1, regime_bucket="calm",
+                terminal_reason="full_fill" if (i % 5 != 0) else "cancel",
+            ))
+        return WalkForwardFold(
+            fold_id=0,
+            cal_start_ts=0.0,
+            cal_end_ts=day_s,
+            eval_end_ts=2 * day_s,
+            cal_records=records,
+            eval_records=records,
+        )
+
+    def test_fit_with_horizon_filter_uses_only_matching_records(self):
+        """fit(horizon_s=1) trains only on horizon=1 records; fit(horizon_s=15) on horizon=15."""
+        fold = self._make_fold()
+
+        model_1s  = fold.fit(horizon_s=1)
+        model_15s = fold.fit(horizon_s=15)
+
+        self.assertIsNotNone(model_1s)
+        self.assertIsNotNone(model_15s)
+        self.assertEqual(model_1s._horizon_s, 1)
+        self.assertEqual(model_15s._horizon_s, 15)
+
+        # 1s model should predict low probability (20% fill rate)
+        # 15s model should predict high probability (80% fill rate)
+        # Compare base rates via intercept sign (intercept negative → low p)
+        import numpy as np
+        dummy = np.zeros((1, 9), dtype=np.float32)
+        p_1s  = model_1s.predict_proba(model_1s._scaler.transform(dummy))[0, 1]
+        p_15s = model_15s.predict_proba(model_15s._scaler.transform(dummy))[0, 1]
+        self.assertLess(p_1s, p_15s,
+                        "1s model should predict lower fill probability than 15s model")
+
+    def test_fit_without_horizon_uses_all_records(self):
+        """fit() without horizon_s keeps existing behaviour (mixes all horizons)."""
+        fold = self._make_fold(n_short=60, n_long=60)
+        model_mixed = fold.fit()
+        self.assertIsNotNone(model_mixed)
+        self.assertIsNone(model_mixed._horizon_s)
+
+    def test_fit_unknown_horizon_returns_none(self):
+        """fit(horizon_s=999) finds no records → returns None."""
+        fold = self._make_fold()
+        result = fold.fit(horizon_s=999)
+        self.assertIsNone(result)
+
+    def test_predict_filters_eval_records_by_horizon(self):
+        """predict(model, horizon_s=h) scores only eval records with matching horizon."""
+        import numpy as np
+        fold = self._make_fold()
+        model_1s = fold.fit(horizon_s=1)
+        self.assertIsNotNone(model_1s)
+
+        y_all, p_all = fold.predict(model_1s)
+        y_1s, p_1s   = fold.predict(model_1s, horizon_s=1)
+        y_15s, p_15s  = fold.predict(model_1s, horizon_s=15)
+
+        # horizon-filtered result is a strict subset of the unfiltered result
+        self.assertLessEqual(len(y_1s), len(y_all))
+        self.assertLessEqual(len(y_15s), len(y_all))
+        self.assertEqual(len(y_1s) + len(y_15s), len(y_all))
+
+    def test_predict_unknown_horizon_returns_empty(self):
+        """predict(model, horizon_s=999) finds no records → empty arrays."""
+        import numpy as np
+        fold = self._make_fold()
+        model = fold.fit(horizon_s=1)
+        y, p = fold.predict(model, horizon_s=999)
+        self.assertEqual(len(y), 0)
+        self.assertEqual(len(p), 0)
+
+
+# ── Stage 3 helpers ───────────────────────────────────────────────────────────
+
+class TestDaysInWindow(unittest.TestCase):
+    """_days_in_window maps calendar days to timestamp windows."""
+
+    DAYS = ["2026-09-01", "2026-09-02", "2026-09-03",
+            "2026-09-04", "2026-09-05"]
+
+    def test_all_days_in_wide_window(self):
+        start = _date_to_epoch("2026-09-01")
+        end   = _date_to_epoch("2026-09-06")
+        result = _days_in_window(self.DAYS, start, end)
+        self.assertEqual(result, self.DAYS)
+
+    def test_single_day_window(self):
+        start = _date_to_epoch("2026-09-03")
+        end   = _date_to_epoch("2026-09-04")
+        result = _days_in_window(self.DAYS, start, end)
+        self.assertEqual(result, ["2026-09-03"])
+
+    def test_empty_when_window_before_all_days(self):
+        start = _date_to_epoch("2026-08-01")
+        end   = _date_to_epoch("2026-08-31")
+        self.assertEqual(_days_in_window(self.DAYS, start, end), [])
+
+    def test_end_is_exclusive(self):
+        # end == epoch("2026-09-03") excludes that day
+        start = _date_to_epoch("2026-09-01")
+        end   = _date_to_epoch("2026-09-03")
+        result = _days_in_window(self.DAYS, start, end)
+        self.assertNotIn("2026-09-03", result)
+        self.assertIn("2026-09-01", result)
+        self.assertIn("2026-09-02", result)
+
+
+class TestAggregateFoldResults(unittest.TestCase):
+    """_aggregate_fold_results sums additive metrics, weights ratios."""
+
+    def _fold(self, pnl, signals_completed, capture):
+        return {
+            "realized_pnl": pnl,
+            "gross_pnl": pnl * 1.1,
+            "fees_paid": abs(pnl) * 0.1,
+            "unhedged_loss": 0.0,
+            "traded_notional": 100_000.0,
+            "signals_generated": 200,
+            "orders_sent": 180,
+            "orders_filled": 120,
+            "orders_missed": 60,
+            "orders_cancelled": 0,
+            "signals_completed": signals_completed,
+            "signals_unhedged": 5,
+            "edge_capture_ratio": capture,
+            "mean_realized_net_edge_bps": capture * 2.0,
+            "fill_log_path": "/tmp/fill_events.jsonl",
+            "start_date": "2026-09-01",
+            "end_date": "2026-09-07",
+            "strategy_report": {"reject_low_fill_prob": 10, "reject_stale_book": 5},
+        }
+
+    def test_additive_sums(self):
+        folds = [self._fold(100.0, 50, 0.8), self._fold(200.0, 100, 0.6)]
+        combined = _aggregate_fold_results(folds)
+        self.assertAlmostEqual(combined["realized_pnl"], 300.0)
+        self.assertEqual(combined["orders_filled"], 240)
+        self.assertEqual(combined["signals_completed"], 150)
+
+    def test_weighted_capture(self):
+        # fold0: signals_completed=50, capture=1.0
+        # fold1: signals_completed=100, capture=0.0
+        # weighted avg = (50*1.0 + 100*0.0) / 150 = 1/3
+        folds = [self._fold(100.0, 50, 1.0), self._fold(0.0, 100, 0.0)]
+        combined = _aggregate_fold_results(folds)
+        self.assertAlmostEqual(combined["edge_capture_ratio"], 50/150, places=6)
+
+    def test_strategy_report_merged(self):
+        folds = [self._fold(0.0, 10, 0.5), self._fold(0.0, 10, 0.5)]
+        combined = _aggregate_fold_results(folds)
+        self.assertEqual(combined["strategy_report"]["reject_low_fill_prob"], 20)
+        self.assertEqual(combined["strategy_report"]["reject_stale_book"], 10)
+
+    def test_fold_count_recorded(self):
+        folds = [self._fold(0.0, 1, 0.0)] * 3
+        combined = _aggregate_fold_results(folds)
+        self.assertEqual(combined["wf_fold_count"], 3)
+
+    def test_empty_input_returns_empty(self):
+        self.assertEqual(_aggregate_fold_results([]), {})
+
+    def test_zero_signals_completed_gives_zero_capture(self):
+        folds = [self._fold(0.0, 0, 0.9)]
+        combined = _aggregate_fold_results(folds)
+        self.assertEqual(combined["edge_capture_ratio"], 0.0)
+
+
+class TestWalkForwardBacktest(unittest.TestCase):
+    """Integration: wf_window_days path in run_pair doesn't crash."""
+
+    PAIR = "BTCUSDT"
+    DAYS = [
+        "2026-09-01", "2026-09-02", "2026-09-03",
+        "2026-09-04", "2026-09-05",
+    ]
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self.tmp.name) / "data"
+        for day in self.DAYS:
+            _write_snapshot(self.root, "bybit", self.PAIR, day,
+                            bid=59_990.0, ask=60_000.0)
+            _write_snapshot(self.root, "binance", self.PAIR, day,
+                            bid=61_200.0, ask=61_210.0)
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def _base_config(self) -> ArbBacktestConfig:
+        return ArbBacktestConfig(
+            data_root=self.root,
+            venues=("bybit", "binance"),
+            start_date=self.DAYS[0],
+            end_date=self.DAYS[-1],
+            latency_preset="colocated_both",
+            arb=ArbConfig(
+                mode=TAKER_TAKER,
+                min_net_edge_bps=1.0,
+                max_clip_notional=10_000.0,
+                block_on_toxic=False,
+            ),
+            include_deltas=False,
+        )
+
+    def test_wf_path_runs_without_exception(self):
+        """wf_window_days > 0 in TAKER_TAKER: cold pass runs; no folds (no fill log)."""
+        out = Path(self.tmp.name) / "out_wf"
+        outcome = run_pair(
+            self.PAIR, self._base_config(), out,
+            two_pass=False,
+            wf_window_days=2, wf_step_days=1,
+        )
+        # In TAKER_TAKER there are no passive orders → no fill_log_path from cold pass
+        # → status should be "ok" (cold pass ran) or "error" (no log / no folds), never an exception
+        self.assertIn(outcome.status, ("ok", "error"))
+
+    def test_wf_supersedes_calibration_days(self):
+        """When both wf_window_days>0 and calibration_days>0, wf path runs first."""
+        out = Path(self.tmp.name) / "out_wf_cal"
+        outcome = run_pair(
+            self.PAIR, self._base_config(), out,
+            two_pass=False,
+            calibration_days=2,
+            wf_window_days=2, wf_step_days=1,
+        )
+        # Detail from wf path contains "wf" or "wf_fold" not "cal="
+        # (It may be "error" if no folds, but not the static-split path)
+        if outcome.status == "ok":
+            self.assertIn("wf", outcome.detail)
+            self.assertNotIn("cal=", outcome.detail)
+
+    def test_wf_not_taken_when_zero(self):
+        """wf_window_days=0 falls through to calibration_days branch."""
+        out = Path(self.tmp.name) / "out_no_wf"
+        outcome = run_pair(
+            self.PAIR, self._base_config(), out,
+            two_pass=True,
+            calibration_days=2, wf_window_days=0,
+        )
+        self.assertEqual(outcome.status, "ok")
+        self.assertIn("cal=", outcome.detail)
+
+    def test_run_batch_wf_params_accepted(self):
+        """run_batch accepts wf_window_days / wf_step_days without error."""
+        out = Path(self.tmp.name) / "batch_wf"
+        summary = run_batch(
+            [self.PAIR], self._base_config(), str(out),
+            two_pass=False, verbose=False,
+            wf_window_days=2, wf_step_days=1,
+        )
+        self.assertEqual(summary.pairs_requested, 1)
 
 
 if __name__ == "__main__":
