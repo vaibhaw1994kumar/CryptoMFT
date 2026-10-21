@@ -316,6 +316,101 @@ class MakerSimulatorTests(unittest.TestCase):
         self.assertEqual(report["cancel_rejects_too_late"], 1)
         self.assertEqual(report["sanity_violation_count"], 0)
 
+    def test_at_price_fill_during_cancel_window_adverse_selection_example(self):
+        # Scenario from the audit doc: passive BUY at 100, market moves to 98,
+        # cancel takes 20 ms (fixture), an aggressive SELL hits AT 100 during that
+        # window.  This exercises the at-price (through=False) cancel-window path,
+        # distinct from the through-price case in the test above.
+        #
+        # Key timing constraint: the quote timer fires at the START of
+        # clock.advance_to(), BEFORE on_book updates state.best_bid.  The book
+        # move must therefore land in a PRIOR event so the timer at T0+1000ms
+        # already sees the new best-bid and decides to cancel.
+        sim = self.simulator(markout_horizons_ns=(1_000 * MS,))
+        # Step 1 — resting bid at 100; order arrives at T0+10 ms.
+        self.apply(sim, T0, [("100", "5")], [("101", "5")], snapshot=True)
+        self.apply(sim, T0 + 11 * MS, [("100", "5")])
+        old = next(o for o in sim.orders.values() if o.side == "BUY" and o.price == 100.0)
+        self.assertEqual(old.state, "RESTING")
+        # Step 2 — at T0+500 ms the book moves: ask falls to 98, best bid to 97.5.
+        # state.best_bid/ask are updated NOW, before the T0+1000 ms timer fires.
+        self.apply(sim, T0 + 500 * MS,
+                   [("100", "0"), ("97.5", "3")], [("101", "0"), ("98", "3")])
+        self.assertFalse(old.cancel_requested)  # timer hasn't fired yet
+        # Step 3 — neutral delta at T0+1005 ms triggers the T0+1000 ms timer,
+        # which now sees desired[BUY]=97.5 ≠ current price 100 → cancel sent.
+        self.apply(sim, T0 + 1_005 * MS, [("97.5", "3")])
+        self.assertTrue(old.cancel_requested, "cancel must be sent at quote-timer tick")
+        # Cancel applies at T0+1000ms+20ms = T0+1020ms.
+        # Step 4 — at-price SELL at 100 arrives at T0+1010ms (still in the 20ms window).
+        # The level was clamped to 0 at T0+500ms → queue_ahead=0, clamp_credit=5.
+        # Print volume 5.003 burns the 5.0 credit then fills 0.001 (our size).
+        sim.on_trade(trade_event("BYBIT", 1, T0 + 1_010 * MS, "100", "5.003", "SELL"))
+        self.assertEqual(old.state, "FILLED")
+        self.assertEqual(sim.fills[0]["cause"], "TRADE")        # at-price, not TRADE_THROUGH
+        self.assertTrue(sim.fills[0]["cancel_pending"])
+        self.assertAlmostEqual(sim.fills[0]["price"], 100.0)
+        # Step 5 — real inventory updates immediately; known_inventory waits for report.
+        venue = sim.venues["BYBIT"]
+        self.assertAlmostEqual(venue.inventory, sim.initial_inventory + 0.001)
+        self.assertAlmostEqual(venue.known_inventory, sim.initial_inventory)
+        # Step 6 — advance past the 1s markout horizon; mid is now (97.5+98)/2=97.75.
+        self.apply(sim, T0 + 2_100 * MS, [("97.5", "3")])
+        sim.finish()
+        report = sim.report()["venues"]["BYBIT"]
+        self.assertEqual(report["cancel_rejects_too_late"], 1)
+        self.assertEqual(report["fills_while_cancel_pending"], 1)
+        # The fill at 100 is outside 2% of the post-move book (97.5/98) — this IS
+        # the adverse selection the test exercises; expect exactly this one violation.
+        self.assertEqual(report["sanity_violation_count"], 1)
+        self.assertIn("fill price 100.0 outside", report["sanity_violations"][0])
+        markout = report["markout_bps"].get("1000ms")
+        self.assertIsNotNone(markout, "markout horizon fires before end of data")
+        # BUY markout: (97.75 - 100) / 100 * 10000 = -225 bps (adverse)
+        self.assertLess(markout["mean"], 0, "adverse selection expected after buying into the move")
+        self.assertAlmostEqual(markout["mean"], -225.0, places=1)
+
+    def test_exposure_check_prevents_new_order_during_cancel_window(self):
+        # When inventory is almost full the cancel-pending order's outstanding
+        # size must be counted so the strategy cannot post a second order that
+        # would exceed the band.
+        # initial=0.009, max=0.01, quote_size=0.001
+        # known_inventory + outstanding + quote_size = 0.009 + 0.001 + 0.001 = 0.011 > 0.01
+        sim = self.simulator(initial_inventory=0.009)
+        self.apply(sim, T0, [("100", "5")], [("101", "5")], snapshot=True)
+        self.apply(sim, T0 + 11 * MS, [("100", "5")])
+        old = next(o for o in sim.orders.values() if o.side == "BUY")
+        self.assertEqual(old.state, "RESTING")
+        # Book moves at T0+500 ms so the T0+1000 ms timer will issue the cancel.
+        self.apply(sim, T0 + 500 * MS, [("100", "0"), ("99", "5")])
+        self.apply(sim, T0 + 1_005 * MS, [("99", "5")])
+        self.assertTrue(old.cancel_requested)
+        # _exposure_allows must BLOCK a new BUY because outstanding already fills the band.
+        new_bids = [o for o in sim.orders.values()
+                    if o.side == "BUY" and not o.cancel_requested]
+        self.assertEqual(len(new_bids), 0,
+                         "no new buy may be sent while cancel-pending order fills the band")
+        sim.finish()
+        report = sim.report()["venues"]["BYBIT"]
+        self.assertEqual(report["sanity_violation_count"], 0)
+        self.assertLessEqual(report["inventory_range"][1], sim.max_inventory + 1e-9)
+
+    def test_markout_truncation_at_end_of_data(self):
+        # Markouts whose horizon extends past the last book event are truncated.
+        # The report must count them separately so callers can adjust for the bias.
+        sim = self.simulator(markout_horizons_ns=(500 * MS,))
+        self.apply(sim, T0, [("100", "1")], [("101", "1")], snapshot=True)
+        self.apply(sim, T0 + 11 * MS, [("100", "1")])
+        # A SELL through our 100 bid fills the order at T0+200ms.
+        sim.on_trade(trade_event("BYBIT", 1, T0 + 200 * MS, "99", "1", "SELL"))
+        # One more book tick so the fill is observed and recorded.
+        self.apply(sim, T0 + 300 * MS, [("100", "1")])
+        # Finish at T0+300ms — the 500ms markout horizon (T0+700ms) never fires.
+        sim.finish(T0 + 300 * MS)
+        report = sim.report()["venues"]["BYBIT"]
+        self.assertEqual(report["markouts_truncated"], 1)
+        self.assertNotIn("500ms", report["markout_bps"])
+
     def test_a_crossing_book_never_fills_without_a_print(self):
         sim = self.simulator()
         self.apply(sim, T0, [("100", "5")], [("101", "5")], snapshot=True)
