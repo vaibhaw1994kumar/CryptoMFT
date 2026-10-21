@@ -520,6 +520,8 @@ def reconcile(
             "fee_asset_revaluation": str(components["fees_and_rebates_at_close"] - (rebates - fee_cost)),
             "out_of_plan_fees": str(out_of_plan_fees),
             "transfer_fees_at_initiation": str(transfer_fee_cost),
+            # A fee booked in the asset with no price to value it: INCOMPLETE.
+            "unvalued_transfer_fees": [e.event_id for e in transfer_fee_events if e.reporting_value is None],
             "transfer_flow": str(transfer_flow),
             "transfer_valuation": str(transfer_valuation),
             "transfer_mode": transfer_mode or "NOT_MODELLED",
@@ -643,7 +645,7 @@ def reconcile(
     failed = [c for c in checks if not c["passed"]]
     status = "FAIL" if failed else "INCOMPLETE" if missing_all or any(
         row["unvalued_fee_events"] or row["funding_flags"] or row["unvalued_borrow_accruals"]
-        or row["fee_fallbacks"]
+        or row["fee_fallbacks"] or row["unvalued_transfer_fees"]
         or any(not f.startswith("UNFINANCED_SHORT") for f in row["borrow_flags"])
         for row in rows.values()
     ) else "RECONCILED"

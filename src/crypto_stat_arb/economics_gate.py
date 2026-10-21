@@ -16,6 +16,7 @@ PASS or FAIL:
   ``FUNDING_DATA``       a settlement with a position had no rate / stale rate / no mark,
                          or a perpetual has no funding schedule
   ``BORROW_DATA``        borrow interest could not be valued, or a buy-in had no price
+  ``TRANSFER_DATA``      a transfer fee could not be valued
 
 Funding's ``economic_status`` is what counts. Data gaps while flat are
 reported, not gated (see funding.py).
@@ -27,7 +28,8 @@ import json
 from pathlib import Path
 from typing import Any, Mapping
 
-REASONS = ("MISSING_PRICE", "FEE_ASSET_UNPRICED", "FEE_RULE_FALLBACK", "FUNDING_DATA", "BORROW_DATA")
+REASONS = ("MISSING_PRICE", "FEE_ASSET_UNPRICED", "FEE_RULE_FALLBACK", "FUNDING_DATA", "BORROW_DATA",
+           "TRANSFER_DATA")
 
 
 def _read(path: Path) -> Any:
@@ -47,6 +49,8 @@ def incomplete_reasons(report: dict[str, Any], funding: dict[str, Any] | None) -
             reasons.setdefault("FUNDING_DATA", []).append(f"{venue}:{item}")
         for item in row.get("unvalued_borrow_accruals", []):
             reasons.setdefault("BORROW_DATA", []).append(f"{venue}:unvalued accrual {item}")
+        for item in row.get("unvalued_transfer_fees", []):
+            reasons.setdefault("TRANSFER_DATA", []).append(f"{venue}:unvalued transfer fee {item}")
         for item in row.get("borrow_flags", []):
             if not item.startswith("UNFINANCED_SHORT"):
                 reasons.setdefault("BORROW_DATA", []).append(f"{venue}:{item}")

@@ -108,6 +108,17 @@ class LifecycleTests(unittest.TestCase):
         self.assertNotIn("TRANSFER", binance["not_modelled"])
         self.assertEqual(Decimal(state["venues"]["BINANCE"]["transfer_fees"]), Decimal("6"))
 
+    def test_an_unpriced_transfer_fee_makes_the_run_incomplete(self):
+        ledger, risk, engine = setup()
+        engine.price = lambda venue, asset: None
+        engine.initiate("BINANCE", "BYBIT", "BTC", Decimal("0.01"), T0)
+        self.assertEqual(engine.flags[0]["code"], "TRANSFER_FEE_UNPRICED")
+        prices = Valuation("USDT", {(v, "BTC"): Decimal("60000") for v in ("BINANCE", "BYBIT")})
+        report = reconcile(ledger.economics, opening=prices, closing=prices, transfer_mode="MODELLED")
+        self.assertEqual(report["status"], "INCOMPLETE")
+        from crypto_stat_arb.economics_gate import incomplete_reasons
+        self.assertIn("TRANSFER_DATA", incomplete_reasons(report, None))
+
     def test_no_rebalancing_mode_is_reported_as_such(self):
         ledger, _, _ = setup()
         report = reconcile(ledger.economics, opening=Valuation("USDT"), closing=Valuation("USDT"),
