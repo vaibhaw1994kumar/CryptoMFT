@@ -25,6 +25,7 @@ from .borrow import BorrowEngine, BorrowLine, BorrowRecall
 from .financing_journal import FinancingJournal
 from .funding import FundingEngine, FundingRateBook, FundingSpec, is_perpetual
 from .margin import LiquidationEngine, MarginConfig
+from .transfers import RebalanceRule, TransferEngine, TransferRoute
 from .risk import InventoryModel
 from .ledger import Ledger
 from .models import EventType, MarketEvent, Opportunity, PlanState
@@ -220,6 +221,10 @@ class TradingSession:
         self.funding = funding_engine(cfg, self.ledger)
         self.borrow = borrow_engine(cfg, self.ledger, self._borrow_forced_close)
         self.risk.borrow = self.borrow
+        self.transfers = self._transfer_engine(cfg)
+        if self.transfers.configured:
+            self.risk.unavailable_provider = self.transfers.in_transit_out
+            self.risk.rebalancing = self.transfers.rebalance_enabled
         self.financing_journal: FinancingJournal | None = None
         if plan_store is not None:
             # Journal fills (buy-ins, liquidations) need the same asset mapping
@@ -232,6 +237,7 @@ class TradingSession:
             for engine in (self.funding, self.borrow):
                 engine.journal = self.financing_journal
                 engine.restore(self.ledger.economics.events)
+            self.transfers.restore(self.ledger.economics.events)
         # Fills rebuilt from the plan store are history, not new fills: the
         # engines must not open loans or rebook settlements for them again.
         listeners, self.ledger.trade_fill_listeners = self.ledger.trade_fill_listeners, []
@@ -372,6 +378,8 @@ class TradingSession:
         if self.borrow.configured:
             self.borrow.process(now)
             self.borrow.settle_until(now)
+        if self.transfers.configured:
+            self.transfers.process(now)
         if self.margin_venues:
             self.oms.retry_flatten(event.venue, now)
             if (event.venue, event.instrument_id) in self.liquidation.active:
@@ -545,6 +553,33 @@ class TradingSession:
             if self.borrow.configured:
                 self.borrow.process(self.last_event_ts_ns)
                 self.borrow.settle_until(self.last_event_ts_ns, final=True)
+            if self.transfers.configured:
+                self.transfers.process(self.last_event_ts_ns)   # never confirmed past the data
+
+    # -- transfers (ECO05) ----------------------------------------------------------
+    def _transfer_engine(self, cfg: AppConfig) -> TransferEngine:
+        section = cfg.transfers or {}
+        rebalance = section.get("rebalance") or {}
+        return TransferEngine(
+            self.ledger, [TransferRoute.from_config(row) for row in section.get("routes", [])],
+            free_balance=lambda venue, asset: self.risk.balance_view(venue, asset)["free"],
+            rebalance=[
+                RebalanceRule(str(asset), Decimal(str(rule["low_watermark"])), Decimal(str(rule["target"])))
+                for asset, rule in (rebalance.get("assets") or {}).items()
+            ],
+            rebalance_enabled=bool(rebalance.get("enabled", False)),
+            cooldown_ns=int(rebalance.get("cooldown_ms", 60_000)) * 1_000_000,
+            price=self._asset_mid,
+        )
+
+    def _asset_mid(self, venue: str, asset: str) -> Decimal | None:
+        for (book_venue, instrument_id), book in self.books.items():
+            if book_venue != venue or not (book.bids and book.asks):
+                continue
+            spec = self.cfg.instruments.get(venue, instrument_id)
+            if spec.base == asset and spec.quote == "USDT":
+                return (book.best_bid + book.best_ask) / Decimal("2")
+        return None
 
     # -- margin (ECO04) -------------------------------------------------------------
     def _venue_adapter(self, venue: str):

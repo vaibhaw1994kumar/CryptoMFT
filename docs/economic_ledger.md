@@ -429,6 +429,60 @@ are in `tests/test_margin_tiers.py`.
   notional) and `refusals_by_reason`. Both appear in the run summary under
   `inventory`.
 
+## Transfers and rebalancing (ECO05, `src/crypto_stat_arb/transfers.py`)
+
+Without `risk.transfers` the platform is in **no-rebalancing mode**
+(`PRE_FUNDED_INVENTORY_NO_REBALANCING`). Each venue trades only its own
+balances, and the reconciliation reports `transfer_mode: NO_REBALANCING`
+rather than NOT_MODELLED.
+
+```jsonc
+"risk": {"transfers": {
+  "routes": [{"from": "BINANCE", "to": "BYBIT", "asset": "BTC",
+              "delay_ms": 900000,          // > 0: transfers are never instantaneous
+              "fee": "0.0002",             // in the transferred asset
+              "min_quantity": "0.001",
+              "fee_refunded_on_failure": false,
+              "outcomes": ["CONFIRMED"],   // scripted, cycled (SIMULATED); e.g. ["CONFIRMED", "FAILED"]
+              "source": "ASSUMED"}],
+  "rebalance": {"enabled": true, "cooldown_ms": 60000,
+                "assets": {"BTC": {"low_watermark": "0.01", "target": "0.03"}}}}}
+```
+
+* **Lifecycle.**
+  - **Initiation** checks the source's free balance, fee included. It books
+    `TRANSFER` (source `main` −q, source `in_transit` +q) and `TRANSFER_FEE`
+    (source `main` −fee).
+  - **While pending,** the funds count at the source as total and
+    *unavailable*, never as free, and are not yet usable at the destination.
+  - **Confirmation** at initiation + `delay_ms` moves them to the
+    destination's `main`.
+  - **Failure** returns the principal to the source; the fee is refunded only
+    if configured.
+  - **Horizon:** nothing is confirmed past the last market event. A pending
+    transfer at the end of a run is reported in `transfers_report.json` →
+    `pending`.
+* **Rebalancer (opt-in).** When a venue's free balance (plus incoming) is
+  below `low_watermark`, it requests up to `target` from the venue with the
+  most spare balance. The source never goes below its own watermark, there
+  is one transfer per route in flight, and a cooldown applies. The inventory
+  label becomes `PRE_FUNDED_INVENTORY_WITH_REBALANCING`.
+* **Accounting.**
+  - The principal is valued at the source venue's price on both sides
+    (`transfer_flow`) and kept out of strategy PnL, like a deposit.
+  - The rest, quantity × (destination − source price), is the value realised
+    by moving inventory to where it is marked higher. It stays in the
+    destination's strategy PnL as `transfer_valuation`; it is the inventory
+    side of the arb's spread, and the plans count it.
+  - The fee is a cost (`transfer_fees`, and a `transfer_fees` column in
+    `account_state.json`, checked by `<venue>_transfer_fees_match_trade_ledger`).
+    It is excluded from the plan-PnL comparison.
+* **Restarts.** Transfer events are journaled. Pending transfers come back
+  with their confirmation times and their place in the outcome script.
+* Delays, fees and failure outcomes are config assumptions (labelled
+  ASSUMED / SIMULATED). No recorded run uses transfers. Tests are in
+  `tests/test_transfers.py`.
+
 ## Reconciliation (`economic_reconciliation.json`)
 
 Written by every backtest and paper run, summarised in `summary.json`
@@ -550,8 +604,8 @@ audit (`economics` component, paper run and replay).
 * Perpetuals: inverse contracts and multipliers other than 1 are rejected at
   load. Margin is not modelled (ECO04): contract positions are valued at
   mid × multiplier, an approximation of the mark price.
-* Transfers: the event type exists with no generator; reported
-  `NOT_MODELLED`, never zero.
+* Transfers are simulated with scripted delays and outcomes; real venue
+  withdrawal/deposit status is not wired yet.
 * Account-specific fee tiers are only as good as the configured
   `fee_source`; unverified tiers are labelled `ASSUMED` on every fee event.
 * Quote reservations in risk admission do not yet include fees.

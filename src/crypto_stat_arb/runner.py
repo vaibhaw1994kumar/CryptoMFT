@@ -119,6 +119,10 @@ def write_economic_artifacts(
     (output_dir / "borrow_report.json").write_text(
         json.dumps(borrow, indent=2, sort_keys=True), encoding="utf-8"
     )
+    transfers = session.transfers.report()
+    (output_dir / "transfers_report.json").write_text(
+        json.dumps(transfers, indent=2, sort_keys=True), encoding="utf-8"
+    )
     venues = account_state.get("venues", {})
     report = reconcile(
         ledger,
@@ -144,7 +148,12 @@ def write_economic_artifacts(
         borrow_notes_by_venue=session.borrow.notes_by_venue(),
         legacy_borrow_cost_by_venue={venue: Decimal(row.get("borrow_cost", "0")) for venue, row in venues.items()},
         estimated_by_venue=session.funding.estimated_by_venue(),
+        transfer_mode="MODELLED" if session.transfers.configured else "NO_REBALANCING",
+        legacy_transfer_fees_by_venue={
+            venue: Decimal(row.get("transfer_fees", "0")) for venue, row in venues.items()
+        },
     )
+    report["transfers"] = {"status": transfers["status"], "report": "transfers_report.json"}
     report["borrow"] = {"status": borrow["status"], "report": "borrow_report.json"}
     report["fee_profile"] = _fee_profile(session)
     report["warnings"] = _economic_warnings(report, funding, borrow)
@@ -166,7 +175,11 @@ def write_economic_artifacts(
             if session.borrow.unfinanced_short_policy == "FAIL" else
             "Unconstrained inventory: spot shorts are admitted without financing (borrow NOT_MODELLED)."
         ),
-        "Transfers are not modelled: no events are generated (reported NOT_MODELLED, not zero).",
+        (
+            "Transfers follow a delayed lifecycle (transfers_report.json); delays, fees and outcomes are assumptions."
+            if session.transfers.configured else
+            "No-rebalancing mode: each venue trades only its own pre-funded balances (no transfers)."
+        ),
         *(
             ["Perpetual margin is not modelled: contract positions are valued at mid x multiplier (ECO04)."]
             if session.funding.configured else []

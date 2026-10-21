@@ -35,6 +35,7 @@ if TYPE_CHECKING:
 FINANCING_TYPES = {
     EconomicEventType.FUNDING, EconomicEventType.BORROW_OPEN, EconomicEventType.BORROW_ACCRUAL,
     EconomicEventType.BORROW_REPAY, EconomicEventType.BORROW_RECALL,
+    EconomicEventType.TRANSFER, EconomicEventType.TRANSFER_FEE,
 }
 
 

@@ -401,6 +401,7 @@ class RiskEngine:
         self.locked_provider: Any | None = None
         self.unavailable_provider: Any | None = None
         self.refusals: dict[str, int] = {}
+        self.rebalancing = False
         self.reserved_gross = Decimal("0")
         self.reserved_cash: dict[str, Decimal] = {}
         self.reserved_margin: dict[str, Decimal] = {}
@@ -1067,15 +1068,18 @@ class RiskEngine:
         Each unit of funds is in exactly one of those buckets.
         """
         base, quote = self._inventory_assets(venue)
-        total = self._economic_asset(venue, asset) if self.ledger is not None and getattr(
+        held = self._economic_asset(venue, asset) if self.ledger is not None and getattr(
             self.ledger, "economics", None) is not None and self.ledger.economics.has_opening_balances() else (
             self.held_base(venue) if asset == base else self.held_quote(venue) if asset == quote else Decimal("0"))
+        # Funds sent and not yet confirmed still belong to the source but have
+        # left ``main``: they count in total and as unavailable, never as free.
+        unavailable = self.unavailable(venue, asset)
+        total = held + unavailable
         reserved = (
             self.reserved_base.get(venue, Decimal("0")) if asset == base
             else self.reserved_cash.get(venue, Decimal("0")) if asset == quote else Decimal("0")
         )
         locked = (self.locked_provider() if self.locked_provider is not None else {}).get((venue, asset), Decimal("0"))
-        unavailable = self.unavailable(venue, asset)
         return {"total": total, "reserved": reserved, "locked": locked, "unavailable": unavailable,
                 "free": total - reserved - locked - unavailable}
 
@@ -1115,7 +1119,9 @@ class RiskEngine:
             "refusals_by_reason": dict(sorted(self.refusals.items())),
             "model": self.inventory.model.value,
             "label": (
-                "PRE_FUNDED_INVENTORY_WITH_BORROW_LINES"
+                "PRE_FUNDED_INVENTORY_WITH_REBALANCING"
+                if self.rebalancing and self.inventory.model == InventoryModel.PRE_FUNDED
+                else "PRE_FUNDED_INVENTORY_WITH_BORROW_LINES"
                 if borrow_lines and self.inventory.model == InventoryModel.PRE_FUNDED
                 else self.inventory.label
             ),
@@ -1768,10 +1774,11 @@ class RiskEngine:
                 needed = (
                     self.reserved_cash.get(opportunity.buy_venue, Decimal("0")) + cash[opportunity.buy_venue]
                 )
+                # In-transit funds have already left ``main`` (held), so they are
+                # not subtracted again here.
                 free_quote = (
                     self.held_quote(opportunity.buy_venue)
                     - locked.get((opportunity.buy_venue, quote_asset), Decimal("0"))
-                    - self.unavailable(opportunity.buy_venue, quote_asset)
                 )
                 if needed > free_quote:
                     raise ValueError(f"insufficient quote inventory: {opportunity.buy_venue}")
@@ -1794,8 +1801,7 @@ class RiskEngine:
             )
             needed = self.reserved_base.get(sell_venue, Decimal("0")) + base[sell_venue]
             held = max(
-                self.held_base(sell_venue) - locked.get((sell_venue, base_asset), Decimal("0"))
-                - self.unavailable(sell_venue, base_asset),
+                self.held_base(sell_venue) - locked.get((sell_venue, base_asset), Decimal("0")),
                 Decimal("0"),
             )
             if needed > held:

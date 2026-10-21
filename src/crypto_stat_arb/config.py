@@ -49,6 +49,8 @@ class AppConfig:
     borrow: dict[str, Any] = field(default_factory=dict)
     # ``risk.margin``: risk tiers, collateral, cross/isolated, liquidation (ECO04, margin.py).
     margin: Any = None
+    # ``risk.transfers``: inter-venue transfer routes and rebalancing (ECO05, transfers.py).
+    transfers: dict[str, Any] = field(default_factory=dict)
 
 
 def _optional_decimal(value: Any, default: str | None) -> Decimal | None:
@@ -395,8 +397,25 @@ def load_config(path: Path) -> tuple[AppConfig, dict]:
         funding=dict(raw.get("funding", {})),
         borrow=_borrow_section(raw),
         margin=_margin_section(raw, instruments),
+        transfers=_transfer_section(raw),
     )
     return cfg, raw
+
+
+def _transfer_section(raw: dict) -> dict[str, Any]:
+    """Validate ``risk.transfers`` at load: positive delays, known venues, one route per leg."""
+    from .transfers import TransferRoute
+
+    section = dict(raw.get("risk", {}).get("transfers") or {})
+    routes = [TransferRoute.from_config(row) for row in section.get("routes", [])]
+    venues = set(raw["strategy"]["venues"])
+    for route in routes:
+        if {route.source, route.destination} - venues:
+            raise ValueError(f"transfer route {route.source}->{route.destination} names a venue outside the strategy")
+    keys = [route.key for route in routes]
+    if len(keys) != len(set(keys)):
+        raise ValueError("duplicate transfer route")
+    return section
 
 
 def _margin_section(raw: dict, instruments: list[Instrument]):

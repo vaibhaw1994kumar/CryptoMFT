@@ -65,6 +65,7 @@ class VenueCapitalState:
     fees: Decimal
     funding: Decimal
     borrow_cost: Decimal
+    transfer_fees: Decimal
     equity: Decimal
     reserved_cash: Decimal
     reserved_margin: Decimal
@@ -355,6 +356,32 @@ class Ledger:
         self._journal(reversal)
         return reversal
 
+    def apply_transfer(self, event: EconomicEvent) -> bool:
+        """Book a TRANSFER / TRANSFER_FEE event (ECO05); journaled for restarts."""
+        if not self.economics.apply(event):
+            return False
+        self._record_transfer(event, reversal=False)
+        self._journal(event)
+        return True
+
+    def _record_transfer(self, event: EconomicEvent, *, reversal: bool) -> None:
+        kind = dict(event.details).get("reversed_type", "") if reversal else event.event_type.value
+        reporting = self.economics.reporting_currency
+        for posting in event.postings:
+            if posting.account == "main" and posting.asset == reporting:
+                # Legacy venue cash is the reporting/quote currency.
+                self.cash_deltas[posting.venue] = self.cash_deltas.get(posting.venue, Decimal("0")) + posting.quantity
+        fee_cost = (
+            -event.reporting_value
+            if kind == EconomicEventType.TRANSFER_FEE.value and event.reporting_value is not None else ""
+        )
+        self.record(
+            "TRANSFER", event.effective, economic_event_id=event.event_id, transfer_event_type=kind,
+            reversal=reversal, venue=event.venue, transfer_fee_cost=fee_cost,
+            postings=[(p.venue, p.account, p.asset, str(p.quantity)) for p in event.postings],
+            details=dict(event.details),
+        )
+
     def _journal(self, event: EconomicEvent) -> None:
         if self.journal is not None:
             self.journal.append_event(event)
@@ -367,6 +394,8 @@ class Ledger:
             return
         if kind == EconomicEventType.FUNDING.value:
             self._record_funding(event, reversal=reversal)
+        elif kind in (EconomicEventType.TRANSFER.value, EconomicEventType.TRANSFER_FEE.value):
+            self._record_transfer(event, reversal=reversal)
         else:
             self._record_borrow(event, reversal=reversal)
 
@@ -453,6 +482,7 @@ class Ledger:
         fees_by_venue: dict[str, Decimal] = {}
         funding_by_venue: dict[str, Decimal] = {}
         borrow_cost_by_venue: dict[str, Decimal] = {}
+        transfer_fees_by_venue: dict[str, Decimal] = {}
         for event in self.events:
             event_type = event["event_type"]
             if event_type == "FILL":
@@ -500,6 +530,11 @@ class Ledger:
                 funding_by_venue[venue] = funding_by_venue.get(
                     venue, Decimal("0")
                 ) + Decimal(str(event["amount"]))
+            elif event_type == "TRANSFER" and event.get("transfer_fee_cost") not in (None, ""):
+                venue = str(event["venue"])
+                transfer_fees_by_venue[venue] = transfer_fees_by_venue.get(
+                    venue, Decimal("0")
+                ) + Decimal(str(event["transfer_fee_cost"]))
             elif event_type == "BORROW" and event.get("borrow_cost") not in (None, ""):
                 venue = str(event["venue"])
                 borrow_cost_by_venue[venue] = borrow_cost_by_venue.get(
@@ -531,6 +566,7 @@ class Ledger:
         reserved_gross = Decimal(str(capacity.get("reserved_gross", "0")))
         venues = sorted({
             *initial, *self.cash_deltas, *fees_by_venue, *funding_by_venue, *borrow_cost_by_venue,
+            *transfer_fees_by_venue,
             *(venue for venue, _ in positions),
             *getattr(reserved_cash, "keys", lambda: ())(),
             *getattr(reserved_margin, "keys", lambda: ())(),
@@ -566,7 +602,8 @@ class Ledger:
             borrow_cost = borrow_cost_by_venue.get(venue, Decimal("0"))
             # Interest at its accrual-time value; the economic reconciliation
             # reports the borrowed asset's later revaluation separately.
-            equity = opening + realized + unrealized - fees + funding - borrow_cost
+            transfer_fees = transfer_fees_by_venue.get(venue, Decimal("0"))
+            equity = opening + realized + unrealized - fees + funding - borrow_cost - transfer_fees
             venue_states[venue] = VenueCapitalState(
                 venue=venue,
                 initial_capital=opening,
@@ -577,6 +614,7 @@ class Ledger:
                 fees=fees,
                 funding=funding,
                 borrow_cost=borrow_cost,
+                transfer_fees=transfer_fees,
                 equity=equity,
                 reserved_cash=cash_reserved,
                 reserved_margin=margin_reserved,

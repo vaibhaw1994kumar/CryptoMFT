@@ -56,6 +56,7 @@ class EconomicEventType(StrEnum):
     BORROW_FORCED_CLOSE = "BORROW_FORCED_CLOSE"
     LIQUIDATION = "LIQUIDATION"
     TRANSFER = "TRANSFER"
+    TRANSFER_FEE = "TRANSFER_FEE"
     DEPOSIT = "DEPOSIT"
     WITHDRAWAL = "WITHDRAWAL"
     VALUATION_ADJUSTMENT = "VALUATION_ADJUSTMENT"
@@ -71,6 +72,7 @@ NOT_MODELLED = {
     EconomicEventType.BORROW_RECALL: "BORROW",
     EconomicEventType.BORROW_FORCED_CLOSE: "BORROW",
     EconomicEventType.TRANSFER: "TRANSFER",
+    EconomicEventType.TRANSFER_FEE: "TRANSFER",
 }
 
 
@@ -384,6 +386,8 @@ def reconcile(
     borrow_notes_by_venue: Mapping[str, list[str]] | None = None,
     legacy_borrow_cost_by_venue: Mapping[str, Decimal] | None = None,
     estimated_by_venue: Mapping[str, list[str]] | None = None,
+    transfer_mode: str | None = None,
+    legacy_transfer_fees_by_venue: Mapping[str, Decimal] | None = None,
 ) -> dict[str, Any]:
     """Closing equity = opening + inventory revaluation + trading + fees/rebates
     + funding - borrow + transfers + external flows + valuation adjustments.
@@ -445,6 +449,7 @@ def reconcile(
                 ("borrow_forced_close", EconomicEventType.BORROW_FORCED_CLOSE),
                 ("liquidation", EconomicEventType.LIQUIDATION),
                 ("transfers", EconomicEventType.TRANSFER),
+                ("transfer_fees", EconomicEventType.TRANSFER_FEE),
                 ("deposits", EconomicEventType.DEPOSIT),
                 ("withdrawals", EconomicEventType.WITHDRAWAL),
                 ("valuation_adjustments", EconomicEventType.VALUATION_ADJUSTMENT),
@@ -480,7 +485,32 @@ def reconcile(
         out_of_plan_fees = _value(out_of_plan_fee_postings, closing, venue, missing)
         explained = opening_equity + revaluation + sum(components.values(), ZERO)
         residual = closing_equity - explained
-        equity_pnl = closing_equity - opening_equity - revaluation - components["deposits"] - components["withdrawals"]
+        # Transfer principal is an internal flow between venues, valued at the
+        # source venue's price on both sides and kept out of strategy PnL (like
+        # a deposit). The rest, quantity x (destination - source price), is the
+        # value realised by moving inventory to where it is worth more: it stays
+        # in the destination's PnL as ``transfer_valuation``. The fee is a cost.
+        transfer_flow = ZERO
+        for e in ledger.events:
+            if e.event_type != EconomicEventType.TRANSFER or e.event_id in reversed_ids:
+                continue
+            source_venue = dict(e.details).get("source", e.venue)
+            for posting in e.postings:
+                if posting.venue != venue or not posting.quantity:
+                    continue
+                price = closing.price(source_venue, posting.asset)
+                if price is None:
+                    missing.add(f"{source_venue}:{posting.asset}")
+                    continue
+                transfer_flow += posting.quantity * price
+        transfer_valuation = components["transfers"] - transfer_flow
+        equity_pnl = (closing_equity - opening_equity - revaluation - components["deposits"]
+                      - components["withdrawals"] - transfer_flow)
+        transfer_fee_events = [
+            e for e in ledger.events if e.event_type == EconomicEventType.TRANSFER_FEE
+            and e.venue == venue and e.event_id not in reversed_ids
+        ]
+        transfer_fee_cost = sum((-(e.reporting_value or ZERO) for e in transfer_fee_events), ZERO)
         rows[venue] = {
             "opening_equity": str(opening_equity),
             "inventory_revaluation": str(revaluation),
@@ -489,6 +519,10 @@ def reconcile(
             "rebates_at_fill_time": str(rebates),
             "fee_asset_revaluation": str(components["fees_and_rebates_at_close"] - (rebates - fee_cost)),
             "out_of_plan_fees": str(out_of_plan_fees),
+            "transfer_fees_at_initiation": str(transfer_fee_cost),
+            "transfer_flow": str(transfer_flow),
+            "transfer_valuation": str(transfer_valuation),
+            "transfer_mode": transfer_mode or "NOT_MODELLED",
             "borrow_cost_at_accrual_time": str(borrow_cost),
             "borrow_interest_revaluation": str(components["borrow_accrual"] + borrow_cost),
             "closing_equity": str(closing_equity),
@@ -500,7 +534,7 @@ def reconcile(
                     label == "FUNDING" and (product_types.get(venue) == "SPOT" or venue in funding_modelled)
                 ) and not (
                     label == "BORROW" and borrow_status.get(venue) in ("MODELLED", "NOT_APPLICABLE")
-                )
+                ) and not (label == "TRANSFER" and transfer_mode is not None)
             } | ({"BORROW"} if borrow_status.get(venue) == "NOT_MODELLED" else set())),
             "funding_flags": funding_flags.get(venue, []),
             "borrow_status": borrow_status.get(venue, "NOT_MODELLED"),
@@ -566,6 +600,13 @@ def reconcile(
                 "passed": borrow_cost == legacy,
                 "detail": f"economic borrow cost at accrual {borrow_cost} vs account state {legacy}",
             })
+        if legacy_transfer_fees_by_venue is not None and transfer_mode == "MODELLED":
+            legacy = legacy_transfer_fees_by_venue.get(venue, ZERO)
+            checks.append({
+                "check": f"{venue}_transfer_fees_match_trade_ledger",
+                "passed": transfer_fee_cost == legacy,
+                "detail": f"economic transfer fees at initiation {transfer_fee_cost} vs account state {legacy}",
+            })
         if borrow_flags.get(venue):
             checks.append({
                 "check": f"{venue}_no_unfinanced_short",
@@ -586,7 +627,8 @@ def reconcile(
     carry = sum((
         Decimal(row[name]) for row in rows.values()
         for name in ("funding", "borrow_open", "borrow_accrual", "borrow_repay",
-                     "borrow_recall", "borrow_forced_close", "liquidation", "out_of_plan_fees")
+                     "borrow_recall", "borrow_forced_close", "liquidation", "out_of_plan_fees",
+                     "transfer_fees")
     ), ZERO)
     if plan_net_pnl is not None:
         difference = plan_net_pnl - (total_equity_pnl - carry)
@@ -616,7 +658,8 @@ def reconcile(
             key: str(sum((Decimal(row[key]) for row in rows.values()), ZERO))
             for key in ("opening_equity", "inventory_revaluation", "trading_pnl", "fees_at_fill_time",
                         "rebates_at_fill_time", "funding", "borrow_accrual", "borrow_cost_at_accrual_time",
-                        "borrow_forced_close", "liquidation", "deposits", "withdrawals", "valuation_adjustments",
+                        "borrow_forced_close", "liquidation", "transfers", "transfer_flow", "transfer_valuation",
+                        "transfer_fees", "deposits", "withdrawals", "valuation_adjustments",
                         "closing_equity", "strategy_equity_pnl", "identity_residual")
         },
         "checks": checks,
