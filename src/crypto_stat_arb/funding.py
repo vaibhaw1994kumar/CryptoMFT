@@ -237,13 +237,19 @@ class FundingEngine(PeriodicSettlement):
         self, ledger: "Ledger", specs: Iterable[FundingSpec], rates: FundingRateBook | None = None, *,
         settle_lag_ns: int = 5_000_000_000, max_rate_age_ns: int | None = None,
         mark_fallback: str = "none", max_abs_rate: Decimal = Decimal("0.05"),
-        max_mark_age_ns: int = 60_000_000_000,
+        max_mark_age_ns: int = 60_000_000_000, schedule_tolerance_ns: int = 1_000_000_000,
     ) -> None:
         super().__init__(settle_lag_ns=settle_lag_ns)
         self.ledger = ledger
         self.specs = {(s.venue, s.instrument_id): s for s in specs}
         self.max_abs_rate = max_abs_rate
         self.rates = (rates or FundingRateBook()).validated(self.specs, max_abs_rate)
+        # Venues stamp a settlement with when it was processed (Binance:
+        # a few ms after the boundary). A record within schedule_tolerance of a
+        # scheduled boundary *is* that settlement; the venue time is kept.
+        self.schedule_tolerance_ns = schedule_tolerance_ns
+        self.venue_settlement_ts: dict[tuple[str, str, int], int] = {}
+        self._snap_to_schedule()
         self.max_rate_age_ns = max_rate_age_ns
         if mark_fallback not in ("none", "book_mid", "exchange_mark"):
             raise ValueError("funding mark_fallback must be 'none', 'book_mid' or 'exchange_mark'")
@@ -278,6 +284,29 @@ class FundingEngine(PeriodicSettlement):
                     self._mid_at.setdefault((venue, instrument_id, when), last[1])
         if mid is not None:
             self._last_mid[key] = (ts_ns, mid)
+
+    def _snap_to_schedule(self) -> None:
+        snapped: dict[tuple[str, str, int], FundingRate] = {}
+        for (venue, instrument_id, ts_ns), record in self.rates.realized.items():
+            spec = self.specs.get((venue, instrument_id))
+            target = ts_ns
+            if spec is not None and spec.interval_ns > 0:
+                k = round((ts_ns - spec.anchor_ns) / spec.interval_ns)
+                boundary = spec.anchor_ns + k * spec.interval_ns
+                if abs(ts_ns - boundary) <= self.schedule_tolerance_ns:
+                    target = boundary
+            key = (venue, instrument_id, target)
+            if target != ts_ns:
+                self.venue_settlement_ts[key] = ts_ns
+                record = FundingRate(
+                    record.venue, record.instrument_id, target, record.rate, record.mark_price, record.source,
+                    record.asof_ns, record.predicted, record.settlement_history,
+                )
+            existing = snapped.get(key)
+            if existing is not None and existing.rate != record.rate:
+                raise FundingDataConflict(f"two different rates for the settlement at {key}")
+            snapped[key] = record
+        self.rates.realized = snapped
 
     def observe_exchange_mark(self, venue: str, instrument_id: str, ts_ns: int, mark: Decimal) -> None:
         """The venue's mark price (derivatives stream) at ``ts_ns``."""
@@ -409,6 +438,8 @@ class FundingEngine(PeriodicSettlement):
                 ("multiplier", str(spec.multiplier)), ("inverse", str(spec.inverse).lower()),
                 ("interval_ns", str(spec.interval_ns)), ("revision", str(revision)),
                 ("rate_asof_ns", "" if record.asof_ns is None else str(record.asof_ns)),
+                ("venue_settlement_ts_ns", str(self.venue_settlement_ts.get(
+                    (spec.venue, spec.instrument_id, ts_ns), ts_ns))),
             ),
         )
 
@@ -533,6 +564,8 @@ class FundingEngine(PeriodicSettlement):
                 "position_boundary": "fills matched strictly before the settlement timestamp count",
                 "mark_fallback": self.mark_fallback,
                 "max_mark_age_ns": self.max_mark_age_ns,
+                "schedule_tolerance_ns": self.schedule_tolerance_ns,
+                "records_snapped_to_schedule": len(self.venue_settlement_ts),
                 "predictions_observed": self.predictions_observed,
                 "settle_lag_ns": self.settle_lag_ns,
                 "max_rate_age_ns": self.max_rate_age_ns,

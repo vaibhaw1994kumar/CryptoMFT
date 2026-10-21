@@ -51,12 +51,26 @@ TESTNET_HOSTS = frozenset({"testnet.binance.vision", "testnet.binancefuture.com"
 HttpCall = Callable[[str, str, dict[str, str], bytes | None, float], tuple[int, str]]
 
 
+def verified_ssl_context() -> ssl.SSLContext:
+    """Certificate verification always on. A Python whose default CA store is
+    empty (e.g. a python.org macOS build before "Install Certificates") uses
+    the certifi bundle instead of failing; verification is never disabled."""
+    context = ssl.create_default_context()
+    if not context.cert_store_stats().get("x509_ca"):
+        try:
+            import certifi
+        except ImportError:
+            return context
+        context.load_verify_locations(cafile=certifi.where())
+    return context
+
+
 def urllib_http(
     method: str, url: str, headers: dict[str, str], body: bytes | None, timeout: float
 ) -> tuple[int, str]:
     request = Request(url, data=body, headers=headers, method=method)
     try:
-        with urlopen(request, timeout=timeout, context=ssl.create_default_context()) as response:
+        with urlopen(request, timeout=timeout, context=verified_ssl_context()) as response:
             return response.status, response.read().decode("utf-8")
     except HTTPError as exc:
         return exc.code, exc.read().decode("utf-8", "replace")

@@ -125,6 +125,7 @@ def funding_engine(cfg: AppConfig, ledger: Ledger) -> FundingEngine:
         mark_fallback=str(section.get("mark_fallback", "none")),
         max_abs_rate=Decimal(str(section.get("max_abs_rate", "0.05"))),
         max_mark_age_ns=int(section.get("max_mark_age_ms", 60_000)) * 1_000_000,
+        schedule_tolerance_ns=int(section.get("schedule_tolerance_ms", 1_000)) * 1_000_000,
     )
 
 

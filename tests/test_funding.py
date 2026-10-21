@@ -425,6 +425,21 @@ class FundingRecordValidationTests(unittest.TestCase):
         self.assertEqual(report["data_coverage"], "GAPS")
         self.assertEqual({r["origin"] for r in report["rejected_samples"] if r["origin"]}, {"row-5", "row-6"})
 
+    def test_venue_processing_time_offsets_snap_to_the_scheduled_settlement(self):
+        # Binance stamps fundingTime a few ms after the boundary (e.g. 08:00:00.005).
+        ledger = perp_ledger()
+        trade(ledger, "o", Side.BUY, "0.1", match_ts=T - HOUR)
+        offset = rate(T + 5_000_000, "0.0001")                          # +5 ms
+        eng = engine(ledger, [offset, rate(T + 8 * HOUR + 7_000_000, "0.0002")])
+        eng.settle_until(T + 8 * HOUR + 10**9)
+        events = funding_events(ledger)
+        self.assertEqual([e.effective for e in events], [T, T + 8 * HOUR])
+        self.assertEqual(dict(events[0].details)["venue_settlement_ts_ns"], str(T + 5_000_000))
+        self.assertEqual(eng.flags, [])                                 # no "missing" schedule slot
+        self.assertEqual(eng.report()["rules"]["records_snapped_to_schedule"], 2)
+        far = engine(perp_ledger(), [rate(T + 5 * 10**9, "0.0001")])     # 5 s away: not snapped
+        self.assertIn(("BINANCE", PERP, T + 5 * 10**9), far.rates.realized)
+
     def test_default_rate_bound_applies_without_venue_cap(self):
         book = FundingRateBook().extend([rate(T, "0.06"), rate(T + 8 * HOUR, "-0.05")])
         valid = book.validated({("BINANCE", PERP): spec()}, Decimal("0.05"))

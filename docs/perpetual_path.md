@@ -66,6 +66,23 @@ PYTHONPATH=src python3 -m crypto_stat_arb.cli funding-history --venue BINANCE --
 * Records are `settlement_history: true` and `source: OBSERVED`, and pass
   the funding engine's validation. Only the public hosts `fapi.binance.com`
   and `api.bybit.com` are accepted.
+* **Processing-time offsets.** Binance stamps `fundingTime` with when the
+  settlement was processed, 0–7 ms after the 8h boundary in the October
+  2026 data. The engine assigns a record within `funding.schedule_tolerance_ms`
+  (default 1000) to that scheduled settlement, and keeps the venue time in
+  the event (`venue_settlement_ts_ns`). Without this, every Binance
+  settlement would show as a missing record plus an off-schedule one.
+* **Downloaded data (2026-09-22 → 2026-10-22):**
+  `data/funding/binance_btcusdt_20260922_20261022.jsonl` and
+  `data/funding/bybit_btcusdt_20260922_20261022.jsonl`.
+  - 90 settlements per venue; no gaps, none rejected, every record with a
+    mark.
+  - Venue marks agree within 0.6 bps (median).
+  - Mean rate 0.0032% (Binance) / 0.0034% (Bybit) per 8h.
+  - Over the month, a 0.01 BTC long paid 2.41 USDT on Binance and a 0.01 BTC
+    short received 2.56 USDT on Bybit (net +0.15 USDT for the hedged pair).
+  - To use them, set `funding.rates_path` to one file per run, or merge
+    them.
 
 ## Futures testnet execution (`testnet.py`)
 
