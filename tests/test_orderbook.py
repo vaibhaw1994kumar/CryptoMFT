@@ -38,6 +38,24 @@ class OrderBookTests(unittest.TestCase):
         self.assertEqual(book.apply(ranged), BookState.VALID)
         self.assertEqual(book.sequence, 13)
 
+    def test_binance_futures_deltas_chain_on_previous_final_id(self):
+        # USDⓈ-M: U jumps (not pu + 1); continuity is pu == the last applied u.
+        def futures(start, end, previous):
+            return MarketEvent.from_dict({
+                "event_type": "BOOK_DELTA", "venue": "BINANCE", "instrument_id": "BTC-USDT-SPOT",
+                "exchange_ts_ns": end, "receive_ts_ns": end, "sequence_start": start, "sequence": end,
+                "bids": [["100", "2"]], "asks": [["101", "2"]],
+                "native": {"U": start, "u": end, "pu": previous},
+            })
+        book = OrderBook("BINANCE", "BTC-USDT-SPOT")
+        book.apply(event(100, "BOOK_SNAPSHOT"))
+        self.assertEqual(book.apply(futures(95, 110, 90)), BookState.VALID)     # bridges U <= 100 <= u
+        self.assertEqual(book.apply(futures(130, 140, 110)), BookState.VALID)   # pu == 110: no gap
+        self.assertEqual(book.apply(futures(160, 170, 150)), BookState.GAP_DETECTED)  # missed 140..150
+        self.assertEqual(book.stats.gaps, 1)
+        book.apply(event(200, "BOOK_SNAPSHOT"))
+        self.assertEqual(book.apply(futures(205, 210, 201)), BookState.GAP_DETECTED)  # does not bridge
+
     def test_sequence_gap_invalidates_book_until_snapshot(self):
         book = OrderBook("BINANCE", "BTC-USDT-SPOT")
         self.assertEqual(book.apply(event(10, "BOOK_SNAPSHOT")), BookState.VALID)

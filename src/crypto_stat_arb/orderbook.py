@@ -73,6 +73,7 @@ class OrderBook:
     jump_confirmation_updates: int = 3
     reference_mid: Decimal | None = None
     jump_streak: int = 0
+    chained_delta: bool = False         # a delta has been applied since the last snapshot
 
     def start_resync(self, reason: str = "connection_resynchronizing") -> None:
         """Discard an unsafe native state and require a new venue snapshot."""
@@ -80,6 +81,7 @@ class OrderBook:
         self.bids.clear()
         self.asks.clear()
         self.sequence = None
+        self.chained_delta = False
         self.last_receive_ts_ns = None
         self.last_event_id = None
         self.pending_deltas.clear()
@@ -121,7 +123,7 @@ class OrderBook:
             ):
                 self._buffer(event)
                 return self.state
-            if event.sequence_start > self.sequence + 1:
+            if self._breaks_chain(event):
                 self.state = BookState.GAP_DETECTED
                 self.invalid_reason = (
                     f"sequence_gap:{self.sequence}->{event.sequence_start}-{event.sequence}"
@@ -141,6 +143,7 @@ class OrderBook:
         self.bids = {x.price: x.quantity for x in event.bids if x.quantity > 0}
         self.asks = {x.price: x.quantity for x in event.asks if x.quantity > 0}
         self.sequence = event.sequence
+        self.chained_delta = False
         self.last_receive_ts_ns = event.receive_ts_ns
         self.last_event_id = event.event_id
         self.stats.snapshots += 1
@@ -155,7 +158,7 @@ class OrderBook:
             return self.state
         for sequence in sorted(self.pending_deltas):
             delta = self.pending_deltas[sequence]
-            if delta.sequence_start > (self.sequence or 0) + 1:
+            if self._breaks_chain(delta):
                 self.state = BookState.GAP_DETECTED
                 self.invalid_reason = (
                     f"buffered_sequence_gap:{self.sequence}->{delta.sequence_start}-{sequence}"
@@ -168,10 +171,21 @@ class OrderBook:
         self.pending_deltas.clear()
         return self.state
 
+    def _breaks_chain(self, delta: MarketEvent) -> bool:
+        """Binance USDⓈ-M deltas carry ``pu`` (the previous delta's final id) and
+        their ``U`` is not ``pu + 1``: after the first delta that bridges the
+        snapshot, continuity is ``pu == last applied u``. Other feeds: ``U <= last + 1``.
+        """
+        previous = delta.native.get("pu") if isinstance(delta.native, dict) else None
+        if previous is not None and self.chained_delta:
+            return int(previous) != self.sequence
+        return delta.sequence_start > (self.sequence or 0) + 1
+
     def _apply_delta(self, event: MarketEvent) -> BookState:
         self._update(self.bids, event.bids)
         self._update(self.asks, event.asks)
         self.sequence = event.sequence
+        self.chained_delta = True
         self.last_receive_ts_ns = event.receive_ts_ns
         self.last_event_id = event.event_id
         self.stats.deltas_applied += 1

@@ -33,9 +33,29 @@ derivatives stream is switched on automatically.
 
 | Venue | Channel | Fields used |
 |---|---|---|
-| Binance | `wss://fstream.binance.com/ws/<symbol>@markPrice@1s` | `p` mark, `i` index, `r` current funding rate, `T` next funding time, `E` event time |
+| Binance | `wss://fstream.binance.com/market/ws/<symbol>@markPrice@1s` | `p` mark, `i` index, `r` current funding rate, `T` next funding time, `E` event time |
 | Bybit | `tickers.<symbol>` on `wss://stream.bybit.com/v5/public/linear` | `markPrice`, `indexPrice`, `fundingRate`, `nextFundingTime`, `fundingIntervalHour` |
 
+* **Binance routing.** USDⓈ-M serves `markPrice` only on `/market/ws`:
+  on `/ws` the socket opens but stays silent. Depth and trades stay on
+  `/ws` (checked 2026-10-22).
+* **Binance futures depth sequencing.** Unlike spot, `U` is not the
+  previous `u + 1`.
+  - The first delta after the REST snapshot must bridge it
+    (`U ≤ lastUpdateId ≤ u`).
+  - After that, continuity is `pu == last applied u`.
+  - `OrderBook` applies the `pu` rule only to frames that carry `pu`; spot
+    and Bybit are unchanged.
+  - With the spot rule alone, the book showed a gap after every snapshot
+    (15 resyncs a minute).
+* **Binance non-market trades.** The futures `@trade` stream also sends
+  rows with `X="NA"` and price/quantity 0. They are recorded as control
+  frames, not trades or rejections.
+* **TLS.** Websocket and REST connections use `verified_ssl_context()`: the
+  system trust store, or the certifi bundle when the interpreter has no CA
+  store. Verification is always on.
+* **Capture size.** BTCUSDT on both venues (books, trades, derivatives) is
+  about 39 MB a minute (≈2.3 GB an hour).
 * **Bybit deltas.** Bybit sends a snapshot and then deltas in which an
   omitted field is *unchanged*. `BybitTickerMerger` keeps the merged state
   and is reset on reconnect, so a delta before a snapshot is rejected.
@@ -111,8 +131,9 @@ a PERP instrument gets the futures transport.
   recorded/fake responses only. Until they have run against the real
   testnets with your testnet keys, they are not lifecycle evidence (the
   requirements make the same point about spot adapters).
-* **No recorded perp data.** Recording means running a public-feed capture
-  with linear markets for a period you choose.
+* **One hour of recorded perp data.** A 1-hour public-feed capture
+  (`data/live/perp_btc_20261022`) is not a regime sample. Longer captures
+  need disk space: about 2.3 GB per hour.
 * **Assumed parameters.** Fee tiers, risk tiers, liquidation fee and
   collateral rules in `perp_research.json` are assumptions until checked
   against the account.

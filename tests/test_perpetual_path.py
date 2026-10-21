@@ -119,6 +119,29 @@ class LiveDerivativeCaptureTests(unittest.TestCase):
         self.assertEqual(sum(1 for t in trace if t.get("disposition") == "DERIVATIVE"), 3)
 
 
+    def test_binance_futures_routes_and_non_market_trades(self):
+        with tempfile.TemporaryDirectory() as directory:
+            service = LiveOrderBookService(
+                PERP_CONFIG, Path(directory), "perp-routes",
+                LiveFeedSettings(binance_market="linear", bybit_market="linear",
+                                 derivative_streams_enabled=True, trade_streams_enabled=True, durable=False),
+            )
+            # markPrice is only served on /market; depth and trades stay on /ws.
+            self.assertEqual(service._binance_mark_price_url(),
+                             "wss://fstream.binance.com/market/ws/btcusdt@markPrice@1s")
+            self.assertTrue(service._binance_urls()[0].startswith("wss://fstream.binance.com/ws/"))
+            url = service._binance_trade_url()
+            na = {"e": "trade", "E": 1, "T": 1, "s": "BTCUSDT", "t": 7, "p": "0", "q": "0", "X": "NA", "m": False}
+            self.assertEqual(service._process_trade_frame("BINANCE", url, json.dumps(na), channel="trade"), 0)
+            self.assertEqual(service.stats["BINANCE"].control_frames, 1)
+            market = dict(na, t=8, p="60000", q="0.01", X="MARKET")
+            self.assertEqual(service._process_trade_frame("BINANCE", url, json.dumps(market), channel="trade"), 1)
+            part = service.recorder._part_dir
+            quarantined = (part / "quarantine.jsonl").exists() and (part / "quarantine.jsonl").read_text().strip()
+            service.recorder.close({})
+        self.assertFalse(quarantined)
+
+
 class FuturesTestnetTransportTests(unittest.TestCase):
     def test_binance_futures_submit_reduce_only_post_only_and_fill_liquidity(self):
         http = FakeHttp([

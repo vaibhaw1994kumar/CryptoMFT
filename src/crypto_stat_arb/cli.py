@@ -14,7 +14,7 @@ from .calibration import calibrate_latency, compare_runs
 from .economics_gate import economics_gate
 from .config import load_config
 from .instrument_status import InstrumentStatusPoller
-from .paper_live import LivePaperSession
+from .paper_live import LivePaperSession, perpetual_feed_settings
 from .maker_sim import maker_simulator_from_config, simulate_recorded_session
 from .session_audit import audit_session
 from .cycle_report import build_cycle_report
@@ -124,7 +124,8 @@ async def _run_live_paper(args: argparse.Namespace) -> dict:
 
 
 async def _run_live_orderbook(args: argparse.Namespace) -> dict:
-    settings = _live_settings(args)
+    # A perpetual config also records mark/index/funding (derivatives.jsonl).
+    settings = perpetual_feed_settings(load_config(args.config)[0], _live_settings(args))
     service = LiveOrderBookService(
         args.config,
         args.output_dir,

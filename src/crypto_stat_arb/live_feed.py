@@ -566,8 +566,10 @@ class RotatingLiveRecorder:
 
 async def public_http_get(url: str, timeout_seconds: float) -> tuple[str | bytes, int]:
     def fetch() -> tuple[bytes, int]:
+        from .testnet import verified_ssl_context
+
         request = Request(url, headers={"User-Agent": "crypto-stat-arb-platform/0.1"})
-        with urlopen(request, timeout=timeout_seconds) as response:
+        with urlopen(request, timeout=timeout_seconds, context=verified_ssl_context()) as response:
             body = response.read()
         return body, time.time_ns()
 
@@ -583,8 +585,12 @@ def public_websocket_connector(
         from websockets.asyncio.client import connect
     except ImportError:
         from websockets import connect  # type: ignore[no-redef]
+    from .testnet import verified_ssl_context
+
+    tls = {"ssl": verified_ssl_context()} if url.startswith("wss://") else {}
     return connect(
         url,
+        **tls,
         ping_interval=20,
         ping_timeout=20,
         # Short on purpose: during shutdown we do not need a clean close
@@ -1077,6 +1083,9 @@ class LiveOrderBookService:
 
     # -- derivatives (mark / index / funding) -------------------------------------
     def _binance_mark_price_url(self) -> str:
+        if not self.settings.binance_ws_base:
+            # USDⓈ-M routes markPrice only on /market (nothing arrives on /ws).
+            return f"wss://fstream.binance.com/market/ws/{self.symbols['BINANCE'].lower()}@markPrice@1s"
         depth_url, _ = self._binance_urls()
         return depth_url.rsplit("@depth@100ms", 1)[0] + "@markPrice@1s"
 
@@ -1410,7 +1419,8 @@ class LiveOrderBookService:
             return 0
         wire, raw, payload = captured
         is_trade = (
-            payload.get("e") == "trade" and "p" in payload
+            # USDⓈ-M futures also send non-market rows (X="NA", p=q=0): not trades.
+            payload.get("e") == "trade" and "p" in payload and payload.get("X", "MARKET") == "MARKET"
             if venue == "BINANCE"
             else str(payload.get("topic", "")).startswith("publicTrade.")
             and isinstance(payload.get("data"), list)
