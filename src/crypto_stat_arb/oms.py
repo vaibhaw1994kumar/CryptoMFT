@@ -195,6 +195,7 @@ class OMS:
             "resting_fill_reports": 0,
         }
         self._books: dict[tuple[str, str], OrderBook] = {}
+        self._flatten_book_marker: dict[str, tuple[int, str]] = {}
         self._legging_bound_codes: dict[str, tuple[str, ...]] = {}
         self._last_execution_ts_ns = 0
         self.dispatch_measurements: list[ChildDispatchMeasurement] = []
@@ -223,8 +224,8 @@ class OMS:
                         order.filled_quantity, order.filled_quantity * order.average_price
                     )
             for plan in self.plans.values():
-                if plan.state in {PlanState.CREATED, PlanState.CLOSED}:
-                    continue
+                if plan.state in {PlanState.CREATED, PlanState.CLOSED} or plan.inherited_base:
+                    continue        # a flatten plan reduces risk and holds no reservation
                 try:
                     reservation = self.risk.rehydrate_reservation(plan.opportunity)
                     self.ledger.record(
@@ -562,6 +563,54 @@ class OMS:
             )
         return report
 
+    FLATTEN_STRATEGY_ID = "risk-flatten"
+    FLATTEN_MAX_ATTEMPTS = 20
+
+    def retry_flatten(self, venue: str, now_ns: int) -> int:
+        """A new book on ``venue``: retry its open flatten plans now, not on the timer."""
+        retried = 0
+        for plan in list(self.plans.values()):
+            if plan.inherited_base and plan.state != PlanState.CLOSED and plan.opportunity.buy_venue == venue:
+                self._finalize_plan(plan, now_ns, self._books)
+                retried += 1
+        return retried
+
+    def open_flatten_plan(
+        self, venue: str, instrument_id: str, exposure: Decimal, now_ns: int, reason: str,
+    ) -> ParentPlan:
+        """Close ``exposure`` (signed base) on ``venue`` with reduce-only unwinds.
+
+        Used after a venue liquidation leaves the other leg of a hedge open. The
+        plan reuses the residual-unwind machinery (retries, escalation to
+        aggressive, risk-reducing orders allowed under the kill switch) but
+        targets flat on the position's own venue. It is not a strategy
+        opportunity and holds no risk reservation.
+        """
+        book = self._books.get((venue, instrument_id))
+        mid = (book.best_bid + book.best_ask) / Decimal("2") if book is not None and book.bids and book.asks else Decimal("0")
+        sequence = sum(1 for p in self.plans.values() if p.inherited_base) + 1
+        opportunity = Opportunity(
+            opportunity_id=stable_id("flatten-opportunity", venue, instrument_id, now_ns, sequence),
+            strategy_id=self.FLATTEN_STRATEGY_ID, instrument_id=instrument_id, observed_ts_ns=now_ns,
+            buy_venue=venue, sell_venue=venue, buy_price=mid, sell_price=mid, quantity=abs(exposure),
+            gross_edge_bps=Decimal("0"), estimated_net_edge_bps=Decimal("0"),
+            source_event_ids=(reason[:80], str(now_ns)),
+        )
+        plan = ParentPlan(
+            parent_id=stable_id("flatten-parent", opportunity.opportunity_id), opportunity=opportunity,
+            children=[], state=PlanState.HEDGE_UNWIND, inherited_base=exposure,
+            residual_since_ts_ns=now_ns,
+            transitions=[{"ts_ns": now_ns, "state": PlanState.HEDGE_UNWIND.value, "reason": reason}],
+        )
+        self.plans[plan.parent_id] = plan
+        self._recompute_plan_economics(plan, now_ns)
+        self.ledger.record(
+            "RISK_FLATTEN_OPENED", now_ns, parent_id=plan.parent_id, venue=venue,
+            instrument_id=instrument_id, exposure=exposure, reason=reason,
+        )
+        self._persist(plan, now_ns, "RISK_FLATTEN_OPENED", venue=venue, exposure=exposure, reason=reason)
+        return self._finalize_plan(plan, now_ns, self._books)
+
     def open_risk_orders(self) -> dict[tuple[str, str], tuple[Decimal, Decimal]]:
         """Remaining (buy, sell) quantity of open hedge/unwind orders per venue and instrument.
 
@@ -778,7 +827,7 @@ class OMS:
     def _recompute_plan_economics(
         self, plan: ParentPlan, ts_ns: int | None = None
     ) -> None:
-        plan.residual_base = sum(
+        plan.residual_base = plan.inherited_base + sum(
             order.filled_quantity if order.side == Side.BUY else -order.filled_quantity
             for order in plan.children
         )
@@ -795,8 +844,11 @@ class OMS:
         else:
             plan.residual_mark_price = Decimal("0")
             plan.residual_mark_value = Decimal("0")
+        inherited_value = (
+            plan.inherited_base * self._residual_mark_price(plan) if plan.inherited_base else Decimal("0")
+        )
         plan.net_pnl = (
-            plan.gross_pnl + plan.residual_mark_value - plan.fees - plan.unwind_cost
+            plan.gross_pnl + plan.residual_mark_value - inherited_value - plan.fees - plan.unwind_cost
         )
 
         if plan.residual_base == 0:
@@ -869,6 +921,8 @@ class OMS:
         hard ceiling, not a threshold a plan may rest on indefinitely."""
         if plan.residual_base == 0:
             return True
+        if plan.inherited_base:
+            return False        # a flatten plan's target is flat, not "within bound"
         cap = self.residual_policy.max_residual_base
         if abs(plan.residual_base) >= cap:
             return False
@@ -976,6 +1030,9 @@ class OMS:
         return price, OrderType.LIMIT, TimeInForce.IOC, False
 
     def _unwind_venues(self, plan: ParentPlan) -> tuple[str, ...]:
+        if plan.inherited_base:
+            # Close the position where it is: a hedge elsewhere would open a new one.
+            return (plan.opportunity.buy_venue,)
         configured = self.residual_policy.hedge_venue_priority
         if configured:
             return configured
@@ -1058,8 +1115,14 @@ class OMS:
         if elapsed_ns >= policy.max_residual_age_ns:
             urgency = UnwindUrgency.AGGRESSIVE
         venues = self._unwind_venues(plan)
+        # A flatten plan keeps trying (bounded) until flat: it is closing exposure
+        # a venue liquidation left behind, not a strategy residual.
+        attempts_allowed = (
+            max(policy.max_unwind_attempts, self.FLATTEN_MAX_ATTEMPTS) if plan.inherited_base
+            else policy.max_unwind_attempts
+        )
         for venue in venues:
-            if plan.unwind_attempts >= policy.max_unwind_attempts:
+            if plan.unwind_attempts >= attempts_allowed:
                 break
             book = books.get((venue, plan.opportunity.instrument_id))
             if book is None or not book.is_tradable:
@@ -1069,6 +1132,13 @@ class OMS:
                     reason=("book_unavailable" if book is None else "book_not_tradable"),
                 )
                 continue
+            if plan.inherited_base:
+                # Retrying a flatten against the same (already consumed) book
+                # only burns attempts: wait for that venue's next update.
+                marker = (book.sequence, book.snapshot_hash())
+                if self._flatten_book_marker.get(plan.parent_id) == marker:
+                    continue
+                self._flatten_book_marker[plan.parent_id] = marker
             quantity = self.instruments.round_quantity(
                 venue, plan.opportunity.instrument_id, abs(plan.residual_base), ts_ns
             )

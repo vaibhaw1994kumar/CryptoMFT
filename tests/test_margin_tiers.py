@@ -300,7 +300,8 @@ class LiquidationSessionTests(unittest.TestCase):
         self.assertEqual(Decimal(first["fee"]), Decimal("0.004") * Decimal("58000") * Decimal("0.0125"))
         self.assertEqual((second["filled"], Decimal(second["residual"])), ("0.006", 0))
         self.assertEqual(Decimal(state["positions"][f"BINANCE:{PERP}"]["quantity"]), 0)
-        self.assertNotEqual(Decimal(state["positions"][f"BYBIT:{PERP}"]["quantity"]), 0)   # now unhedged
+        # The surviving BYBIT short was flattened too: no unhedged leg is left.
+        self.assertEqual(Decimal(state["positions"][f"BYBIT:{PERP}"]["quantity"]), 0)
         self.assertEqual(kill["state"], "ACTIVE")
         self.assertTrue(margin["evaluated_during_session"])
         self.assertEqual(margin["unsupported"]["adl"], "UNSUPPORTED")
@@ -310,6 +311,86 @@ class LiquidationSessionTests(unittest.TestCase):
         self.assertEqual(Decimal(binance["out_of_plan_fees"]), -Decimal("7.24925"))   # 2.9 + 4.34925 fees
         self.assertLess(Decimal(binance["strategy_equity_pnl"]), Decimal("-20"))
         self.assertTrue(all(check["passed"] for check in report["checks"]), report["checks"])
+
+    def flatten_rows(self):
+        return self.rows()[:2] + [
+            # BYBIT moves first and shows only 0.002 to buy back; then BINANCE breaches.
+            snapshot("BYBIT", 2 * SECOND, 901, [["58000.00", "1"]], [["58000.10", "0.002"]]),
+            snapshot("BINANCE", 2 * SECOND + 10**6, 101, [["58000.00", "0.004"]], [["58000.10", "1"]]),
+            # A second later both books are deep, 10 USDT lower.
+            snapshot("BINANCE", 3 * SECOND, 102, [["57990.00", "1"]], [["57990.10", "1"]]),
+            snapshot("BYBIT", 3 * SECOND + 10**6, 902, [["57990.00", "1"]], [["57990.10", "1"]]),
+        ]
+
+    def run_flatten(self, rows, *, restart_after=None):
+        from crypto_stat_arb.config import load_config
+        from crypto_stat_arb.session import TradingSession
+
+        with tempfile.TemporaryDirectory() as directory:
+            config, _ = write_session(Path(directory), rows)
+            cfg, _ = load_config(config)
+            store = ParentPlanStore(Path(directory) / "f.sqlite")
+            session = TradingSession(cfg, plan_store=store)
+            for n, event in enumerate(rows):
+                if restart_after is not None and n == restart_after:
+                    store.close()
+                    store = ParentPlanStore(Path(directory) / "f.sqlite")
+                    session = TradingSession(cfg, plan_store=store)
+                session.on_event(event)
+            session.drain()
+            marks = {k: (b.best_bid + b.best_ask) / 2 for k, b in session.books.items()}
+            state = session.oms.recalculate_account_state(mark_prices=marks)
+            flatten = [p for p in session.oms.plans.values() if p.inherited_base]
+            reconciliation = session.oms.reconcile_risk_state(
+                now_ns=rows[-1].receive_ts_ns, require_venue_orders=False, require_complete_opportunities=True,
+            )
+            store.close()
+        return session, state, flatten, reconciliation
+
+    def test_thin_book_flatten_retries_under_the_kill_switch_until_flat(self):
+        session, state, flatten, reconciliation = self.run_flatten(self.flatten_rows())
+        self.assertTrue(session.risk.kill_switch)
+        self.assertEqual({k: Decimal(v["quantity"]) for k, v in state["positions"].items()},
+                         {f"BINANCE:{PERP}": 0, f"BYBIT:{PERP}": 0})
+        self.assertEqual([p.state.value for p in flatten], ["CLOSED", "CLOSED"])
+        self.assertEqual([p.inherited_base for p in flatten], [Decimal("-0.004"), Decimal("-0.006")])
+        orders = [o for p in flatten for o in p.children]
+        self.assertTrue(all(o.venue == "BYBIT" and o.reduce_only for o in orders))  # not hedge_venue_priority
+        self.assertGreater(len(orders), 2)                                         # the thin book forced retries
+        self.assertEqual(reconciliation.decision.value, "APPROVED", reconciliation.issues)
+        # Flatten PnL is measured from the inherited exposure's mark, so plans
+        # still agree with equity after the price moved between liquidation and flatten.
+        self.assertNotIn(session.oms.FLATTEN_STRATEGY_ID, session.strategy_report()["strategies"])
+
+    def test_flatten_resumes_after_a_restart(self):
+        rows = self.flatten_rows()
+        session, state, flatten, reconciliation = self.run_flatten(rows, restart_after=4)
+        self.assertEqual({k: Decimal(v["quantity"]) for k, v in state["positions"].items()},
+                         {f"BINANCE:{PERP}": 0, f"BYBIT:{PERP}": 0})
+        self.assertTrue(all(p.state.value == "CLOSED" for p in flatten))
+        self.assertEqual(reconciliation.decision.value, "APPROVED", reconciliation.issues)
+
+    def test_plan_pnl_still_matches_equity_with_a_price_move_before_the_flatten(self):
+        with tempfile.TemporaryDirectory() as directory:
+            config, events = write_session(Path(directory), self.flatten_rows())
+            out = Path(directory) / "out"
+            result = run_backtest(config, events, out)
+            report = json.loads((out / "economic_reconciliation.json").read_text())
+        check = next(c for c in report["checks"] if c["check"] == "plan_net_pnl_matches_equity_pnl")
+        self.assertTrue(check["passed"], check)
+        self.assertEqual(result["economics"]["status"], "RECONCILED", report["checks"])
+
+    def test_no_flatten_when_disabled(self):
+        rows = self.rows()
+        with tempfile.TemporaryDirectory() as directory:
+            config, events = write_session(Path(directory), rows)
+            raw = json.loads(config.read_text())
+            raw["risk"]["margin"]["flatten_after_liquidation"] = False
+            config.write_text(json.dumps(raw))
+            out = Path(directory) / "out"
+            run_backtest(config, events, out)
+            state = json.loads((out / "account_state.json").read_text())
+        self.assertNotEqual(Decimal(state["positions"][f"BYBIT:{PERP}"]["quantity"]), 0)
 
     def test_gap_move_leaves_a_bankruptcy_deficit_recorded_once(self):
         rows = self.rows()[:2] + [

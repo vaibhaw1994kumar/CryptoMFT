@@ -147,7 +147,7 @@ class _SignalTracker:
     sell_notional: float = 0.0
     fees: float = 0.0
     missed: int = 0
-    hedge_sent: bool = False
+    hedged_qty: float = 0.0   # cumulative qty for which a hedge leg was dispatched
     maker_resting: bool = False
 
 
@@ -369,13 +369,13 @@ class CrossVenueArbBacktester:
             # Passive leg filled: fire the hedge now, not before. Sending it
             # earlier would leave a naked position against an uncertain fill.
             sig = tracker.signal
-            if sig.mode == MAKER_TAKER and not fill.is_taker and not tracker.hedge_sent:
+            if sig.mode == MAKER_TAKER and not fill.is_taker:
                 hedge = self.strategy.hedge_leg(sig, fill.qty, self.books[sig.sell_venue])
                 if hedge is not None:
-                    tracker.hedge_sent = True
-                    tracker.maker_resting = False
+                    tracker.hedged_qty += fill.qty
                     tracker.legs_outstanding += 1
                     self._send_leg(hedge, sig, fill.ts)
+                # maker_resting stays True until cancel_all clears it
 
         if len(self.trade_log) < self.config.max_trade_log:
             self.trade_log.append({
@@ -430,7 +430,8 @@ class CrossVenueArbBacktester:
         a directional one.
         """
         sig = tracker.signal
-        venue = sig.sell_venue if imbalance > 0 else sig.buy_venue
+        # imbalance = buy_qty - sell_qty; positive → long on buy_venue → sell there
+        venue = sig.buy_venue if imbalance > 0 else sig.sell_venue
         book = self.books[venue]
         if not book.ready:
             return
@@ -447,7 +448,7 @@ class CrossVenueArbBacktester:
         if outcome.filled and outcome.fill is not None:
             self.orders_filled += 1
             f = outcome.fill
-            self.unhedged_loss += abs(f.price - ref) * f.qty + abs(f.fee)
+            self.unhedged_loss += abs(f.price - ref) * f.qty  # fee goes to fees_paid via _on_fill
             self._on_fill(f)
 
     # ── Main loop ────────────────────────────────────────────────────────────
@@ -469,54 +470,57 @@ class CrossVenueArbBacktester:
         )
 
         now = 0.0
-        for ev in feed:
-            if cfg.max_events is not None and self.events_processed >= cfg.max_events:
-                break
-            now = ev.receive_ts
-            virtual_clock.set_now(now)
-            self.events_processed += 1
-            self.events_by_venue[ev.venue] += 1
-            self.events_by_kind[ev.kind] += 1
+        try:
+            for ev in feed:
+                if cfg.max_events is not None and self.events_processed >= cfg.max_events:
+                    break
+                now = ev.receive_ts
+                virtual_clock.set_now(now)
+                self.events_processed += 1
+                self.events_by_venue[ev.venue] += 1
+                self.events_by_kind[ev.kind] += 1
 
-            # In-flight orders land before the current event is applied: an order
-            # sent at t-latency cannot see the book update arriving right now.
-            for order in self.pending.release(now):
+                # In-flight orders land before the current event is applied: an order
+                # sent at t-latency cannot see the book update arriving right now.
+                for order in self.pending.release(now):
+                    self._execute_arrival(order, now)
+
+                self._apply_event(ev)
+
+                # Trades can move the touch too, via trade-tape repair.
+                if self._touch_changed(ev.venue):
+                    self.markouts.resolve(now, {v: b.mid for v, b in self.books.items()})
+                    signal = self.strategy.evaluate(self.books, self.states, self.inventory, now)
+                    if signal is not None:
+                        self._fire(signal, now)
+
+                if cfg.progress_every and self.events_processed % cfg.progress_every == 0:
+                    print(
+                        f"  {self.events_processed:>12,} ev  "
+                        f"sig={self.strategy.signals:<7,} fill={self.orders_filled:<7,} "
+                        f"miss={self.orders_missed:<7,} "
+                        f"pnl={self.gross_pnl - self.fees_paid - self.unhedged_loss:,.2f}",
+                        flush=True,
+                    )
+
+            # Drain: everything in flight lands, resting orders are cancelled.
+            for order in self.pending.drain():
                 self._execute_arrival(order, now)
+            for mo in self.maker.cancel_all(now):
+                sid = self._maker_to_signal.get(mo.order_id, -1)
+                t = self._trackers.get(sid)
+                if t is not None:
+                    t.maker_resting = False
+                self._maybe_resolve(sid, now)
+            for sid in list(self._trackers):
+                self._trackers[sid].legs_outstanding = 0
+                self._trackers[sid].maker_resting = False
+                self._maybe_resolve(sid, now)
 
-            self._apply_event(ev)
-
-            # Trades can move the touch too, via trade-tape repair.
-            if self._touch_changed(ev.venue):
-                self.markouts.resolve(now, {v: b.mid for v, b in self.books.items()})
-                signal = self.strategy.evaluate(self.books, self.states, self.inventory, now)
-                if signal is not None:
-                    self._fire(signal, now)
-
-            if cfg.progress_every and self.events_processed % cfg.progress_every == 0:
-                print(
-                    f"  {self.events_processed:>12,} ev  "
-                    f"sig={self.strategy.signals:<7,} fill={self.orders_filled:<7,} "
-                    f"miss={self.orders_missed:<7,} "
-                    f"pnl={self.gross_pnl - self.fees_paid - self.unhedged_loss:,.2f}",
-                    flush=True,
-                )
-
-        # Drain: everything in flight lands, resting orders are cancelled.
-        for order in self.pending.drain():
-            self._execute_arrival(order, now)
-        for mo in self.maker.cancel_all(now):
-            sid = self._maker_to_signal.get(mo.order_id, -1)
-            t = self._trackers.get(sid)
-            if t is not None:
-                t.maker_resting = False
-            self._maybe_resolve(sid, now)
-        for sid in list(self._trackers):
-            self._trackers[sid].legs_outstanding = 0
-            self._trackers[sid].maker_resting = False
-            self._maybe_resolve(sid, now)
-
-        self.markouts.resolve(now, {v: b.mid for v, b in self.books.items()}, finalize=True)
-        return self._build_result(feed, coverage, virtual_clock.real_time() - wall_start)
+            self.markouts.resolve(now, {v: b.mid for v, b in self.books.items()}, finalize=True)
+            return self._build_result(feed, coverage, virtual_clock.real_time() - wall_start)
+        finally:
+            virtual_clock.uninstall()
 
     # ── Result ───────────────────────────────────────────────────────────────
 

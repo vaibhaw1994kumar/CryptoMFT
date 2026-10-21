@@ -110,6 +110,7 @@ def _restore_plan(payload: str) -> ParentPlan:
             if row.get("residual_since_ts_ns") is not None else None
         ),
         unwind_attempts=int(row.get("unwind_attempts", 0)),
+        inherited_base=Decimal(str(row.get("inherited_base", "0"))),
     )
 
 

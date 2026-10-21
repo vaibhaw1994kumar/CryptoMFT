@@ -293,6 +293,10 @@ class ParentPlan:
     transitions: list[dict[str, Any]] = field(default_factory=list)
     residual_since_ts_ns: int | None = None
     unwind_attempts: int = 0
+    # A risk-flatten plan (after a venue liquidation) starts with exposure it
+    # did not trade: residual = inherited + child fills, and PnL is measured
+    # against the inherited exposure's mark, so it is zero at creation.
+    inherited_base: Decimal = Decimal("0")
 
     def transition(self, state: PlanState, ts_ns: int, reason: str = "") -> None:
         self.state = state

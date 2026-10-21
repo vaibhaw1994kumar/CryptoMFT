@@ -355,11 +355,28 @@ This extends `RiskEngine.evaluate_margin` for venues listed under
   - Simplifications: a full close rather than the venues' stepwise partial
     liquidation, and a book walk rather than takeover at the bankruptcy
     price.
+* **Flattening the surviving leg** (`flatten_after_liquidation`, default
+  true).
+  - When a liquidation closes one leg of a cross-venue hedge, the same
+    quantity of the opposite position on the other venue is flattened
+    (never more than is still open there) through a risk-flatten plan.
+  - The plan's residual is the inherited exposure plus its own fills, and
+    its target is flat, not "within bound".
+  - It trades reduce-only on the position's own venue, ignoring
+    `hedge_venue_priority`. It runs under the kill switch (risk-reducing
+    orders are allowed), escalates like any residual unwind, and has up to
+    20 attempts.
+  - It retries on that venue's next book update, never against the same
+    book twice.
+  - Its PnL is measured from the inherited exposure's mark, so the plan-PnL
+    check still holds after a price move. It holds no risk reservation, is
+    not a strategy opportunity, and resumes after a restart.
+  - A flatten that cannot reach flat leaves its plan open, which the RMS
+    check reports as `INCOMPLETE_OPPORTUNITY`.
+  - Perpetuals only: nothing is flattened after a spot borrow buy-in.
 * **Unsupported, and reported as such** in `margin_status.json`: ADL,
   insurance fund, and spot-margin liquidation (only the borrow-recall buy-in
-  exists). After a liquidation, the surviving leg on the other venue is
-  reported (`positions`) but not flattened automatically; the kill switch
-  stops new risk.
+  exists).
 * **Artifacts.** `margin_status.json` has per-venue state, alerts,
   `available_margin` and `details` (mode, balance basis, collateral rows,
   per-position tier / MM / worst-case IM / isolated equity, breached

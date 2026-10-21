@@ -258,6 +258,7 @@ class TradingSession:
         }
         self._margin_due_ns: int | None = None
         self._margin_dirty = False
+
         self.liquidation = LiquidationEngine(
             self.ledger, self.margin_config,
             adapter_for=self._venue_adapter, on_liquidation=self._liquidation_stop,
@@ -369,13 +370,16 @@ class TradingSession:
             self.borrow.process(now)
             self.borrow.settle_until(now)
         if self.margin_venues:
+            self.oms.retry_flatten(event.venue, now)
             if (event.venue, event.instrument_id) in self.liquidation.active:
                 # A new book update: keep liquidating the residual until flat.
-                if self.liquidation.liquidate(
+                result = self.liquidation.liquidate(
                     event.venue, event.instrument_id, self.books.get(book_key), now,
                     reason="continuing liquidation of the residual",
-                ) is not None:
+                )
+                if result is not None:
                     self._margin_dirty = True
+                    self._flatten_surviving_leg(result, now)
             self._evaluate_margin(now)
         self._notify_closed_plans()
         if gate_allowed is None:
@@ -579,6 +583,7 @@ class TradingSession:
                 )
                 if result is not None:
                     self._margin_dirty = True
+                    self._flatten_surviving_leg(result, now)
             last = next((e for e in reversed(self.liquidation.events) if e["venue"] == row.venue), None)
             if last is not None and last["code"] != "BANKRUPTCY_DEFICIT":
                 # Checked once per liquidation episode: after the latest
@@ -594,6 +599,43 @@ class TradingSession:
                         "deficit": str(-venue_after.effective_margin_balance),
                         "detail": "equity below zero after liquidation; insurance fund and ADL are UNSUPPORTED",
                     })
+
+    def _flatten_surviving_leg(self, liquidation: dict, now: int) -> None:
+        """A liquidation closed one leg of a cross-venue hedge: close the other.
+
+        Each liquidation fill flattens the same quantity of the opposite
+        position on the other venues (never more than is still open there),
+        through a risk-flatten plan that may trade under the kill switch.
+        Perpetuals only: after a spot borrow buy-in nothing is flattened.
+        """
+        filled = Decimal(liquidation.get("filled", "0"))
+        if not self.margin_config.flatten_after_liquidation or filled <= 0:
+            return
+        venue, instrument_id = liquidation["venue"], liquidation["instrument_id"]
+        closed_long = liquidation["side"] == "SELL"
+        remaining = filled
+        for other in self.cfg.venues:
+            if other == venue or remaining <= 0:
+                continue
+            position = self.ledger.positions.get((other, instrument_id), Decimal("0"))
+            if position == 0 or (position > 0) == closed_long:
+                continue                      # no opposite exposure here
+            # Still to be closed by flatten plans already open on that venue
+            # (what they have filled is already out of ``position``).
+            outstanding = sum((
+                abs(plan.residual_base) for plan in self.oms.plans.values()
+                if plan.inherited_base and plan.state.value != "CLOSED"
+                and (plan.opportunity.buy_venue, plan.opportunity.instrument_id) == (other, instrument_id)
+            ), Decimal("0"))
+            size = min(remaining, abs(position) - outstanding)
+            if size <= 0:
+                continue
+            exposure = size if position > 0 else -size
+            remaining -= size
+            self.oms.open_flatten_plan(
+                other, instrument_id, exposure, now,
+                reason=f"liquidation of {venue} {instrument_id} ({liquidation['code']}) left this leg unhedged",
+            )
 
     def _borrow_forced_close(self, reason: str, now_ns: int) -> None:
         """A venue buy-in leaves the other leg unhedged: stop trading."""

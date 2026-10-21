@@ -126,6 +126,9 @@ class VenueMarginConfig:
 class MarginConfig:
     venues: dict[str, VenueMarginConfig] = field(default_factory=dict)
     evaluate_interval_ns: int = 1_000_000_000
+    # After a liquidation closes one leg of a cross-venue hedge, flatten the
+    # matching quantity of the opposite position on the other venue.
+    flatten_after_liquidation: bool = True
 
     @classmethod
     def from_config(cls, section: dict[str, Any] | None) -> "MarginConfig":
@@ -175,7 +178,8 @@ class MarginConfig:
                 if not ZERO <= haircut <= ONE:
                     raise ValueError(f"collateral haircut for {venue} {asset} must be within [0, 1]")
         return cls(venues=venues,
-                   evaluate_interval_ns=int(section.get("evaluate_interval_ms", 1_000)) * 1_000_000)
+                   evaluate_interval_ns=int(section.get("evaluate_interval_ms", 1_000)) * 1_000_000,
+                   flatten_after_liquidation=bool(section.get("flatten_after_liquidation", True)))
 
     @property
     def configured(self) -> bool:
