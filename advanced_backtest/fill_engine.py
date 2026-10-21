@@ -246,7 +246,7 @@ class MakerExecutor:
         order = self.orders.pop(order_id, None)
         if order is None:
             return None
-        self._record_outcome(order)
+        self._record_outcome(order, end_ts=now)
         self.orders_cancelled += 1
         return order
 
@@ -389,26 +389,24 @@ class MakerExecutor:
                 return lv_size
         return 0.0
 
-    def _record_outcome(self, order: MakerOrder) -> None:
+    def _record_outcome(self, order: MakerOrder, end_ts: float | None = None) -> None:
         """Feed the completed order to EmpiricalFillModel, one event per horizon.
 
         `filled` is horizon-conditional: an order that filled after 12s counts as
-        filled at the 15s horizon but not at 1s or 5s. That is what lets the
-        posterior express how fill probability decays with holding time.
+        filled at the 15s horizon but not at 1s or 5s.
 
-        Censoring: an order cancelled at t_cancel is eligible for horizon h only if
-        it filled before h or lived at least h. Emitting a cancelled order as
-        "not filled" at all horizons beyond t_cancel overstates non-fill rates.
+        Censoring: pass end_ts=now when cancelling. An observation at horizon h is
+        emitted only if the order filled before h OR survived for at least h seconds.
+        Without end_ts (full fills routed from _consume), fill_ts is finite and
+        life_s is computed from it correctly.
 
         Feature: queue_ahead is snapshotted at placement (initial_queue_ahead) not at
-        close, because _consume() decrements it as fills arrive — using the residual
-        would leak the label back into the feature.
+        close, because _consume() decrements it as fills arrive.
         """
         fill_ts = order.first_fill_ts if order.first_fill_ts is not None else math.inf
         adverse_ts = order.adverse_ts if order.adverse_ts is not None else math.inf
         ratio = order.filled_qty / max(order.size, 1e-9)
 
-        # terminal_reason: what ended this order's life
         if order.filled_qty >= order.size - 1e-9:
             terminal_reason = "full_fill"
         elif order.filled_qty > 0:
@@ -416,13 +414,20 @@ class MakerExecutor:
         else:
             terminal_reason = "cancel"
 
-        life_s = (fill_ts - order.placed_ts) if fill_ts < math.inf else None
+        # life_s: how long the order was observable.
+        # For fills: time-to-first-fill (fill_ts is finite).
+        # For cancels: end_ts is the cancel timestamp; fall back to fill_ts if
+        #   partially filled (partial_then_cancel), else None if neither is known.
+        if fill_ts < math.inf:
+            life_s: float | None = fill_ts - order.placed_ts
+        elif end_ts is not None:
+            life_s = end_ts - order.placed_ts
+        else:
+            life_s = None
 
         for horizon in self.config.fill_horizons_s:
             filled_by_h = fill_ts - order.placed_ts <= horizon
-            # Skip: cancelled before this horizon AND not filled — censored observation.
-            # An observation is valid only if the order either filled before h OR
-            # survived for the full horizon.
+            # Censoring guard: skip h when the order ended before h and did not fill.
             if not filled_by_h and life_s is not None and life_s < horizon:
                 continue
 

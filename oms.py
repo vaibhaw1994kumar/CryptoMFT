@@ -231,6 +231,7 @@ class OMS:
         self._late_fill_alerted: set[str] = set()
         self._residual_breach_since: dict[str, int] = {}
         self._residual_next_check: dict[str, int] = {}
+        self._reconciliation_retry: set[str] = set()
         self._deferred_close: dict[str, tuple[str, tuple[str, ...]]] = {}
         self.realism_counters: dict[str, int] = {
             "unknown_state_orders": 0,
@@ -306,6 +307,34 @@ class OMS:
                         reason=str(exc),
                     )
             self._update_exposure_control(recovery_ts_ns)
+            # Reconstruct report deadlines for every order that was open at
+            # shutdown.  _report_deadlines is in-memory only, so after a restart
+            # any order that had not yet received a definitive venue report would
+            # be silently unmonitored.  Schedule an immediate re-query using the
+            # same filter as _unknown_state_children: non-terminal and not a GTC
+            # order that is already resting acknowledged or partially filled.
+            for plan in self.plans.values():
+                if plan.state == PlanState.CLOSED:
+                    continue
+                for order in plan.children:
+                    if order.state in TERMINAL_ORDER_STATES:
+                        continue
+                    if (
+                        order.time_in_force == TimeInForce.GTC.value
+                        and order.state in {OrderState.ACKNOWLEDGED, OrderState.PARTIAL}
+                    ):
+                        continue
+                    self._watch_order(order, recovery_ts_ns, immediate=True)
+            for plan in self.plans.values():
+                if plan.state == PlanState.HEDGE_UNWIND:
+                    self._residual_breach_since.setdefault(plan.parent_id, recovery_ts_ns)
+            for plan in self.plans.values():
+                if plan.state == PlanState.CLOSED:
+                    continue
+                if plan.state == PlanState.HEDGE_UNWIND:
+                    continue
+                if all(order.state in TERMINAL_ORDER_STATES for order in plan.children):
+                    self._reconciliation_retry.add(plan.parent_id)
 
     def _exposure_mark_prices(self) -> dict[tuple[str, str], Decimal]:
         return {
@@ -1402,7 +1431,9 @@ class OMS:
             issues=list(internal_report.issues),
         )
         if internal_report.issues:
+            self._reconciliation_retry.add(plan.parent_id)
             return plan
+        self._reconciliation_retry.discard(plan.parent_id)
         self._transition(plan, PlanState.RECONCILED, ts_ns)
         self._transition(plan, PlanState.CLOSED, ts_ns)
         self.risk.carried_residual_base = self.carried_residual_base()
@@ -1569,6 +1600,14 @@ class OMS:
             if only_due and self._residual_next_check.get(plan.parent_id, 0) > now_ns:
                 continue
             self._residual_next_check[plan.parent_id] = now_ns + interval_ns
+            affected.append(self._finalize_plan(plan, now_ns, self._books))
+        for parent_id in list(self._reconciliation_retry):
+            plan = self.plans.get(parent_id)
+            if plan is None or plan.state == PlanState.CLOSED:
+                self._reconciliation_retry.discard(parent_id)
+                continue
+            if self.router.has_pending_parent(parent_id):
+                continue
             affected.append(self._finalize_plan(plan, now_ns, self._books))
         return tuple(affected)
 
@@ -1867,6 +1906,19 @@ class OMS:
         reason = status.reason
         cumulative = status.cumulative_filled_quantity
         if state is None:
+            if order.filled_quantity > 0:
+                # Venue has no record of this order, but we already hold a confirmed
+                # partial fill from the private stream.  Mapping to REJECTED would
+                # overwrite PARTIAL in state arbitration (ORDER_STATE_RANK 4 > 2).
+                # Defer: re-schedule an immediate re-query and preserve the known
+                # fill rather than booking a contradictory rejection.
+                self._watch_order(order, ts_ns, immediate=True)
+                self.ledger.record(
+                    "VENUE_QUERY_NOT_FOUND_DEFERRED", ts_ns,
+                    parent_id=plan.parent_id, order_id=order.order_id,
+                    venue=order.venue, known_fill=str(order.filled_quantity),
+                )
+                return
             state = ExecutionEventType.REJECTED
             reason = reason or "venue has no record of order"
             cumulative = Decimal("0")

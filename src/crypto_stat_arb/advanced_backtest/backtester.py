@@ -486,6 +486,7 @@ class CrossVenueArbBacktester:
             start_day=cfg.start_date, end_day=cfg.end_date, latency=self.latency,
             trust_local_ts={v: s.trust_local_ts for v, s in self.venue_specs.items()},
             include_deltas=cfg.include_deltas,
+            quality_preflight=True,
         )
 
         now = 0.0

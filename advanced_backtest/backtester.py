@@ -77,6 +77,11 @@ class ArbBacktestConfig:
     # If set, only load fill-log events whose label has matured by this epoch second.
     # Prevents temporal leakage when the calibration window overlaps the eval window.
     warm_start_until_ts: float | None = None
+    # Path to a FillModelV1 JSON checkpoint.  When set, the strategy gates maker
+    # quotes on P(fill) >= arb.min_fill_prob.  The model's trained_until_ts must
+    # be <= epoch(start_date); the backtester raises ValueError otherwise to
+    # prevent forward-looking model use.
+    fill_model_v1_path: str | None = None
     markout_horizons_s: tuple[float, ...] = (1.0, 5.0, 30.0)
     progress_every: int = 0          # print every N events; 0 = silent
     max_trade_log: int = 200_000     # cap in-memory fill log on long runs
@@ -205,7 +210,27 @@ class CrossVenueArbBacktester:
         if config.arb.max_position_base <= 0:
             config.arb.max_position_base = max_position_for(config.pair)
 
-        self.strategy = CrossVenueArbStrategy(config.pair, self.venue_specs, config.arb)
+        fill_model_v1 = None
+        if config.fill_model_v1_path:
+            from .fill_model_v1 import FillModelV1  # noqa: PLC0415
+            import datetime as _dt  # noqa: PLC0415
+            fill_model_v1 = FillModelV1.load_json(config.fill_model_v1_path)
+            # Leakage guard: model must not have been trained on data from the
+            # eval window.  Convert start_date "YYYY-MM-DD" to midnight UTC.
+            start_epoch = _dt.datetime.fromisoformat(config.start_date).replace(
+                tzinfo=_dt.timezone.utc
+            ).timestamp()
+            if fill_model_v1.trained_until_ts > start_epoch:
+                raise ValueError(
+                    f"FillModelV1 trained_until_ts={fill_model_v1.trained_until_ts:.0f} "
+                    f"is after start_date epoch {start_epoch:.0f} ({config.start_date!r}). "
+                    "Using a model trained on future data leaks labels into the backtest."
+                )
+
+        self.strategy = CrossVenueArbStrategy(
+            config.pair, self.venue_specs, config.arb,
+            fill_model_v1=fill_model_v1,
+        )
         self.taker = TakerExecutor(consume_liquidity=config.consume_liquidity)
         self.maker = MakerExecutor(self.fill_model, config.maker)
         self.pending = PendingOrderQueue()
@@ -497,6 +522,7 @@ class CrossVenueArbBacktester:
             start_day=cfg.start_date, end_day=cfg.end_date, latency=self.latency,
             trust_local_ts={v: s.trust_local_ts for v, s in self.venue_specs.items()},
             include_deltas=cfg.include_deltas,
+            quality_preflight=True,
         )
 
         now = 0.0

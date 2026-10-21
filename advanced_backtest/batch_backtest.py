@@ -124,10 +124,30 @@ def run_pair(
                              warm_start=None, warm_start_until_ts=None)
             r_cal = _run_once(cfg_cal)
 
+            # Fit Phase-1 FillModelV1 from the calibration log, leakage-guarded
+            # by until_ts.  One model per decision horizon; the eval run uses
+            # whichever horizon matches ArbConfig.fill_gate_horizon_s.
+            fill_model_v1_path: str | None = None
+            if (base.arb.mode == "maker_taker"
+                    and base.arb.min_fill_prob > 0.0
+                    and r_cal.fill_log_path):
+                from .fill_label import extract_labels   # noqa: PLC0415
+                from .fill_model_v1 import FillModelV1   # noqa: PLC0415
+                records = extract_labels(r_cal.fill_log_path, until_ts=until_ts)
+                if records:
+                    horizon_s = base.arb.fill_gate_horizon_s
+                    model = FillModelV1.fit(records, horizon_s=horizon_s,
+                                           trained_until_ts=until_ts)
+                    if model is not None:
+                        model_path = str(pair_dir / "calibration" / "fill_model_v1.json")
+                        model.save_json(model_path)
+                        fill_model_v1_path = model_path
+
             cfg_eval = _clone(base, pair=pair, start=eval_days[0], end=eval_days[-1],
                               output_dir=str(pair_dir / "eval"),
                               warm_start=r_cal.fill_log_path,
-                              warm_start_until_ts=until_ts)
+                              warm_start_until_ts=until_ts,
+                              fill_model_v1_path=fill_model_v1_path)
             r_eval = _run_once(cfg_eval)
             return PairOutcome(
                 pair, "ok",
@@ -160,6 +180,7 @@ def _clone(
     base: ArbBacktestConfig, pair: str, start: str, end: str,
     output_dir: str, warm_start: str | None,
     warm_start_until_ts: float | None = None,
+    fill_model_v1_path: str | None = None,
 ) -> ArbBacktestConfig:
     arb = ArbConfig(**{**vars(base.arb), "max_position_base": max_position_for(pair)})
     return ArbBacktestConfig(
@@ -173,6 +194,7 @@ def _clone(
         include_deltas=base.include_deltas, seed=base.seed,
         output_dir=output_dir, warm_start_fill_events=warm_start,
         warm_start_until_ts=warm_start_until_ts,
+        fill_model_v1_path=fill_model_v1_path,
         markout_horizons_s=base.markout_horizons_s,
         progress_every=base.progress_every,
     )

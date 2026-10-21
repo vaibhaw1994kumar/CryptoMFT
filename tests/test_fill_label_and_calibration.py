@@ -394,5 +394,209 @@ class TestCalibrationDaysBacktest(unittest.TestCase):
         self.assertAlmostEqual(r["ending_equity"], r["mark_to_market_pnl"], places=6)
 
 
+# ── Censoring fix ─────────────────────────────────────────────────────────────
+
+class TestCensoringFix(unittest.TestCase):
+    """Cancelled orders must NOT generate fill-label records.
+
+    Before the fix, _record_outcome() received end_ts=None for cancelled orders,
+    so life_s was always None, the censoring guard was bypassed, and every horizon
+    got a 'not filled' label — inflating the false-negative rate.
+
+    After the fix, cancel() passes end_ts=now so life_s = now - placed_ts, and
+    only horizons where h > life_s fire (order was still open when cancelled).
+    A cancel at t+0.5s must produce zero labels for h=1, h=5, h=15 (all larger).
+    """
+
+    def test_cancel_at_half_second_produces_no_label_records(self):
+        from new_backtest.fill_engine import MakerExecutor, MakerConfig
+        from new_backtest.fill_model import EmpiricalFillModel
+        from new_backtest.order_book import OrderBook
+        from new_backtest.models import MarketState, LambdaBucket, Side
+
+        model = EmpiricalFillModel()
+        executor = MakerExecutor(model, MakerConfig())
+
+        now = 1_000.0
+        book = OrderBook("bybit", "BTCUSDT", delta_semantics=False)
+        book._bids = {59_990.0: 1.0}
+        book._asks = {60_000.0: 1.0}
+        # Heaps must be populated too so level lookups work
+        import heapq
+        book._bid_heap = [-59_990.0]
+        book._ask_heap = [60_000.0]
+        book.last_update_ts = now
+
+        state = MarketState(
+            timestamp=now, best_bid=59_990.0, best_ask=60_000.0,
+            bid_size=1.0, ask_size=1.0, mid=59_995.0,
+            microprice=59_995.0, spread_bps=1.67, imbalance=0.0,
+            top5_imbalance=0.0, depth_weighted_imbalance=0.0,
+            spread_pct=0.000167, microprice_deviation_bps=0.0,
+            microprice_drift_bps=0.0, short_vol=0.0002, short_vol_bps=2.0,
+            trade_sign=0.1, impact_trade_sign=0.1, flow_toxicity=0.1,
+            recent_trade_rate=5.0, recent_signed_volume=0.05,
+            trade_burst_flag=False, trade_cluster_score=0.0,
+            depth_collapse=0.0, liquidity_evaporation=0.0,
+            cancel_burst=0.0, cancel_imbalance=0.0,
+            replenish_imbalance=0.0, queue_fragility=0.0,
+            book_hole=False, recent_sweep_flag=False, sweep_risk=False,
+            top_depth=2.0, top_depth_baseline=3.0, total_depth=20.0,
+            tick_size=0.1,
+        )
+
+        initial_count = len(model.order_event_log)
+
+        order = executor.place(
+            venue="bybit", pair="BTCUSDT", symbol="BTCUSDT",
+            side=Side.BID, price=59_985.0, size=0.01,
+            book=book, state=state, regime_bucket=LambdaBucket.CALM,
+            now=now, active_ts=now, tick_size=0.1,
+        )
+
+        # Cancel 0.5 s later — all horizons (1, 5, 15) are still open
+        executor.cancel(order.order_id, now=now + 0.5)
+
+        # No new label records (all horizons > life_s=0.5 → censored out)
+        new_count = len(model.order_event_log)
+        self.assertEqual(new_count, initial_count,
+                         "Cancelled orders must not generate fill-label records "
+                         "when cancelled before the shortest horizon")
+
+
+# ── Fill gate stub tests ───────────────────────────────────────────────────────
+
+class TestFillGate(unittest.TestCase):
+    """Verify min_fill_prob gate behaviour with stub models."""
+
+    def _make_strategy(self, min_fill_prob: float, model=None):
+        from new_backtest.arb_strategy import CrossVenueArbStrategy, ArbConfig, MAKER_TAKER
+        from new_backtest.config import make_venues, BYBIT, BINANCE
+        specs = make_venues("neutral")
+        venue_specs = {BYBIT: specs[BYBIT], BINANCE: specs[BINANCE]}
+        cfg = ArbConfig(
+            mode=MAKER_TAKER,
+            min_fill_prob=min_fill_prob,
+            fill_gate_horizon_s=15,
+        )
+        return CrossVenueArbStrategy("BTCUSDT", venue_specs, cfg, fill_model_v1=model)
+
+    def _make_books_and_states(self):
+        """Produce books where Bybit has a wide spread so a passive bid derived
+        from Binance's price lands inside it — needed for MAKER_TAKER signals.
+
+        Bybit:   bid=59900  ask=60100   (spread ≈ 33bps, wide)
+        Binance: bid=60010  ask=60020   (tight)
+        max_bid = 60010 * (1 - 11.5bps) ≈ 59941 — inside Bybit's spread ✓
+        """
+        import heapq
+        from new_backtest.order_book import OrderBook
+        from new_backtest.venue_state import VenueState
+        from new_backtest.config import BYBIT, BINANCE
+        now = 1_000.0
+        books = {}
+        states = {}
+        for venue, bid, ask in [(BYBIT, 59_900.0, 60_100.0), (BINANCE, 60_010.0, 60_020.0)]:
+            ob = OrderBook(venue, "BTCUSDT", delta_semantics=False)
+            ob._bids = {bid: 5.0, bid - 1: 5.0}
+            ob._asks = {ask: 5.0, ask + 1: 5.0}
+            ob._bid_heap = [-bid, -(bid - 1)]
+            ob._ask_heap = [ask, ask + 1]
+            heapq.heapify(ob._bid_heap)
+            heapq.heapify(ob._ask_heap)
+            # touch_age_s returns inf when conf dict is empty → stale_touch gate
+            # fires.  Stamp both touches as confirmed at `now`.
+            ob._bid_conf = {bid: now}
+            ob._ask_conf = {ask: now}
+            ob.last_update_ts = now
+            ob.last_snapshot_ts = now
+            books[venue] = ob
+            states[venue] = VenueState(venue)
+        return books, states, now
+
+    def test_gate_disabled_by_default_no_model(self):
+        """Without a model, min_fill_prob=0 should pass all signals through."""
+        from new_backtest.arb_strategy import InventoryBook
+        strat = self._make_strategy(min_fill_prob=0.0)
+        books, states, now = self._make_books_and_states()
+        inv = InventoryBook()
+        inv.ensure(tuple(books.keys()))
+        # Should evaluate without error (gate is disabled)
+        _ = strat.evaluate(books, states, inv, now)
+        self.assertEqual(strat.rejects.get("low_fill_prob", 0), 0)
+
+    def test_gate_blocks_when_model_returns_zero(self):
+        """A stub returning p=0 with min_fill_prob=0.5 must block all maker signals."""
+        from new_backtest.fill_model_v1 import FillModelV1
+        from new_backtest.arb_strategy import InventoryBook
+
+        # Build a model that always predicts 0
+        zero_model = FillModelV1(
+            horizon_s=15,
+            trained_until_ts=0.0,
+            n_train=100,
+            base_rate=0.5,
+            feature_mean=[0.0] * 9,
+            feature_scale=[1.0] * 9,
+            coef=[0.0] * 9,
+            intercept=-1000.0,  # sigmoid(-1000) ≈ 0
+        )
+        strat = self._make_strategy(min_fill_prob=0.5, model=zero_model)
+        books, states, now = self._make_books_and_states()
+        inv = InventoryBook()
+        inv.ensure(tuple(books.keys()))
+
+        sig = strat.evaluate(books, states, inv, now)
+        self.assertIsNone(sig)
+        self.assertGreater(strat.rejects["low_fill_prob"], 0)
+
+    def test_gate_passes_when_model_returns_one(self):
+        """A stub returning p≈1 with min_fill_prob=0.5 must not block maker signals."""
+        from new_backtest.fill_model_v1 import FillModelV1
+        from new_backtest.arb_strategy import InventoryBook
+
+        one_model = FillModelV1(
+            horizon_s=15,
+            trained_until_ts=0.0,
+            n_train=100,
+            base_rate=0.5,
+            feature_mean=[0.0] * 9,
+            feature_scale=[1.0] * 9,
+            coef=[0.0] * 9,
+            intercept=1000.0,  # sigmoid(1000) ≈ 1
+        )
+        strat = self._make_strategy(min_fill_prob=0.5, model=one_model)
+        books, states, now = self._make_books_and_states()
+        inv = InventoryBook()
+        inv.ensure(tuple(books.keys()))
+
+        _ = strat.evaluate(books, states, inv, now)
+        self.assertEqual(strat.rejects.get("low_fill_prob", 0), 0)
+
+    def test_leakage_guard_raises_on_future_model(self):
+        """backtester must raise ValueError if model trained_until_ts > start epoch."""
+        import datetime as dt
+        from new_backtest.fill_model_v1 import FillModelV1
+        from new_backtest.backtester import ArbBacktestConfig, CrossVenueArbBacktester
+        from new_backtest.arb_strategy import ArbConfig, MAKER_TAKER
+        import tempfile, json, os
+
+        model = FillModelV1(
+            horizon_s=15, trained_until_ts=9_999_999_999.0, n_train=1,
+            base_rate=0.5, feature_mean=[0.0]*9, feature_scale=[1.0]*9,
+            coef=[0.0]*9, intercept=0.0,
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, "model.json")
+            model.save_json(path)
+            cfg = ArbBacktestConfig(
+                data_root=tmp, start_date="2026-01-01", end_date="2026-01-02",
+                arb=ArbConfig(mode=MAKER_TAKER),
+                fill_model_v1_path=path,
+            )
+            with self.assertRaises(ValueError):
+                CrossVenueArbBacktester(cfg)
+
+
 if __name__ == "__main__":
     unittest.main()
