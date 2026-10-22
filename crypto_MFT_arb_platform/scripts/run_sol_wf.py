@@ -55,6 +55,7 @@ BASE_CFG = ArbBacktestConfig(
         min_fill_prob=0.5,             # skip signals with P(fill@5s) < 0.5
         max_adverse_prob=0.15,         # skip signals with P(adverse) > 0.15
         max_ttf_s=8.0,                 # skip signals where E[TTF] > 8 s
+        max_cross_venue_skew_s=0.2,    # reject if books differ by > 200 ms
         fill_gate_horizon_s=5.0,       # horizon used for both gates
     ),
     output_dir=str(OUTPUT_ROOT / "SOLUSDT"),
