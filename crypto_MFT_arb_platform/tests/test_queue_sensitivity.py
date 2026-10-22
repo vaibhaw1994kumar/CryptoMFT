@@ -32,7 +32,7 @@ DAYS = ["2026-10-01", "2026-10-02", "2026-10-03"]
 
 # Pricing calibration for maker_taker arb:
 # max_bid = taker_bid * (1 - required_bps/10000)
-# required_bps = bybit_spot_mm.maker(-0.5) + binance_perp_vip0.taker(5.0) + min_net(1.0) + safety(0.5) = 6.0
+# required_bps = bybit_perp_mm.maker(-0.5) + binance_perp_vip0.taker(5.0) + min_net(1.0) + safety(0.5) = 6.0
 # For max_bid to lie inside the maker spread [59990, 60000]:
 #   59990 < taker_bid * 0.9994 < 60000
 #   ⟹  taker_bid ∈ (59990/0.9994, 60000/0.9994) ≈ (60026, 60036)

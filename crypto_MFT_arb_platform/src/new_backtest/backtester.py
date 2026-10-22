@@ -62,7 +62,7 @@ class ArbBacktestConfig:
     max_events: int | None = None
 
     latency_preset: str = DEFAULT_LATENCY_PRESET
-    bybit_fee_preset: str = "bybit_spot_mm"
+    bybit_fee_preset: str = "bybit_perp_mm"
     binance_fee_preset: str = "binance_perp_vip0"
 
     arb: ArbConfig = field(default_factory=ArbConfig)
@@ -705,7 +705,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
     p.add_argument("--mode", choices=[TAKER_TAKER, MAKER_TAKER], default=TAKER_TAKER)
     p.add_argument("--latency-preset", choices=sorted(LATENCY_PRESETS),
                    default=DEFAULT_LATENCY_PRESET)
-    p.add_argument("--bybit-fees", default="bybit_spot_mm")
+    p.add_argument("--bybit-fees", default="bybit_perp_mm")
     p.add_argument("--binance-fees", default="binance_perp_vip0")
     p.add_argument("--min-edge-bps", type=float, default=1.0)
     p.add_argument("--safety-buffer-bps", type=float, default=0.5)

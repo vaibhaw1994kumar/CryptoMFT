@@ -107,7 +107,7 @@ class VenueSpec:
 
 def make_venues(
     latency_preset: str = DEFAULT_LATENCY_PRESET,
-    bybit_fee_preset: str = "bybit_spot_mm",
+    bybit_fee_preset: str = "bybit_perp_mm",
     binance_fee_preset: str = "binance_perp_vip0",
 ) -> dict[str, VenueSpec]:
     lat = LATENCY_PRESETS[latency_preset]

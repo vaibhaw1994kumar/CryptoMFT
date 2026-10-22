@@ -488,7 +488,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
     p.add_argument("--mode", choices=[TAKER_TAKER, MAKER_TAKER], default=TAKER_TAKER)
     p.add_argument("--latency-preset", choices=sorted(LATENCY_PRESETS),
                    default=DEFAULT_LATENCY_PRESET)
-    p.add_argument("--bybit-fees", default="bybit_spot_mm")
+    p.add_argument("--bybit-fees", default="bybit_perp_mm")
     p.add_argument("--binance-fees", default="binance_perp_vip0")
     p.add_argument("--min-edge-bps", type=float, default=1.0)
     p.add_argument("--max-book-age-ms", type=float, default=500.0)
