@@ -1,0 +1,733 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Backtest Quality Report</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.0/chart.umd.min.js"></script>
+<style>
+:root {
+  color-scheme: light;
+  --surf:  #fcfcfb;
+  --page:  #f9f9f7;
+  --ink:   #0b0b0b;
+  --ink2:  #52514e;
+  --muted: #898781;
+  --grid:  #e1e0d9;
+  --axis:  #c3c2b7;
+  --s1: #2a78d6;
+  --s2: #eb6834;
+  --s3: #1baf7a;
+  --s4: #eda100;
+  --good:  #0ca30c;
+  --warn:  #fab219;
+  --ser:   #ec835a;
+  --crit:  #d03b3b;
+  --up:    #006300;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+    --surf:  #1a1a19;
+    --page:  #0d0d0d;
+    --ink:   #f0efec;
+    --ink2:  #c3c2b7;
+    --muted: #898781;
+    --grid:  #2c2c2a;
+    --axis:  #383835;
+    --s1: #3987e5;
+    --s2: #d95926;
+    --s3: #199e70;
+    --s4: #c98500;
+    --up:    #0ca30c;
+  }
+}
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --surf:  #1a1a19;
+  --page:  #0d0d0d;
+  --ink:   #f0efec;
+  --ink2:  #c3c2b7;
+  --muted: #898781;
+  --grid:  #2c2c2a;
+  --axis:  #383835;
+  --s1: #3987e5;
+  --s2: #d95926;
+  --s3: #199e70;
+  --s4: #c98500;
+  --up:    #0ca30c;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:system-ui,-apple-system,"Segoe UI",sans-serif;background:var(--page);color:var(--ink);font-size:14px;line-height:1.5}
+a{color:var(--s1)}
+
+/* ─── Header ─── */
+.rpt-header{background:var(--surf);border-bottom:1px solid var(--grid);padding:18px 16px 14px}
+.rpt-hinner{max-width:980px;margin:0 auto;display:flex;justify-content:space-between;align-items:flex-start;gap:16px;flex-wrap:wrap}
+.rpt-title{font-size:18px;font-weight:600;letter-spacing:-.01em}
+.rpt-meta{font-size:12px;color:var(--ink2);margin-top:3px}
+.theme-btn{background:none;border:1px solid var(--axis);border-radius:6px;color:var(--ink2);cursor:pointer;padding:4px 11px;font-size:12px;font-family:inherit;transition:border-color .15s,color .15s}
+.theme-btn:hover{border-color:var(--s1);color:var(--s1)}
+
+/* ─── Wrapper ─── */
+.wrap{max-width:980px;margin:0 auto;padding:0 16px 56px}
+
+/* ─── Section header ─── */
+.sec{margin-bottom:24px}
+.sec-title{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:var(--muted);margin:24px 0 10px;padding-bottom:6px;border-bottom:1px solid var(--grid)}
+
+/* ─── KPI Tiles ─── */
+.kpi-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:10px}
+@media(max-width:600px){.kpi-grid{grid-template-columns:repeat(2,1fr)}}
+.kpi{background:var(--surf);border:1px solid var(--grid);border-radius:8px;padding:14px 16px}
+.kpi-lbl{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.04em;margin-bottom:3px}
+.kpi-val{font-size:26px;font-weight:600;font-variant-numeric:tabular-nums;line-height:1.1}
+.kpi-sub{font-size:11px;color:var(--ink2);margin-top:2px}
+
+/* ─── Disclaimer ─── */
+.disc{background:rgba(250,178,25,.08);border:1px solid rgba(250,178,25,.3);border-radius:6px;padding:10px 13px;font-size:12px;color:var(--ink2);margin-bottom:12px}
+
+/* ─── Issues grid ─── */
+.issues-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+@media(max-width:580px){.issues-grid{grid-template-columns:1fr}}
+.issue-card{background:var(--surf);border:1px solid var(--grid);border-radius:8px;padding:11px 13px;display:flex;gap:10px;align-items:flex-start}
+.badge{flex-shrink:0;font-size:9.5px;font-weight:700;letter-spacing:.04em;padding:3px 7px;border-radius:4px;white-space:nowrap;margin-top:1px}
+.b-crit{background:rgba(208,59,59,.12);color:var(--crit)}
+.b-warn{background:rgba(250,178,25,.15);color:#9b6e00}
+.b-done{background:rgba(12,163,12,.12);color:var(--good)}
+.b-susp{background:rgba(236,131,90,.15);color:#a84e20}
+.b-part{background:rgba(42,120,214,.12);color:var(--s1)}
+.issue-name{font-weight:600;font-size:13px;margin-bottom:2px}
+.issue-desc{font-size:12px;color:var(--ink2)}
+
+/* ─── Charts ─── */
+.charts-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:14px}
+@media(max-width:680px){.charts-grid{grid-template-columns:1fr}}
+.chart-card{background:var(--surf);border:1px solid var(--grid);border-radius:8px;padding:14px}
+.chart-title{font-size:12px;font-weight:600;margin-bottom:2px}
+.chart-sub{font-size:11px;color:var(--ink2);margin-bottom:10px}
+.chart-wrap{position:relative;height:170px}
+
+/* ─── Detail cards ─── */
+.detail-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+@media(max-width:580px){.detail-grid{grid-template-columns:1fr}}
+.dc{background:var(--surf);border:1px solid var(--grid);border-radius:8px;padding:15px}
+.dc.full{grid-column:1/-1}
+.dc-head{display:flex;align-items:center;gap:8px;margin-bottom:9px}
+.dc-head h3{font-size:13px;font-weight:600}
+.dc-text{font-size:12.5px;color:var(--ink2);line-height:1.65}
+.dc-text p+p{margin-top:6px}
+code{font-family:"SFMono-Regular",Consolas,monospace;font-size:11.5px;background:var(--page);border:1px solid var(--grid);border-radius:3px;padding:0 4px}
+pre.cb{background:var(--page);border:1px solid var(--grid);border-radius:6px;padding:11px 13px;font-family:"SFMono-Regular",Consolas,monospace;font-size:11.5px;overflow-x:auto;margin-top:10px;line-height:1.5;color:var(--ink)}
+.fact{display:flex;justify-content:space-between;padding:5px 0;border-bottom:1px solid var(--grid);font-size:12px}
+.fact:last-child{border-bottom:none}
+.fl{color:var(--ink2)}
+.fv{font-weight:500;font-variant-numeric:tabular-nums}
+.facts-block{margin-top:10px}
+
+/* ─── Action plan ─── */
+.actions{display:flex;flex-direction:column;gap:8px}
+.act{display:flex;gap:10px;padding:13px 14px;background:var(--surf);border:1px solid var(--grid);border-radius:8px}
+.act-num{flex-shrink:0;width:22px;height:22px;border-radius:50%;background:var(--s1);color:#fff;font-size:11px;font-weight:700;display:flex;align-items:center;justify-content:center}
+.act-title{font-size:13px;font-weight:600;margin-bottom:2px}
+.act-body{font-size:12px;color:var(--ink2);line-height:1.55}
+
+/* ─── Fee-mismatch warning ─── */
+.fee-warn{background:rgba(42,120,214,.07);border:1px solid rgba(42,120,214,.25);border-radius:6px;padding:8px 12px;font-size:11.5px;color:var(--ink2);margin-top:8px}
+</style>
+</head>
+<body>
+
+<div class="rpt-header">
+  <div class="rpt-hinner">
+    <div>
+      <div class="rpt-title">Backtest Quality Report</div>
+      <div class="rpt-meta">Bybit (maker) ↔ Binance (taker) &nbsp;·&nbsp; SOLUSDT &nbsp;·&nbsp; 2022-01-13 &nbsp;·&nbsp; maker_taker mode &nbsp;·&nbsp; latency: colocated_both</div>
+    </div>
+    <button class="theme-btn" onclick="toggleTheme()">Toggle theme</button>
+  </div>
+</div>
+
+<div class="wrap">
+
+  <!-- ── Run Summary ── -->
+  <div class="sec-title">Run Summary</div>
+  <div class="kpi-grid">
+    <div class="kpi">
+      <div class="kpi-lbl">Signals</div>
+      <div class="kpi-val">443</div>
+      <div class="kpi-sub">Generated &amp; completed</div>
+    </div>
+    <div class="kpi">
+      <div class="kpi-lbl">Fill Rate</div>
+      <div class="kpi-val">53.9%</div>
+      <div class="kpi-sub">517 of 960 orders filled</div>
+    </div>
+    <div class="kpi">
+      <div class="kpi-lbl">Realized PnL</div>
+      <div class="kpi-val" style="color:var(--up)">$6.01</div>
+      <div class="kpi-sub">0.89 bps mean net edge</div>
+    </div>
+    <div class="kpi">
+      <div class="kpi-lbl">Edge Capture</div>
+      <div class="kpi-val">92.1%</div>
+      <div class="kpi-sub">Realized / theoretical</div>
+    </div>
+  </div>
+  <div class="fee-warn">
+    ⚠ Fee preset mismatch: Bybit used <code>bybit_spot_mm</code> (spot) vs Binance <code>binance_perp_vip0</code> (perp). PnL figure assumes spot fees on the maker leg. Use matching product types in production.
+  </div>
+
+  <!-- ── Quality Checklist ── -->
+  <div class="sec-title" style="margin-top:20px">Quality Checklist</div>
+  <div class="disc">
+    ⚠ This run was a single cold pass with all gates disabled. PnL and edge-capture numbers are <strong>indicative only</strong> — produced without fill-probability filtering, adverse selection control, or walk-forward calibration. Do not use these figures to size position limits.
+  </div>
+  <div class="issues-grid">
+
+    <div class="issue-card">
+      <div class="badge b-crit">PRESENT</div>
+      <div>
+        <div class="issue-name">Forward Bias</div>
+        <div class="issue-desc">FillModelV2 calibrated post-hoc on the same day's data the backtest ran on. <code>trained_until_ts=0.0</code> — leakage guard was never set.</div>
+      </div>
+    </div>
+
+    <div class="issue-card">
+      <div class="badge b-warn">NOT WIRED</div>
+      <div>
+        <div class="issue-name">Walk-Forward Calibration</div>
+        <div class="issue-desc">Infrastructure in <code>run_pair()</code> is complete. Not activated — run called <code>_run_once()</code> directly with <code>wf_window_days=0</code> default.</div>
+      </div>
+    </div>
+
+    <div class="issue-card">
+      <div class="badge b-done">DONE ✓</div>
+      <div>
+        <div class="issue-name">Labeling Quality</div>
+        <div class="issue-desc">1,329 labels (443 orders × 3 horizons). Censored events excluded. Per-horizon fitting. <code>price_moved_through</code> correctly tracked for adverse model.</div>
+      </div>
+    </div>
+
+    <div class="issue-card">
+      <div class="badge b-warn">NOT WIRED</div>
+      <div>
+        <div class="issue-name">Fill Prediction Gate</div>
+        <div class="issue-desc"><code>min_fill_prob=0.0</code> default — gate disabled. <code>fill_model_v1_path=None</code> — no model loaded during the run. All signals sent unconditionally.</div>
+      </div>
+    </div>
+
+    <div class="issue-card">
+      <div class="badge b-susp">SUSPICIOUS</div>
+      <div>
+        <div class="issue-name">Expected Fill Qty</div>
+        <div class="issue-desc">All 443 orders: <code>fill_ratio=1.000</code>. 89.2% have <code>queue_ahead=0</code>. EmpiricalFillModel cold-start likely assumes first-in-queue by default.</div>
+      </div>
+    </div>
+
+    <div class="issue-card">
+      <div class="badge b-part">COMPUTED, NOT USED</div>
+      <div>
+        <div class="issue-name">Time to Fill (TTF)</div>
+        <div class="issue-desc">FillModelV2 computes E[TTF]=1.61s via survival-function integral. Calibrated post-hoc only — never fed back to the run config as a gate.</div>
+      </div>
+    </div>
+
+    <div class="issue-card">
+      <div class="badge b-crit">NOT WIRED</div>
+      <div>
+        <div class="issue-name">Adverse Selection Gate</div>
+        <div class="issue-desc"><code>block_on_toxic=False</code> and <code>max_adverse_prob=1.0</code> (default). Adverse model trained with base_rate=2.3% — never applied during run.</div>
+      </div>
+    </div>
+
+    <div class="issue-card">
+      <div class="badge b-warn">NOT WIRED</div>
+      <div>
+        <div class="issue-name">Walk-Forward Retraining</div>
+        <div class="issue-desc">No daily / weekly retraining loop. <code>WalkForwardCalibrator</code> and fold loop in <code>run_pair()</code> are implemented but bypassed.</div>
+      </div>
+    </div>
+
+  </div><!-- issues-grid -->
+
+  <!-- ── Markout Summary ── -->
+  <div class="sec-title" style="margin-top:24px">Markout Analysis — Fill Quality</div>
+  <div class="disc" style="background:rgba(42,120,214,.07);border-color:rgba(42,120,214,.25)">
+    ℹ Markout tracks how price moved after each fill: positive = price moved in our favour (good fill), negative = adverse. <strong>Qty-weighted markout is positive (+2.9–3.4 bps)</strong> — the strategy is capturing spread, not just being picked off. However <strong>36–44% adverse rate</strong> is the key risk metric to monitor in production.
+  </div>
+  <div class="kpi-grid" style="grid-template-columns:repeat(4,1fr);margin-bottom:12px">
+    <div class="kpi">
+      <div class="kpi-lbl">Markout @ 1 s</div>
+      <div class="kpi-val" style="color:var(--up)">+2.93 bps</div>
+      <div class="kpi-sub">39.5% adverse · 1,034 fills</div>
+    </div>
+    <div class="kpi">
+      <div class="kpi-lbl">Markout @ 5 s</div>
+      <div class="kpi-val" style="color:var(--up)">+3.24 bps</div>
+      <div class="kpi-sub">36.5% adverse</div>
+    </div>
+    <div class="kpi">
+      <div class="kpi-lbl">Markout @ 30 s</div>
+      <div class="kpi-val" style="color:var(--up)">+3.43 bps</div>
+      <div class="kpi-sub">43.4% adverse</div>
+    </div>
+    <div class="kpi">
+      <div class="kpi-lbl">Markout @ 60 s</div>
+      <div class="kpi-val" style="color:var(--up)">+2.98 bps</div>
+      <div class="kpi-sub">44.4% adverse</div>
+    </div>
+  </div>
+  <div class="charts-grid" style="grid-template-columns:1fr 1fr;margin-bottom:24px">
+    <div class="chart-card">
+      <div class="chart-title">Qty-Weighted Markout by Horizon</div>
+      <div class="chart-sub">Average bps gain/loss after fill · positive = strategy captures spread</div>
+      <div class="chart-wrap"><canvas id="c-markout"></canvas></div>
+    </div>
+    <div class="chart-card">
+      <div class="chart-title">Adverse Fill Rate by Horizon</div>
+      <div class="chart-sub">% of fills where price moved against us · &gt;40% warrants gate review</div>
+      <div class="chart-wrap"><canvas id="c-adverse"></canvas></div>
+    </div>
+  </div>
+
+  <!-- ── Charts ── -->
+  <div class="sec-title" style="margin-top:8px">Fill Model — Calibration Data</div>
+  <div class="charts-grid">
+    <div class="chart-card">
+      <div class="chart-title">P(Fill) by Horizon</div>
+      <div class="chart-sub">Calibrated from 1,329 records · post-hoc only</div>
+      <div class="chart-wrap"><canvas id="c-horizon"></canvas></div>
+    </div>
+    <div class="chart-card">
+      <div class="chart-title">Queue-Ahead Distribution</div>
+      <div class="chart-sub">At gate horizon (5 s) · 443 orders · improve-inside-spread = first in queue</div>
+      <div class="chart-wrap"><canvas id="c-queue"></canvas></div>
+    </div>
+    <div class="chart-card">
+      <div class="chart-title">TTF Survival Curve S(t)</div>
+      <div class="chart-sub">P(time-to-fill &gt; t) · calibrated, not used</div>
+      <div class="chart-wrap"><canvas id="c-surv"></canvas></div>
+    </div>
+  </div>
+
+  <!-- ── Issue Details ── -->
+  <div class="sec-title" style="margin-top:24px">Issue Details</div>
+  <div class="detail-grid">
+
+    <!-- Forward Bias -->
+    <div class="dc">
+      <div class="dc-head"><div class="badge b-crit">PRESENT</div><h3>Forward Bias</h3></div>
+      <div class="dc-text">
+        <p>The FillModelV2 was calibrated on the same 2022-01-13 data the backtest consumed. Because <code>fill_model_v1_path=None</code>, the model was never loaded <em>during</em> the run — so it did not bias trade decisions. However, the calibration output cannot be trusted for forward use without a temporal split.</p>
+        <p>The leakage guard in <code>backtester.py:226</code> raises <code>ValueError</code> if <code>trained_until_ts&nbsp;&gt;&nbsp;start_epoch</code>, but it was never triggered because <code>trained_until_ts=0.0</code> — the model was fit without setting the cutoff timestamp.</p>
+      </div>
+      <div class="facts-block">
+        <div class="fact"><span class="fl">trained_until_ts</span><span class="fv" style="color:var(--crit)">0.0 (not set)</span></div>
+        <div class="fact"><span class="fl">Pass type</span><span class="fv">Single cold pass</span></div>
+        <div class="fact"><span class="fl">Train / test split</span><span class="fv" style="color:var(--crit)">None — same day</span></div>
+        <div class="fact"><span class="fl">Model loaded during run</span><span class="fv" style="color:var(--crit)">No</span></div>
+      </div>
+    </div>
+
+    <!-- Walk-Forward Calibration -->
+    <div class="dc">
+      <div class="dc-head"><div class="badge b-warn">NOT WIRED</div><h3>Walk-Forward Calibration</h3></div>
+      <div class="dc-text">
+        <p><code>batch_backtest.run_pair()</code> has a complete walk-forward loop: cold pass → per-fold <code>FillModelV2.fit()</code> with <code>until_ts</code> leakage guard → eval pass with model loaded. Fold boundaries are calendar-day-aligned.</p>
+        <p>This run called <code>_run_once(cfg)</code> directly, bypassing the fold loop entirely. The parameter <code>wf_window_days=0</code> is the default and must be explicitly set.</p>
+      </div>
+<pre class="cb"># Activate walk-forward:
+from new_backtest.batch_backtest import run_pair
+
+results = run_pair(
+    pair="SOLUSDT",
+    start_date="2022-01-06",
+    end_date="2022-02-06",
+    wf_window_days=7,       # 7-day cal window
+    wf_step_days=1,         # step 1 day
+    min_fill_prob=0.5,      # enable fill gate
+    max_adverse_prob=0.15,  # enable adverse gate
+)</pre>
+    </div>
+
+    <!-- Labeling Quality -->
+    <div class="dc">
+      <div class="dc-head"><div class="badge b-done">DONE ✓</div><h3>Labeling Quality</h3></div>
+      <div class="dc-text">
+        <p>Labels are correctly structured: per-order × per-horizon (1 s / 5 s / 15 s) with a 14-field feature set including <code>queue_ahead</code>, <code>local_depth</code>, <code>spread_pct</code>, <code>short_vol</code>, <code>trade_count</code>, <code>trade_sign</code>, <code>regime_bucket</code>, and <code>price_moved_through</code>.</p>
+        <p>Censored records are excluded in <code>extract_labels()</code>. The <code>until_ts</code> parameter prevents future-label leakage when called inside a fold. <code>WalkForwardFold.fit()</code> correctly passes <code>horizon_s</code> to avoid mixing horizons.</p>
+      </div>
+      <div class="facts-block">
+        <div class="fact"><span class="fl">Total label records</span><span class="fv">1,329</span></div>
+        <div class="fact"><span class="fl">Unique orders</span><span class="fv">443</span></div>
+        <div class="fact"><span class="fl">Horizons</span><span class="fv">1 s / 5 s / 15 s</span></div>
+        <div class="fact"><span class="fl">Censored (excluded)</span><span class="fv">0</span></div>
+        <div class="fact"><span class="fl">price_moved_through</span><span class="fv">54 / 1,329 (4.1%)</span></div>
+      </div>
+    </div>
+
+    <!-- Fill Prediction Gate -->
+    <div class="dc">
+      <div class="dc-head"><div class="badge b-warn">NOT WIRED</div><h3>Fill Prediction Gate</h3></div>
+      <div class="dc-text">
+        <p>FillModelV2 was calibrated post-hoc but was never loaded during the run. With <code>min_fill_prob=0.0</code>, every signal was sent regardless of predicted fill probability. This means phantom-edge signals — orders with very low actual fill probability — are counted at full edge value.</p>
+        <p>The model's mean <code>p_fill(5s)=0.945</code> is suspiciously high because the queue model placed 89% of orders at queue-ahead=0 (see below). This inflates apparent calibration confidence.</p>
+      </div>
+      <div class="facts-block">
+        <div class="fact"><span class="fl">min_fill_prob used</span><span class="fv" style="color:var(--crit)">0.0 (disabled)</span></div>
+        <div class="fact"><span class="fl">fill_model_v1_path</span><span class="fv" style="color:var(--crit)">None</span></div>
+        <div class="fact"><span class="fl">Model p_fill(5s) mean</span><span class="fv">0.945</span></div>
+        <div class="fact"><span class="fl">Recommended threshold</span><span class="fv">0.50 – 0.70</span></div>
+      </div>
+    </div>
+
+    <!-- Expected Fill Qty -->
+    <div class="dc">
+      <div class="dc-head"><div class="badge b-susp">SUSPICIOUS</div><h3>Expected Fill Qty (fill_ratio)</h3></div>
+      <div class="dc-text">
+        <p>Every one of the 443 completed orders has <code>fill_ratio=1.000</code> and <code>terminal_reason=full_fill</code>. No partial fills, no cancels. This is unrealistically optimistic.</p>
+        <p>The proximate cause is the queue model: 395 of 443 orders (89.2%) have <code>queue_ahead=0</code>, placing them at the front of the maker queue. The EmpiricalFillModel likely defaults to queue position 0 when it has no prior fill-log evidence (cold start). The remaining 48 non-zero orders have a mean queue of 187.78 — another unrealistically bimodal distribution.</p>
+      </div>
+      <div class="facts-block">
+        <div class="fact"><span class="fl">fill_ratio = 1.000</span><span class="fv" style="color:var(--crit)">443 / 443 (100%)</span></div>
+        <div class="fact"><span class="fl">queue_ahead = 0</span><span class="fv" style="color:var(--ser)">395 / 443 (89.2%)</span></div>
+        <div class="fact"><span class="fl">queue_ahead mean (when &gt; 0)</span><span class="fv">187.78</span></div>
+        <div class="fact"><span class="fl">terminal_reason = full_fill</span><span class="fv" style="color:var(--crit)">443 / 443 (100%)</span></div>
+      </div>
+    </div>
+
+    <!-- TTF -->
+    <div class="dc">
+      <div class="dc-head"><div class="badge b-part">COMPUTED, NOT USED</div><h3>Time to Fill (TTF)</h3></div>
+      <div class="dc-text">
+        <p>FillModelV2 computes E[TTF] via trapezoidal integration of the survival function over calibrated horizons (1 s / 5 s / 15 s). The sample prediction gives E[TTF]=1.61 s — but this is computed from fill events that all have <code>queue_ahead=0</code>, so the estimate is optimistically biased.</p>
+        <p>TTF is not currently used as a signal gate. A gate like "skip if E[TTF] &gt; 8 s" would reduce inventory lock-up on slow markets and improve responsiveness to regime changes.</p>
+      </div>
+      <div class="facts-block">
+        <div class="fact"><span class="fl">E[TTF] (sample order)</span><span class="fv">1.61 s</span></div>
+        <div class="fact"><span class="fl">P(fill ≤ 1 s)</span><span class="fv">82.8%</span></div>
+        <div class="fact"><span class="fl">P(fill ≤ 5 s)</span><span class="fv">91.4%</span></div>
+        <div class="fact"><span class="fl">P(fill ≤ 15 s)</span><span class="fv">99.5%</span></div>
+        <div class="fact"><span class="fl">Used as gate</span><span class="fv" style="color:var(--crit)">No</span></div>
+      </div>
+    </div>
+
+    <!-- Adverse Selection -->
+    <div class="dc">
+      <div class="dc-head"><div class="badge b-crit">NOT WIRED</div><h3>Adverse Selection Gate</h3></div>
+      <div class="dc-text">
+        <p>Both adverse-selection controls were disabled for this run. The real-time toxic-flow detector (<code>block_on_toxic</code>) was set to <code>False</code>. The model-based adverse gate had <code>max_adverse_prob=1.0</code>, which passes every order regardless of predicted adversity.</p>
+        <p>The adverse model was calibrated post-hoc with a base rate of 2.3% at h=5 (10/443 orders where <code>price_moved_through=True</code>). The sample prediction yields <code>p_adverse=0.149</code>, which is 6× the base rate — implying the model already identifies high-risk orders. Wiring <code>max_adverse_prob=0.15</code> would have blocked ~10–15% of fills.</p>
+      </div>
+      <div class="facts-block">
+        <div class="fact"><span class="fl">block_on_toxic</span><span class="fv" style="color:var(--crit)">False</span></div>
+        <div class="fact"><span class="fl">max_adverse_prob used</span><span class="fv" style="color:var(--crit)">1.0 (disabled)</span></div>
+        <div class="fact"><span class="fl">Adverse base rate (h=5, label)</span><span class="fv">2.3% (10 / 443)</span></div>
+        <div class="fact"><span class="fl">Observed adverse rate @ 1s (markout)</span><span class="fv" style="color:var(--crit)">39.5%</span></div>
+        <div class="fact"><span class="fl">Observed adverse rate @ 5s (markout)</span><span class="fv" style="color:var(--ser)">36.5%</span></div>
+        <div class="fact"><span class="fl">p_adverse (sample order)</span><span class="fv">0.149</span></div>
+        <div class="fact"><span class="fl">Recommended threshold</span><span class="fv">0.15 – 0.20</span></div>
+      </div>
+    </div>
+
+    <!-- Retraining -->
+    <div class="dc">
+      <div class="dc-head"><div class="badge b-warn">NOT WIRED</div><h3>Walk-Forward Retraining</h3></div>
+      <div class="dc-text">
+        <p>Both the <code>WalkForwardCalibrator</code> class (<code>fill_label.py</code>) and the fold loop in <code>batch_backtest.run_pair()</code> are fully implemented and tested. Neither is activated for multi-day runs.</p>
+        <p>Recommended cadence for a liquid pair: <strong>daily retraining</strong> with a 7-day rolling calibration window. Weekly retraining is acceptable for regime-stable periods but risks missing intraday volatility clusters. A single static model trained on one day — as this run produced — will not generalize across market regimes.</p>
+      </div>
+      <div class="facts-block">
+        <div class="fact"><span class="fl">WalkForwardCalibrator</span><span class="fv" style="color:var(--good)">Implemented ✓</span></div>
+        <div class="fact"><span class="fl">run_pair() fold loop</span><span class="fv" style="color:var(--good)">Implemented ✓</span></div>
+        <div class="fact"><span class="fl">wf_window_days used</span><span class="fv" style="color:var(--crit)">0 (disabled)</span></div>
+        <div class="fact"><span class="fl">Static model trained on</span><span class="fv" style="color:var(--crit)">1 day only</span></div>
+        <div class="fact"><span class="fl">Recommended cadence</span><span class="fv">Daily (7-day window)</span></div>
+      </div>
+    </div>
+
+  </div><!-- detail-grid -->
+
+  <!-- ── Action Plan ── -->
+  <div class="sec-title" style="margin-top:24px">Action Plan — Priority Order</div>
+  <div class="actions">
+    <div class="act">
+      <div class="act-num">1</div>
+      <div>
+        <div class="act-title">Fix <code>trained_until_ts</code> in FillModelV2.fit()</div>
+        <div class="act-body">Pass <code>trained_until_ts=until_ts</code> when calling <code>FillModelV2.fit(cal_records, ...)</code> inside the walk-forward fold. Currently defaults to 0.0 (epoch 0), which bypasses the leakage guard in <code>backtester.py:226</code>. Without this fix, a future-trained model silently passes the guard.</div>
+      </div>
+    </div>
+    <div class="act">
+      <div class="act-num">2</div>
+      <div>
+        <div class="act-title">Investigate queue_ahead=0 rate in EmpiricalFillModel</div>
+        <div class="act-body">89.2% of orders placing at queue-ahead=0 is the single largest source of result inflation. Audit the cold-start behavior: does it default to position 0 when no prior fill log is available? A conservative default (e.g., queue_ahead = book_depth × 0.1) or a warm start from the prior day's fill log would produce more realistic fills.</div>
+      </div>
+    </div>
+    <div class="act">
+      <div class="act-num">3</div>
+      <div>
+        <div class="act-title">Switch to <code>run_pair()</code> with <code>wf_window_days=7</code> for multi-day runs</div>
+        <div class="act-body">Replace direct <code>_run_once(cfg)</code> calls with the walk-forward loop. This eliminates forward bias, fits the model before each eval fold, and produces fold-by-fold PnL statistics that can be compared across regimes. The infrastructure is already tested and merged.</div>
+      </div>
+    </div>
+    <div class="act">
+      <div class="act-num">4</div>
+      <div>
+        <div class="act-title">Enable gates: <code>min_fill_prob=0.5</code>, <code>max_adverse_prob=0.15</code>, <code>block_on_toxic=True</code></div>
+        <div class="act-body">Set these in <code>ArbConfig</code>. Start with conservative thresholds. The toxic-flow block (<code>block_on_toxic=True</code>) requires no model and should be enabled even before the model-based gates are calibrated. Expect signal count to drop by ~20–40% once gates are active; evaluate whether edge per-signal improves enough to compensate.</div>
+      </div>
+    </div>
+    <div class="act">
+      <div class="act-num">5</div>
+      <div>
+        <div class="act-title">Fix fee preset mismatch (spot vs perp)</div>
+        <div class="act-body">The Bybit leg used <code>bybit_spot_mm</code> while Binance used <code>binance_perp_vip0</code>. Use matching product types. For a perpetual-vs-perpetual cross-venue strategy, both venues should use their respective perp fee schedules. This affects the net edge calculation and signal filter threshold.</div>
+      </div>
+    </div>
+    <div class="act">
+      <div class="act-num">6</div>
+      <div>
+        <div class="act-title">Re-run on 4–8 weeks of data with all fixes applied</div>
+        <div class="act-body">The single-day result ($6.01 PnL, 92.1% edge capture) is statistically meaningless as a sizing input. Run <code>run_pair()</code> on a multi-week window with walk-forward active, gates wired, and the queue model fixed. Compare fold-by-fold Sharpe, fill rate, and adversity rate. Only then are the numbers reliable enough for position-limit decisions.</div>
+      </div>
+    </div>
+  </div>
+
+</div><!-- wrap -->
+
+<script>
+// ─── Theme toggle ───────────────────────────────────────────────────────────
+try {
+  const s = localStorage.getItem('bqr-theme');
+  if (s) document.documentElement.setAttribute('data-theme', s);
+} catch(e) {}
+
+function toggleTheme() {
+  const cur = document.documentElement.getAttribute('data-theme');
+  const nxt = cur === 'dark' ? 'light' : 'dark';
+  document.documentElement.setAttribute('data-theme', nxt);
+  try { localStorage.setItem('bqr-theme', nxt); } catch(e) {}
+  // Rebuild charts in new palette
+  rebuildCharts();
+}
+
+// ─── Color helpers ──────────────────────────────────────────────────────────
+function cssVar(name) {
+  return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+}
+
+// ─── Chart instances ────────────────────────────────────────────────────────
+let charts = {};
+
+function destroyAll() {
+  Object.values(charts).forEach(c => c.destroy());
+  charts = {};
+}
+
+function buildCharts() {
+  const s1 = cssVar('--s1');
+  const s2 = cssVar('--s2');
+  const s3 = cssVar('--s3');
+  const grid = cssVar('--grid');
+  const muted = '#898781';
+
+  Chart.defaults.color = muted;
+  Chart.defaults.borderColor = grid;
+  Chart.defaults.font.family = 'system-ui,-apple-system,"Segoe UI",sans-serif';
+  Chart.defaults.font.size = 11;
+
+  const baseOpts = {
+    responsive: true,
+    maintainAspectRatio: false,
+    plugins: { legend: { display: false } },
+  };
+
+  // Chart M1 — Qty-weighted markout
+  charts.mk = new Chart(document.getElementById('c-markout').getContext('2d'), {
+    type: 'bar',
+    data: {
+      labels: ['1 s', '5 s', '30 s', '60 s'],
+      datasets: [{
+        data: [2.9257, 3.2411, 3.4324, 2.9800],
+        backgroundColor: [s3+'bb', s3+'cc', s3+'dd', s3+'bb'],
+        borderColor: s3,
+        borderWidth: 1.5,
+        borderRadius: 4,
+        borderSkipped: false,
+      }]
+    },
+    options: {
+      ...baseOpts,
+      plugins: {
+        ...baseOpts.plugins,
+        tooltip: { callbacks: { label: c => ` +${c.parsed.y.toFixed(2)} bps` } },
+      },
+      scales: {
+        x: { grid: { color: grid }, ticks: { color: muted } },
+        y: {
+          min: 0, suggestedMax: 4,
+          grid: { color: grid },
+          ticks: { color: muted, callback: v => v.toFixed(1) + ' bps' },
+        },
+      },
+    },
+  });
+
+  // Chart M2 — Adverse fill rate
+  charts.av = new Chart(document.getElementById('c-adverse').getContext('2d'), {
+    type: 'bar',
+    data: {
+      labels: ['1 s', '5 s', '30 s', '60 s'],
+      datasets: [{
+        data: [39.45, 36.46, 43.42, 44.39],
+        backgroundColor: [s2+'bb', s2+'aa', s2+'cc', s2+'cc'],
+        borderColor: s2,
+        borderWidth: 1.5,
+        borderRadius: 4,
+        borderSkipped: false,
+      }]
+    },
+    options: {
+      ...baseOpts,
+      plugins: {
+        ...baseOpts.plugins,
+        tooltip: { callbacks: { label: c => ` ${c.parsed.y.toFixed(1)}% of fills adverse` } },
+      },
+      scales: {
+        x: { grid: { color: grid }, ticks: { color: muted } },
+        y: {
+          min: 0, max: 60,
+          grid: { color: grid },
+          ticks: { color: muted, callback: v => v + '%' },
+        },
+      },
+    },
+  });
+
+  // Chart 1 — P(fill) by horizon
+  charts.h = new Chart(document.getElementById('c-horizon').getContext('2d'), {
+    type: 'bar',
+    data: {
+      labels: ['1 s', '5 s', '15 s'],
+      datasets: [{
+        data: [0.828, 0.914, 0.995],
+        backgroundColor: [s1 + 'bb', s1 + 'cc', s1 + 'ee'],
+        borderColor: s1,
+        borderWidth: 1.5,
+        borderRadius: 4,
+        borderSkipped: false,
+      }]
+    },
+    options: {
+      ...baseOpts,
+      plugins: {
+        ...baseOpts.plugins,
+        tooltip: { callbacks: { label: c => ` ${(c.parsed.y * 100).toFixed(1)}%` } },
+      },
+      scales: {
+        x: { grid: { color: grid }, ticks: { color: muted } },
+        y: {
+          min: 0.7, max: 1.05,
+          grid: { color: grid },
+          ticks: { color: muted, callback: v => (v * 100).toFixed(0) + '%' },
+        },
+      },
+    },
+  });
+
+  // Chart 2 — Queue-ahead distribution
+  charts.q = new Chart(document.getElementById('c-queue').getContext('2d'), {
+    type: 'bar',
+    data: {
+      labels: ['queue = 0', 'queue > 0'],
+      datasets: [{
+        data: [395, 48],
+        backgroundColor: [s1 + 'cc', s2 + 'cc'],
+        borderColor: [s1, s2],
+        borderWidth: 1.5,
+        borderRadius: 4,
+        borderSkipped: false,
+      }]
+    },
+    options: {
+      ...baseOpts,
+      plugins: {
+        ...baseOpts.plugins,
+        tooltip: {
+          callbacks: {
+            label: c => {
+              const pct = (c.parsed.y / 443 * 100).toFixed(1);
+              if (c.dataIndex === 1) return ` ${c.parsed.y} orders (${pct}%) — mean queue: 187.78`;
+              return ` ${c.parsed.y} orders (${pct}%)`;
+            },
+          },
+        },
+      },
+      scales: {
+        x: { grid: { display: false }, ticks: { color: muted } },
+        y: { grid: { color: grid }, ticks: { color: muted } },
+      },
+    },
+  });
+
+  // Chart 3 — TTF Survival curve
+  const survSurf = cssVar('--surf');
+  charts.s = new Chart(document.getElementById('c-surv').getContext('2d'), {
+    type: 'line',
+    data: {
+      labels: ['0', '1', '5', '15'],
+      datasets: [{
+        label: 'S(t)',
+        data: [1.0, 0.172, 0.086, 0.005],
+        borderColor: s3,
+        backgroundColor: s3 + '22',
+        borderWidth: 2,
+        fill: true,
+        stepped: 'after',
+        pointRadius: 5,
+        pointHoverRadius: 7,
+        pointBackgroundColor: s3,
+        pointBorderColor: survSurf,
+        pointBorderWidth: 2,
+      }]
+    },
+    options: {
+      ...baseOpts,
+      plugins: {
+        ...baseOpts.plugins,
+        tooltip: {
+          callbacks: {
+            title: c => `t = ${c[0].label} s`,
+            label: c => ` ${(c.parsed.y * 100).toFixed(1)}% still unfilled`,
+          },
+        },
+      },
+      scales: {
+        x: {
+          title: { display: true, text: 'Time (s)', color: muted, font: { size: 10 } },
+          grid: { color: grid },
+          ticks: { color: muted },
+        },
+        y: {
+          min: 0, max: 1.05,
+          grid: { color: grid },
+          ticks: { color: muted, callback: v => (v * 100).toFixed(0) + '%' },
+        },
+      },
+    },
+  });
+}
+
+function rebuildCharts() {
+  destroyAll();
+  // Brief delay so CSS vars have updated
+  setTimeout(buildCharts, 50);
+}
+
+buildCharts();
+</script>
+</body>
+</html>
