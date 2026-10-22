@@ -24,6 +24,7 @@ from .canonical import validate_canonical_event
 from .models import BookState, EventType, MarketEvent, json_default
 from .time_integrity import TimeIntegrityMonitor
 from . import rest_reconcile
+from .cross_venue import CrossVenueMonitor
 from .market_data_output import (
     LtpOhlcBar,
     LtpOhlcCsvWriter,
@@ -187,6 +188,11 @@ class LiveFeedSettings:
     # Periodic REST cross-check of each VALID book (None: off). A best bid/ask
     # disagreement forces a resync; deeper-level differences are reported.
     rest_reconcile_seconds: float | None = None
+    # Cross-venue mid divergence (two venues): classified and reported, never blocking.
+    # 25 bps is ~2x the largest BTC spot divergence in the recorded 2026-09-14 cycles
+    # (p50 0.39, p99 1.3-7, max 13 bps).
+    cross_venue_divergence_bps: float = 25.0
+    cross_venue_stall_seconds: float = 5.0
     max_trade_deviation_bps: float = 500.0
 
     def validate(self) -> None:
@@ -726,6 +732,12 @@ class LiveOrderBookService:
         self._pending_rest: dict[str, rest_reconcile.RestBook] = {}
         self._history: dict[str, rest_reconcile.BookHistory] = {}
         self._book_cross_seq: dict[str, int | None] = {}
+        venues = tuple(self.settings.venues)
+        self.cross_venue = (
+            CrossVenueMonitor(venues, Decimal(str(self.settings.cross_venue_divergence_bps)),
+                              int(self.settings.cross_venue_stall_seconds * 1_000_000_000))
+            if len(venues) == 2 else None
+        )
         self.stop_event = asyncio.Event()
         self.started_ts_ns: int | None = None
         self.stopped_ts_ns: int | None = None
@@ -1646,6 +1658,28 @@ class LiveOrderBookService:
         book.invalid_reason = "rest_reconcile_touch_mismatch"
         return book.state
 
+    def _observe_cross_venue(self, event: MarketEvent) -> None:
+        monitor = self.cross_venue
+        if monitor is None:
+            return
+        delayed = [venue for venue, flag in self._feed_delayed.items() if flag]
+        divergence = monitor.observe(self.books, self.monotonic_ns(), delayed)
+        if divergence is None or divergence.classification == monitor.state:
+            return
+        previous, monitor.state = monitor.state, divergence.classification
+        within = divergence.classification == "WITHIN_THRESHOLD"
+        level = (StructuredLogLevel.INFO if within or divergence.classification == "MARKET_DIVERGENCE"
+                 else StructuredLogLevel.WARNING)
+        self._connector_log(
+            "CROSS_VENUE_CONVERGED" if within else "CROSS_VENUE_DIVERGENCE", level,
+            f"{previous} -> {divergence.classification}: {float(divergence.bps):.2f} bps"
+            + (f" ({divergence.venue})" if divergence.venue else ""),
+            venue=divergence.venue, ts_ns=event.receive_ts_ns, source_event_id=event.event_id,
+            raw_ref=event.raw_ref,
+            payload={"bps": str(divergence.bps), "classification": divergence.classification,
+                     "threshold_bps": str(monitor.threshold_bps)},
+        )
+
     def _book_ages(self) -> dict[str, int | None]:
         now = self.monotonic_ns()
         return {venue: (None if last is None else now - last)
@@ -2007,6 +2041,8 @@ class LiveOrderBookService:
             else pending_events.get(book.last_event_id or "", event)
         )
         self.book_gate.allow(tuple(self.books.values()), event.receive_ts_ns, self._book_ages())
+        if accepted:
+            self._observe_cross_venue(event)
         if accepted or state != previous_state:
             self._publish_book(book, source_event)
         if accepted:
@@ -2064,6 +2100,7 @@ class LiveOrderBookService:
             "max_book_age_ns": self.config.max_book_age_ns,
             "events_seen": self.events_seen,
             "persistence_failure": self.persistence_failure or None,
+            "cross_venue": None if self.cross_venue is None else self.cross_venue.report(),
             "time_integrity": {
                 "clock_offset_estimate_ns": self.time_monitor.clock_offset_estimate_ns,
                 "host_clock_state": self.time_monitor.host_clock.state,

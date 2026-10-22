@@ -153,6 +153,9 @@ def load_config(path: Path) -> tuple[AppConfig, dict]:
         )
         for x in raw["instruments"]
     ]
+    from .cross_venue import check_instrument_compatibility
+
+    check_instrument_compatibility(instruments, raw["strategy"]["instrument_id"], raw["strategy"]["venues"])
     inventory = _inventory_policy(raw)
     if inventory.model == InventoryModel.PRE_FUNDED and any(
         i.settlement_asset and i.instrument_id == raw["strategy"]["instrument_id"]

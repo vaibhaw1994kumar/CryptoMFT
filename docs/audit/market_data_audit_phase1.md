@@ -360,3 +360,22 @@ This matches the offline analysis. A first design that compared against the *cur
 - **Full suite:** 605 passed.
 - **Spot regression:** identical (the check is off by default).
 - **`run_all_local`:** PASSED.
+
+## Phase 3c: cross-venue consistency (2026-10-23)
+
+`src/crypto_stat_arb/cross_venue.py`:
+
+- **Instrument compatibility at config load.** `check_instrument_compatibility` is called from `load_config`. Every venue leg of the strategy instrument must match on base, quote, product type, settlement asset and multiplier. A spot leg against a perpetual, or USDT against USDC, is refused. All shipped configs pass.
+- **`CrossVenueMonitor` in the live service** (two venues). After each applied update, while both books are VALID, it measures the mid divergence (bps). Above `cross_venue_divergence_bps` (default 25) the divergence is classified, logged on each transition (`CROSS_VENUE_DIVERGENCE` / `CROSS_VENUE_CONVERGED`) and summarised under `service.cross_venue`. **It never blocks:** arbitrage *is* divergence, and stale or delayed data already block trading elsewhere. The classes:
+  - `STALE_SIDE`: a venue is FEED_DELAYED;
+  - `STALLED_VENUE`: one venue's mid hasn't changed for `cross_venue_stall_seconds` (5 s) while the other's has. This is a frozen feed that still looks VALID, which no other check catches;
+  - `MARKET_DIVERGENCE`: both sides are current, so it's a real price difference.
+- **Choosing the default from data.** Over the recorded BTC spot cycles 0006 and 0007 (147,467 two-venue samples), the divergence was p50 0.39 bps, p99 1.3–7 bps, max 13 bps. There was no breach at 25 bps, even through cycle 0006's backlog. A delayed feed doesn't necessarily show up as divergence; FEED_DELAYED is the check for that.
+
+**Tests:** `tests/test_cross_venue.py` (10), mutation check M15–M17.
+
+**Verification:**
+
+- **Full suite:** 615 passed.
+- **Spot regression:** identical.
+- **`run_all_local`:** PASSED.
