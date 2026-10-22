@@ -47,7 +47,7 @@ def margin_config(**venue_overrides) -> MarginConfig:
     return MarginConfig.from_config({"venues": venues})
 
 
-def setup(usdt=("10", "10"), config=None, extra=()):
+def make_risk_env(usdt=("10", "10"), config=None, extra=()):
     ledger = Ledger()
     ledger.asset_resolver = lambda venue, instrument: (instrument, "USDT")
     rows = [("BINANCE", "USDT", Decimal(usdt[0])), ("BYBIT", "USDT", Decimal(usdt[1])), *extra]
@@ -94,7 +94,7 @@ class TierTests(unittest.TestCase):
                           RiskTier(Decimal("50"), Decimal("0.05"), Decimal("0.10"))))
 
     def test_position_crossing_a_risk_tier_boundary(self):
-        ledger, risk = setup(usdt=("100", "10"))
+        ledger, risk = make_risk_env(usdt=("100", "10"))
         fill(ledger, "BINANCE", Side.BUY, "0.4")                 # 40 notional: tier 0
         row = evaluate(ledger, risk, {"BINANCE": "100"})["BINANCE"]
         self.assertEqual((row.details["positions"][0]["tier"], row.maintenance_margin_required),
@@ -108,7 +108,7 @@ class TierTests(unittest.TestCase):
         for mark, expected in (("100", MarginState.HEALTHY), ("93", MarginState.WARNING),
                                ("92", MarginState.BREACH)):
             with self.subTest(mark=mark):
-                ledger, risk = setup()
+                ledger, risk = make_risk_env()
                 fill(ledger, "BINANCE", Side.BUY, "1")           # long 1 at 100 with 10 USDT
                 row = evaluate(ledger, risk, {"BINANCE": mark})["BINANCE"]
                 self.assertEqual(row.state, expected)
@@ -119,7 +119,7 @@ class TierTests(unittest.TestCase):
                     self.assertEqual(row.details["breached_positions"], [PERP])
 
     def test_position_above_the_last_tier_is_a_breach(self):
-        ledger, risk = setup(usdt=("100000", "10"))
+        ledger, risk = make_risk_env(usdt=("100000", "10"))
         fill(ledger, "BINANCE", Side.BUY, "20")                  # 2000 notional > 1000 cap
         row = evaluate(ledger, risk, {"BINANCE": "100"})["BINANCE"]
         self.assertEqual(row.state, MarginState.BREACH)
@@ -128,7 +128,7 @@ class TierTests(unittest.TestCase):
 
 class CollateralTests(unittest.TestCase):
     def test_collateral_asset_receives_a_haircut_and_ineligible_assets_count_zero(self):
-        ledger, risk = setup(usdt=("0", "0"), extra=[("BYBIT", "BTC", Decimal("1")), ("BYBIT", "ETH", Decimal("5"))])
+        ledger, risk = make_risk_env(usdt=("0", "0"), extra=[("BYBIT", "BTC", Decimal("1")), ("BYBIT", "ETH", Decimal("5"))])
         risk.asset_prices = {("BYBIT", "BTC"): Decimal("100"), ("BYBIT", "ETH"): Decimal("10")}
         fill(ledger, "BYBIT", Side.SELL, "0.5")                  # short 0.5 at 100: +50 USDT
         row = evaluate(ledger, risk, {"BYBIT": "100"})["BYBIT"]
@@ -141,14 +141,14 @@ class CollateralTests(unittest.TestCase):
 
     def test_without_a_collateral_list_only_the_quote_is_eligible(self):
         config = margin_config(BYBIT={"collateral": None})
-        ledger, risk = setup(usdt=("0", "10"), config=config, extra=[("BYBIT", "BTC", Decimal("1"))])
+        ledger, risk = make_risk_env(usdt=("0", "10"), config=config, extra=[("BYBIT", "BTC", Decimal("1"))])
         risk.asset_prices = {("BYBIT", "BTC"): Decimal("100")}
         row = evaluate(ledger, risk, {"BYBIT": "100"})["BYBIT"]
         self.assertEqual(row.margin_balance, Decimal("10"))
         self.assertIn("quote asset only", row.details["collateral_rule"])
 
     def test_unpriced_liability_fails_closed(self):
-        ledger, risk = setup(extra=[("BINANCE", "SOL", Decimal("-1"))])
+        ledger, risk = make_risk_env(extra=[("BINANCE", "SOL", Decimal("-1"))])
         fill(ledger, "BINANCE", Side.BUY, "0.1")
         row = evaluate(ledger, risk, {"BINANCE": "100"})["BINANCE"]
         self.assertEqual(row.state, MarginState.BREACH)
@@ -159,7 +159,7 @@ class ModeTests(unittest.TestCase):
     def test_isolated_venue_accounts_with_opposing_positions(self):
         # Long BINANCE, short BYBIT, each with 10 USDT: flat as a portfolio. The
         # price falls: BYBIT's gain cannot cover BINANCE, which breaches alone.
-        ledger, risk = setup()
+        ledger, risk = make_risk_env()
         fill(ledger, "BINANCE", Side.BUY, "1")
         fill(ledger, "BYBIT", Side.SELL, "1")
         rows = evaluate(ledger, risk, {"BINANCE": "90", "BYBIT": "90"})
@@ -169,7 +169,7 @@ class ModeTests(unittest.TestCase):
 
     def test_isolated_position_breaches_while_the_wallet_is_rich(self):
         config = margin_config(BINANCE={"mode": "ISOLATED", "isolated_margin": {PERP: "5"}})
-        ledger, risk = setup(usdt=("1000", "10"), config=config)
+        ledger, risk = make_risk_env(usdt=("1000", "10"), config=config)
         fill(ledger, "BINANCE", Side.BUY, "1")
         row = evaluate(ledger, risk, {"BINANCE": "97"})["BINANCE"]   # PnL -3: isolated equity 2 < MM 2.85
         position = row.details["positions"][0]
@@ -177,7 +177,7 @@ class ModeTests(unittest.TestCase):
         self.assertEqual(row.state, MarginState.BREACH)
         self.assertEqual(row.details["breached_positions"], [PERP])
         # The same position in CROSS mode is carried by the 1000 USDT wallet.
-        ledger, risk = setup(usdt=("1000", "10"))
+        ledger, risk = make_risk_env(usdt=("1000", "10"))
         fill(ledger, "BINANCE", Side.BUY, "1")
         self.assertEqual(evaluate(ledger, risk, {"BINANCE": "97"})["BINANCE"].state, MarginState.HEALTHY)
 
@@ -188,7 +188,7 @@ class ModeTests(unittest.TestCase):
             margin_config(BINANCE={"tiers": {PERP: TIERS, "ETH-USDT-PERP": TIERS}})
 
     def test_venue_reported_margin_lower_than_local(self):
-        ledger, risk = setup()
+        ledger, risk = make_risk_env()
         fill(ledger, "BINANCE", Side.BUY, "1")
         reported = (VenueRiskSnapshot(venue="BINANCE", instrument_id=PERP, position_base=Decimal("1"),
                                       balance_delta=Decimal("0"), margin_balance=Decimal("3.5")),)
@@ -208,7 +208,7 @@ class ReservationTests(unittest.TestCase):
         )
 
     def test_open_orders_and_reserved_legs_consume_margin(self):
-        ledger, risk = setup(usdt=("4", "4"))
+        ledger, risk = make_risk_env(usdt=("4", "4"))
         risk.margin_marks = {(v, PERP): Decimal("100") for v in ("BINANCE", "BYBIT")}
         first = risk.reserve(self.opportunity(1))
         # 30 notional at tier 0: initial 0.6; no notional cash for a margined perp leg.
@@ -223,7 +223,7 @@ class ReservationTests(unittest.TestCase):
             risk.reserve(self.opportunity(3, qty="0.4"))
 
     def test_exposure_above_the_last_tier_is_refused(self):
-        ledger, risk = setup(usdt=("100000", "100000"))
+        ledger, risk = make_risk_env(usdt=("100000", "100000"))
         with self.assertRaisesRegex(ValueError, "above the last risk tier"):
             risk.reserve(self.opportunity(1, qty="20"))
 
