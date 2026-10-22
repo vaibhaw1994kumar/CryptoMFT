@@ -46,3 +46,13 @@ PCOC.MD
 # Compiled mm_matching_engine (built per Python/arch, see docs/execution_realism.md).
 src/crypto_stat_arb/sim_engine/*.so
 src/crypto_stat_arb/sim_engine/*.pyd
+
+# crypto_MFT_arb_platform/ had its own nested .git; its non-source files
+# (docs, configs, Dockerfile, .github/) are not tracked by this outer repo.
+# Already-tracked files under src/new_backtest/ and tests/ are unaffected
+# by this rule (gitignore never un-tracks files already in the index).
+crypto_MFT_arb_platform/
+
+# macOS metadata
+.DS_Store
+**/.DS_Store
