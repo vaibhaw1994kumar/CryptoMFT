@@ -250,3 +250,29 @@ PARTIAL. `live_manifest.json` and `live_part_manifest.json` hold file hashes, co
 
 - A real Bybit *rejection* frame. That needs a live call with a bad symbol; the format is taken from Bybit's documentation.
 - `live-paper`'s `finalize` writing on a full disk. It still raises, which also gives a non-zero exit.
+
+## Phase 2b: untested recovery paths (2026-10-22)
+
+`tests/test_recovery_paths.py`: 10 tests that drive the live service (fake sockets and REST) and `OrderBook`. The tests were written against the expected behaviour first. Three failed on the existing code and exposed real defects:
+
+| Defect | Sev | Scenario | Root cause | Fix |
+|---|---|---|---|---|
+| Overflow forgotten | P1 | The Binance delta buffer overflows while the REST snapshot is in flight. A snapshot older than the dropped updates replays what was kept and reports **VALID with updates known to be missing**, until the next delta happens to expose the gap. | `apply()` overwrote the overflow GAP with SYNCING `awaiting_snapshot`, and nothing remembered what was dropped. | `OrderBook.dropped_through`: the overflow stays a GAP (counted once per episode). A snapshot below it is `GAP snapshot_does_not_cover_dropped_deltas:<snap><<dropped>`; one at or above it recovers. |
+| REST snapshot storm | P2 | A Binance REST snapshot that keeps failing (503 / timeout) was retried at the minimum backoff on every attempt. | The backoff reset on every websocket *connect*. | The backoff resets only when the connection produced a valid book (`VenueLiveStats.book_syncs`). This also generalises the P1-3 subscription-refusal rule. |
+
+**Verified correct, now with tests:**
+
+- **Snapshot hangs while the feed is silent** → `market_data_stale_while_fetching_snapshot`, then recovery.
+- **Snapshot older than the buffered deltas** → `buffered_sequence_gap`, never VALID before recovery.
+- **Binance REST snapshot with an empty side** → resync.
+- **Bybit delta empties a side** → SYNCING: the gate suspends and orders are cancelled. When the side refills it goes VALID with the sequence intact and no reconnect. *This corrects Phase 1, which listed "empty side does not trigger a resync" as a gap. Within an intact sequence, an empty side is a real book state and a resync isn't needed.*
+- **Bybit `u` reset by a new snapshot** → the book is replaced and old levels removed.
+- **Repeated gaps after valid books** → each recovery starts from the minimum backoff.
+
+**Verification:**
+
+- **Mutation check:** M5–M7, each fix broken on purpose; the matching test fails.
+- **Full suite:** 531 passed.
+- **Spot regression:** identical to baseline.
+- **Bybit capture replay:** byte-identical events, book hashes and quality counts.
+- **`run_all_local`:** PASSED.

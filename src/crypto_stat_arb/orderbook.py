@@ -74,6 +74,9 @@ class OrderBook:
     reference_mid: Decimal | None = None
     jump_streak: int = 0
     chained_delta: bool = False         # a delta has been applied since the last snapshot
+    # Highest sequence dropped because the delta buffer was full: a snapshot older than
+    # this cannot restore the book (those updates are known to be missing).
+    dropped_through: int | None = None
 
     def start_resync(self, reason: str = "connection_resynchronizing") -> None:
         """Discard an unsafe native state and require a new venue snapshot."""
@@ -82,6 +85,7 @@ class OrderBook:
         self.asks.clear()
         self.sequence = None
         self.chained_delta = False
+        self.dropped_through = None
         self.last_receive_ts_ns = None
         self.last_event_id = None
         self.pending_deltas.clear()
@@ -108,8 +112,9 @@ class OrderBook:
         elif event.event_type == EventType.BOOK_DELTA:
             if self.sequence is None:
                 self._buffer(event)
-                self.state = BookState.SYNCING
-                self.invalid_reason = "awaiting_snapshot"
+                if self.dropped_through is None:     # an overflow stays a GAP
+                    self.state = BookState.SYNCING
+                    self.invalid_reason = "awaiting_snapshot"
                 return self.state
             if event.sequence <= self.sequence:
                 if event.sequence == self.sequence:
@@ -153,6 +158,15 @@ class OrderBook:
             sequence: delta for sequence, delta in self.pending_deltas.items()
             if sequence > event.sequence
         }
+        if self.dropped_through is not None:
+            if event.sequence < self.dropped_through:
+                self.state = BookState.GAP_DETECTED
+                self.invalid_reason = (
+                    f"snapshot_does_not_cover_dropped_deltas:{event.sequence}<{self.dropped_through}"
+                )
+                self.stats.gaps += 1
+                return self.state
+            self.dropped_through = None
         self.state = self._validate(event)
         if self.state != BookState.VALID:
             return self.state
@@ -198,9 +212,11 @@ class OrderBook:
             self.stats.duplicates += 1
             return
         if len(self.pending_deltas) >= self.max_pending_deltas:
+            if self.dropped_through is None:
+                self.stats.gaps += 1                  # one gap per overflow episode
+            self.dropped_through = max(self.dropped_through or 0, event.sequence)
             self.state = BookState.GAP_DETECTED
             self.invalid_reason = "delta_buffer_overflow"
-            self.stats.gaps += 1
             return
         self.pending_deltas[event.sequence] = event
         self.stats.buffered_deltas += 1

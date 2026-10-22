@@ -112,6 +112,7 @@ class WireFrame:
 
 @dataclass(slots=True)
 class VenueLiveStats:
+    book_syncs: int = 0                  # times the book became VALID
     subscription_acks: int = 0
     subscription_rejections: int = 0
     derivative_connections: int = 0
@@ -1074,8 +1075,7 @@ class LiveOrderBookService:
         stats = self.stats[venue]
         backoff = self.settings.reconnect_min_seconds
         while not self.stop_event.is_set():
-            connections_before = stats.connections
-            rejected = False
+            syncs_before = stats.book_syncs
             stats.connection_attempts += 1
             self._connector_log(
                 "CONNECTION_ATTEMPT", StructuredLogLevel.INFO,
@@ -1094,7 +1094,6 @@ class LiveOrderBookService:
             except PersistenceFailure:
                 raise
             except SubscriptionRejected as exc:
-                rejected = True
                 stats.last_error = str(exc)
                 LOGGER.error("%s", exc)
                 self._connector_log("SUBSCRIPTION_REJECTED", StructuredLogLevel.ERROR,
@@ -1120,8 +1119,10 @@ class LiveOrderBookService:
             if self.stop_event.is_set():
                 break
             stats.reconnects += 1
-            # A connection that was refused its subscription is not progress.
-            if stats.connections > connections_before and not rejected:
+            # Progress is a valid book, not a connect: a connection whose subscription
+            # was refused or whose snapshot failed must not reset the backoff
+            # (each Binance attempt costs REST snapshot weight).
+            if stats.book_syncs > syncs_before:
                 backoff = self.settings.reconnect_min_seconds
             self._connector_log(
                 "RECONNECT_SCHEDULED", StructuredLogLevel.WARNING,
@@ -1739,6 +1740,8 @@ class LiveOrderBookService:
             pending.event_id: pending for pending in book.pending_deltas.values()
         }
         state = book.apply(event)
+        if state == BookState.VALID and previous_state != BookState.VALID:
+            self.stats[event.venue].book_syncs += 1
         accepted = book.last_event_id is not None and book.last_event_id != previous_event_id
         source_event = (
             event
