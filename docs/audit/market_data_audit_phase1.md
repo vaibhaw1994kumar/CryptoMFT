@@ -379,3 +379,32 @@ This matches the offline analysis. A first design that compared against the *cur
 - **Full suite:** 615 passed.
 - **Spot regression:** identical.
 - **`run_all_local`:** PASSED.
+
+## Phase 3d: Tardis comparison (2026-10-23)
+
+`src/crypto_stat_arb/tardis_compare.py` and the CLI command `compare-tardis --capture <session> --venue BYBIT --tardis <incremental_book_L2.csv.gz> --output report.json`.
+
+This is an offline research tool: it isn't on the live path and adds no dependencies to it. Neither source is treated as ground truth.
+
+- **Reconstruction.** Both books are rebuilt independently: ours with `OrderBook` (sequence-checked), and Tardis's from the raw CSV with exact decimals. Rows are grouped back into venue messages, and a run of snapshot rows resets the book.
+- **Alignment.** Samples are taken on the exchange timestamp, every 1 s by default. Comparison is touch first, then level by level inside our depth, since Tardis may record deeper books.
+- **Classification:** `MATCH`, `LOCAL_RECOVERY` (excluded), `TIMESTAMP_ALIGNMENT`, `LOCAL_INGESTION_LOSS`, `DEPTH_OR_SOURCE_DIFFERENCE`, `UNRESOLVED`.
+- **Report contents:**
+  - input SHA-256 hashes;
+  - counts per class and the mismatch share;
+  - event counts;
+  - arrival-minus-exchange percentiles for both sources;
+  - our side's integrity (gaps, resyncs);
+  - discrepancies with our `raw_ref` and the Tardis CSV row;
+  - a reproduction command.
+
+**Evidence:**
+
+- **Unit tests:** `tests/test_tardis_compare.py` (8), mutation check M18–M20.
+- **Real-scale self-check.** The 2026-10-22 Bybit capture (39,792 updates) was compared against a Tardis-format CSV built from its own websocket frames: 901/901 samples MATCH. With 1% of updates dropped from that CSV, 92% of samples are flagged and our side shows 0 gaps.
+
+**NOT VERIFIED against real Tardis data.**
+
+- No Tardis API key is available here, and Tardis's free datasets are the first day of each month, which overlaps none of our captures.
+- To run it: capture on the 1st of a month (or use a key), download `incremental_book_L2` for the same symbol and window, then run `compare-tardis`.
+- Expect `DEPTH_OR_SOURCE_DIFFERENCE` where Tardis's channel depth differs from ours (Bybit `orderbook.50` vs Tardis's deeper book).

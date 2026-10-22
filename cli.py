@@ -356,6 +356,17 @@ def main() -> None:
         help="accept an INCOMPLETE reason (MISSING_PRICE, FEE_ASSET_UNPRICED, FEE_RULE_FALLBACK, FUNDING_DATA, "
              "BORROW_DATA, TRANSFER_DATA, DATA_QUALITY) with a written justification; listed in the result",
     )
+    tardis = sub.add_parser(
+        "compare-tardis",
+        help="offline: compare a recorded capture's books against a Tardis incremental_book_L2 CSV",
+    )
+    tardis.add_argument("--capture", type=Path, required=True, help="live session directory (part-*/)")
+    tardis.add_argument("--venue", choices=("BINANCE", "BYBIT"), required=True)
+    tardis.add_argument("--tardis", type=Path, required=True, help="incremental_book_L2 .csv or .csv.gz")
+    tardis.add_argument("--symbol", help="Tardis symbol filter, e.g. BTCUSDT")
+    tardis.add_argument("--interval-ms", type=int, default=1000)
+    tardis.add_argument("--depth", type=int, default=20)
+    tardis.add_argument("--output", type=Path, required=True)
     benchmark = sub.add_parser("benchmark", help="MR-14 replay and paper performance baseline")
     benchmark.add_argument("--config", type=Path, required=True)
     benchmark.add_argument("--output", type=Path, required=True)
@@ -559,6 +570,15 @@ def main() -> None:
         print(json.dumps({"venue": args.venue, "records": len(records),
                           "without_mark": sum(1 for r in records if not r["mark_price"]),
                           "output": str(args.output)}, indent=2))
+    elif args.command == "compare-tardis":
+        from .tardis_compare import compare_with_tardis
+
+        report = compare_with_tardis(args.capture, args.venue, args.tardis, symbol=args.symbol,
+                                     interval_ns=args.interval_ms * 1_000_000, depth=args.depth)
+        args.output.parent.mkdir(parents=True, exist_ok=True)
+        args.output.write_text(json.dumps(report, indent=2, sort_keys=True), encoding="utf-8")
+        print(json.dumps({k: report[k] for k in ("venue", "samples", "compared_samples", "mismatch_share",
+                                                 "event_counts")}, indent=2))
     elif args.command == "economics-gate":
         allow = {}
         for item in args.allow_incomplete:
