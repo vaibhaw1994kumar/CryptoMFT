@@ -71,12 +71,20 @@ class FillLabelRecord:
     fill_ratio: float = 0.0          # terminal fill_qty / order_size (NOT at-horizon)
     price_moved_through: bool = False  # market moved through order within horizon_s
 
+    # Censoring fields (zero/False on old logs without observation_time_s).
+    # observation_time_s: seconds the order was observable (fill_time_s or cancel_time_s).
+    # is_censored: True when order was cancelled before this horizon without filling.
+    #   Censored rows are excluded from the label y but used to estimate the censoring
+    #   survival function G(t) for IPCW weighting (see compute_ipcw_weights).
+    observation_time_s: float = 0.0
+    is_censored: bool = False
+
 
 def extract_labels(
     log_path: str | Path,
     until_ts: float | None = None,
 ) -> list[FillLabelRecord]:
-    """Read fill_events.jsonl and extract non-censored FillLabelRecords.
+    """Read fill_events.jsonl and return FillLabelRecords including censored rows.
 
     Parameters
     ----------
@@ -88,7 +96,10 @@ def extract_labels(
 
     Returns
     -------
-    List of label records, one per (event, horizon) pair that is not censored.
+    List of label records, one per (event, horizon) pair.  Records where the
+    order was cancelled before the horizon (``is_censored=True``) are included
+    so that ``compute_ipcw_weights`` can estimate the censoring distribution G(t)
+    and produce unbiased per-record weights for logistic-regression training.
     """
     records: list[FillLabelRecord] = []
     path = Path(log_path)
@@ -109,19 +120,21 @@ def extract_labels(
             horizon_s = int(payload.get("horizon_s", 0))
             terminal_reason = str(payload.get("terminal_reason", ""))
             filled = bool(payload.get("filled", False))
+            obs_time = float(payload.get("observation_time_s", 0.0))
 
             # Leakage guard: skip if label hasn't matured at until_ts
             if until_ts is not None and ts + horizon_s > until_ts:
                 continue
 
-            # Censoring: if the order was cancelled before this horizon and
-            # not filled, we have no information about fill probability.
-            # terminal_reason == "cancel" + filled==False → censored for h
-            # where order lifetime < h.  Without order lifetime in the log we
-            # rely on the fill_engine's censoring filter (it already skips
-            # emitting these rows), so any row here is already non-censored.
-            # We still guard: if cancelled and not filled, label is 0 (not censored,
-            # since fill_engine only logs h <= lifetime for cancelled orders).
+            # Derive is_censored: order cancelled before this horizon without filling.
+            # Old logs (obs_time == 0.0) default to is_censored=False so behaviour
+            # is unchanged for logs that predate this field.
+            is_censored = (
+                not filled
+                and terminal_reason == "cancel"
+                and obs_time > 0.0
+                and obs_time < horizon_s
+            )
 
             records.append(FillLabelRecord(
                 timestamp=ts,
@@ -141,9 +154,123 @@ def extract_labels(
                 terminal_reason=terminal_reason,
                 fill_ratio=float(payload.get("fill_ratio", 0.0)),
                 price_moved_through=bool(payload.get("price_moved_through", False)),
+                observation_time_s=obs_time,
+                is_censored=is_censored,
             ))
 
     return records
+
+
+# ── IPCW censoring weights ───────────────────────────────────────────────────
+
+def _km_censoring_survival(
+    times: list[float],
+    is_event: list[bool],
+) -> "Callable[[float], float]":
+    """Kaplan-Meier estimate of G(t) = P(not censored by t).
+
+    times[i]     : observation time for subject i.
+    is_event[i]  : True when subject i experienced the censoring event at times[i];
+                   False when they were a competing event (fill) or survived past h.
+
+    Returns a right-continuous step function G_hat(t) clamped to [1e-6, 1].
+    """
+    from typing import Callable  # noqa: PLC0415
+
+    n = len(times)
+    if n == 0:
+        return lambda t: 1.0
+
+    # Sort: events before non-events at ties (standard KM convention)
+    pairs = sorted(zip(times, is_event), key=lambda x: (x[0], not x[1]))
+
+    G = 1.0
+    breakpoints: list[tuple[float, float]] = [(0.0, 1.0)]
+    at_risk = n
+    i = 0
+
+    while i < len(pairs):
+        t = pairs[i][0]
+        d = 0   # censoring events at t
+        tied = 0
+        j = i
+        while j < len(pairs) and pairs[j][0] == t:
+            if pairs[j][1]:
+                d += 1
+            tied += 1
+            j += 1
+        if d > 0:
+            G *= 1.0 - d / at_risk
+        breakpoints.append((t, G))
+        at_risk -= tied
+        i = j
+
+    bp_times = [b[0] for b in breakpoints]
+    bp_vals = [b[1] for b in breakpoints]
+
+    def G_hat(t: float) -> float:
+        lo, hi, idx = 0, len(bp_times) - 1, 0
+        while lo <= hi:
+            mid = (lo + hi) // 2
+            if bp_times[mid] <= t:
+                idx = mid
+                lo = mid + 1
+            else:
+                hi = mid - 1
+        return max(bp_vals[idx], 1e-6)
+
+    return G_hat
+
+
+def compute_ipcw_weights(
+    records: "list[FillLabelRecord]",
+    horizon_s: int,
+) -> list[float]:
+    """IPCW weights for logistic regression at fixed horizon *horizon_s*.
+
+    Weights correct for the bias introduced when censored observations (orders
+    cancelled before the horizon without filling) are excluded from training.
+
+    Returns a weight per record in the *same order* as the input list:
+      - is_censored=True  → 0.0  (excluded; only used to build G_hat)
+      - filled at t_fill  → 1 / G_hat(t_fill)
+      - survived past h   → 1 / G_hat(h)
+
+    Falls back to equal weights (1.0 / 0.0) when no record carries a positive
+    observation_time_s (old logs that predate the field).
+    """
+    h_recs = [r for r in records if r.horizon_s == horizon_s]
+    if not h_recs:
+        return []
+
+    # Backward-compat: old logs have observation_time_s == 0.0 everywhere
+    if all(r.observation_time_s <= 0.0 for r in h_recs):
+        return [0.0 if r.is_censored else 1.0 for r in h_recs]
+
+    km_times: list[float] = []
+    km_events: list[bool] = []
+    for r in h_recs:
+        if r.is_censored:
+            km_times.append(r.observation_time_s)
+            km_events.append(True)           # censoring event
+        elif r.filled:
+            km_times.append(r.observation_time_s)
+            km_events.append(False)          # fill = competing event; "censored" for G
+        else:
+            km_times.append(float(horizon_s))
+            km_events.append(False)          # survived past h, no censoring event
+
+    G_hat = _km_censoring_survival(km_times, km_events)
+
+    weights: list[float] = []
+    for r in h_recs:
+        if r.is_censored:
+            weights.append(0.0)
+        elif r.filled:
+            weights.append(1.0 / G_hat(r.observation_time_s))
+        else:
+            weights.append(1.0 / G_hat(float(horizon_s)))
+    return weights
 
 
 # ── Walk-forward calibrator ───────────────────────────────────────────────────

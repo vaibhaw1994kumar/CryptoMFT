@@ -121,6 +121,9 @@ class LoggedOrderEvent:
     # terminal_reason: why the order ended (full_fill / partial_then_cancel / cancel)
     # Enables censoring-aware training: skip horizon h if cancelled before h and not filled.
     terminal_reason: str = ""
+    # How long the order was observable: fill_time_s for fills, cancel_time_s for cancels.
+    # Used by IPCW censoring weights in FillModelV1.fit().
+    observation_time_s: float = 0.0
 
 
 @dataclass(frozen=True)

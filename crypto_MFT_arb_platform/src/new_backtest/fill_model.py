@@ -496,6 +496,7 @@ class EmpiricalFillModel:
             "book_event_fill_qty": event.book_event_fill_qty,
             "snapshot_fill_qty": event.snapshot_fill_qty,
             "terminal_reason": event.terminal_reason,
+            "observation_time_s": event.observation_time_s,
         }
 
     @staticmethod
@@ -522,6 +523,7 @@ class EmpiricalFillModel:
             book_event_fill_qty=float(payload.get("book_event_fill_qty", 0.0)),
             snapshot_fill_qty=float(payload.get("snapshot_fill_qty", 0.0)),
             terminal_reason=str(payload.get("terminal_reason", "")),
+            observation_time_s=float(payload.get("observation_time_s", 0.0)),
         )
 
     def bucket_stats_snapshot(self) -> list[dict[str, str | int]]:

@@ -438,9 +438,11 @@ class MakerExecutor:
 
         for horizon in self.config.fill_horizons_s:
             filled_by_h = fill_ts - order.placed_ts <= horizon
-            # Censoring guard: skip h when the order ended before h and did not fill.
-            if not filled_by_h and life_s is not None and life_s < horizon:
-                continue
+            # observation_time_s: how long this order was observable.
+            # For fills: time-to-first-fill. For cancels: cancel_time_s.
+            # When neither is known (life_s is None), use the horizon itself as a
+            # conservative upper bound (order was alive at least until h).
+            obs_time = life_s if life_s is not None else float(horizon)
 
             self.fill_model.record_order_event(
                 LoggedOrderEvent(
@@ -465,6 +467,7 @@ class MakerExecutor:
                     book_event_fill_qty=order.delta_fill_qty,
                     snapshot_fill_qty=order.snapshot_fill_qty,
                     terminal_reason=terminal_reason,
+                    observation_time_s=obs_time,
                 )
             )
 

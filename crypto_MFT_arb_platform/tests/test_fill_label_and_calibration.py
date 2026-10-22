@@ -410,7 +410,7 @@ class TestCensoringFix(unittest.TestCase):
     A cancel at t+0.5s must produce zero labels for h=1, h=5, h=15 (all larger).
     """
 
-    def test_cancel_at_half_second_produces_no_label_records(self):
+    def test_cancel_at_half_second_produces_censored_label_records(self):
         from new_backtest.fill_engine import MakerExecutor, MakerConfig
         from new_backtest.fill_model import EmpiricalFillModel
         from new_backtest.order_book import OrderBook
@@ -459,11 +459,16 @@ class TestCensoringFix(unittest.TestCase):
         # Cancel 0.5 s later — all horizons (1, 5, 15) are still open
         executor.cancel(order.order_id, now=now + 0.5)
 
-        # No new label records (all horizons > life_s=0.5 → censored out)
+        # Censored rows ARE now emitted (one per horizon) so IPCW can estimate G(t).
+        # All should be marked is_censored=True with observation_time_s=0.5.
         new_count = len(model.order_event_log)
-        self.assertEqual(new_count, initial_count,
-                         "Cancelled orders must not generate fill-label records "
-                         "when cancelled before the shortest horizon")
+        n_horizons = len(MakerConfig().fill_horizons_s)
+        self.assertEqual(new_count - initial_count, n_horizons,
+                         "Cancelled order must emit one censored record per horizon")
+        for ev in model.order_event_log[initial_count:]:
+            self.assertAlmostEqual(ev.observation_time_s, 0.5, places=6,
+                                   msg="observation_time_s must equal cancel_time - placed_ts")
+            self.assertEqual(ev.terminal_reason, "cancel")
 
 
 # ── Fill gate stub tests ───────────────────────────────────────────────────────
