@@ -88,6 +88,10 @@ class ArbBacktestConfig:
     markout_horizons_s: tuple[float, ...] = (1.0, 5.0, 30.0)
     progress_every: int = 0          # print every N events; 0 = silent
     max_trade_log: int = 200_000     # cap in-memory fill log on long runs
+    # Directory of funding-rate history JSONL files (e.g. data/funding/).
+    # When set, perpetual funding payments are settled during replay and
+    # reported as funding_paid in ArbBacktestResult.  None = not modelled.
+    funding_rate_dir: str | None = None
 
 
 @dataclass
@@ -116,6 +120,7 @@ class ArbBacktestResult:
     gross_pnl: float
     fees_paid: float
     unhedged_loss: float
+    funding_paid: float
     realized_pnl: float
     open_position_value: float   # A10: unrealised – base inventory marked at end-of-run mids
     ending_equity: float         # A10: total_cash + open_position_value (does not assume zero start)
@@ -240,6 +245,17 @@ class CrossVenueArbBacktester:
         self.markouts = MarkoutTracker(config.markout_horizons_s)
         self.inventory = InventoryBook()
         self.inventory.ensure(config.venues)
+
+        self.settler: "FundingSettler | None" = None
+        if config.funding_rate_dir:
+            from .funding_settler import FundingSettler  # noqa: PLC0415
+            self.settler = FundingSettler(
+                config.funding_rate_dir,
+                tuple(config.venues),
+                start_date=config.start_date,
+                end_date=config.end_date,
+            )
+
         self.agent = BackgroundAgentModel(config.agent_flow)
         self._last_trade_ts: dict[str, float] = {}
 
@@ -566,6 +582,9 @@ class CrossVenueArbBacktester:
 
                 self._apply_event(ev)
 
+                if self.settler is not None:
+                    self.settler.settle(now, self.inventory, self.books)
+
                 # Trades can move the touch too, via trade-tape repair.
                 if self._touch_changed(ev.venue):
                     self.markouts.resolve(now, {v: b.mid for v, b in self.books.items()})
@@ -654,7 +673,9 @@ class CrossVenueArbBacktester:
             gross_pnl=self.gross_pnl,
             fees_paid=self.fees_paid,
             unhedged_loss=self.unhedged_loss,
-            realized_pnl=self.gross_pnl - self.fees_paid - self.unhedged_loss,
+            funding_paid=self.settler.funding_paid if self.settler else 0.0,
+            realized_pnl=(self.gross_pnl - self.fees_paid - self.unhedged_loss
+                          - (self.settler.funding_paid if self.settler else 0.0)),
             open_position_value=open_pos_value,
             ending_equity=ending_equity,
             mark_to_market_pnl=mtm,
