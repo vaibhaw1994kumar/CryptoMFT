@@ -37,6 +37,7 @@ from .arb_strategy import (
     MAKER_TAKER, TAKER_TAKER, ArbConfig, ArbLeg, ArbSignal,
     CrossVenueArbStrategy, InventoryBook,
 )
+from .background_agent_model import AgentFlowConfig, BackgroundAgentModel
 from .config import (
     BINANCE, BYBIT, DEFAULT_END_DATE, DEFAULT_LATENCY_PRESET, DEFAULT_START_DATE,
     LATENCY_PRESETS, VenueSpec, make_venues, max_position_for,
@@ -71,6 +72,8 @@ class ArbBacktestConfig:
     consume_liquidity: bool = True
     include_deltas: bool = True
     seed: int = 7
+
+    agent_flow: AgentFlowConfig = field(default_factory=AgentFlowConfig)
 
     output_dir: str | None = None
     warm_start_fill_events: str | None = None
@@ -212,9 +215,9 @@ class CrossVenueArbBacktester:
 
         fill_model_v1 = None
         if config.fill_model_v1_path:
-            from .fill_model_v1 import FillModelV1  # noqa: PLC0415
-            import datetime as _dt  # noqa: PLC0415
-            fill_model_v1 = FillModelV1.load_json(config.fill_model_v1_path)
+            from .fill_model_v1 import load_fill_model  # noqa: PLC0415
+            import datetime as _dt                       # noqa: PLC0415
+            fill_model_v1 = load_fill_model(config.fill_model_v1_path)
             # Leakage guard: model must not have been trained on data from the
             # eval window.  Convert start_date "YYYY-MM-DD" to midnight UTC.
             start_epoch = _dt.datetime.fromisoformat(config.start_date).replace(
@@ -222,7 +225,7 @@ class CrossVenueArbBacktester:
             ).timestamp()
             if fill_model_v1.trained_until_ts > start_epoch:
                 raise ValueError(
-                    f"FillModelV1 trained_until_ts={fill_model_v1.trained_until_ts:.0f} "
+                    f"Fill model trained_until_ts={fill_model_v1.trained_until_ts:.0f} "
                     f"is after start_date epoch {start_epoch:.0f} ({config.start_date!r}). "
                     "Using a model trained on future data leaks labels into the backtest."
                 )
@@ -237,6 +240,8 @@ class CrossVenueArbBacktester:
         self.markouts = MarkoutTracker(config.markout_horizons_s)
         self.inventory = InventoryBook()
         self.inventory.ensure(config.venues)
+        self.agent = BackgroundAgentModel(config.agent_flow)
+        self._last_trade_ts: dict[str, float] = {}
 
         self._order_ids = 0
         self._trackers: dict[int, _SignalTracker] = {}
@@ -304,6 +309,23 @@ class CrossVenueArbBacktester:
             price, volume, sign = trade_fields(ev.payload)
             if price <= 0 or volume <= 0:
                 return
+            # Inject synthetic background taker flow in the gap since the last
+            # real trade on this venue.  Gate on live orders: with nothing
+            # resting the synthetic trades have no effect on queue state.
+            if (self.agent.config.enabled
+                    and book.ready
+                    and self.maker.live_orders(ev.venue)):
+                last = self._last_trade_ts.get(ev.venue, now)
+                if last < now:
+                    for syn in self.agent.generate(
+                        last, now, book.best_bid, book.best_ask,
+                    ):
+                        for f in self.maker.on_trade(
+                            ev.venue, syn.price, syn.volume, syn.sign,
+                            syn.timestamp, spec.fees.maker_bps, is_synthetic=True,
+                        ):
+                            self._on_fill(f)
+            self._last_trade_ts[ev.venue] = now
             book.on_trade(price, volume, sign, now)
             state.on_trade(now, price, volume, sign)
             for f in self.maker.on_trade(
@@ -438,6 +460,7 @@ class CrossVenueArbBacktester:
                 "qty": fill.qty, "price": fill.price, "fee": fill.fee,
                 "taker": fill.is_taker, "signal_id": fill.signal_id,
                 "slippage_bps": fill.slippage_bps,
+                "synthetic": fill.is_synthetic,
             })
 
     def _maybe_resolve(self, signal_id: int, now: float) -> None:
@@ -522,6 +545,7 @@ class CrossVenueArbBacktester:
             start_day=cfg.start_date, end_day=cfg.end_date, latency=self.latency,
             trust_local_ts={v: s.trust_local_ts for v, s in self.venue_specs.items()},
             include_deltas=cfg.include_deltas,
+            quality_preflight=True,
         )
 
         now = 0.0

@@ -66,6 +66,11 @@ class FillLabelRecord:
 
     terminal_reason: str         # "full_fill" / "partial_then_cancel" / "cancel"
 
+    # Stage 4 outputs — read from fill_events.jsonl (zero/False when absent for
+    # records written before Stage 4 was deployed).
+    fill_ratio: float = 0.0          # terminal fill_qty / order_size (NOT at-horizon)
+    price_moved_through: bool = False  # market moved through order within horizon_s
+
 
 def extract_labels(
     log_path: str | Path,
@@ -134,6 +139,8 @@ def extract_labels(
                 trade_sign=float(payload.get("trade_sign", 0.0)),
                 regime_bucket=str(payload.get("regime_bucket", "calm")),
                 terminal_reason=terminal_reason,
+                fill_ratio=float(payload.get("fill_ratio", 0.0)),
+                price_moved_through=bool(payload.get("price_moved_through", False)),
             ))
 
     return records
@@ -176,17 +183,36 @@ class WalkForwardFold:
             labels.append(int(r.filled))
         return np.array(rows, dtype=np.float32), np.array(labels, dtype=np.int8)
 
-    def fit(self, C: float = 1.0):
+    def fit(self, C: float = 1.0, horizon_s: int | None = None):
         """Fit a logistic-regression hazard model on cal_records.
 
-        Returns an sklearn LogisticRegression fitted on the calibration set.
+        Parameters
+        ----------
+        C:
+            Inverse regularisation strength passed to LogisticRegression.
+        horizon_s:
+            When provided, only records whose ``horizon_s`` matches this value
+            are used for training.  Without this filter, records at different
+            horizons (e.g. 1s, 5s, 15s) are mixed: the label ``filled``
+            changes meaning across horizons and the fitted probabilities are
+            uninterpretable.  Always pass the target horizon when records from
+            multiple horizons are present in the fold.
+
+        Returns an sklearn LogisticRegression fitted on the filtered calibration
+        set, or None when the filtered set is empty or single-class.
         Requires scikit-learn.
         """
         from sklearn.linear_model import LogisticRegression  # noqa: PLC0415
         from sklearn.preprocessing import StandardScaler     # noqa: PLC0415
         import numpy as np                                   # noqa: PLC0415
 
-        X, y = self.feature_matrix(self.cal_records)
+        records = (
+            [r for r in self.cal_records if r.horizon_s == horizon_s]
+            if horizon_s is not None
+            else self.cal_records
+        )
+
+        X, y = self.feature_matrix(records)
         if len(X) == 0 or y.sum() == 0 or y.sum() == len(y):
             # Can't fit with all-one-class labels or empty set
             return None
@@ -196,16 +222,30 @@ class WalkForwardFold:
         lr = LogisticRegression(C=C, max_iter=500, solver="lbfgs")
         lr.fit(X_scaled, y)
         lr._scaler = scaler  # attach scaler for predict convenience
+        lr._horizon_s = horizon_s  # record for diagnostics
         return lr
 
-    def predict(self, model) -> tuple:
-        """Return (y_true, y_prob) for eval_records using a fitted model."""
+    def predict(self, model, horizon_s: int | None = None) -> tuple:
+        """Return (y_true, y_prob) for eval_records using a fitted model.
+
+        Parameters
+        ----------
+        horizon_s:
+            When provided, only eval records with matching ``horizon_s`` are
+            scored.  Should match the horizon passed to ``fit()``.
+        """
         import numpy as np  # noqa: PLC0415
 
-        if model is None or not self.eval_records:
+        records = (
+            [r for r in self.eval_records if r.horizon_s == horizon_s]
+            if horizon_s is not None
+            else self.eval_records
+        )
+
+        if model is None or not records:
             return np.array([]), np.array([])
 
-        X, y = self.feature_matrix(self.eval_records)
+        X, y = self.feature_matrix(records)
         X_scaled = model._scaler.transform(X)
         probs = model.predict_proba(X_scaled)[:, 1]
         return y, probs

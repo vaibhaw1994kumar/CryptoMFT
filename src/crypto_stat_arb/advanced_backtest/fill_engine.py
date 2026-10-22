@@ -49,6 +49,7 @@ class Fill:
     slippage_bps: float = 0.0     # vs the price the strategy expected
     order_id: int = 0
     signal_id: int = 0
+    is_synthetic: bool = False    # True when triggered by BackgroundAgentModel
 
     @property
     def notional(self) -> float:
@@ -161,6 +162,7 @@ class MakerOrder:
     trade_fill_qty: float = 0.0
     delta_fill_qty: float = 0.0
     snapshot_fill_qty: float = 0.0
+    synthetic_fill_qty: float = 0.0   # qty filled by BackgroundAgentModel synthetic trades
 
     @property
     def is_live(self) -> bool:
@@ -267,6 +269,7 @@ class MakerExecutor:
 
     def on_trade(
         self, venue: str, price: float, volume: float, sign: int, now: float, fee_bps: float,
+        is_synthetic: bool = False,
     ) -> list[Fill]:
         """A public trade crossed the book. Fill any resting order it reached."""
         fills: list[Fill] = []
@@ -275,9 +278,9 @@ class MakerExecutor:
                 continue
             # sign=-1: sell aggressor hits bids. sign=+1: buy aggressor lifts asks.
             if sign < 0 and order.side == Side.BID and price <= order.price + 1e-12:
-                f = self._consume(order, volume, now, self.config.trade_fill_share, "trade", fee_bps)
+                f = self._consume(order, volume, now, self.config.trade_fill_share, "trade", fee_bps, is_synthetic)
             elif sign > 0 and order.side == Side.ASK and price >= order.price - 1e-12:
-                f = self._consume(order, volume, now, self.config.trade_fill_share, "trade", fee_bps)
+                f = self._consume(order, volume, now, self.config.trade_fill_share, "trade", fee_bps, is_synthetic)
             else:
                 continue
             if f is not None:
@@ -339,6 +342,7 @@ class MakerExecutor:
     def _consume(
         self, order: MakerOrder, volume: float, now: float,
         fill_share: float, source: str, fee_bps: float,
+        is_synthetic: bool = False,
     ) -> Fill | None:
         """Drain queue first, then fill our own size from what is left."""
         if volume <= 0 or not order.is_live:
@@ -360,7 +364,9 @@ class MakerExecutor:
         order.filled_qty += qty
         if order.first_fill_ts is None:
             order.first_fill_ts = now
-        if source == "trade":
+        if is_synthetic:
+            order.synthetic_fill_qty += qty
+        elif source == "trade":
             order.trade_fill_qty += qty
         elif source == "delta":
             order.delta_fill_qty += qty
@@ -372,11 +378,16 @@ class MakerExecutor:
         fill = Fill(
             ts=now, venue=order.venue, side=order.side_str, qty=qty, price=order.price,
             fee=fee, is_taker=False, order_id=order.order_id, signal_id=order.signal_id,
+            is_synthetic=is_synthetic,
         )
 
         if not order.is_live:
             self.orders.pop(order.order_id, None)
-            self._record_outcome(order)
+            # Skip training label if synthetic flow touched this order at any point.
+            # Synthetic qty on first_fill_ts corrupts time-to-fill labels even when
+            # a real trade completes the order later.
+            if order.synthetic_fill_qty == 0:
+                self._record_outcome(order)
             self.orders_filled += 1
         return fill
 

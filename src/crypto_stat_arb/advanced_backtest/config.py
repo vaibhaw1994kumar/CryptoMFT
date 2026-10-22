@@ -21,32 +21,15 @@ BINANCE = "binance"
 class FeeSpec:
     maker_bps: float
     taker_bps: float
-    # When True, negative rates (rebates) are treated as zero until verified with
-    # the venue's actual post-trade statements. Mirrors FeeRule.effective_bps().
-    conservative_unverified: bool = False
-
-    @property
-    def effective_maker_bps(self) -> float:
-        """Maker rate with conservative policy: unverified rebates count as zero."""
-        if self.conservative_unverified and self.maker_bps < 0:
-            return 0.0
-        return self.maker_bps
-
-    @property
-    def effective_taker_bps(self) -> float:
-        """Taker rate with conservative policy: unverified rebates count as zero."""
-        if self.conservative_unverified and self.taker_bps < 0:
-            return 0.0
-        return self.taker_bps
 
 
 # Bybit spot VIP-0 is 10bps/10bps; the MM desk runs PostOnly with a rebate tier.
 # Binance USD-M futures VIP-0 is 2.0/5.0, with BNB discount 1.8/4.5.
 FEE_PRESETS: dict[str, FeeSpec] = {
     "bybit_perp_vip0":   FeeSpec(maker_bps=2.0,  taker_bps=5.5),
-    "bybit_perp_mm":     FeeSpec(maker_bps=-0.5, taker_bps=5.5,  conservative_unverified=True),
+    "bybit_perp_mm":     FeeSpec(maker_bps=-0.5, taker_bps=5.5),   # MM rebate tier
     "bybit_spot_vip0":   FeeSpec(maker_bps=10.0, taker_bps=10.0),
-    "bybit_spot_mm":     FeeSpec(maker_bps=-0.5, taker_bps=6.0,  conservative_unverified=True),
+    "bybit_spot_mm":     FeeSpec(maker_bps=-0.5, taker_bps=6.0),   # matches bybit_backtester.py
     "binance_perp_vip0": FeeSpec(maker_bps=2.0,  taker_bps=5.0),
     "binance_perp_bnb":  FeeSpec(maker_bps=1.8,  taker_bps=4.5),
     "binance_perp_mm":   FeeSpec(maker_bps=0.0,  taker_bps=3.0),   # MM program tier

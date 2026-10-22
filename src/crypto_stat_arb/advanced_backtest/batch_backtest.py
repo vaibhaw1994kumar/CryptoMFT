@@ -90,12 +90,57 @@ def _date_to_epoch(date_str: str) -> float:
     ).timestamp()
 
 
+def _days_in_window(common_days: list[str], start_ts: float, end_ts: float) -> list[str]:
+    """Days from common_days whose UTC midnight epoch falls in [start_ts, end_ts)."""
+    return [d for d in common_days if start_ts <= _date_to_epoch(d) < end_ts]
+
+
+def _aggregate_fold_results(fold_dicts: list[dict]) -> dict:
+    """Combine per-fold ArbBacktestResult dicts.
+
+    Additive scalars are summed; ratio metrics are weighted by signals_completed.
+    """
+    if not fold_dicts:
+        return {}
+
+    _ADD = (
+        "realized_pnl", "gross_pnl", "fees_paid", "unhedged_loss",
+        "traded_notional", "signals_generated", "orders_sent",
+        "orders_filled", "orders_missed", "orders_cancelled",
+        "signals_completed", "signals_unhedged",
+    )
+    combined: dict = {k: sum(d.get(k, 0) for d in fold_dicts) for k in _ADD}
+
+    tot_sig = combined.get("signals_completed", 0)
+    for metric in ("edge_capture_ratio", "mean_realized_net_edge_bps"):
+        combined[metric] = (
+            sum(d.get(metric, 0.0) * d.get("signals_completed", 0) for d in fold_dicts)
+            / tot_sig
+        ) if tot_sig > 0 else 0.0
+
+    last = fold_dicts[-1]
+    combined["fill_log_path"] = last.get("fill_log_path")
+    combined["start_date"] = fold_dicts[0].get("start_date", "")
+    combined["end_date"] = last.get("end_date", "")
+
+    merged_report: dict = {}
+    for d in fold_dicts:
+        for k, v in d.get("strategy_report", {}).items():
+            if isinstance(v, (int, float)):
+                merged_report[k] = merged_report.get(k, 0) + v
+    combined["strategy_report"] = merged_report
+    combined["wf_fold_count"] = len(fold_dicts)
+    return combined
+
+
 def run_pair(
     pair: str,
     base: ArbBacktestConfig,
     output_root: Path,
     two_pass: bool,
     calibration_days: int = 0,
+    wf_window_days: int = 0,
+    wf_step_days: int = 7,
 ) -> PairOutcome:
     coverage = check_coverage(
         base.data_root, pair, base.venues, base.start_date, base.end_date,
@@ -110,7 +155,89 @@ def run_pair(
 
     pair_dir = output_root / pair
     try:
-        # Walk-forward calibration: run a cold calibration pass on the first
+        # Walk-forward: rolling day-aligned cal/eval folds.
+        # 1. Cold pass (agent disabled) → fill_events.jsonl for all common days.
+        # 2. Load all label records once; slice per fold using calendar indices.
+        # 3. Per fold: FillModelV2.fit(cal_records) → eval backtester run.
+        # 4. Aggregate eval fold metrics.
+        # Fold boundaries are calendar-day-aligned (common[i:i+w] / common[i+w:i+w+s])
+        # so every eval day is exactly what it says on the tin, regardless of when
+        # the first fill event in the cold log happens to fall.
+        if wf_window_days > 0 and len(common) > wf_step_days:
+            from .background_agent_model import AgentFlowConfig  # noqa: PLC0415
+            from .fill_label import extract_labels               # noqa: PLC0415
+            from .fill_model_v1 import FillModelV2               # noqa: PLC0415
+
+            cfg_cold = _clone(base, pair=pair, start=common[0], end=common[-1],
+                              output_dir=str(pair_dir / "wf_cold"),
+                              warm_start=None,
+                              agent_flow_override=AgentFlowConfig(enabled=False))
+            r_cold = _run_once(cfg_cold)
+
+            if not r_cold.fill_log_path:
+                return PairOutcome(pair, "error",
+                                   detail="wf cold pass produced no fill_log_path")
+
+            # Load all records once; filter per fold in memory
+            all_records = extract_labels(r_cold.fill_log_path)
+            horizon_s = base.arb.fill_gate_horizon_s
+            fold_results: list[dict] = []
+            fold_idx = 0
+            for i in range(0, len(common) - wf_window_days, wf_step_days):
+                cal_days = common[i:i + wf_window_days]
+                eval_days = common[i + wf_window_days:i + wf_window_days + wf_step_days]
+                if not cal_days or not eval_days:
+                    break
+
+                cal_start_ts = _date_to_epoch(cal_days[0])
+                until_ts = _date_to_epoch(eval_days[0])
+
+                cal_records = [r for r in all_records
+                               if cal_start_ts <= r.timestamp < until_ts
+                               and r.timestamp + r.horizon_s <= until_ts]
+                if len(cal_records) < 50:
+                    fold_idx += 1
+                    continue
+
+                model = FillModelV2.fit(
+                    cal_records, gate_horizon_s=horizon_s,
+                    trained_until_ts=until_ts,
+                )
+                if model is None:
+                    fold_idx += 1
+                    continue
+
+                fold_dir = pair_dir / f"wf_fold_{fold_idx:03d}"
+                model_path = str(fold_dir / "fill_model_v1.json")
+                model.save_json(model_path)
+
+                cfg_eval = _clone(
+                    base, pair=pair, start=eval_days[0], end=eval_days[-1],
+                    output_dir=str(fold_dir),
+                    warm_start=r_cold.fill_log_path,
+                    warm_start_until_ts=until_ts,
+                    fill_model_v1_path=model_path,
+                )
+                fold_results.append(asdict(_run_once(cfg_eval)))
+                fold_idx += 1
+
+            if not fold_results:
+                return PairOutcome(
+                    pair, "error",
+                    detail=(f"wf: no folds fitted "
+                            f"(window={wf_window_days}d step={wf_step_days}d "
+                            f"days={len(common)})"),
+                )
+            combined = _aggregate_fold_results(fold_results)
+            n = combined["wf_fold_count"]
+            return PairOutcome(
+                pair, "ok",
+                detail=(f"wf {n} folds window={wf_window_days}d "
+                        f"step={wf_step_days}d {common[0]}..{common[-1]}"),
+                pass1=asdict(r_cold), pass2=combined,
+            )
+
+        # Static single cal/eval split: run a cold calibration pass on the first
         # calibration_days, then evaluate on the remaining days warm-started
         # from those labels.  until_ts prevents label leakage: events whose
         # horizon crosses into the eval window are dropped from the warm-start.
@@ -132,11 +259,11 @@ def run_pair(
                     and base.arb.min_fill_prob > 0.0
                     and r_cal.fill_log_path):
                 from .fill_label import extract_labels   # noqa: PLC0415
-                from .fill_model_v1 import FillModelV1   # noqa: PLC0415
+                from .fill_model_v1 import FillModelV2   # noqa: PLC0415
                 records = extract_labels(r_cal.fill_log_path, until_ts=until_ts)
                 if records:
                     horizon_s = base.arb.fill_gate_horizon_s
-                    model = FillModelV1.fit(records, horizon_s=horizon_s,
+                    model = FillModelV2.fit(records, gate_horizon_s=horizon_s,
                                            trained_until_ts=until_ts)
                     if model is not None:
                         model_path = str(pair_dir / "calibration" / "fill_model_v1.json")
@@ -181,6 +308,7 @@ def _clone(
     output_dir: str, warm_start: str | None,
     warm_start_until_ts: float | None = None,
     fill_model_v1_path: str | None = None,
+    agent_flow_override=None,
 ) -> ArbBacktestConfig:
     arb = ArbConfig(**{**vars(base.arb), "max_position_base": max_position_for(pair)})
     return ArbBacktestConfig(
@@ -197,6 +325,7 @@ def _clone(
         fill_model_v1_path=fill_model_v1_path,
         markout_horizons_s=base.markout_horizons_s,
         progress_every=base.progress_every,
+        agent_flow=agent_flow_override if agent_flow_override is not None else base.agent_flow,
     )
 
 
@@ -207,6 +336,8 @@ def run_batch(
     two_pass: bool = True,
     verbose: bool = True,
     calibration_days: int = 0,
+    wf_window_days: int = 0,
+    wf_step_days: int = 7,
 ) -> BatchSummary:
     out_root = Path(output_dir)
     out_root.mkdir(parents=True, exist_ok=True)
@@ -217,7 +348,9 @@ def run_batch(
         if verbose:
             print(f"\n[{i}/{len(pairs)}] {pair}", flush=True)
         outcome = run_pair(pair, base, out_root, two_pass,
-                           calibration_days=calibration_days)
+                           calibration_days=calibration_days,
+                           wf_window_days=wf_window_days,
+                           wf_step_days=wf_step_days)
         outcomes.append(outcome)
         if verbose:
             if outcome.status != "ok":
@@ -374,10 +507,36 @@ def build_arg_parser() -> argparse.ArgumentParser:
     p.add_argument(
         "--calibration-days", type=int, default=0, metavar="N",
         help=(
-            "walk-forward: run a cold N-day calibration pass first, then evaluate "
-            "on the remaining days warm-started from those labels (A5 leakage fix). "
-            "Labels whose horizon crosses into the eval window are excluded. "
-            "Falls back to standard two-pass when fewer than N+1 days are available."
+            "static cal/eval split: run a cold N-day calibration pass first, then "
+            "evaluate on the remaining days warm-started from those labels. "
+            "Superseded by --wf-window-days when both are set."
+        ),
+    )
+    p.add_argument(
+        "--wf-window-days", type=int, default=0, metavar="N",
+        help=(
+            "walk-forward window size in days (0 = disabled). When >0, runs a cold "
+            "pass over all days then iterates rolling cal/eval folds of this width."
+        ),
+    )
+    p.add_argument(
+        "--wf-step-days", type=int, default=7, metavar="N",
+        help="eval window size per walk-forward fold (days); also the fold step size",
+    )
+    p.add_argument(
+        "--min-fill-prob", type=float, default=0.0,
+        help="minimum P(fill) gate threshold; 0 disables (maker_taker mode only)",
+    )
+    p.add_argument(
+        "--fill-gate-horizon-s", type=int, default=15,
+        help="horizon in seconds used by the fill probability gate",
+    )
+    p.add_argument(
+        "--max-adverse-prob", type=float, default=1.0,
+        help=(
+            "Stage 4 adverse-selection gate: reject maker leg when "
+            "P(price_moved_through) exceeds this threshold (1.0 = disabled). "
+            "Requires a FillModelV2 model and maker_taker mode."
         ),
     )
     return p
@@ -404,12 +563,17 @@ def main(argv: Iterable[str] | None = None) -> int:
             max_touch_age_s=args.max_touch_age_ms / 1000.0,
             max_clip_notional=args.max_clip_notional,
             block_on_toxic=not args.no_toxic_gate,
+            min_fill_prob=args.min_fill_prob,
+            fill_gate_horizon_s=args.fill_gate_horizon_s,
+            max_adverse_prob=args.max_adverse_prob,
         ),
         include_deltas=not args.no_deltas, seed=args.seed,
         progress_every=args.progress_every,
     )
     run_batch(args.pairs, base, args.output_dir, two_pass=two_pass,
-              calibration_days=args.calibration_days)
+              calibration_days=args.calibration_days,
+              wf_window_days=args.wf_window_days,
+              wf_step_days=args.wf_step_days)
     return 0
 
 
