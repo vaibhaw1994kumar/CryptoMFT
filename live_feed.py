@@ -567,6 +567,19 @@ class RotatingLiveRecorder:
         self._raw_writer = None
         self._part_dir = None
 
+    def abort(self) -> None:
+        """Release every open file without sealing the part (after a recording failure).
+
+        The part keeps whatever was written; no manifest claims it is complete.
+        """
+        for handle in (self._wire_handle, self._canonical_handle, self._trade_handle,
+                       self._trace_handle, self._quarantine_handle, self._derivative_handle,
+                       getattr(self._raw_writer, "_handle", None)):
+            if handle is not None:
+                with suppress(OSError, ValueError):
+                    handle.close()
+        self._closed = True
+
     def close(self, service_summary: dict[str, Any]) -> dict[str, Any]:
         if self._closed:
             raise RuntimeError("live recorder already closed")
@@ -915,6 +928,7 @@ class LiveOrderBookService:
             return self.recorder.close(self._service_summary())
         except (OSError, PersistenceFailure) as exc:
             self._fail_closed_on_persistence("", exc)
+            self.recorder.abort()
             # The manifest could not be written: return what is known, unsealed.
             return {"session_id": self.recorder.session_id, "manifest_path": None,
                     "persistence_failure": self.persistence_failure,

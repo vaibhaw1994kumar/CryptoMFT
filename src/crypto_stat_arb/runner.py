@@ -581,7 +581,7 @@ def write_session_artifacts(
         },
         "tca": {
             "report": "tca_report.json",
-            "daily_reports": [str(path.relative_to(output_dir)) for path in tca_daily_paths],
+            "daily_reports": [path.relative_to(output_dir).as_posix() for path in tca_daily_paths],
             "fills": tca_report["summary"]["fills"],
             "weighted_slippage_bps": tca_report["summary"]["weighted_slippage_bps"],
             "fees": tca_report["summary"]["fees"],

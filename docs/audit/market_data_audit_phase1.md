@@ -288,3 +288,11 @@ After `f9e2e2a` removed the Windows import errors, the Windows test job ran the 
   - Afterwards, `lsof` shows 0 run files open.
   - There's no performance cost: a 69,799-event replay took 45.5 s before and 45.1 s after, with identical log rows.
 - **Regression test:** `tests/test_sqlite_handles.py` tracks every connection the store opens during a backtest and asserts it is closed. It fails on the old code on every OS, not only Windows.
+
+**Windows CI follow-up, after `a60df26`.** Windows went from 42 failures to 7. Of those 7:
+
+- **Fixed, recorder failure path:** after a recording failure, `recorder.close()` failed partway and left the part files open, so the handles leaked. `RotatingLiveRecorder.abort()` now releases every handle without sealing the part.
+- **Fixed, TCA report paths:** `summary.tca.daily_reports` used OS separators (`tca_daily\…` on Windows). They're now written as POSIX paths.
+- **Fixed, test cleanup:** my two perp tests never closed the OHLC/LTP CSV writers or the files they read.
+- **Open, Windows-only hang:** `test_maker_execution_path::LiveReplayParityTests` takes 0.18 s on macOS but exceeds its 10 s `wait_for` on Windows. The `paper_timestamps.jsonl` lock is only a side effect of the timeout. It wasn't reproducible here; the likely areas are Windows' asyncio Proactor loop or its clock resolution. Not patched: raising the timeout would hide it.
+- **Open, existing failures:** `test_minreq_cli` paper-mode default, and AT-14 timing on the slower Windows runner.
