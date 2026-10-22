@@ -196,6 +196,7 @@
     "max_host_drift_ppm": 500,
     "negative_latency_tolerance_ms": 5,
     "correct_host_offset": true,
+    "max_feed_delay_ms": 2000,
     "host_offset_quantile": 0.01,
     "host_offset_window": 2000,
     "host_offset_min_samples": 20

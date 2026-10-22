@@ -285,13 +285,17 @@ class OrderBook:
         return min(self.asks)
 
     def mark_stale(self, now_ns: int, max_age_ns: int) -> None:
-        if (
-            self.state == BookState.VALID
-            and self.last_receive_ts_ns is not None
-            and now_ns - self.last_receive_ts_ns > max_age_ns
-        ):
-            if self.state != BookState.STALE:
-                self.stats.stale_transitions += 1
+        if self.last_receive_ts_ns is not None:
+            self.mark_stale_age(now_ns - self.last_receive_ts_ns, max_age_ns)
+
+    def mark_stale_age(self, age_ns: int, max_age_ns: int) -> None:
+        """Stale when the last applied update is older than ``max_age_ns``.
+
+        Live callers measure ``age_ns`` on a monotonic clock, so a wall-clock
+        step cannot make a silent book look fresh (or a fresh one look stale).
+        """
+        if self.state == BookState.VALID and age_ns > max_age_ns:
+            self.stats.stale_transitions += 1
             self.state = BookState.STALE
             self.invalid_reason = "market_data_stale"
 

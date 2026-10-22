@@ -22,6 +22,7 @@ from .book_gate import BookIntegrityGate, CancelCallback, VenueControlCallback
 from .config import load_config
 from .canonical import validate_canonical_event
 from .models import BookState, MarketEvent, json_default
+from .time_integrity import TimeIntegrityMonitor
 from .market_data_output import (
     LtpOhlcBar,
     LtpOhlcCsvWriter,
@@ -113,6 +114,8 @@ class WireFrame:
 @dataclass(slots=True)
 class VenueLiveStats:
     book_syncs: int = 0                  # times the book became VALID
+    feed_delayed_events: int = 0         # FEED_DELAYED (config time.max_feed_delay_ms)
+    validation_errors: int = 0           # book events rejected by validate_canonical_event
     subscription_acks: int = 0
     subscription_rejections: int = 0
     derivative_connections: int = 0
@@ -676,6 +679,7 @@ class LiveOrderBookService:
         websocket_connector: WebSocketConnector = public_websocket_connector,
         http_getter: HttpGetter = public_http_get,
         clock_ns: Callable[[], int] = time.time_ns,
+        monotonic_ns: Callable[[], int] = time.monotonic_ns,
         cancel_callback: CancelCallback | None = None,
         venue_control_callback: VenueControlCallback | None = None,
         publisher: MarketDataPublisher | None = None,
@@ -700,6 +704,14 @@ class LiveOrderBookService:
         self.websocket_connector = websocket_connector
         self.http_getter = http_getter
         self.clock_ns = clock_ns
+        # Freshness runs on a monotonic clock; clock_ns (wall) stamps records.
+        self.monotonic_ns = monotonic_ns
+        self._last_book_mono_ns: dict[str, int | None] = {}
+        # Venue-to-host delay (backlog) and host-clock offset, for alerts and the summary.
+        # Decisions are blocked by the trading session's own monitor (same policy).
+        self.time_monitor = TimeIntegrityMonitor(self.config.time_policy, tuple(self.settings.venues))
+        self._feed_delayed: dict[str, bool] = {}
+        self._host_clock_state = ""
         self.stop_event = asyncio.Event()
         self.started_ts_ns: int | None = None
         self.stopped_ts_ns: int | None = None
@@ -786,7 +798,7 @@ class LiveOrderBookService:
             LOGGER.critical("recording failed, stopping fail-closed: %s", exc)
             for book in self.books.values():
                 book.start_resync("persistence_failure")
-            self.book_gate.allow(tuple(self.books.values()), self.clock_ns())
+            self.book_gate.allow(tuple(self.books.values()), self.clock_ns(), self._book_ages())
             for book in self.books.values():
                 self._publish_book(book, None)
             with suppress(PersistenceFailure):
@@ -1436,13 +1448,48 @@ class LiveOrderBookService:
                     ):
                     raise ResyncRequired(self.books[venue].invalid_reason)
 
+    def _observe_timing(self, event: MarketEvent) -> None:
+        assessment = self.time_monitor.observe(event, now_ns=event.receive_ts_ns)
+        delayed = "FEED_DELAYED" in assessment.flags
+        if delayed:
+            self.stats[event.venue].feed_delayed_events += 1
+        if delayed != self._feed_delayed.get(event.venue, False):
+            self._feed_delayed[event.venue] = delayed
+            offset = self.time_monitor.clock_offset_estimate_ns or 0
+            self._connector_log(
+                "FEED_DELAYED" if delayed else "FEED_CAUGHT_UP",
+                StructuredLogLevel.WARNING if delayed else StructuredLogLevel.INFO,
+                ("venue-to-host delay above max_feed_delay_ms: decisions blocked"
+                 if delayed else "venue-to-host delay back within max_feed_delay_ms"),
+                venue=event.venue, ts_ns=event.receive_ts_ns, source_event_id=event.event_id,
+                payload={"corrected_delay_ns": assessment.latency_ns - offset,
+                         "clock_offset_estimate_ns": offset},
+            )
+        state = self.time_monitor.host_clock.state
+        if state != self._host_clock_state:
+            if self._host_clock_state or state != "UNKNOWN":
+                offset = self.time_monitor.clock_offset_estimate_ns
+                self._connector_log(
+                    "HOST_CLOCK_OFFSET" if state == "UNSYNCED" else "HOST_CLOCK_STATE",
+                    StructuredLogLevel.WARNING if state == "UNSYNCED" else StructuredLogLevel.INFO,
+                    f"host clock {state}: offset estimate {None if offset is None else offset / 1e6} ms "
+                    f"vs max_host_offset_ms {self.config.time_policy.max_host_offset_ns / 1e6}",
+                    venue=event.venue, ts_ns=event.receive_ts_ns,
+                    payload={"state": state, "clock_offset_estimate_ns": offset},
+                )
+            self._host_clock_state = state
+
+    def _book_ages(self) -> dict[str, int | None]:
+        now = self.monotonic_ns()
+        return {venue: (None if last is None else now - last)
+                for venue, last in self._last_book_mono_ns.items()}
+
     def _remaining_fresh_seconds(self, venue: str) -> float:
         book = self.books[venue]
-        if book.state != BookState.VALID or book.last_receive_ts_ns is None:
+        last = self._last_book_mono_ns.get(venue)
+        if book.state != BookState.VALID or last is None:
             return self.settings.initial_sync_timeout_seconds
-        remaining_ns = self.config.max_book_age_ns - (
-            self.clock_ns() - book.last_receive_ts_ns
-        )
+        remaining_ns = self.config.max_book_age_ns - (self.monotonic_ns() - last)
         return max(0.001, remaining_ns / 1_000_000_000)
 
     async def _recv_fresh(
@@ -1459,19 +1506,23 @@ class LiveOrderBookService:
 
     def _mark_stale(self, venue: str) -> None:
         book = self.books[venue]
-        book.mark_stale(self.clock_ns(), self.config.max_book_age_ns)
+        age = self._book_ages().get(venue)
+        if age is not None:
+            book.mark_stale_age(age, self.config.max_book_age_ns)
         self.stats[venue].stale_disconnects += 1
-        self.book_gate.allow(tuple(self.books.values()), self.clock_ns())
+        self.book_gate.allow(tuple(self.books.values()), self.clock_ns(), self._book_ages())
         self._publish_book(book, None)
 
     def _begin_connection(self, venue: str) -> None:
+        self._last_book_mono_ns[venue] = None
         self.books[venue].start_resync("connection_snapshot_required")
-        self.book_gate.allow(tuple(self.books.values()), self.clock_ns())
+        self.book_gate.allow(tuple(self.books.values()), self.clock_ns(), self._book_ages())
         self._publish_book(self.books[venue], None)
 
     def _invalidate_connection(self, venue: str) -> None:
+        self._last_book_mono_ns[venue] = None
         self.books[venue].start_resync("connection_lost")
-        self.book_gate.allow(tuple(self.books.values()), self.clock_ns())
+        self.book_gate.allow(tuple(self.books.values()), self.clock_ns(), self._book_ages())
         self._publish_book(self.books[venue], None)
 
     def _capture_and_parse(
@@ -1664,6 +1715,8 @@ class LiveOrderBookService:
                 wire, exc, raw_ref=raw.raw_ref, stage="NORMALIZE"
             )
             return None
+        if not self._validated(venue, wire, raw, event):
+            return None
         return self._apply_and_record(wire, raw, event)
 
     def _process_binance_snapshot(
@@ -1697,7 +1750,20 @@ class LiveOrderBookService:
                 wire, exc, raw_ref=raw.raw_ref, stage="NORMALIZE"
             )
             return None
+        if not self._validated(venue, wire, raw, event):
+            return None
         return self._apply_and_record(wire, raw, event)
+
+    def _validated(self, venue: str, wire: WireFrame, raw: RawFrame, event: MarketEvent) -> bool:
+        """The envelope checks every consumer relies on. A rejected book event is never
+        applied, so the next delta exposes the hole as a sequence gap (resync)."""
+        try:
+            validate_canonical_event(event, require_raw_ref=True)
+        except ValueError as exc:
+            self.stats[venue].validation_errors += 1
+            self.recorder.record_rejection(wire, exc, raw_ref=raw.raw_ref, stage="VALIDATE")
+            return False
+        return True
 
     def _check_subscription_reply(self, venue: str, payload: dict[str, Any]) -> None:
         """Bybit answers ``subscribe`` with ``success``; a refusal must not look like silence."""
@@ -1757,12 +1823,15 @@ class LiveOrderBookService:
         if state == BookState.VALID and previous_state != BookState.VALID:
             self.stats[event.venue].book_syncs += 1
         accepted = book.last_event_id is not None and book.last_event_id != previous_event_id
+        if accepted:
+            self._last_book_mono_ns[event.venue] = self.monotonic_ns()
+        self._observe_timing(event)
         source_event = (
             event
             if book.last_event_id == event.event_id
             else pending_events.get(book.last_event_id or "", event)
         )
-        self.book_gate.allow(tuple(self.books.values()), event.receive_ts_ns)
+        self.book_gate.allow(tuple(self.books.values()), event.receive_ts_ns, self._book_ages())
         if accepted or state != previous_state:
             self._publish_book(book, source_event)
         if accepted:
@@ -1820,6 +1889,12 @@ class LiveOrderBookService:
             "max_book_age_ns": self.config.max_book_age_ns,
             "events_seen": self.events_seen,
             "persistence_failure": self.persistence_failure or None,
+            "time_integrity": {
+                "clock_offset_estimate_ns": self.time_monitor.clock_offset_estimate_ns,
+                "host_clock_state": self.time_monitor.host_clock.state,
+                "max_feed_delay_ns": self.config.time_policy.max_feed_delay_ns,
+                "feed_delayed_events": {v: s.feed_delayed_events for v, s in self.stats.items()},
+            },
             "pipeline_monitoring": {
                 "report": "pipeline_monitoring.json",
                 "prometheus_metrics": "pipeline_metrics.prom",

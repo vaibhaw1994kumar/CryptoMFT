@@ -296,3 +296,33 @@ After `f9e2e2a` removed the Windows import errors, the Windows test job ran the 
 - **Fixed, test cleanup:** my two perp tests never closed the OHLC/LTP CSV writers or the files they read.
 - **Open, Windows-only hang:** `test_maker_execution_path::LiveReplayParityTests` takes 0.18 s on macOS but exceeds its 10 s `wait_for` on Windows. The `paper_timestamps.jsonl` lock is only a side effect of the timeout. It wasn't reproducible here; the likely areas are Windows' asyncio Proactor loop or its clock resolution. Not patched: raising the timeout would hide it.
 - **Open, existing failures:** `test_minreq_cli` paper-mode default, and AT-14 timing on the slower Windows runner.
+
+## Phase 3: P2 fixes (2026-10-23)
+
+| # | Finding (Phase 1) | Fix | Tests |
+|---|---|---|---|
+| 1 | Live book events skipped `validate_canonical_event` | `LiveOrderBookService._validated()` runs it on every book event (websocket and REST snapshot) before it is applied. A rejected event is quarantined (`stage=VALIDATE`, `validation_errors`) and never applied, so a real hole shows up as a sequence gap. All 39,792 events in the 2026-10-22 Bybit capture pass it. | `test_market_data_p2::LiveValidationTests` |
+| 2 | Freshness used the wall clock | `OrderBook.mark_stale_age()`. `BookIntegrityGate.allow(..., ages_ns)` takes per-venue ages, which the live service measures on `time.monotonic_ns()` from the last applied update (`_book_ages`, `_remaining_fresh_seconds`). Recorded timestamps are unchanged; replay passes no ages and keeps recorded time. | `MonotonicFreshnessTests` (step forward: no false stale; step back: silence still stale; replay unchanged) |
+| 3 | No backlog / slow-consumer detection; host-clock offset not alerted | `TimePolicy.max_feed_delay_ns` (config `time.max_feed_delay_ms`). The venue-to-host delay is corrected by the host-offset estimate. Above the limit, an event is `FEED_DELAYED`, and every other venue of that instrument gets `PEER_FEED_DELAYED` until the delayed stream catches up. Both block decisions, in live paper and in replay. The live service logs `FEED_DELAYED` / `FEED_CAUGHT_UP` and `HOST_CLOCK_OFFSET` (offset beyond `max_host_offset_ms`), and reports them under `service.time_integrity`. | `FeedDelayTests` (off by default; own and peer blocking; catch-up; offset-corrected), `LiveTimingAlertTests` |
+
+**Setting the limit to 2000 ms** (`research`, `paper_watch`, `perp_research`):
+
+- **A real backlog in the recordings.** Cycle 0006 (2026-09-14) has a backlog: 151 events more than 2 s late (worst 4.4 s, corrected).
+- **Normal tails stay below it.** Elsewhere the worst corrected delay is 1.3 s, and 1.08 s in the 2026-10-22 capture.
+- **No change to regression results.** With the limit on, cycles 0006–0010 have identical opportunities, fills, P&L and economics. No opportunity fell inside a delayed window.
+- **The host clock was already off in September.** The offset estimates for those cycles are −150 to −230 ms: the host clock was behind then too.
+
+**Mutation check:** M8–M11 fail the matching tests.
+
+**Verification:**
+
+- **Full suite:** 555 passed.
+- **Spot regression:** identical to baseline.
+- **Bybit capture replay:** identical.
+- **`run_all_local`:** PASSED.
+
+**Still open (P2):**
+
+- a Tardis vs own-capture comparison;
+- live REST reconciliation;
+- a cross-venue price-consistency monitor.

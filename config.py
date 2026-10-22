@@ -261,6 +261,10 @@ def load_config(path: Path) -> tuple[AppConfig, dict]:
             host_offset_quantile=float(time_config.get("host_offset_quantile", 0.01)),
             host_offset_window=int(time_config.get("host_offset_window", 2_000)),
             host_offset_min_samples=int(time_config.get("host_offset_min_samples", 20)),
+            max_feed_delay_ns=(
+                None if time_config.get("max_feed_delay_ms") is None
+                else int(float(time_config["max_feed_delay_ms"]) * 1_000_000)
+            ),
         ),
         quality_thresholds=QualityThresholds(
             min_events=int(quality_config.get("min_events", 1)),

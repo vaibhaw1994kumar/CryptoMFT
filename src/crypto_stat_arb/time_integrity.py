@@ -41,6 +41,10 @@ class TimePolicy:
     host_offset_quantile: float = 0.01
     host_offset_window: int = 2_000
     host_offset_min_samples: int = 20
+    # Backlog / slow consumer: an event whose venue-to-host delay, corrected by the
+    # host-offset estimate, exceeds this is FEED_DELAYED (blocking decisions on it).
+    # None (default) keeps the original behaviour.
+    max_feed_delay_ns: int | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -55,6 +59,8 @@ class TimeAssessment:
             "NEGATIVE_RECEIVE_LATENCY",
             "IMPOSSIBLE_EVENT_LATENCY",
             "FUTURE_RECEIVE_TIMESTAMP",
+            "FEED_DELAYED",
+            "PEER_FEED_DELAYED",
         })
 
 
@@ -113,6 +119,8 @@ class _VenueTimeStats:
     corrected_negative_latency: int = 0
     impossible_latency: int = 0
     stale_feed: int = 0
+    feed_delayed: int = 0
+    max_corrected_delay_ns: int | None = None
 
 
 class TimeIntegrityMonitor:
@@ -124,6 +132,9 @@ class TimeIntegrityMonitor:
         )
         self._venues = {venue: _VenueTimeStats() for venue in venues}
         self._latest_receive: dict[tuple[str, str], int] = {}
+        # Streams whose latest event was FEED_DELAYED: their books are behind, so a
+        # decision on *any* venue of that instrument must wait until they catch up.
+        self.delayed_streams: set[tuple[str, str]] = set()
         self.events = 0
         self.blocked_events = 0
         self.cross_venue_samples = 0
@@ -191,6 +202,21 @@ class TimeIntegrityMonitor:
         elif latency > self.policy.max_event_latency_ns:
             flags.append("IMPOSSIBLE_EVENT_LATENCY")
             stats.impossible_latency += 1
+        elif self.policy.max_feed_delay_ns is not None and corrected > self.policy.max_feed_delay_ns:
+            flags.append("FEED_DELAYED")
+            stats.feed_delayed += 1
+        if self.policy.max_feed_delay_ns is not None:
+            stream = (event.venue, event.instrument_id)
+            if "FEED_DELAYED" in flags:
+                self.delayed_streams.add(stream)
+            else:
+                self.delayed_streams.discard(stream)
+            if any(instrument == event.instrument_id and venue != event.venue
+                   for venue, instrument in self.delayed_streams):
+                flags.append("PEER_FEED_DELAYED")
+        stats.max_corrected_delay_ns = (
+            corrected if stats.max_corrected_delay_ns is None else max(stats.max_corrected_delay_ns, corrected)
+        )
         if feed_age < 0:
             flags.append("FUTURE_RECEIVE_TIMESTAMP")
         elif feed_age > self.policy.max_feed_age_ns:
@@ -239,6 +265,8 @@ class TimeIntegrityMonitor:
                 "corrected_negative_latency_events": stats.corrected_negative_latency,
                 "impossible_latency_events": stats.impossible_latency,
                 "stale_feed_events": stats.stale_feed,
+                "feed_delayed_events": stats.feed_delayed,
+                "max_corrected_delay_ns": stats.max_corrected_delay_ns,
             }
         return {
             "schema_version": "1.0.0",

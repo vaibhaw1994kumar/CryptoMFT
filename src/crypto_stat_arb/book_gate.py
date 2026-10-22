@@ -27,9 +27,17 @@ class BookIntegrityGate:
     venue_validity: dict[str, bool] = field(default_factory=dict)
     venue_transitions: int = 0
 
-    def allow(self, books: tuple[OrderBook, ...], now_ns: int) -> bool:
+    def allow(
+        self, books: tuple[OrderBook, ...], now_ns: int,
+        ages_ns: dict[str, int | None] | None = None,
+    ) -> bool:
+        """``ages_ns`` (live): per-venue age of the last applied update on a monotonic
+        clock. Without it (replay) the age is ``now_ns`` minus the recorded receive time."""
         for book in books:
-            book.mark_stale(now_ns, self.max_book_age_ns)
+            if ages_ns is None:
+                book.mark_stale(now_ns, self.max_book_age_ns)
+            elif ages_ns.get(book.venue) is not None:
+                book.mark_stale_age(ages_ns[book.venue], self.max_book_age_ns)
             valid = book.state == BookState.VALID
             previous = self.venue_validity.get(book.venue)
             if previous is None or previous != valid:
