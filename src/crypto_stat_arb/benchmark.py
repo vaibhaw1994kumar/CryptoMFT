@@ -18,10 +18,14 @@ from decimal import Decimal
 import json
 from pathlib import Path
 import random
-import resource
 import sys
 import time
 from typing import Any
+
+try:  # Unix only; on Windows peak RSS is reported as unavailable (None)
+    import resource
+except ImportError:
+    resource = None
 
 from .config import load_config
 from .models import MarketEvent
@@ -86,7 +90,9 @@ def synthetic_book_events(
     return rows
 
 
-def _peak_rss_bytes() -> int:
+def _peak_rss_bytes() -> int | None:
+    if resource is None:
+        return None
     peak = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
     return int(peak if sys.platform == "darwin" else peak * 1024)
 
