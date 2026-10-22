@@ -13,6 +13,12 @@ This project implements the minimum backtest-ready vertical slice described in t
 7. Each venue book exposes `SYNCING`, `VALID`, `STALE`, `GAP_DETECTED` or `CHECKSUM_FAILED`. Only `VALID` is tradable.
 8. The book-integrity gate suspends strategy evaluation when any required venue is unsafe, requests cancel-all once per valid-to-unsafe transition, and resumes only when every book is valid.
 9. Replay applies a stable total ordering: receive time, exchange time, source time, venue, sequence range and event ID.
+   - Within one (venue, instrument) book stream, the deltas between two snapshots are placed in venue
+     sequence order on the same time slots.
+   - This is needed because the receive time is the capture host's wall clock, which can step backwards
+     (seen on 2026-10-22: a 62 ms NTP step that inverted four Bybit deltas into a false gap).
+   - No timestamp is changed, and genuine gaps stay gaps.
+   - Data whose deltas already follow the venue sequence keeps exactly the order above.
 10. The strategy evaluates only valid, fresh books and creates an immutable opportunity with source event IDs.
 11. The OMS creates one parent plan and two child orders, validates instruments, reserves package risk and dispatches to a deterministic depth matcher.
 12. Fills update the event ledger and venue positions. The parent reports gross PnL, fees, residual and net PnL.

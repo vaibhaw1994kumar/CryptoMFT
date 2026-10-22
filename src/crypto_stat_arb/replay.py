@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Iterable
 
-from .models import MarketEvent
+from .models import EventType, MarketEvent
 from .time_integrity import ORDERING_RULE
 
 
@@ -20,10 +20,34 @@ def event_order_key(event: MarketEvent) -> tuple[int | str, ...]:
 
 
 def deterministic_order(events: Iterable[MarketEvent]) -> list[MarketEvent]:
-    return sorted(
-        events,
-        key=event_order_key,
-    )
+    """``ORDERING_RULE`` across streams; venue sequence order within a book stream.
+
+    ``receive_ts_ns`` is the capture host's wall clock, which can step backwards
+    (NTP correction). Book deltas of one (venue, instrument) stream between two
+    snapshots are re-placed in venue ``sequence`` order on the same time slots,
+    so a clock step cannot invert them into a false sequence gap. Timestamps are
+    not modified, missing sequences stay missing, and data whose deltas already
+    follow the venue sequence is returned in exactly the ``ORDERING_RULE`` order.
+    """
+    ordered = sorted(events, key=event_order_key)
+    result = list(ordered)
+    open_slots: dict[tuple[str, str], list[int]] = {}
+
+    def restore(stream: tuple[str, str]) -> None:
+        slots = open_slots.pop(stream, [])
+        by_sequence = sorted((ordered[i] for i in slots), key=lambda e: e.sequence)   # stable
+        for slot, event in zip(slots, by_sequence):
+            result[slot] = event
+
+    for index, event in enumerate(ordered):
+        stream = (event.venue, event.instrument_id)
+        if event.event_type == EventType.BOOK_SNAPSHOT:
+            restore(stream)                 # a snapshot starts a new sequence segment
+        elif event.event_type == EventType.BOOK_DELTA:
+            open_slots.setdefault(stream, []).append(index)
+    for stream in list(open_slots):
+        restore(stream)
+    return result
 
 
 assert len(ORDERING_RULE) == 7
