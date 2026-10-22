@@ -344,5 +344,89 @@ class ReconciliationTests(unittest.TestCase):
         self.assertEqual(report["consolidated"]["strategy_equity_pnl"], result["net_pnl"])
 
 
+class LedgerAccountingIntegrationTests(unittest.TestCase):
+    """P0 accounting integration: full Ledger (positions + cash_deltas + economics) chain.
+
+    These tests exercise ledger.apply_fill() directly — without OMS — so that
+    the three invariants the audit requires are verified at both the legacy and
+    economics layers in one place.
+    """
+
+    def _order(self, order_id="o1", side=Side.BUY, qty="1", price="100000",
+               fee="0", fee_source="VERIFIED", liquidity="MAKER") -> ChildOrder:
+        return ChildOrder(
+            order_id=order_id, parent_id="p1", opportunity_id="op",
+            venue="BINANCE", instrument_id=INSTRUMENT,
+            side=side, quantity=Decimal(qty), limit_price=Decimal(price),
+            filled_quantity=Decimal(qty), average_price=Decimal(price),
+            fee=Decimal(fee), fee_source=fee_source, liquidity=liquidity,
+        )
+
+    def test_p0_1_fill_idempotency_legacy_and_economics_unchanged_on_duplicate(self):
+        """Ingest the same cumulative fill report twice; position, cash and economics must not change."""
+        ledger = Ledger()
+        order = self._order(qty="1", price="100000", fee="20")
+
+        ledger.apply_fill(order, ts_ns=10)
+        pos_snap = dict(ledger.positions)
+        cash_snap = dict(ledger.cash_deltas)
+        econ_snap = ledger.economics.balances()
+
+        ledger.apply_fill(order, ts_ns=11)  # identical report
+
+        self.assertEqual(ledger.positions, pos_snap, "position double-booked on duplicate fill report")
+        self.assertEqual(ledger.cash_deltas, cash_snap, "cash double-booked on duplicate fill report")
+        self.assertEqual(ledger.economics.balances(), econ_snap, "economics changed on duplicate fill report")
+        fill_events = [e for e in ledger.economics.events if e.event_type == EconomicEventType.TRADE_FILL]
+        self.assertEqual(len(fill_events), 1, "expected exactly one TRADE_FILL event after two identical reports")
+
+    def test_p0_2_partial_fill_sequence_is_exactly_the_final_cumulative(self):
+        """0.4 BTC then cumulative 1.0 BTC must give exactly 1.0 BTC, not 1.4 BTC."""
+        ledger = Ledger()
+        order = self._order(qty="0.4", price="100000", fee="8")
+        ledger.apply_fill(order, ts_ns=10)
+
+        # Cumulative report: filled_quantity now 1.0
+        order.filled_quantity = Decimal("1.0")
+        order.average_price = Decimal("100000")
+        order.fee = Decimal("20")
+        ledger.apply_fill(order, ts_ns=20)
+
+        pos_key = ("BINANCE", INSTRUMENT)
+        self.assertEqual(ledger.positions[pos_key], Decimal("1.0"),
+                         "partial+cumulative fill must not double-count; expected exactly 1.0 BTC")
+        # Cash: -100000 notional − 20 fee = −100020
+        self.assertEqual(ledger.cash_deltas["BINANCE"], Decimal("-100020"))
+        # Economics layer agrees
+        self.assertEqual(ledger.economics.balance("BINANCE", "BTC"), Decimal("1.0"))
+        self.assertEqual(ledger.economics.balance("BINANCE", "USDT"), Decimal("-100020"))
+        fill_events = [e for e in ledger.economics.events if e.event_type == EconomicEventType.TRADE_FILL]
+        self.assertEqual(len(fill_events), 2, "expected two TRADE_FILL events (one per fill delta)")
+
+    def test_p0_3_fee_correction_with_no_new_fill_books_the_delta_exactly_once(self):
+        """Updating a cumulative fee without changing fill quantity must book the delta exactly once."""
+        ledger = Ledger()
+        order = self._order(qty="1", price="100000", fee="20")
+        ledger.apply_fill(order, ts_ns=10)
+
+        pos_after_fill = dict(ledger.positions)
+        cash_after_fill = ledger.cash_deltas["BINANCE"]
+
+        # Fee correction: same filled_quantity, fee corrected from 20 → 25
+        order.fee = Decimal("25")
+        ledger.apply_fill(order, ts_ns=20)
+
+        # Position must not change — no new fill
+        self.assertEqual(ledger.positions, pos_after_fill, "position must not change on fee-only correction")
+        # Cash reduced by the extra 5 fee
+        self.assertEqual(ledger.cash_deltas["BINANCE"], cash_after_fill - Decimal("5"))
+        # Exactly two FEE events: one from the original fill, one from the correction
+        fee_events = [e for e in ledger.economics.events if e.event_type == EconomicEventType.FEE]
+        self.assertEqual(len(fee_events), 2, "expected two FEE events: original + correction delta")
+        # No additional TRADE_FILL
+        fill_events = [e for e in ledger.economics.events if e.event_type == EconomicEventType.TRADE_FILL]
+        self.assertEqual(len(fill_events), 1, "fee correction must not create a new TRADE_FILL")
+
+
 if __name__ == "__main__":
     unittest.main()
