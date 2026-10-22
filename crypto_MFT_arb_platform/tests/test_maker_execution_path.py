@@ -287,6 +287,46 @@ class MakerSimulatorTests(unittest.TestCase):
         self.assertEqual(fill["match_ts_ns"], T0 + 20 * MS)
         self.assertEqual(fill["report_observed_ts_ns"], T0 + 22 * MS)
 
+    def test_queue_position_shrinks_when_level_drains_before_arrival(self):
+        # Level is 10 at decision (T0) but falls to 3 before our order arrives at T0+10ms.
+        # queue_ahead must reflect the smaller arrival-time value, not the decision-time value.
+        # A trade of 3.0005 should burn the 3.0 queue and then fill 0.0005 of our size.
+        sim = self.simulator()
+        self.apply(sim, T0, [("100", "10")], [("101", "5")], snapshot=True)
+        self.apply(sim, T0 + 5 * MS, [("100", "3")])    # shrinks before arrival
+        self.apply(sim, T0 + 15 * MS, [("100", "2")])   # shrinks further AFTER arrival (irrelevant)
+        bid = self.resting(sim, "BUY")[0]
+        self.assertEqual(bid.arrival_ts_ns, T0 + 10 * MS)
+        self.assertEqual(bid.queue_ahead_at_arrival, 3.0)   # not 10 (decision) nor 2 (post-arrival)
+        sim.on_trade(trade_event("BYBIT", 1, T0 + 20 * MS, "100", "3.0005", "SELL"))
+        fill = sim.fills[0]
+        self.assertEqual(fill["cause"], "TRADE")
+        self.assertAlmostEqual(fill["quantity"], 0.0005)
+        # A smaller trade that only burns 2.9 of the 3.0 queue should NOT fill.
+        sim2 = self.simulator()
+        self.apply(sim2, T0, [("100", "10")], [("101", "5")], snapshot=True)
+        self.apply(sim2, T0 + 5 * MS, [("100", "3")])
+        self.apply(sim2, T0 + 15 * MS, [("100", "2")])
+        sim2.on_trade(trade_event("BYBIT", 2, T0 + 20 * MS, "100", "2.9", "SELL"))
+        self.assertEqual(sim2.fills, [], "queue not cleared → no fill")
+
+    def test_queue_position_is_zero_when_level_disappears_before_arrival(self):
+        # Level 100 is cleared to 0 before our order arrives (level 99 keeps the book valid).
+        # queue_ahead must be 0: we land at the front, and any print at 100 fills us immediately.
+        sim = self.simulator()
+        self.apply(sim, T0, [("100", "7"), ("99", "3")], [("101", "5")], snapshot=True)
+        # Level 100 cleared; level 99 keeps the book valid so _sync_levels runs.
+        self.apply(sim, T0 + 5 * MS, [("100", "0")])
+        self.apply(sim, T0 + 15 * MS, [("100", "2")])   # comes back AFTER arrival — does not affect queue
+        bid = self.resting(sim, "BUY")[0]
+        self.assertEqual(bid.arrival_ts_ns, T0 + 10 * MS)
+        self.assertEqual(bid.queue_ahead_at_arrival, 0.0)   # front of queue
+        # Even a tiny print at 100 fills us.
+        sim.on_trade(trade_event("BYBIT", 1, T0 + 20 * MS, "100", "0.0005", "SELL"))
+        fill = sim.fills[0]
+        self.assertEqual(fill["cause"], "TRADE")
+        self.assertAlmostEqual(fill["quantity"], 0.0005)
+
     def test_strategy_inventory_changes_only_when_the_fill_report_arrives(self):
         sim = self.simulator()
         self.apply(sim, T0, [("100", "1")], [("101", "1")], snapshot=True)
