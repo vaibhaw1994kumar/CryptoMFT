@@ -326,3 +326,37 @@ After `f9e2e2a` removed the Windows import errors, the Windows test job ran the 
 - a Tardis vs own-capture comparison;
 - live REST reconciliation;
 - a cross-venue price-consistency monitor.
+
+## Phase 3b: live REST cross-check (2026-10-23)
+
+`src/crypto_stat_arb/rest_reconcile.py`, wired into `LiveOrderBookService`. It's off by default; turn it on with `--rest-reconcile-seconds N` (`LiveFeedSettings.rest_reconcile_seconds`).
+
+- **Sequence alignment.** A REST book carries a sequence on the feed's own counter:
+  - Binance: `lastUpdateId`, on the websocket `u` counter;
+  - Bybit: the cross-sequence `seq` (`data.seq`), because Bybit's REST `u` is a different counter.
+- **Comparing against the right book state.** By the time the response arrives, the feed has normally moved past that sequence (one request takes ~300 ms). So while a request is in flight, and only then, `BookHistory` keeps the top 100 levels (Bybit) or 200 (Binance) after every applied update. The snapshot is compared with the states just before and just after the update that crossed its sequence, and the closer match counts.
+- **Comparison method.** Price by price, inside the REST window.
+- **Outcomes:**
+  - `RECONCILE_OK`;
+  - `RECONCILE_DEEP_DIFF`: the best bid and ask agree, deeper levels differ. This is a warning only, because the venue's own REST and websocket can disagree there (seen on 2026-10-22);
+  - `RECONCILE_MISMATCH`: the best bid or ask disagrees on both sides. The book becomes `GAP_DETECTED` `rest_reconcile_touch_mismatch`, which forces a resync and blocks trading;
+  - `RECONCILE_SKIPPED`: the check can't be done, because the book resynced, the snapshot is older than the history, the history overflowed, or there's no sequence;
+  - fetch and parse failures are counted (`reconcile_fetch_errors`) and are not treated as book faults.
+- **Request size and evidence.** Snapshots are small (Binance `limit=100`, Bybit `limit=50`) and recorded raw as control frames for evidence.
+
+**Real-data check.** I replayed the 2026-10-22 Bybit capture through the live service, delivering the 4 real REST snapshots with realistic send/arrive timing (two timing assumptions). Result:
+
+- snapshots 1 and 3: OK;
+- snapshot 2: DEEP_DIFF (2 levels);
+- snapshot 4: DEEP_DIFF (20 levels, a busy straddling push);
+- 0 mismatches, 0 false resyncs, and the book stayed VALID with 0 gaps.
+
+This matches the offline analysis. A first design that compared against the *current* book skipped 3 of the 4 snapshots, which is why the history was added.
+
+**Tests:** `tests/test_rest_reconcile.py` (10), mutation check M12–M14.
+
+**Verification:**
+
+- **Full suite:** 605 passed.
+- **Spot regression:** identical (the check is off by default).
+- **`run_all_local`:** PASSED.

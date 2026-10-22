@@ -68,6 +68,7 @@ def _live_settings(args: argparse.Namespace) -> LiveFeedSettings:
         udp_depth=args.udp_depth,
         udp_max_datagram_bytes=args.udp_max_datagram_bytes,
         monitor_interval_seconds=args.monitor_interval_seconds,
+        rest_reconcile_seconds=args.rest_reconcile_seconds,
     )
 
 
@@ -165,6 +166,11 @@ def _add_live_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--binance-rest-base")
     parser.add_argument("--bybit-ws-url")
     parser.add_argument("--bybit-depth", type=int, default=50)
+    parser.add_argument(
+        "--rest-reconcile-seconds", type=float,
+        help="cross-check each valid book against a REST snapshot this often (off by default); "
+             "a best bid/ask disagreement forces a resync",
+    )
     parser.add_argument("--http-timeout-seconds", type=float, default=10.0)
     parser.add_argument("--initial-sync-timeout-seconds", type=float, default=15.0)
     parser.add_argument("--reconnect-min-seconds", type=float, default=1.0)

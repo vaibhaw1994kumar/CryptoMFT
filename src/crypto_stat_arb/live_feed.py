@@ -21,8 +21,9 @@ from .adapters import normalize_binance_depth, normalize_bybit_depth
 from .book_gate import BookIntegrityGate, CancelCallback, VenueControlCallback
 from .config import load_config
 from .canonical import validate_canonical_event
-from .models import BookState, MarketEvent, json_default
+from .models import BookState, EventType, MarketEvent, json_default
 from .time_integrity import TimeIntegrityMonitor
+from . import rest_reconcile
 from .market_data_output import (
     LtpOhlcBar,
     LtpOhlcCsvWriter,
@@ -114,6 +115,11 @@ class WireFrame:
 @dataclass(slots=True)
 class VenueLiveStats:
     book_syncs: int = 0                  # times the book became VALID
+    reconciles_ok: int = 0               # REST cross-checks: exact match
+    reconcile_deep_diffs: int = 0        # touch agrees, deeper levels differ
+    reconcile_mismatches: int = 0        # best bid/ask disagree: resync forced
+    reconcile_skipped: int = 0           # snapshot not comparable (book already past it, no seq)
+    reconcile_fetch_errors: int = 0
     feed_delayed_events: int = 0         # FEED_DELAYED (config time.max_feed_delay_ms)
     validation_errors: int = 0           # book events rejected by validate_canonical_event
     subscription_acks: int = 0
@@ -178,9 +184,14 @@ class LiveFeedSettings:
     udp_depth: int = 20
     udp_max_datagram_bytes: int = 60_000
     monitor_interval_seconds: float = 1.0
+    # Periodic REST cross-check of each VALID book (None: off). A best bid/ask
+    # disagreement forces a resync; deeper-level differences are reported.
+    rest_reconcile_seconds: float | None = None
     max_trade_deviation_bps: float = 500.0
 
     def validate(self) -> None:
+        if self.rest_reconcile_seconds is not None and self.rest_reconcile_seconds <= 0:
+            raise ValueError("rest_reconcile_seconds must be positive")
         if not self.venues:
             raise ValueError("at least one venue is required")
         if any(x not in ("BINANCE", "BYBIT") for x in self.venues):
@@ -712,6 +723,9 @@ class LiveOrderBookService:
         self.time_monitor = TimeIntegrityMonitor(self.config.time_policy, tuple(self.settings.venues))
         self._feed_delayed: dict[str, bool] = {}
         self._host_clock_state = ""
+        self._pending_rest: dict[str, rest_reconcile.RestBook] = {}
+        self._history: dict[str, rest_reconcile.BookHistory] = {}
+        self._book_cross_seq: dict[str, int | None] = {}
         self.stop_event = asyncio.Event()
         self.started_ts_ns: int | None = None
         self.stopped_ts_ns: int | None = None
@@ -865,6 +879,14 @@ class LiveOrderBookService:
             tasks.extend(
                 asyncio.create_task(
                     self._fail_closed(self._trade_forever(venue), venue), name=f"trades-{venue.lower()}"
+                )
+                for venue in self.settings.venues
+            )
+        if self.settings.rest_reconcile_seconds is not None:
+            tasks.extend(
+                asyncio.create_task(
+                    self._fail_closed(self._reconcile_forever(venue), venue),
+                    name=f"reconcile-{venue.lower()}",
                 )
                 for venue in self.settings.venues
             )
@@ -1479,6 +1501,151 @@ class LiveOrderBookService:
                 )
             self._host_clock_state = state
 
+    # -- REST cross-check ---------------------------------------------------------
+    def _reconcile_url(self, venue: str) -> str:
+        symbol = self.symbols[venue]
+        if venue == "BINANCE":
+            _, snapshot_url = self._binance_urls()
+            return snapshot_url.replace("&limit=1000", "&limit=100")
+        category = "linear" if self.settings.bybit_market == "linear" else "spot"
+        return f"https://api.bybit.com/v5/market/orderbook?category={category}&symbol={symbol}&limit=50"
+
+    async def _reconcile_forever(self, venue: str) -> None:
+        while not self.stop_event.is_set():
+            try:
+                await asyncio.wait_for(self.stop_event.wait(), timeout=self.settings.rest_reconcile_seconds)
+                return
+            except TimeoutError:
+                pass
+            book = self.books[venue]
+            if book.state != BookState.VALID or venue in self._pending_rest:
+                continue
+            url = self._reconcile_url(venue)
+            self._start_history(venue)
+            try:
+                original, receive_ts_ns = await self.http_getter(url, self.settings.http_timeout_seconds)
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                self._history.pop(venue, None)
+                self.stats[venue].reconcile_fetch_errors += 1
+                self._connector_log("RECONCILE_FETCH_FAILED", StructuredLogLevel.WARNING,
+                                    f"{type(exc).__name__}: {exc}", venue=venue)
+                continue
+            self.on_reconcile_snapshot(venue, url, original, receive_ts_ns)
+
+    def _start_history(self, venue: str) -> None:
+        """Keep the book's top levels after every update until the REST book arrives."""
+        book = self.books[venue]
+        history = rest_reconcile.BookHistory(depth=200 if venue == "BINANCE" else 100)
+        history.record(self._cross_seq_of_book(venue), book)
+        self._history[venue] = history
+
+    def _cross_seq_of_book(self, venue: str) -> int | None:
+        return self._book_cross_seq.get(venue)
+
+    def on_reconcile_snapshot(self, venue: str, url: str, original: str | bytes, receive_ts_ns: int) -> None:
+        """A fetched REST book: recorded raw, then compared when the feed reaches its sequence."""
+        captured = self._capture_and_parse(
+            venue, url, "rest-reconcile", "HTTPS", original, receive_ts_ns,
+            "binance-rest-depth-v1" if venue == "BINANCE" else "bybit-rest-orderbook-v1",
+        )
+        if captured is None:
+            self.stats[venue].reconcile_fetch_errors += 1
+            return
+        wire, raw, payload = captured
+        self.recorder.record_control(wire, raw)
+        try:
+            rest = rest_reconcile.parse_rest_book(venue, payload, receive_ts_ns, raw.raw_ref)
+        except (KeyError, TypeError, ValueError, ArithmeticError) as exc:
+            self.stats[venue].reconcile_fetch_errors += 1
+            self._connector_log("RECONCILE_FETCH_FAILED", StructuredLogLevel.WARNING,
+                                f"unusable REST book: {exc}", venue=venue, raw_ref=raw.raw_ref)
+            return
+        history = self._history.get(venue)
+        if history is None:
+            history = rest_reconcile.BookHistory(depth=200 if venue == "BINANCE" else 100)
+            history.record(self._cross_seq_of_book(venue), self.books[venue])
+        before, after = history.around(rest.cross_sequence)
+        if history.overflowed:
+            self._history.pop(venue, None)
+            self._reconcile_skip(venue, rest, "history_overflow")
+        elif before is None:
+            self._history.pop(venue, None)
+            self._reconcile_skip(venue, rest, "snapshot_older_than_history" if history.states else "no_cross_sequence")
+        elif after is not None:                       # the feed already crossed it: compare now
+            self._history.pop(venue, None)
+            self._finish_reconcile(venue, rest, before, after)
+        else:                                         # feed not there yet: finish on the crossing delta
+            self._history[venue] = history
+            self._pending_rest[venue] = rest
+
+    def _reconcile_skip(self, venue: str, rest: rest_reconcile.RestBook, reason: str) -> None:
+        self.stats[venue].reconcile_skipped += 1
+        self._connector_log("RECONCILE_SKIPPED", StructuredLogLevel.INFO, reason, venue=venue,
+                            raw_ref=rest.raw_ref, payload={"rest_cross_sequence": rest.cross_sequence,
+                                                           "book_cross_sequence": self._cross_seq_of_book(venue)})
+
+    def _reconcile_before(self, event: MarketEvent, book: OrderBook) -> None:
+        if event.event_type == EventType.BOOK_SNAPSHOT or book.state != BookState.VALID:
+            # A snapshot or resync breaks continuity with any recorded history.
+            if event.venue in self._history or event.venue in self._pending_rest:
+                self._history.pop(event.venue, None)
+                rest = self._pending_rest.pop(event.venue, None)
+                if rest is not None:
+                    self._reconcile_skip(event.venue, rest, "book_resynchronised")
+
+    def _reconcile_after(self, event: MarketEvent, book: OrderBook, state: BookState) -> BookState:
+        venue = event.venue
+        if book.last_event_id == event.event_id:
+            self._book_cross_seq[venue] = rest_reconcile.cross_sequence(event)
+        history = self._history.get(venue)
+        if history is None or state != BookState.VALID or book.last_event_id != event.event_id:
+            return state
+        history.record(self._book_cross_seq.get(venue), book)
+        rest = self._pending_rest.get(venue)
+        if rest is None:
+            return state
+        before, after = history.around(rest.cross_sequence)
+        if after is None and not history.overflowed:
+            return state
+        self._pending_rest.pop(venue)
+        self._history.pop(venue)
+        if history.overflowed or before is None:
+            self._reconcile_skip(venue, rest, "history_overflow" if history.overflowed else "no_cross_sequence")
+            return state
+        return self._finish_reconcile(venue, rest, before, after) or state
+
+    def _finish_reconcile(self, venue, rest, before, after) -> BookState | None:
+        result = rest_reconcile.reconcile(
+            rest, rest_reconcile.compare(before[1], before[2], rest),
+            rest_reconcile.compare(after[1], after[2], rest))
+        stats = self.stats[venue]
+        closer = result.before if result.before.differences <= result.after.differences else result.after
+        payload = {"rest_cross_sequence": rest.cross_sequence, "before_sequence": before[0],
+                   "after_sequence": after[0], "differences": result.differences,
+                   "levels_compared": closer.levels_compared,
+                   "differing_prices": [str(p) for p in closer.differing_prices[:10]]}
+        if result.status == "OK":
+            stats.reconciles_ok += 1
+            self._connector_log("RECONCILE_OK", StructuredLogLevel.INFO, "REST book matches the live book",
+                                venue=venue, raw_ref=rest.raw_ref, payload=payload)
+            return None
+        if result.status == "DEEP_DIFF":
+            stats.reconcile_deep_diffs += 1
+            self._connector_log("RECONCILE_DEEP_DIFF", StructuredLogLevel.WARNING,
+                                f"{result.differences} level(s) differ below the touch",
+                                venue=venue, raw_ref=rest.raw_ref, payload=payload)
+            return None
+        stats.reconcile_mismatches += 1
+        self._connector_log("RECONCILE_MISMATCH", StructuredLogLevel.ERROR,
+                            "best bid/ask disagree with the REST book: resync",
+                            venue=venue, raw_ref=rest.raw_ref, payload=payload)
+        book = self.books[venue]
+        book.state = BookState.GAP_DETECTED
+        book.invalid_reason = "rest_reconcile_touch_mismatch"
+        return book.state
+
     def _book_ages(self) -> dict[str, int | None]:
         now = self.monotonic_ns()
         return {venue: (None if last is None else now - last)
@@ -1515,12 +1682,18 @@ class LiveOrderBookService:
 
     def _begin_connection(self, venue: str) -> None:
         self._last_book_mono_ns[venue] = None
+        self._pending_rest.pop(venue, None)
+        self._history.pop(venue, None)
+        self._book_cross_seq[venue] = None
         self.books[venue].start_resync("connection_snapshot_required")
         self.book_gate.allow(tuple(self.books.values()), self.clock_ns(), self._book_ages())
         self._publish_book(self.books[venue], None)
 
     def _invalidate_connection(self, venue: str) -> None:
         self._last_book_mono_ns[venue] = None
+        self._pending_rest.pop(venue, None)
+        self._history.pop(venue, None)
+        self._book_cross_seq[venue] = None
         self.books[venue].start_resync("connection_lost")
         self.book_gate.allow(tuple(self.books.values()), self.clock_ns(), self._book_ages())
         self._publish_book(self.books[venue], None)
@@ -1819,7 +1992,9 @@ class LiveOrderBookService:
         pending_events = {
             pending.event_id: pending for pending in book.pending_deltas.values()
         }
+        self._reconcile_before(event, book)
         state = book.apply(event)
+        state = self._reconcile_after(event, book, state)
         if state == BookState.VALID and previous_state != BookState.VALID:
             self.stats[event.venue].book_syncs += 1
         accepted = book.last_event_id is not None and book.last_event_id != previous_event_id
