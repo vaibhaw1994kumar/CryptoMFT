@@ -276,3 +276,15 @@ PARTIAL. `live_manifest.json` and `live_part_manifest.json` hold file hashes, co
 - **Spot regression:** identical to baseline.
 - **Bybit capture replay:** byte-identical events, book hashes and quality counts.
 - **`run_all_local`:** PASSED.
+
+## Phase 2c: CI on Windows (2026-10-22)
+
+After `f9e2e2a` removed the Windows import errors, the Windows test job ran the suite for the first time. Before that, collection errors had stopped pytest before any test ran. It showed **40 failures with the same cause**: `PermissionError [WinError 32] … structured_logs.sqlite`.
+
+- **Root cause:** `StructuredLogStore` used `with sqlite3.connect(...) as connection:`. In Python that commits or rolls back but **does not close** the connection.
+  - On macOS, `lsof` shows `structured_logs.sqlite` still open after `run_backtest` returns.
+  - Windows can't delete an open file, so every test that cleaned up a run directory failed.
+- **Fix:** `structured_logging._connect()` commits or rolls back, then always closes. It's used at all 5 sites.
+  - Afterwards, `lsof` shows 0 run files open.
+  - There's no performance cost: a 69,799-event replay took 45.5 s before and 45.1 s after, with identical log rows.
+- **Regression test:** `tests/test_sqlite_handles.py` tracks every connection the store opens during a backtest and asserts it is closed. It fails on the old code on every OS, not only Windows.

@@ -1,15 +1,28 @@
 from __future__ import annotations
 
+from contextlib import contextmanager
 from dataclasses import asdict, dataclass, field
 from enum import StrEnum
 import json
 import os
 from pathlib import Path
 import sqlite3
-from typing import Any, Iterable
+from typing import Any, Iterable, Iterator
 
 from .models import MarketEvent, ParentPlan, json_default, stable_id
 
+
+
+@contextmanager
+def _connect(path: Path) -> Iterator[sqlite3.Connection]:
+    """Commit (or roll back) and *close*: ``with sqlite3.connect(...)`` alone leaves the
+    connection open, which keeps the file locked on Windows."""
+    connection = sqlite3.connect(path)
+    try:
+        with connection:
+            yield connection
+    finally:
+        connection.close()
 
 class StructuredLogLevel(StrEnum):
     DEBUG = "DEBUG"
@@ -70,7 +83,7 @@ class StructuredLogStore:
         self._initialize()
 
     def _initialize(self) -> None:
-        with sqlite3.connect(self.database_path) as connection:
+        with _connect(self.database_path) as connection:
             connection.execute("""
                 CREATE TABLE IF NOT EXISTS structured_logs (
                     log_id TEXT PRIMARY KEY,
@@ -122,7 +135,7 @@ class StructuredLogStore:
         serialized = json.dumps(
             row, default=json_default, sort_keys=True, separators=(",", ":")
         )
-        with sqlite3.connect(self.database_path) as connection:
+        with _connect(self.database_path) as connection:
             inserted = connection.execute(
                 f"INSERT OR IGNORE INTO structured_logs ({','.join(self._COLUMNS)}) "
                 f"VALUES ({','.join('?' for _ in self._COLUMNS)})",
@@ -142,7 +155,7 @@ class StructuredLogStore:
                 enumerate(records), key=lambda pair: (pair[1].ts_ns, pair[0])
             )
         ]
-        with sqlite3.connect(self.database_path) as connection:
+        with _connect(self.database_path) as connection:
             connection.execute("DELETE FROM structured_logs")
             connection.executemany(
                 f"INSERT INTO structured_logs ({','.join(self._COLUMNS)}) "
@@ -160,7 +173,7 @@ class StructuredLogStore:
         return self.stats()
 
     def stats(self) -> dict[str, Any]:
-        with sqlite3.connect(self.database_path) as connection:
+        with _connect(self.database_path) as connection:
             connection.row_factory = sqlite3.Row
             total = connection.execute("SELECT COUNT(*) AS count FROM structured_logs").fetchone()[0]
             levels = {
@@ -223,7 +236,7 @@ class StructuredLogStore:
             clauses.append("(message LIKE ? OR payload LIKE ?)")
             values.extend([f"%{text}%", f"%{text}%"])
         where = f" WHERE {' AND '.join(clauses)}" if clauses else ""
-        with sqlite3.connect(self.database_path) as connection:
+        with _connect(self.database_path) as connection:
             connection.row_factory = sqlite3.Row
             rows = connection.execute(
                 f"SELECT * FROM structured_logs{where} ORDER BY ts_ns, rowid LIMIT ?",
