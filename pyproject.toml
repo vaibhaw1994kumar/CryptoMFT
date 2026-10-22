@@ -58,8 +58,10 @@ hft-platform-kit = "hft_platform_kit.cli:main"
 crypto-stat-arb = "crypto_stat_arb.cli:main"
 
 [project.optional-dependencies]
-# new_backtest.fetch_tardis downloads Tardis data over HTTP
-backtest = ["requests>=2.31"]
+# new_backtest.fetch_tardis downloads Tardis data over HTTP; the fill models
+# (fill_label / fill_model_v1, also under crypto_stat_arb.advanced_backtest) fit a
+# scikit-learn LogisticRegression
+backtest = ["requests>=2.31", "scikit-learn>=1.5"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
@@ -144,6 +146,8 @@ dev = [
     "pytest>=9.1.1",
     "pytest-asyncio>=1.4.0",
     "scikit-build-core>=1.0.3",
+    # tests/test_fill_label_and_calibration.py exercises the fill models
+    "scikit-learn>=1.5",
 ]
 
 [tool.cibuildwheel]
