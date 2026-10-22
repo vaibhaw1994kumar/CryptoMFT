@@ -180,6 +180,15 @@ class MakerConfig:
     snapshot_fill_share: float = 0.05
     queue_stress_multiplier: float = 1.0    # >1 assumes more size ahead of us
     fill_horizons_s: tuple[int, ...] = (1, 5, 15)
+    # Minimum queue depth assumed at placement when _level_size() returns zero
+    # (absent price level in the book).  Zero means "no orders ahead" — fills
+    # on the first touching trade, which is optimistic for liquid instruments.
+    # Units: base-asset quantity, same scale as order size and level sizes.
+    # Calibrate from observed time-to-first-fill distributions by venue/pair.
+    # Interaction with queue_stress_multiplier: the effective queue at placement
+    # is max(level_size * queue_stress_multiplier, min_queue_ahead).  It is a
+    # floor for absent levels only, not a blanket override of the multiplier.
+    min_queue_ahead: float = 0.0
 
 
 class MakerExecutor:
@@ -225,6 +234,12 @@ class MakerExecutor:
             rel_ticks = max(-3, min(3, rel_ticks))
 
         initial_q = level_size * max(0.0, self.config.queue_stress_multiplier)
+        # Apply min_queue_ahead as a floor only when the price level is absent
+        # from the book (level_size == 0).  On a genuine empty level, queue = 0
+        # is correct for FIFO.  When the level is absent due to data granularity
+        # or a stale book, min_queue_ahead provides a conservative proxy depth.
+        if level_size == 0.0 and self.config.min_queue_ahead > 0.0:
+            initial_q = self.config.min_queue_ahead
         order = MakerOrder(
             order_id=next(self._ids), venue=venue, pair=pair, symbol=symbol,
             side=side, price=price, size=size, remaining=size,
@@ -306,7 +321,11 @@ class MakerExecutor:
                 f = self._consume(order, prev - new_size, now, self.config.delta_fill_share, "delta", fee_bps)
                 if f is not None:
                     fills.append(f)
-            order.observed_level_size = new_size
+            # Never increase observed_level_size: orders that join the level
+            # after our placement arrive behind us in the FIFO queue.  Allowing
+            # the tracked size to grow upward would incorrectly trigger fills
+            # when those behind-us orders later cancel or trade.
+            order.observed_level_size = min(order.observed_level_size, new_size)
         return fills
 
     def on_snapshot(
@@ -323,7 +342,8 @@ class MakerExecutor:
                                   self.config.snapshot_fill_share, "snapshot", fee_bps)
                 if f is not None:
                     fills.append(f)
-            order.observed_level_size = curr
+            # Same invariant as on_delta: never increase observed_level_size.
+            order.observed_level_size = min(order.observed_level_size, curr)
         return fills
 
     def mark_adverse(self, venue: str, book: OrderBook, now: float, tick_size: float) -> None:
