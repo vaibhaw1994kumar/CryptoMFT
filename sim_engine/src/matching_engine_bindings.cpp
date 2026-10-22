@@ -86,7 +86,6 @@ PYBIND11_MODULE(mm_matching_engine, m) {
         .def_readonly("remaining_size",         &OrderEntry::remaining_size)
         .def_readonly("queue_ahead",            &OrderEntry::queue_ahead)
         .def_readonly("queue_ahead_remaining",  &OrderEntry::queue_ahead_remaining)
-        .def_readonly("clamp_credit",           &OrderEntry::clamp_credit)
         .def_readonly("queue_satisfied",        &OrderEntry::queue_satisfied)
         .def_readonly("active",                 &OrderEntry::active)
         .def("fill_ratio", [](const OrderEntry& e) {
@@ -157,10 +156,6 @@ PYBIND11_MODULE(mm_matching_engine, m) {
              "Top N ask levels as LevelSnapshot list.")
         .def("fee_engine", &MatchingEngine::fee_engine,
              py::return_value_policy::reference_internal)
-        .def("set_queue_position_frac", &MatchingEngine::set_queue_position_frac,
-             py::arg("frac"),
-             "Fraction of the visible level assumed ahead of a new order (0..1).")
-        .def("queue_position_frac", &MatchingEngine::queue_position_frac)
         .def("reset_all", &MatchingEngine::reset_all,
              "Clear all book data, orders, and fee accumulators.");
 }
