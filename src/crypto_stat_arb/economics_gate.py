@@ -29,7 +29,7 @@ from pathlib import Path
 from typing import Any, Mapping
 
 REASONS = ("MISSING_PRICE", "FEE_ASSET_UNPRICED", "FEE_RULE_FALLBACK", "FUNDING_DATA", "BORROW_DATA",
-           "TRANSFER_DATA")
+           "TRANSFER_DATA", "DATA_QUALITY")
 
 
 def _read(path: Path) -> Any:
@@ -104,6 +104,18 @@ def economics_gate(run_dir: Path, *, allow_incomplete: Mapping[str, str] | None 
                 result["allowed_incomplete"][reason] = {"justification": allow[reason], "items": items}
             else:
                 result["failures"].append(f"INCOMPLETE {reason}: {'; '.join(items)[:500] or 'see report'}")
+    # Economics computed on a dataset the data-quality gate REJECTED are not usable
+    # unless a written justification exists (backtest --allow-rejected-data, or here).
+    quality = _read(run_dir / "data_quality_report.json")
+    result["data_quality"] = None if quality is None else quality.get("decision")
+    if quality is not None and quality.get("decision") == "REJECTED":
+        codes = [flag.get("code", "") for flag in quality.get("active_flags", [])]
+        override = _read(run_dir / "data_quality_override.json")
+        why = allow.get("DATA_QUALITY") or (override or {}).get("justification")
+        if why:
+            result["allowed_incomplete"]["DATA_QUALITY"] = {"justification": why, "items": codes}
+        else:
+            result["failures"].append("DATA_QUALITY REJECTED: " + (", ".join(codes) or "see data_quality_report.json"))
     if borrow is not None and borrow.get("status") == "FAIL":
         result["failures"].append("borrow FAIL: " + "; ".join(
             f"{f['code']}@{f['ts_ns']}" for f in borrow.get("flags", []))[:500])

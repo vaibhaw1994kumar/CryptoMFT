@@ -5,6 +5,7 @@ from decimal import Decimal
 import asyncio
 from collections.abc import Awaitable, Callable
 from contextlib import AbstractAsyncContextManager, suppress
+from functools import wraps
 from dataclasses import asdict, dataclass, replace
 from datetime import datetime, timezone
 from hashlib import sha256
@@ -64,6 +65,35 @@ class ResyncRequired(RuntimeError):
     """The connection must restart so a clean snapshot can be acquired."""
 
 
+class PersistenceFailure(RuntimeError):
+    """Recording failed (disk full, I/O error): stop fail-closed, never reconnect into it.
+
+    Distinct from network errors on purpose: ``ConnectionError`` and
+    ``TimeoutError`` are ``OSError`` subclasses, so only the recorder's own
+    writes (and the structured log) are translated into this exception.
+    """
+
+
+class SubscriptionRejected(RuntimeError):
+    """The venue refused a subscription (unknown symbol or topic): not a transient drop."""
+
+
+def _persisting(method):
+    """Translate a recorder write's ``OSError`` into ``PersistenceFailure``; stay failed after."""
+
+    @wraps(method)
+    def wrapper(self, *args, **kwargs):
+        if self.persistence_error:
+            raise PersistenceFailure(f"recorder unusable after an earlier failure: {self.persistence_error}")
+        try:
+            return method(self, *args, **kwargs)
+        except OSError as exc:
+            self.persistence_error = f"{method.__name__}: {type(exc).__name__}: {exc}"
+            raise PersistenceFailure(self.persistence_error) from exc
+
+    return wrapper
+
+
 @dataclass(frozen=True, slots=True)
 class WireFrame:
     wire_ref: str
@@ -82,6 +112,8 @@ class WireFrame:
 
 @dataclass(slots=True)
 class VenueLiveStats:
+    subscription_acks: int = 0
+    subscription_rejections: int = 0
     derivative_connections: int = 0
     derivative_ticks: int = 0
     derivative_errors: int = 0
@@ -239,6 +271,7 @@ class RotatingLiveRecorder:
         self._quarantine_handle: Any = None
         self._part_dir: Path | None = None
         self._closed = False
+        self.persistence_error = ""
 
     @staticmethod
     def _canonical_json(value: Any) -> str:
@@ -301,6 +334,7 @@ class RotatingLiveRecorder:
             self._close_part()
             self._open_part(now_ns)
 
+    @_persisting
     def capture_wire(
         self,
         *,
@@ -350,6 +384,7 @@ class RotatingLiveRecorder:
         self.wire_count += 1
         return wire
 
+    @_persisting
     def append_payload(
         self,
         wire: WireFrame,
@@ -379,6 +414,7 @@ class RotatingLiveRecorder:
             wire_ref=wire.wire_ref,
         )
 
+    @_persisting
     def record_event(
         self, wire: WireFrame, raw: RawFrame, event: MarketEvent, arrival_ordinal: int = 0
     ) -> None:
@@ -406,6 +442,7 @@ class RotatingLiveRecorder:
         )
         self.canonical_count += 1
 
+    @_persisting
     def record_trade(self, wire: WireFrame, raw: RawFrame, tick: TradeTick) -> None:
         self._trade_handle.write(self._canonical_json(tick.to_dict()) + "\n")
         self._trace_handle.write(self._canonical_json({
@@ -428,6 +465,7 @@ class RotatingLiveRecorder:
         )
         self.trade_count += 1
 
+    @_persisting
     def record_derivative(self, wire: WireFrame, raw: RawFrame, ticker: Any) -> None:
         """Mark/index/funding ticker; ``derivatives.jsonl`` exists only in parts that have one."""
         if self._derivative_handle is None:
@@ -448,6 +486,7 @@ class RotatingLiveRecorder:
         )
         self.derivative_count += 1
 
+    @_persisting
     def record_control(self, wire: WireFrame, raw: RawFrame) -> None:
         self._trace_handle.write(self._canonical_json({
             "wire_ref": wire.wire_ref,
@@ -460,6 +499,7 @@ class RotatingLiveRecorder:
         self._flush(self._trace_handle)
         self.control_count += 1
 
+    @_persisting
     def record_rejection(
         self,
         wire: WireFrame,
@@ -650,6 +690,7 @@ class LiveOrderBookService:
         self.started_ts_ns: int | None = None
         self.stopped_ts_ns: int | None = None
         self.events_seen = 0
+        self.persistence_failure = ""
         # One processing order across book and trade streams (both run on this
         # event loop), so replay can reproduce the live interleaving exactly.
         self.arrival_ordinal = 0
@@ -713,13 +754,46 @@ class LiveOrderBookService:
         source_event_id: str = "", raw_ref: str = "",
         payload: dict[str, Any] | None = None,
     ) -> None:
-        self.structured_logs.append(StructuredLogStore.connector_record(
-            session_id=self.recorder.session_id,
-            ts_ns=(self.clock_ns() if ts_ns is None else ts_ns),
-            event_type=event_type, level=level, message=message,
-            venue=venue, host=host, instrument_id=self.config.instrument_id,
-            source_event_id=source_event_id, raw_ref=raw_ref, payload=payload,
-        ))
+        try:
+            self.structured_logs.append(StructuredLogStore.connector_record(
+                session_id=self.recorder.session_id,
+                ts_ns=(self.clock_ns() if ts_ns is None else ts_ns),
+                event_type=event_type, level=level, message=message,
+                venue=venue, host=host, instrument_id=self.config.instrument_id,
+                source_event_id=source_event_id, raw_ref=raw_ref, payload=payload,
+            ))
+        except OSError as exc:
+            raise PersistenceFailure(f"structured log: {type(exc).__name__}: {exc}") from exc
+
+    def _fail_closed_on_persistence(self, venue: str, exc: BaseException) -> None:
+        """Recording is broken: invalidate every book (gate suspends, cancels) and stop."""
+        if not self.persistence_failure:
+            self.persistence_failure = str(exc)
+            LOGGER.critical("recording failed, stopping fail-closed: %s", exc)
+            for book in self.books.values():
+                book.start_resync("persistence_failure")
+            self.book_gate.allow(tuple(self.books.values()), self.clock_ns())
+            for book in self.books.values():
+                self._publish_book(book, None)
+            with suppress(PersistenceFailure):
+                self._connector_log("PERSISTENCE_FAILURE", StructuredLogLevel.ERROR,
+                                    self.persistence_failure, venue=venue)
+        self.request_stop()
+
+    async def _fail_closed(self, task: Awaitable[None], venue: str = "", *, io_errors: bool = False) -> None:
+        """Run a feed task; a recording failure anywhere in it stops the session.
+
+        ``io_errors`` also treats a bare ``OSError`` as a recording failure, for
+        tasks that only write files (no network), such as the OHLC and monitoring clocks.
+        """
+        try:
+            await task
+        except PersistenceFailure as exc:
+            self._fail_closed_on_persistence(venue, exc)
+        except OSError as exc:
+            if not io_errors:
+                raise
+            self._fail_closed_on_persistence(venue, exc)
 
     def _binance_urls(self) -> tuple[str, str]:
         if self.settings.binance_market == "linear":
@@ -756,26 +830,31 @@ class LiveOrderBookService:
             payload={"venues": list(self.settings.venues)},
         )
         tasks = [
-            asyncio.create_task(self._venue_forever(venue), name=f"live-{venue.lower()}")
+            asyncio.create_task(
+                self._fail_closed(self._venue_forever(venue), venue), name=f"live-{venue.lower()}"
+            )
             for venue in self.settings.venues
         ]
         if self.settings.trade_streams_enabled:
             tasks.extend(
                 asyncio.create_task(
-                    self._trade_forever(venue), name=f"trades-{venue.lower()}"
+                    self._fail_closed(self._trade_forever(venue), venue), name=f"trades-{venue.lower()}"
                 )
                 for venue in self.settings.venues
             )
         if self.settings.derivative_streams_enabled:
             tasks.extend(
                 asyncio.create_task(
-                    self._derivative_forever(venue), name=f"derivatives-{venue.lower()}"
+                    self._fail_closed(self._derivative_forever(venue), venue),
+                    name=f"derivatives-{venue.lower()}",
                 )
                 for venue in self.settings.venues
             )
-        tasks.append(asyncio.create_task(self._ohlc_clock(), name="ohlc-clock"))
         tasks.append(asyncio.create_task(
-            self._monitoring_clock(), name="pipeline-monitor"
+            self._fail_closed(self._ohlc_clock(), io_errors=True), name="ohlc-clock"
+        ))
+        tasks.append(asyncio.create_task(
+            self._fail_closed(self._monitoring_clock(), io_errors=True), name="pipeline-monitor"
         ))
         timer: asyncio.Task[None] | None = None
         if self.settings.max_runtime_seconds is not None:
@@ -815,20 +894,30 @@ class LiveOrderBookService:
                 with suppress(asyncio.CancelledError):
                     await timer
             self.stopped_ts_ns = self.clock_ns()
-            self._connector_log(
-                "SESSION_STOPPED", StructuredLogLevel.INFO,
-                "live market-data session stopped", ts_ns=self.stopped_ts_ns,
-            )
-            for bar in self.ohlc_resampler.flush_partial():
-                self._emit_ohlc(bar)
-            for bar in self.ltp_resampler.flush_partial():
-                self._emit_ltp_ohlc(bar)
-            self.ohlc_artifact = self.ohlc_writer.close()
-            self.ltp_artifact = self.ltp_writer.close()
-            if self.publisher is not None:
-                self.publisher.close()
-            self._write_monitoring(self.stopped_ts_ns or self.clock_ns(), final=True)
-        return self.recorder.close(self._service_summary())
+            try:
+                self._connector_log(
+                    "SESSION_STOPPED", StructuredLogLevel.INFO,
+                    "live market-data session stopped", ts_ns=self.stopped_ts_ns,
+                )
+                for bar in self.ohlc_resampler.flush_partial():
+                    self._emit_ohlc(bar)
+                for bar in self.ltp_resampler.flush_partial():
+                    self._emit_ltp_ohlc(bar)
+                self.ohlc_artifact = self.ohlc_writer.close()
+                self.ltp_artifact = self.ltp_writer.close()
+                if self.publisher is not None:
+                    self.publisher.close()
+                self._write_monitoring(self.stopped_ts_ns or self.clock_ns(), final=True)
+            except (OSError, PersistenceFailure) as exc:
+                self._fail_closed_on_persistence("", exc)
+        try:
+            return self.recorder.close(self._service_summary())
+        except (OSError, PersistenceFailure) as exc:
+            self._fail_closed_on_persistence("", exc)
+            # The manifest could not be written: return what is known, unsealed.
+            return {"session_id": self.recorder.session_id, "manifest_path": None,
+                    "persistence_failure": self.persistence_failure,
+                    "service": self._service_summary()}
 
     async def _stop_after(self, seconds: float) -> None:
         """Stop the session at ``seconds`` past start.
@@ -986,6 +1075,7 @@ class LiveOrderBookService:
         backoff = self.settings.reconnect_min_seconds
         while not self.stop_event.is_set():
             connections_before = stats.connections
+            rejected = False
             stats.connection_attempts += 1
             self._connector_log(
                 "CONNECTION_ATTEMPT", StructuredLogLevel.INFO,
@@ -1001,6 +1091,14 @@ class LiveOrderBookService:
                     raise ConnectionError("public feed connection closed")
             except asyncio.CancelledError:
                 raise
+            except PersistenceFailure:
+                raise
+            except SubscriptionRejected as exc:
+                rejected = True
+                stats.last_error = str(exc)
+                LOGGER.error("%s", exc)
+                self._connector_log("SUBSCRIPTION_REJECTED", StructuredLogLevel.ERROR,
+                                    str(exc), venue=venue)
             except ResyncRequired as exc:
                 stats.resyncs += 1
                 stats.last_error = str(exc)
@@ -1022,13 +1120,14 @@ class LiveOrderBookService:
             if self.stop_event.is_set():
                 break
             stats.reconnects += 1
+            # A connection that was refused its subscription is not progress.
+            if stats.connections > connections_before and not rejected:
+                backoff = self.settings.reconnect_min_seconds
             self._connector_log(
                 "RECONNECT_SCHEDULED", StructuredLogLevel.WARNING,
                 "order-book reconnect scheduled", venue=venue,
                 payload={"backoff_seconds": backoff},
             )
-            if stats.connections > connections_before:
-                backoff = self.settings.reconnect_min_seconds
             try:
                 await asyncio.wait_for(self.stop_event.wait(), timeout=backoff)
             except TimeoutError:
@@ -1040,6 +1139,7 @@ class LiveOrderBookService:
         backoff = self.settings.reconnect_min_seconds
         while not self.stop_event.is_set():
             connections_before = stats.trade_connections
+            rejected = False
             stats.trade_connection_attempts += 1
             self._connector_log(
                 "TRADE_CONNECTION_ATTEMPT", StructuredLogLevel.INFO,
@@ -1055,6 +1155,14 @@ class LiveOrderBookService:
                     raise ConnectionError("public trade feed connection closed")
             except asyncio.CancelledError:
                 raise
+            except PersistenceFailure:
+                raise
+            except SubscriptionRejected as exc:
+                rejected = True
+                stats.last_error = str(exc)
+                LOGGER.error("%s", exc)
+                self._connector_log("SUBSCRIPTION_REJECTED", StructuredLogLevel.ERROR,
+                                    str(exc), venue=venue, payload={"stream": "trades"})
             except TimeoutError:
                 stats.trade_stale_disconnects += 1
                 stats.last_error = "public trade feed stale"
@@ -1073,7 +1181,7 @@ class LiveOrderBookService:
             if self.stop_event.is_set():
                 break
             stats.trade_reconnects += 1
-            if stats.trade_connections > connections_before:
+            if stats.trade_connections > connections_before and not rejected:
                 backoff = self.settings.reconnect_min_seconds
             try:
                 await asyncio.wait_for(self.stop_event.wait(), timeout=backoff)
@@ -1093,6 +1201,7 @@ class LiveOrderBookService:
         stats = self.stats[venue]
         backoff = self.settings.reconnect_min_seconds
         while not self.stop_event.is_set():
+            backoff_before = backoff
             try:
                 if venue == "BINANCE":
                     url = self._binance_mark_price_url()
@@ -1123,6 +1232,14 @@ class LiveOrderBookService:
                     raise ConnectionError("derivatives feed connection closed")
             except asyncio.CancelledError:
                 raise
+            except PersistenceFailure:
+                raise
+            except SubscriptionRejected as exc:
+                backoff = backoff_before
+                stats.last_error = str(exc)
+                LOGGER.error("%s", exc)
+                self._connector_log("SUBSCRIPTION_REJECTED", StructuredLogLevel.ERROR,
+                                    str(exc), venue=venue, payload={"stream": "derivatives"})
             except Exception as exc:
                 stats.last_error = f"{type(exc).__name__}: {exc}"
                 self._connector_log("DERIVATIVE_CONNECTOR_ERROR", StructuredLogLevel.ERROR,
@@ -1154,6 +1271,7 @@ class LiveOrderBookService:
         if not is_ticker:
             self.stats[venue].control_frames += 1
             self.recorder.record_control(wire, raw)
+            self._check_subscription_reply(venue, payload)
             return 0
         try:
             if venue == "BINANCE":
@@ -1428,6 +1546,7 @@ class LiveOrderBookService:
         if not is_trade:
             self.stats[venue].control_frames += 1
             self.recorder.record_control(wire, raw)
+            self._check_subscription_reply(venue, payload)
             return 0
         try:
             if venue == "BINANCE":
@@ -1520,6 +1639,7 @@ class LiveOrderBookService:
         if not self._is_book_payload(venue, payload):
             self.stats[venue].control_frames += 1
             self.recorder.record_control(wire, raw)
+            self._check_subscription_reply(venue, payload)
             return None
         try:
             event = self._normalize(venue, payload, receive_ts_ns, raw.raw_ref)
@@ -1563,6 +1683,19 @@ class LiveOrderBookService:
             )
             return None
         return self._apply_and_record(wire, raw, event)
+
+    def _check_subscription_reply(self, venue: str, payload: dict[str, Any]) -> None:
+        """Bybit answers ``subscribe`` with ``success``; a refusal must not look like silence."""
+        if venue != "BYBIT" or payload.get("op") != "subscribe":
+            return
+        if payload.get("success") is True:
+            self.stats[venue].subscription_acks += 1
+            return
+        self.stats[venue].subscription_rejections += 1
+        raise SubscriptionRejected(
+            f"BYBIT subscription rejected: {payload.get('ret_msg') or 'no ret_msg'} "
+            f"(req_id={payload.get('req_id', '')!r})"
+        )
 
     @staticmethod
     def _is_book_payload(venue: str, payload: dict[str, Any]) -> bool:
@@ -1669,6 +1802,7 @@ class LiveOrderBookService:
             "symbols": self.symbols,
             "max_book_age_ns": self.config.max_book_age_ns,
             "events_seen": self.events_seen,
+            "persistence_failure": self.persistence_failure or None,
             "pipeline_monitoring": {
                 "report": "pipeline_monitoring.json",
                 "prometheus_metrics": "pipeline_metrics.prom",

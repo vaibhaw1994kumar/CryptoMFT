@@ -33,6 +33,29 @@ def load_events(path: Path) -> list[MarketEvent]:
         return [MarketEvent.from_dict(json.loads(line)) for line in handle if line.strip()]
 
 
+def enforce_data_quality(summary: dict, run_dir: Path, justification: str | None) -> str:
+    """The data-quality decision for a finished replay; "" when its results may be used.
+
+    A REJECTED dataset still writes every artifact (evidence for the defects), but
+    its results are not usable unless someone records a written justification,
+    which is written to ``data_quality_override.json`` and added to ``summary``.
+    """
+    approval = summary.get("data_quality_approval", {})
+    if approval.get("decision") != "REJECTED":
+        return ""
+    flags = approval.get("active_flag_codes", [])
+    if justification is None or not justification.strip():
+        return (f"data-quality gate REJECTED the dataset ({', '.join(flags) or 'see report'}); "
+                f"results in {run_dir} are evidence only. Re-run with "
+                f"--allow-rejected-data JUSTIFICATION to use them anyway.")
+    override = {"decision": "REJECTED", "active_flag_codes": flags,
+                "justification": justification.strip(), "recorded_at": utc_now_iso()}
+    (Path(run_dir) / "data_quality_override.json").write_text(
+        json.dumps(override, indent=2, sort_keys=True), encoding="utf-8")
+    summary["data_quality_override"] = override
+    return ""
+
+
 def load_derivatives(path: Path) -> list:
     """A recorded ``derivatives.jsonl`` (or several, concatenated), in receive/arrival order."""
     from .derivatives import DerivativeTicker

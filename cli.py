@@ -6,9 +6,10 @@ import json
 import logging
 from pathlib import Path
 import signal
+import sys
 import time
 
-from .runner import run_backtest
+from .runner import enforce_data_quality, run_backtest
 from .benchmark import run_benchmark
 from .calibration import calibrate_latency, compare_runs
 from .economics_gate import economics_gate
@@ -87,6 +88,21 @@ async def _run_with_signals(service, runner) -> dict:
     finally:
         for sig in registered:
             loop.remove_signal_handler(sig)
+
+
+def _persistence_failure(result: dict) -> str:
+    """The recording failure a live run stopped on ("" if none): it must not exit 0."""
+    feed = result.get("live_feed", result)
+    return (feed.get("persistence_failure")
+            or (feed.get("service") or {}).get("persistence_failure") or "")
+
+
+def _print_live_result(result: dict) -> None:
+    print(json.dumps(result, indent=2, default=str))
+    failure = _persistence_failure(result)
+    if failure:
+        print(f"recording failed; the session stopped fail-closed: {failure}", file=sys.stderr)
+        raise SystemExit(2)
 
 
 async def _run_live_paper(args: argparse.Namespace) -> dict:
@@ -180,6 +196,11 @@ def main() -> None:
     backtest.add_argument("--config", type=Path, required=True)
     backtest.add_argument("--events", type=Path, required=True)
     backtest.add_argument("--output", type=Path, default=Path("runs/latest"))
+    backtest.add_argument(
+        "--allow-rejected-data", metavar="JUSTIFICATION",
+        help="exit 0 even when the data-quality gate REJECTS the dataset; the written "
+             "justification is recorded in the run (data_quality_override.json)",
+    )
     backtest.add_argument(
         "--instrument-status-log", type=Path,
         help="a live-paper session's paper_timestamps.jsonl: replay its recorded "
@@ -327,7 +348,7 @@ def main() -> None:
     gate.add_argument(
         "--allow-incomplete", action="append", default=[], metavar="REASON=JUSTIFICATION",
         help="accept an INCOMPLETE reason (MISSING_PRICE, FEE_ASSET_UNPRICED, FEE_RULE_FALLBACK, FUNDING_DATA, "
-             "BORROW_DATA) with a written justification; listed in the result",
+             "BORROW_DATA, TRANSFER_DATA, DATA_QUALITY) with a written justification; listed in the result",
     )
     benchmark = sub.add_parser("benchmark", help="MR-14 replay and paper performance baseline")
     benchmark.add_argument("--config", type=Path, required=True)
@@ -413,12 +434,17 @@ def main() -> None:
     release_reproduce.add_argument("--output-dir", type=Path, required=True)
     args = parser.parse_args()
     if args.command == "backtest":
-        print(json.dumps(run_backtest(
+        summary = run_backtest(
             args.config, args.events, args.output,
             instrument_status_log=args.instrument_status_log,
             event_timing_log=args.event_timing_log,
             derivatives_log=args.derivatives,
-        ), indent=2))
+        )
+        rejected = enforce_data_quality(summary, args.output, args.allow_rejected_data)
+        print(json.dumps(summary, indent=2))
+        if rejected:
+            print(rejected, file=sys.stderr)
+            raise SystemExit(1)
     elif args.command == "sdk-backtest":
         result = BacktestAPI(RuntimeMode.BACKTEST).run(AdvancedBacktestSpec(
             pair=args.pair,
@@ -497,13 +523,13 @@ def main() -> None:
             level=getattr(logging, args.log_level),
             format="%(asctime)s %(levelname)s %(name)s %(message)s",
         )
-        print(json.dumps(asyncio.run(_run_live_orderbook(args)), indent=2))
+        _print_live_result(asyncio.run(_run_live_orderbook(args)))
     elif args.command == "live-paper":
         logging.basicConfig(
             level=getattr(logging, args.log_level),
             format="%(asctime)s %(levelname)s %(name)s %(message)s",
         )
-        print(json.dumps(asyncio.run(_run_live_paper(args)), indent=2, default=str))
+        _print_live_result(asyncio.run(_run_live_paper(args)))
     elif args.command == "calibrate-latency":
         print(json.dumps(calibrate_latency(
             args.run_dir, args.output, seed=args.seed,
