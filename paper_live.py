@@ -42,6 +42,27 @@ from .runner import file_sha256, write_session_artifacts
 from .session import ExecutionMode, TradingSession
 
 
+def perpetual_feed_settings(cfg, settings: LiveFeedSettings) -> LiveFeedSettings:
+    """A perpetual config runs on linear books with the derivatives stream; spot configs are unchanged.
+
+    Fails closed when a perpetual instrument would be fed spot order books.
+    """
+    from dataclasses import replace as _replace
+    from .funding import is_perpetual
+
+    perpetual = {
+        venue for venue in cfg.venues
+        if is_perpetual(cfg.instruments.get(venue, cfg.instrument_id).product_type)
+    }
+    if not perpetual:
+        return settings
+    markets = {"BINANCE": settings.binance_market, "BYBIT": settings.bybit_market}
+    spot_fed = sorted(venue for venue in perpetual if markets.get(venue) != "linear")
+    if spot_fed:
+        raise ValueError(f"perpetual instruments on {spot_fed} need linear market feeds, not spot books")
+    return _replace(settings, derivative_streams_enabled=True)
+
+
 class LivePaperSession:
     def __init__(
         self,
@@ -65,6 +86,7 @@ class LivePaperSession:
     ) -> None:
         self.cfg, _ = load_config(Path(config_path))
         settings = settings or LiveFeedSettings(udp_enabled=False)
+        settings = perpetual_feed_settings(self.cfg, settings)
         if set(settings.venues) != set(self.cfg.venues):
             raise ValueError("live paper trading requires every configured venue")
         self.clock_ns = clock_ns
@@ -75,6 +97,7 @@ class LivePaperSession:
             venue_control_callback=self._venue_control, publisher=publisher,
             event_listener=self._on_event, pre_event_listener=self._before_event,
             trade_listener=self._on_trade,
+            derivative_listener=self._on_derivative,
         )
         books: dict[tuple[str, str], OrderBook] = {
             (venue, self.cfg.instrument_id): book
@@ -141,6 +164,11 @@ class LivePaperSession:
             "exchange_ts_ns": event.exchange_ts_ns, "receive_ts_ns": event.receive_ts_ns,
             "processed_ts_ns": now, "book_state": state.value, "accepted": accepted,
         })
+
+    def _on_derivative(self, ticker) -> None:
+        session = getattr(self, "session", None)
+        if session is not None:
+            session.on_derivative(ticker)
 
     def _on_trade(self, tick) -> None:
         if self.maker_simulator is not None:

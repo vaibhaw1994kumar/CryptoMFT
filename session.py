@@ -124,6 +124,8 @@ def funding_engine(cfg: AppConfig, ledger: Ledger) -> FundingEngine:
         max_rate_age_ns=None if max_age is None else int(max_age) * 1_000_000,
         mark_fallback=str(section.get("mark_fallback", "none")),
         max_abs_rate=Decimal(str(section.get("max_abs_rate", "0.05"))),
+        max_mark_age_ns=int(section.get("max_mark_age_ms", 60_000)) * 1_000_000,
+        schedule_tolerance_ns=int(section.get("schedule_tolerance_ms", 1_000)) * 1_000_000,
     )
 
 
@@ -674,6 +676,19 @@ class TradingSession:
                 other, instrument_id, exposure, now,
                 reason=f"liquidation of {venue} {instrument_id} ({liquidation['code']}) left this leg unhedged",
             )
+
+    def on_derivative(self, ticker) -> None:
+        """Venue mark/index/funding (derivatives stream): the exchange mark for
+        settlements and the predicted rate for funding forecasts, never realised funding."""
+        if not self.funding.configured:
+            return
+        if ticker.mark_price is not None:
+            self.funding.observe_exchange_mark(ticker.venue, ticker.instrument_id, ticker.receive_ts_ns,
+                                               ticker.mark_price)
+        if ticker.funding_rate is not None and ticker.next_funding_ts_ns:
+            self.funding.observe_prediction(ticker.venue, ticker.instrument_id, ticker.funding_rate,
+                                            ticker.next_funding_ts_ns, ticker.receive_ts_ns, ticker.mark_price)
+        self.derivative_ticks = getattr(self, "derivative_ticks", 0) + 1
 
     def _borrow_forced_close(self, reason: str, now_ns: int) -> None:
         """A venue buy-in leaves the other leg unhedged: stop trading."""

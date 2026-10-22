@@ -14,7 +14,7 @@ from .calibration import calibrate_latency, compare_runs
 from .economics_gate import economics_gate
 from .config import load_config
 from .instrument_status import InstrumentStatusPoller
-from .paper_live import LivePaperSession
+from .paper_live import LivePaperSession, perpetual_feed_settings
 from .maker_sim import maker_simulator_from_config, simulate_recorded_session
 from .session_audit import audit_session
 from .cycle_report import build_cycle_report
@@ -124,7 +124,8 @@ async def _run_live_paper(args: argparse.Namespace) -> dict:
 
 
 async def _run_live_orderbook(args: argparse.Namespace) -> dict:
-    settings = _live_settings(args)
+    # A perpetual config also records mark/index/funding (derivatives.jsonl).
+    settings = perpetual_feed_settings(load_config(args.config)[0], _live_settings(args))
     service = LiveOrderBookService(
         args.config,
         args.output_dir,
@@ -183,6 +184,10 @@ def main() -> None:
         "--instrument-status-log", type=Path,
         help="a live-paper session's paper_timestamps.jsonl: replay its recorded "
              "effective-dated instrument/rule changes",
+    )
+    backtest.add_argument(
+        "--derivatives", type=Path,
+        help="a recorded derivatives.jsonl (mark/index/funding) replayed with the events",
     )
     backtest.add_argument(
         "--event-timing-log", type=Path,
@@ -303,6 +308,17 @@ def main() -> None:
     compare.add_argument("--paper", type=Path, required=True)
     compare.add_argument("--output", type=Path, required=True)
     compare.add_argument("--min-opportunities", type=int, default=30)
+    history = sub.add_parser(
+        "funding-history",
+        help="download realised funding (public endpoints) into a rate-records JSONL",
+    )
+    history.add_argument("--venue", choices=("BINANCE", "BYBIT"), required=True)
+    history.add_argument("--symbol", required=True, help="venue symbol, e.g. BTCUSDT")
+    history.add_argument("--instrument-id", required=True, help="platform instrument id, e.g. BTC-USDT-PERP")
+    history.add_argument("--start", required=True, help="ISO time or epoch ms")
+    history.add_argument("--end", required=True, help="ISO time or epoch ms")
+    history.add_argument("--output", type=Path, required=True)
+    history.add_argument("--no-marks", action="store_true", help="Bybit: skip the mark-price kline lookups")
     gate = sub.add_parser(
         "economics-gate",
         help="fail unless a run's economics reconcile (exit 1 on FAIL)",
@@ -401,6 +417,7 @@ def main() -> None:
             args.config, args.events, args.output,
             instrument_status_log=args.instrument_status_log,
             event_timing_log=args.event_timing_log,
+            derivatives_log=args.derivatives,
         ), indent=2))
     elif args.command == "sdk-backtest":
         result = BacktestAPI(RuntimeMode.BACKTEST).run(AdvancedBacktestSpec(
@@ -497,6 +514,19 @@ def main() -> None:
             args.replay, args.paper, args.output,
             min_opportunities=args.min_opportunities,
         ), indent=2))
+    elif args.command == "funding-history":
+        from .funding_history import fetch_binance, fetch_bybit, to_ms, urllib_get, write_jsonl
+
+        start, end = to_ms(args.start), to_ms(args.end)
+        if args.venue == "BINANCE":
+            records = fetch_binance(args.symbol, args.instrument_id, start, end, http=urllib_get)
+        else:
+            records = fetch_bybit(args.symbol, args.instrument_id, start, end, http=urllib_get,
+                                  with_marks=not args.no_marks)
+        write_jsonl(records, args.output)
+        print(json.dumps({"venue": args.venue, "records": len(records),
+                          "without_mark": sum(1 for r in records if not r["mark_price"]),
+                          "output": str(args.output)}, indent=2))
     elif args.command == "economics-gate":
         allow = {}
         for item in args.allow_incomplete:

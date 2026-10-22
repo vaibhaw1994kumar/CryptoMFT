@@ -33,6 +33,15 @@ def load_events(path: Path) -> list[MarketEvent]:
         return [MarketEvent.from_dict(json.loads(line)) for line in handle if line.strip()]
 
 
+def load_derivatives(path: Path) -> list:
+    """A recorded ``derivatives.jsonl`` (or several, concatenated), in receive/arrival order."""
+    from .derivatives import DerivativeTicker
+
+    with path.open(encoding="utf-8") as handle:
+        rows = [DerivativeTicker.from_dict(json.loads(line)) for line in handle if line.strip()]
+    return sorted(rows, key=lambda t: (t.receive_ts_ns, t.arrival_ordinal))
+
+
 def _valuation(session: TradingSession, marks: dict, reporting: str) -> Valuation:
     valuation = Valuation(reporting_currency=reporting)
     for (venue, instrument_id), mark in marks.items():
@@ -646,6 +655,7 @@ def run_backtest(
     config_path: Path, events_path: Path, output_dir: Path, *,
     instrument_status_log: Path | None = None,
     event_timing_log: Path | None = None,
+    derivatives_log: Path | None = None,
 ) -> dict:
     output_dir.mkdir(parents=True, exist_ok=True)
     cfg, raw_config = load_config(config_path)
@@ -662,9 +672,16 @@ def run_backtest(
         cfg, execution_mode=ExecutionMode(cfg.execution_mode), live_data=False
     )
     events = deterministic_order(load_events(events_path))
+    # Recorded mark/index/funding tickers replay in receive order, each before
+    # the first market event received at or after it (causal; never past the data).
+    tickers = load_derivatives(derivatives_log) if derivatives_log is not None else []
+    ticker_index = 0
 
     def process_strategy_event(event: MarketEvent) -> None:
-        nonlocal timed_events
+        nonlocal timed_events, ticker_index
+        while ticker_index < len(tickers) and tickers[ticker_index].receive_ts_ns <= event.receive_ts_ns:
+            session.on_derivative(tickers[ticker_index])
+            ticker_index += 1
         recorded_now = event_timing.get(event.event_id)
         if recorded_now is not None:
             timed_events += 1
