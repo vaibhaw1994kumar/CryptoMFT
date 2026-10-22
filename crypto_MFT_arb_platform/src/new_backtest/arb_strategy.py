@@ -107,6 +107,9 @@ class ArbConfig:
     fill_gate_horizon_s: int = 15
     # Stage 4: adverse-selection gate (FillModelV2 only; 1.0 = disabled)
     max_adverse_prob: float = 1.0
+    # TTF gate: skip if E[TTF] > max_ttf_s.  Reduces inventory lock-up in slow
+    # markets.  0.0 = disabled.  Typical value: 8.0 (seconds).
+    max_ttf_s: float = 0.0
 
 
 @dataclass
@@ -193,6 +196,7 @@ class CrossVenueArbStrategy:
             "maker_limit": 0,
             "low_fill_prob": 0,   # Phase 1 gate: P(fill) < min_fill_prob
             "high_adverse_prob": 0,  # Stage 4 gate: P(adverse) > max_adverse_prob
+            "slow_ttf": 0,           # TTF gate: E[TTF] > max_ttf_s
         }
         self.evaluations = 0
         self.signals = 0
@@ -454,6 +458,9 @@ class CrossVenueArbStrategy:
                 p_fill = pred.p_fill
                 if cfg.max_adverse_prob < 1.0 and pred.p_adverse > cfg.max_adverse_prob:
                     self.rejects["high_adverse_prob"] += 1
+                    return None
+                if cfg.max_ttf_s > 0.0 and pred.e_ttf > cfg.max_ttf_s:
+                    self.rejects["slow_ttf"] += 1
                     return None
             else:
                 p_fill = model.predict(**feat)
