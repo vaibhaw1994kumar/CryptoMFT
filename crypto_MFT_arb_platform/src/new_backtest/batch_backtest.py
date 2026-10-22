@@ -155,15 +155,18 @@ def run_pair(
 
     pair_dir = output_root / pair
     try:
-        # Walk-forward: rolling cal/eval folds (takes priority over calibration_days).
-        # 1. Cold pass over all days (agent disabled) → clean fill_events.jsonl.
-        # 2. WalkForwardCalibrator splits it into rolling folds.
-        # 3. Per fold: FillModelV1.fit(cal_records) → eval backtester run.
+        # Walk-forward: rolling day-aligned cal/eval folds.
+        # 1. Cold pass (agent disabled) → fill_events.jsonl for all common days.
+        # 2. Load all label records once; slice per fold using calendar indices.
+        # 3. Per fold: FillModelV2.fit(cal_records) → eval backtester run.
         # 4. Aggregate eval fold metrics.
+        # Fold boundaries are calendar-day-aligned (common[i:i+w] / common[i+w:i+w+s])
+        # so every eval day is exactly what it says on the tin, regardless of when
+        # the first fill event in the cold log happens to fall.
         if wf_window_days > 0 and len(common) > wf_step_days:
             from .background_agent_model import AgentFlowConfig  # noqa: PLC0415
-            from .fill_label import WalkForwardCalibrator        # noqa: PLC0415
-            from .fill_model_v1 import FillModelV1               # noqa: PLC0415
+            from .fill_label import extract_labels               # noqa: PLC0415
+            from .fill_model_v1 import FillModelV2               # noqa: PLC0415
 
             cfg_cold = _clone(base, pair=pair, start=common[0], end=common[-1],
                               output_dir=str(pair_dir / "wf_cold"),
@@ -175,26 +178,36 @@ def run_pair(
                 return PairOutcome(pair, "error",
                                    detail="wf cold pass produced no fill_log_path")
 
-            calibrator = WalkForwardCalibrator(
-                log_path=r_cold.fill_log_path,
-                window_days=wf_window_days,
-                step_days=wf_step_days,
-            )
+            # Load all records once; filter per fold in memory
+            all_records = extract_labels(r_cold.fill_log_path)
             horizon_s = base.arb.fill_gate_horizon_s
             fold_results: list[dict] = []
-            for fold in calibrator.folds():
-                model = FillModelV1.fit(
-                    fold.cal_records,
-                    horizon_s=horizon_s,
-                    trained_until_ts=fold.cal_end_ts,
-                )
-                if model is None:
-                    continue
-                eval_days = _days_in_window(common, fold.cal_end_ts, fold.eval_end_ts)
-                if not eval_days:
+            fold_idx = 0
+            for i in range(0, len(common) - wf_window_days, wf_step_days):
+                cal_days = common[i:i + wf_window_days]
+                eval_days = common[i + wf_window_days:i + wf_window_days + wf_step_days]
+                if not cal_days or not eval_days:
+                    break
+
+                cal_start_ts = _date_to_epoch(cal_days[0])
+                until_ts = _date_to_epoch(eval_days[0])
+
+                cal_records = [r for r in all_records
+                               if cal_start_ts <= r.timestamp < until_ts
+                               and r.timestamp + r.horizon_s <= until_ts]
+                if len(cal_records) < 50:
+                    fold_idx += 1
                     continue
 
-                fold_dir = pair_dir / f"wf_fold_{fold.fold_id:03d}"
+                model = FillModelV2.fit(
+                    cal_records, gate_horizon_s=horizon_s,
+                    trained_until_ts=until_ts,
+                )
+                if model is None:
+                    fold_idx += 1
+                    continue
+
+                fold_dir = pair_dir / f"wf_fold_{fold_idx:03d}"
                 model_path = str(fold_dir / "fill_model_v1.json")
                 model.save_json(model_path)
 
@@ -202,10 +215,11 @@ def run_pair(
                     base, pair=pair, start=eval_days[0], end=eval_days[-1],
                     output_dir=str(fold_dir),
                     warm_start=r_cold.fill_log_path,
-                    warm_start_until_ts=fold.cal_end_ts,
+                    warm_start_until_ts=until_ts,
                     fill_model_v1_path=model_path,
                 )
                 fold_results.append(asdict(_run_once(cfg_eval)))
+                fold_idx += 1
 
             if not fold_results:
                 return PairOutcome(
@@ -245,11 +259,11 @@ def run_pair(
                     and base.arb.min_fill_prob > 0.0
                     and r_cal.fill_log_path):
                 from .fill_label import extract_labels   # noqa: PLC0415
-                from .fill_model_v1 import FillModelV1   # noqa: PLC0415
+                from .fill_model_v1 import FillModelV2   # noqa: PLC0415
                 records = extract_labels(r_cal.fill_log_path, until_ts=until_ts)
                 if records:
                     horizon_s = base.arb.fill_gate_horizon_s
-                    model = FillModelV1.fit(records, horizon_s=horizon_s,
+                    model = FillModelV2.fit(records, gate_horizon_s=horizon_s,
                                            trained_until_ts=until_ts)
                     if model is not None:
                         model_path = str(pair_dir / "calibration" / "fill_model_v1.json")
@@ -517,6 +531,14 @@ def build_arg_parser() -> argparse.ArgumentParser:
         "--fill-gate-horizon-s", type=int, default=15,
         help="horizon in seconds used by the fill probability gate",
     )
+    p.add_argument(
+        "--max-adverse-prob", type=float, default=1.0,
+        help=(
+            "Stage 4 adverse-selection gate: reject maker leg when "
+            "P(price_moved_through) exceeds this threshold (1.0 = disabled). "
+            "Requires a FillModelV2 model and maker_taker mode."
+        ),
+    )
     return p
 
 
@@ -543,6 +565,7 @@ def main(argv: Iterable[str] | None = None) -> int:
             block_on_toxic=not args.no_toxic_gate,
             min_fill_prob=args.min_fill_prob,
             fill_gate_horizon_s=args.fill_gate_horizon_s,
+            max_adverse_prob=args.max_adverse_prob,
         ),
         include_deltas=not args.no_deltas, seed=args.seed,
         progress_every=args.progress_every,

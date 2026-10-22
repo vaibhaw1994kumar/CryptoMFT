@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import json
+import math
 from pathlib import Path
 
 from .models import (
@@ -25,6 +26,15 @@ class FillModelConfig:
     sell_heavy_threshold: float = -0.35
     buy_heavy_threshold: float = 0.35
     global_symbol: str = "*"
+    spread_fill_haircut_start_bps: float = 20.0
+    spread_fill_haircut_end_bps: float = 300.0
+    min_spread_fill_multiplier: float = 0.10
+    spread_adverse_uplift_start_bps: float = 20.0
+    spread_adverse_uplift_end_bps: float = 300.0
+    max_spread_adverse_uplift: float = 0.35
+    # Distance-aware fill decay: fill_prob *= exp(-k * distance_bps)
+    # Corrects phantom edge from quoting far outside the market spread
+    distance_decay_k: float = 0.15
 
 
 def _normalize_symbol(symbol: str | None) -> str:
@@ -42,6 +52,16 @@ class EmpiricalFillModel:
         self.book_event_fill_stats: dict[FillModelBucket, BucketStats] = {}
         self.snapshot_fill_stats: dict[FillModelBucket, BucketStats] = {}
         self.order_event_log: list[LoggedOrderEvent] = []
+
+    @staticmethod
+    def _linear_scale(value: float, start: float, end: float) -> float:
+        if end <= start:
+            return 1.0 if value >= end else 0.0
+        if value <= start:
+            return 0.0
+        if value >= end:
+            return 1.0
+        return (value - start) / (end - start)
 
     def _queue_bucket(self, queue_ahead: float, local_depth: float) -> str:
         ratio = 0.0 if local_depth <= 0 else queue_ahead / local_depth
@@ -282,6 +302,7 @@ class EmpiricalFillModel:
         state: MarketState,
         lambda_regime: LambdaRegime,
         horizon_s: int = 5,
+        distance_bps: float = 0.0,
     ) -> FillProbabilityEstimate:
         bucket = self.bucket_for_quote(
             symbol=symbol,
@@ -330,6 +351,39 @@ class EmpiricalFillModel:
         book_event_fill_prob = min(fill_prob, book_event_fill_prob)
         snapshot_fill_prob = min(fill_prob, snapshot_fill_prob)
 
+        spread_stress = self._linear_scale(
+            state.spread_bps,
+            self.config.spread_fill_haircut_start_bps,
+            self.config.spread_fill_haircut_end_bps,
+        )
+        fill_multiplier = (
+            1.0
+            - spread_stress * (1.0 - self.config.min_spread_fill_multiplier)
+        )
+        fill_prob *= fill_multiplier
+        trade_fill_prob *= fill_multiplier
+        book_event_fill_prob *= fill_multiplier
+        snapshot_fill_prob *= fill_multiplier
+
+        # Distance-aware decay: quotes far outside market spread have lower fill probability
+        if distance_bps > 0.0 and self.config.distance_decay_k > 0.0:
+            distance_multiplier = math.exp(-self.config.distance_decay_k * distance_bps)
+            fill_prob *= distance_multiplier
+            trade_fill_prob *= distance_multiplier
+            book_event_fill_prob *= distance_multiplier
+            snapshot_fill_prob *= distance_multiplier
+
+        adverse_spread_stress = self._linear_scale(
+            state.spread_bps,
+            self.config.spread_adverse_uplift_start_bps,
+            self.config.spread_adverse_uplift_end_bps,
+        )
+        adverse_move_prob = min(
+            0.99,
+            adverse_move_prob
+            + adverse_spread_stress * self.config.max_spread_adverse_uplift,
+        )
+
         return FillProbabilityEstimate(
             fill_prob=fill_prob,
             adverse_move_prob=adverse_move_prob,
@@ -348,6 +402,7 @@ class EmpiricalFillModel:
         state: MarketState,
         lambda_regime: LambdaRegime,
         horizon_s: int = 5,
+        distance_bps: float = 0.0,
     ) -> float:
         return self.predict(
             symbol,
@@ -357,6 +412,7 @@ class EmpiricalFillModel:
             state,
             lambda_regime,
             horizon_s,
+            distance_bps=distance_bps,
         ).fill_prob
 
     def predict_adverse_move_prob(
@@ -368,6 +424,7 @@ class EmpiricalFillModel:
         state: MarketState,
         lambda_regime: LambdaRegime,
         horizon_s: int = 5,
+        distance_bps: float = 0.0,
     ) -> float:
         return self.predict(
             symbol,
@@ -377,6 +434,7 @@ class EmpiricalFillModel:
             state,
             lambda_regime,
             horizon_s,
+            distance_bps=distance_bps,
         ).adverse_move_prob
 
     @staticmethod

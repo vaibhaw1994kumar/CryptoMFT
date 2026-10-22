@@ -105,6 +105,8 @@ class ArbConfig:
     # fill probability.  fill_gate_horizon_s selects which trained horizon to use.
     min_fill_prob: float = 0.0           # 0 = gate disabled
     fill_gate_horizon_s: int = 15
+    # Stage 4: adverse-selection gate (FillModelV2 only; 1.0 = disabled)
+    max_adverse_prob: float = 1.0
 
 
 @dataclass
@@ -189,7 +191,8 @@ class CrossVenueArbStrategy:
             "toxic": 0, "no_edge": 0, "stale_touch": 0, "no_depth": 0,
             "inventory": 0, "clip_too_small": 0, "throttled": 0,
             "maker_limit": 0,
-            "low_fill_prob": 0,  # Phase 1 gate: P(fill) < min_fill_prob
+            "low_fill_prob": 0,   # Phase 1 gate: P(fill) < min_fill_prob
+            "high_adverse_prob": 0,  # Stage 4 gate: P(adverse) > max_adverse_prob
         }
         self.evaluations = 0
         self.signals = 0
@@ -423,18 +426,19 @@ class CrossVenueArbStrategy:
             self.rejects["clip_too_small"] += 1
             return None
 
-        # Phase 1 fill-probability gate ─────────────────────────────────────
-        # Skip quotes where the calibrated model predicts low fill probability.
-        # queue_ahead=0 is an approximation: the order hasn't been placed yet,
-        # so there is no queue snapshot; using 0 biases toward over-estimating
-        # fill probability, which is conservative (gates fewer signals).
+        # Fill-probability gate (Phase 1) + adverse-selection gate (Stage 4) ──
+        # queue_ahead=0: order not yet placed; biases toward over-estimating
+        # fill probability (conservative — gates fewer signals than reality).
+        # relative_to_touch_ticks=0: tick_size unavailable at gate time; actual
+        # value at placement is -maker_improve_ticks (typically -1), so the gate
+        # slightly over-estimates fill probability for improve-by-1 quotes.
         if (cfg.min_fill_prob > 0.0
                 and self.fill_model_v1 is not None
                 and self.fill_model_v1.horizon_s == cfg.fill_gate_horizon_s):
             ms = states[maker_venue]
             mb = books[maker_venue]
             top_depth = mb.best_bid_size + mb.best_ask_size
-            p_fill = self.fill_model_v1.predict(
+            feat = dict(
                 queue_ahead=0.0,
                 local_depth=top_depth,
                 local_depth_baseline=ms.top_depth_baseline,
@@ -444,6 +448,15 @@ class CrossVenueArbStrategy:
                 trade_sign=ms.trade_sign,
                 regime_bucket=ms.last_regime.bucket.value,
             )
+            model = self.fill_model_v1
+            if hasattr(model, "predict_ttf"):
+                pred = model.predict_ttf(**feat)
+                p_fill = pred.p_fill
+                if cfg.max_adverse_prob < 1.0 and pred.p_adverse > cfg.max_adverse_prob:
+                    self.rejects["high_adverse_prob"] += 1
+                    return None
+            else:
+                p_fill = model.predict(**feat)
             if p_fill < cfg.min_fill_prob:
                 self.rejects["low_fill_prob"] += 1
                 return None
