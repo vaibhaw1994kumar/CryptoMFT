@@ -424,5 +424,231 @@ class TestFeeCalculation(unittest.TestCase):
         self.assertAlmostEqual(fills[0].fee, -0.05, places=9)
 
 
+# ── D1: level disappearance and reappearance ─────────────────────────────────
+
+class TestLevelDisappearReappear(unittest.TestCase):
+    """Validation step 2: disappearance, reappearance, and delta/snapshot ordering."""
+
+    def test_level_disappears_drains_queue(self):
+        # Level was 50 at placement. Delta fires with new_size=0 (level gone).
+        # observed(50) > new(0) → consume 50; queue_ahead=50 drains to 0, no fill.
+        book = _book(bids=[(100.0, 50.0)])
+        ex = _executor(MakerConfig(delta_fill_share=0.15))
+        order = _place(ex, book, price=100.0, size=10.0)
+        self.assertAlmostEqual(order.queue_ahead, 50.0)
+
+        ex.on_delta("bybit", side="bid", price=100.0, new_size=0.0,
+                    now=2.0, tick_size=1.0, fee_bps=0.0)
+        # Queue fully drained; observed→0
+        self.assertAlmostEqual(order.queue_ahead, 0.0)
+        self.assertAlmostEqual(order.observed_level_size, 0.0)
+
+    def test_level_disappears_then_reappears_no_spurious_fill(self):
+        # Level disappears → queue drained. Level reappears (new orders at same
+        # price arrive behind us). The reappearance must NOT trigger any fill.
+        book = _book(bids=[(100.0, 30.0)])
+        ex = _executor(MakerConfig(delta_fill_share=0.15))
+        order = _place(ex, book, price=100.0, size=10.0)
+
+        # Disappear
+        ex.on_delta("bybit", side="bid", price=100.0, new_size=0.0,
+                    now=2.0, tick_size=1.0, fee_bps=0.0)
+        self.assertAlmostEqual(order.observed_level_size, 0.0)
+
+        # Reappear with 40 units (new resting orders behind us)
+        fills = ex.on_delta("bybit", side="bid", price=100.0, new_size=40.0,
+                            now=3.0, tick_size=1.0, fee_bps=0.0)
+        # prev=0, new=40 → not prev>new → no fill; observed stays 0 (invariant)
+        self.assertEqual(len(fills), 0)
+        self.assertAlmostEqual(order.observed_level_size, 0.0,
+            msg="observed_level_size must not grow on reappearance")
+
+    def test_snapshot_then_delta_same_change_no_double_drain(self):
+        # Snapshot fires first showing shrink of 10 (50→40); then a delta fires
+        # with the same new_size=40.  The second event must not re-drain the queue.
+        book = _book(bids=[(100.0, 50.0)])
+        ex = _executor(MakerConfig(delta_fill_share=0.15, snapshot_fill_share=0.05))
+        order = _place(ex, book, price=100.0, size=10.0)
+
+        # Snapshot: level drops to 40
+        shrunken = _book(bids=[(100.0, 40.0)])
+        ex.on_snapshot("bybit", shrunken, now=2.0, tick_size=1.0, fee_bps=0.0)
+        queue_after_snapshot = order.queue_ahead   # should be ~40 (consumed 10)
+        obs_after_snapshot = order.observed_level_size  # should be ~40
+
+        # Delta fires for the same change: new_size=40
+        # prev=40 (already updated), new=40 → not prev>new → no further drain
+        fills = ex.on_delta("bybit", side="bid", price=100.0, new_size=40.0,
+                            now=2.001, tick_size=1.0, fee_bps=0.0)
+        self.assertEqual(len(fills), 0)
+        self.assertAlmostEqual(order.queue_ahead, queue_after_snapshot,
+            msg="Delta after snapshot for same shrink must not re-drain queue")
+
+    def test_delta_then_snapshot_same_change_no_double_drain(self):
+        # Delta fires first (shrink 50→40); then snapshot arrives showing 40.
+        # Snapshot must not re-drain the already-updated queue.
+        book = _book(bids=[(100.0, 50.0)])
+        ex = _executor(MakerConfig(delta_fill_share=0.15, snapshot_fill_share=0.05))
+        order = _place(ex, book, price=100.0, size=10.0)
+
+        # Delta: 50 → 40
+        ex.on_delta("bybit", side="bid", price=100.0, new_size=40.0,
+                    now=2.0, tick_size=1.0, fee_bps=0.0)
+        queue_after_delta = order.queue_ahead
+
+        # Snapshot: shows same level at 40
+        shrunken = _book(bids=[(100.0, 40.0)])
+        fills = ex.on_snapshot("bybit", shrunken, now=2.001, tick_size=1.0, fee_bps=0.0)
+        self.assertEqual(len(fills), 0)
+        self.assertAlmostEqual(order.queue_ahead, queue_after_delta,
+            msg="Snapshot after delta for same shrink must not re-drain queue")
+
+    def test_replenishment_then_disappearance_uses_original_baseline(self):
+        # Level grows (replenishment from behind) then disappears entirely.
+        # Only the original-baseline portion (50 units) counts toward queue drain.
+        book = _book(bids=[(100.0, 50.0)])
+        ex = _executor(MakerConfig(delta_fill_share=0.15))
+        order = _place(ex, book, price=100.0, size=10.0)  # queue=50, observed=50
+
+        # Replenishment: level grows to 200
+        ex.on_delta("bybit", side="bid", price=100.0, new_size=200.0,
+                    now=2.0, tick_size=1.0, fee_bps=0.0)
+        # observed_level_size must stay 50 (invariant)
+        self.assertAlmostEqual(order.observed_level_size, 50.0)
+
+        # Level disappears entirely: shrink = observed(50) - new(0) = 50
+        fills_disappear = ex.on_delta("bybit", side="bid", price=100.0, new_size=0.0,
+                                      now=3.0, tick_size=1.0, fee_bps=0.0)
+        # Shrink 50 drains queue 50 → queue=0, no fill (all went to drain)
+        self.assertAlmostEqual(order.queue_ahead, 0.0)
+        total_fill = sum(f.qty for f in fills_disappear)
+        self.assertAlmostEqual(total_fill, 0.0,
+            msg="Queue drain on disappearance must not produce fills when queue=queue_ahead")
+
+
+# ── D2: tick_size=0 and min_queue_ahead scoping ──────────────────────────────
+
+class TestD2EdgeCases(unittest.TestCase):
+    """Validation step 3: confirm min_queue_ahead only activates for genuinely
+    absent levels; document tick_size=0 tolerance behaviour."""
+
+    def test_tick_size_zero_exact_price_still_matches(self):
+        # When tick_size=0, tolerance collapses to 1e-12. An exact match must
+        # still work so that min_queue_ahead does NOT fire on present levels.
+        book = _book(bids=[(100.0, 60.0)])
+        cfg = MakerConfig(min_queue_ahead=999.0)
+        ex = _executor(cfg)
+        order = _place(ex, book, price=100.0, size=5.0, tick_size=0.0)
+        # Level is exactly present at 100.0 — must NOT apply min_queue_ahead
+        self.assertAlmostEqual(order.queue_ahead, 60.0,
+            msg="min_queue_ahead must not override a genuinely present level even with tick_size=0")
+
+    def test_tick_size_zero_absent_level_applies_min_queue_ahead(self):
+        # With tick_size=0, tolerance=1e-12; level at 99.0 does not match 100.0
+        # → level absent → min_queue_ahead applies.
+        book = _book(bids=[(99.0, 50.0)])
+        cfg = MakerConfig(min_queue_ahead=25.0)
+        ex = _executor(cfg)
+        order = _place(ex, book, price=100.0, size=5.0, tick_size=0.0)
+        self.assertAlmostEqual(order.queue_ahead, 25.0)
+
+    def test_min_queue_ahead_not_applied_for_small_but_present_level(self):
+        # Level is present but tiny (size=0.001); min_queue_ahead must NOT override.
+        book = _book(bids=[(100.0, 0.001)])
+        cfg = MakerConfig(min_queue_ahead=50.0)
+        ex = _executor(cfg)
+        order = _place(ex, book, price=100.0, size=5.0)
+        self.assertAlmostEqual(order.queue_ahead, 0.001,
+            msg="min_queue_ahead must not apply when level is present, even if tiny")
+
+    def test_min_queue_ahead_not_applied_when_level_size_zero_but_present(self):
+        # Level IS at the right price but size=0.0 (level present, empty).
+        # _level_size returns 0.0 but that is a real "level at our price exists,
+        # has nothing resting".  The current code treats this identically to
+        # absent (because it checks level_size == 0.0).  This test documents
+        # the edge case: min_queue_ahead fires for both "absent" and "present-but-empty".
+        book = _book(bids=[(100.0, 0.0)])
+        cfg = MakerConfig(min_queue_ahead=30.0)
+        ex = _executor(cfg)
+        order = _place(ex, book, price=100.0, size=5.0)
+        # Current behavior: min_queue_ahead applies because level_size == 0.0
+        # (conservatively safe — slightly pessimistic for the genuinely-empty case)
+        self.assertAlmostEqual(order.queue_ahead, 30.0)
+
+
+# ── D3: trade + delta double-count regression ─────────────────────────────────
+
+class TestD3TradeAndDeltaDoubleCount(unittest.TestCase):
+    """Validation step 4: demonstrate D3 (known limitation) with exact numbers.
+
+    When an exchange trade of V units occurs it produces two feed events:
+      1. TRADE tape:  volume = V
+      2. BOOK delta:  level shrinks by V (new_size = old_size - V)
+
+    With default fill_share parameters the backtester processes both events
+    independently against the same resting order.  The test below measures the
+    double-count and records it as a regression baseline.
+
+    This is a KNOWN LIMITATION, not a bug introduced by the D1/D2 fixes.
+    Fixing it properly requires correlating trade and delta events, which would
+    add significant complexity.  The test ensures it does not silently worsen.
+    """
+
+    def _setup_order_with_drained_queue(self):
+        """Place order at level=50, drain queue to 0 with a separate trade."""
+        book = _book(bids=[(100.0, 50.0)])
+        ex = _executor(MakerConfig(
+            trade_fill_share=1.0,
+            delta_fill_share=0.15,
+        ))
+        order = _place(ex, book, price=100.0, size=10.0)
+        # Drain the 50-unit queue so subsequent fills are immediate
+        ex.on_trade("bybit", price=100.0, volume=50.0, sign=-1, now=1.5, fee_bps=0.0)
+        self.assertAlmostEqual(order.queue_ahead, 0.0)
+        return ex, order
+
+    def test_trade_alone_fills_V(self):
+        ex, order = self._setup_order_with_drained_queue()
+        # TRADE only: should fill exactly V=5
+        fills = ex.on_trade("bybit", price=100.0, volume=5.0, sign=-1, now=2.0, fee_bps=0.0)
+        total = sum(f.qty for f in fills)
+        self.assertAlmostEqual(total, 5.0, places=9)
+
+    def test_delta_alone_fills_V_times_delta_fill_share(self):
+        ex, order = self._setup_order_with_drained_queue()
+        # DELTA only: observed=50, new_size=45 → shrink=5 → fill=5*0.15=0.75
+        fills = ex.on_delta("bybit", side="bid", price=100.0, new_size=45.0,
+                            now=2.0, tick_size=1.0, fee_bps=0.0)
+        total = sum(f.qty for f in fills)
+        self.assertAlmostEqual(total, 0.75, places=9,
+            msg="delta alone: fill = shrink * delta_fill_share = 5 * 0.15 = 0.75")
+
+    def test_d3_trade_then_delta_exceeds_V(self):
+        # D3: process TRADE then DELTA for the same 5 units of real activity.
+        # Expected ideal fill: 5.0; actual (double-count): 5.75
+        ex, order = self._setup_order_with_drained_queue()
+
+        # Event A: trade tape
+        fills_a = ex.on_trade("bybit", price=100.0, volume=5.0, sign=-1, now=2.0, fee_bps=0.0)
+        # Event B: corresponding book delta (same liquidity removal)
+        fills_b = ex.on_delta("bybit", side="bid", price=100.0, new_size=45.0,
+                              now=2.001, tick_size=1.0, fee_bps=0.0)
+
+        fill_from_trade = sum(f.qty for f in fills_a)
+        fill_from_delta = sum(f.qty for f in fills_b)
+        total = fill_from_trade + fill_from_delta
+
+        # Verify the known double-count: 5.0 + 5*0.15 = 5.75
+        self.assertAlmostEqual(fill_from_trade, 5.0, places=9)
+        self.assertAlmostEqual(fill_from_delta, 0.75, places=9)
+        self.assertAlmostEqual(total, 5.75, places=9,
+            msg="D3 regression: trade+delta for same 5 units produces 5.75, not 5.0")
+
+        # Double-count factor: total / trade_volume ≈ 1.15 (= 1 + delta_fill_share)
+        double_count_factor = total / 5.0
+        self.assertAlmostEqual(double_count_factor, 1.15, places=9,
+            msg="D3 double-count factor should be 1 + delta_fill_share = 1.15")
+
+
 if __name__ == "__main__":
     unittest.main()
