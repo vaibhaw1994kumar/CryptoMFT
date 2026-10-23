@@ -446,3 +446,31 @@ This is an offline research tool: it isn't on the live path and adds no dependen
 - **Full suite:** 640 passed. That excludes `tests/test_latency_model.py`, a new untracked file from another session whose import (`crypto_MFT_arb_platform.src.new_backtest...`) fails at collection.
 - **Spot regression:** identical; manifests written for all 5 cycles.
 - **`run_all_local`:** every stage after its unittest step PASSED. That unittest step is blocked by the same file.
+
+## Phase 5: Step 12 failure-injection gaps (2026-10-23)
+
+`tests/test_failure_injection.py` (8 tests). No production code changed: every scenario already behaved correctly once tested.
+
+| Scenario | What is asserted |
+|---|---|
+| Fill arrives while the feed-control cancel is in flight (OMS, latency model) | Venue → RISK_REDUCING_ONLY (`FEED_CONTROL_STATE_TRANSITION`, `new_risk_allowed=False`). `FEED_CONTROL_VENUE_CANCEL` counts 1. The **reservation stays active during the cancel window**. The fill reaches the venue first and is booked (FILLED 0.01, one FILL). The cancel is rejected and re-queried. The plan closes hedged, with no kill switch, and the reservation is released once resolved. |
+| New risk on the invalid venue | Refused by the **OMS's own pre-trade check** (`VENUE_STATUS` fails only for that venue), independently of the book gate. After `apply_feed_control(valid=True)` and with fresh books, a new plan is APPROVED and fills. A stale book is refused by `LIVE_DATA_AGE`. |
+| Binance healthy / Bybit invalid, and the reverse | The gate suspends, the invalid venue is `RISK_REDUCING_ONLY`, the healthy one stays `ACTIVE`, and both are ACTIVE again after a snapshot. |
+| Recovery during a strategy evaluation | Not possible by design: book apply, gate and `strategy.evaluate` run in one synchronous call (asserted: neither `TradingSession.on_event` nor `_apply_and_record` is a coroutine). |
+| Process restart after a VALID book | A new service starts SYNCING with no sequence and the gate suspended. A delta alone cannot make it VALID; a fresh snapshot does. Order recovery on restart is already covered by `test_restart_resilience`. |
+| Randomized long sequences | 150 seeds × 3 rules (Binance spot ranged `U = u+1`, Binance USD-M `pu`, Bybit `u+1`), 400 messages each, with injected drops, swaps, duplicates and NaN levels. **Whenever `OrderBook` is VALID its levels equal the independently built true book and it isn't crossed.** More than 100 faults are injected per rule. A guard test confirms the harness fails when gap detection is disabled. Seeds are reproducible. |
+
+**Mutation check:**
+
+- M24: pre-trade ignores the router venue status.
+- M25: the USD-M `pu` chain isn't checked.
+- M26: the bridge check is off.
+
+Each fails the matching test.
+
+**Verification:**
+
+- **Full suite:** 652 passed (excluding the other session's `tests/test_latency_model.py`, which still fails at import).
+- **`run_all_local`:** the stages after its unittest step PASSED.
+
+**Still open in Step 12:** "processing queue overflow" doesn't apply as such, because there is no internal queue: backlog is detected by FEED_DELAYED (Phase 3).
