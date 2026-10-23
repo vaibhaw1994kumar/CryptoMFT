@@ -203,6 +203,10 @@ def main() -> None:
     backtest.add_argument("--events", type=Path, required=True)
     backtest.add_argument("--output", type=Path, default=Path("runs/latest"))
     backtest.add_argument(
+        "--comparison-report", type=Path, action="append", default=[],
+        help="a compare-tardis report for this data; summarised in dataset_manifest.json",
+    )
+    backtest.add_argument(
         "--allow-rejected-data", metavar="JUSTIFICATION",
         help="exit 0 even when the data-quality gate REJECTS the dataset; the written "
              "justification is recorded in the run (data_quality_override.json)",
@@ -456,6 +460,7 @@ def main() -> None:
             instrument_status_log=args.instrument_status_log,
             event_timing_log=args.event_timing_log,
             derivatives_log=args.derivatives,
+            comparison_reports=args.comparison_report,
         )
         rejected = enforce_data_quality(summary, args.output, args.allow_rejected_data)
         print(json.dumps(summary, indent=2))

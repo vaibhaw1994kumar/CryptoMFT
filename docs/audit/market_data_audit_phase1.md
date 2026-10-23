@@ -408,3 +408,41 @@ This is an offline research tool: it isn't on the live path and adds no dependen
 - No Tardis API key is available here, and Tardis's free datasets are the first day of each month, which overlaps none of our captures.
 - To run it: capture on the 1st of a month (or use a key), download `incremental_book_L2` for the same symbol and window, then run `compare-tardis`.
 - Expect `DEPTH_OR_SOURCE_DIFFERENCE` where Tardis's channel depth differs from ours (Bybit `orderbook.50` vs Tardis's deeper book).
+
+## Phase 4: dataset quality manifest, Step 14 (2026-10-23)
+
+`src/crypto_stat_arb/dataset_manifest.py`. Every `run_backtest` writes `dataset_manifest.json`. It's a separate file so that `summary.json` and its `deterministic_result_sha256` don't change. It records:
+
+- **Dataset identity.** A dataset SHA-256 built from the input files (events, plus derivatives if present). Provenance back to the live session: session id and hash, wire and rejected counts, quarantined rows per part.
+- **Venues.** Per venue:
+  - instruments;
+  - feed (BINANCE_SPOT / BINANCE_USDM / BYBIT);
+  - the reconstruction rule applied;
+  - event-type counts;
+  - adapter and schema versions;
+  - first and last exchange and receive times (ns and ISO UTC);
+  - `raw_ref` coverage.
+- **Instrument metadata version.** SHA-256 of the instrument and fee config, plus the effective-dated rows.
+- **Sequence and recovery.** From an independent rebuild of each venue's book: gaps, resyncs, duplicates, crossed books, final state.
+- **`invalid_intervals`.** Every stretch in which a venue's book wasn't VALID, with reasons, duration and the starting `raw_ref`.
+- **`silent_intervals`.** No book update for longer than the max book age. A reconnect leaves no sequence gap in the data, only this silence.
+- **Timestamp anomalies and latency.** Per-venue negative, corrected, impossible and delayed counts, latency percentiles, the max corrected delay, and the host-clock offset and state.
+- **`source_comparisons`.** Summaries of attached `compare-tardis` reports (`backtest --comparison-report`).
+- **`exclusions_and_repairs`.** The explicit policy (nothing is excluded; invalid intervals are replayed with decisions blocked). It also lists every repair: within-stream reorders after host clock steps, with the count moved and the input left unchanged. Truncation semantics, the data-quality decision and any override justification are here too; the override is added by `backtest --allow-rejected-data`.
+- **Run.** Config path and SHA-256, platform version, a `source_sha256` of the running package's source, git revision / checkout / dirty flag, Python and host.
+- **`manifest_sha256`.** It doesn't depend on the output path, so the same inputs give the same manifest (tested).
+
+**Real data:**
+
+- **Cycle 0006 (2026-09-14):** it shows Binance invalid intervals of 14.5 s (waiting for the first snapshot), plus two real sequence gaps of 0.4 s and **19.9 s**, and 151 feed-delayed events.
+- **The 2026-10-22 Bybit capture:** its two stalls appear as silent intervals (3.66 s and 3.47 s), with the 8-event clock-step reorder repair, provenance and the attached Tardis self-check.
+- **Cost:** about 1.2 s per 22k events.
+- **Git revision quirk.** The git revision it reports comes from the nested checkout inside the package directory, so `dirty` is true there. `source_sha256` identifies the code that ran regardless.
+
+**Tests:** `tests/test_dataset_manifest.py` (7), mutation check M21–M23.
+
+**Verification:**
+
+- **Full suite:** 640 passed. That excludes `tests/test_latency_model.py`, a new untracked file from another session whose import (`crypto_MFT_arb_platform.src.new_backtest...`) fails at collection.
+- **Spot regression:** identical; manifests written for all 5 cycles.
+- **`run_all_local`:** every stage after its unittest step PASSED. That unittest step is blocked by the same file.

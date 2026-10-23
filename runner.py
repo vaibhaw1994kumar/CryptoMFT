@@ -53,6 +53,9 @@ def enforce_data_quality(summary: dict, run_dir: Path, justification: str | None
     (Path(run_dir) / "data_quality_override.json").write_text(
         json.dumps(override, indent=2, sort_keys=True), encoding="utf-8")
     summary["data_quality_override"] = override
+    from .dataset_manifest import record_override
+
+    record_override(Path(run_dir), override)
     return ""
 
 
@@ -679,6 +682,7 @@ def run_backtest(
     instrument_status_log: Path | None = None,
     event_timing_log: Path | None = None,
     derivatives_log: Path | None = None,
+    comparison_reports: list[Path] | None = None,
 ) -> dict:
     output_dir.mkdir(parents=True, exist_ok=True)
     cfg, raw_config = load_config(config_path)
@@ -739,4 +743,11 @@ def run_backtest(
         "deterministic_result_sha256": sha256(canonical_json(summary).encode()).hexdigest(),
     }
     (output_dir / "manifest.json").write_text(json.dumps(manifest, indent=2, sort_keys=True), encoding="utf-8")
+    from .dataset_manifest import build_dataset_manifest, write_dataset_manifest
+
+    write_dataset_manifest(output_dir, build_dataset_manifest(
+        cfg=cfg, raw_config=raw_config, config_path=config_path, events_path=events_path,
+        events=events, output_dir=output_dir, derivatives_log=derivatives_log,
+        comparison_reports=comparison_reports,
+    ))
     return summary
