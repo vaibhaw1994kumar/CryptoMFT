@@ -36,7 +36,11 @@ OUTPUT_ROOT = Path("/Users/vaibhav/Documents/Newproject/out/sol_wf_backtest")
 
 # Date window — extend as data becomes available.
 START_DATE = "2022-01-13"
-END_DATE   = "2022-01-13"   # single day for now; extend to e.g. "2022-02-13"
+END_DATE   = "2022-01-13"   # ← extend to cover ≥14 days once data is downloaded
+                             # e.g. START_DATE="2022-01-01", END_DATE="2022-01-14"
+                             # With ≥14 days the WF path fires (wf_window_days=7,
+                             # wf_step_days=1 → 7 folds), FillModelV2 is fitted per
+                             # fold on past-only labels, and the gates become valid.
 
 BASE_CFG = ArbBacktestConfig(
     data_root=DATA_ROOT,
@@ -55,13 +59,16 @@ BASE_CFG = ArbBacktestConfig(
         mode="maker_taker",
         min_net_edge_bps=1.0,
         max_clip_notional=10_000.0,
-        # ── Action 4: enable gates ──
         block_on_toxic=True,           # real-time toxic flow block
+        # Gates are enabled but only execute when a temporally-valid FillModelV2
+        # is loaded.  On the single-day fallback path fill_model_v1=None so these
+        # values are inactive.  They become live automatically once ≥14 days of
+        # data activate the WF fold loop and FillModelV2.fit() succeeds per fold.
         min_fill_prob=0.5,             # skip signals with P(fill@5s) < 0.5
         max_adverse_prob=0.15,         # skip signals with P(adverse) > 0.15
-        max_ttf_s=8.0,                 # skip signals where E[TTF] > 8 s
+        max_ttf_s=8.0,                 # skip signals where E[TTF] > 8s
         max_cross_venue_skew_s=0.2,    # reject if books differ by > 200 ms
-        fill_gate_horizon_s=5.0,       # horizon used for both gates
+        fill_gate_horizon_s=5,         # horizon used for all gates (int, matches FillModelV2)
     ),
     output_dir=str(OUTPUT_ROOT / "SOLUSDT"),
 )
@@ -98,6 +105,14 @@ outcome = run_pair(
 
 print(f"status : {outcome.status}")
 print(f"detail : {outcome.detail}")
+if "[exploratory" in outcome.detail:
+    print()
+    print("WARNING: results are IN-SAMPLE / EXPLORATORY.")
+    print("  The fill-probability gate is disabled because there is insufficient")
+    print("  prior data for a temporally-guarded calibration window.")
+    print(f"  To get a valid walk-forward run set START_DATE at least")
+    print(f"  {WF_WINDOW_DAYS + 1} days before END_DATE.")
+    print()
 print()
 
 final = outcome.final

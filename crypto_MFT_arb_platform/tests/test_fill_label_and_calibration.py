@@ -380,6 +380,57 @@ class TestCalibrationDaysBacktest(unittest.TestCase):
         # Two-pass: same date window for both passes
         self.assertEqual(outcome.pass1["start_date"], outcome.pass2["start_date"])
 
+    def test_two_pass_fallback_labels_as_exploratory(self):
+        """When falling back to two-pass (no held-out calibration window),
+        the detail string must warn the caller that results are in-sample and
+        the fill-probability gate is disabled."""
+        out = Path(self.tmp.name) / "out_exploratory"
+        outcome = run_pair(
+            self.PAIR, self._base_config(), out,
+            two_pass=True, calibration_days=0, wf_window_days=7,
+        )
+        self.assertEqual(outcome.status, "ok")
+        # Must carry the exploratory tag so callers / scripts can detect it.
+        self.assertIn("[exploratory", outcome.detail,
+                      "two-pass fallback must label result as exploratory")
+
+    def test_two_pass_fallback_gate_disabled(self):
+        """Pass 2 in the two-pass fallback must have min_fill_prob=0.0 so the
+        fill gate never fires even when the base config requests a non-zero threshold."""
+        from new_backtest.arb_strategy import ArbConfig, TAKER_TAKER, MAKER_TAKER
+        from new_backtest.backtester import ArbBacktestConfig
+
+        # Use MAKER_TAKER with min_fill_prob=0.9 — would gate aggressively if active.
+        cfg = ArbBacktestConfig(
+            data_root=self.root,
+            venues=("bybit", "binance"),
+            start_date=self.DAYS[0],
+            end_date=self.DAYS[-1],
+            latency_preset="colocated_both",
+            arb=ArbConfig(
+                mode=MAKER_TAKER,
+                min_net_edge_bps=1.0,
+                max_clip_notional=10_000.0,
+                block_on_toxic=False,
+                min_fill_prob=0.9,
+            ),
+            include_deltas=False,
+        )
+        out = Path(self.tmp.name) / "out_gate_disabled"
+        outcome = run_pair(
+            self.PAIR, cfg, out,
+            two_pass=True, calibration_days=0, wf_window_days=7,
+        )
+        self.assertEqual(outcome.status, "ok")
+        # The gate must not have rejected any signals — pass2 strategy_report
+        # should show zero low_fill_prob rejects (gate was disabled).
+        pass2 = outcome.pass2 or {}
+        report = pass2.get("strategy_report", {})
+        self.assertEqual(
+            report.get("reject_low_fill_prob", 0), 0,
+            "fill gate must be disabled in two-pass fallback — no rejections expected",
+        )
+
     def test_calibration_days_splits_window(self):
         """calibration_days=2 → cal on first 2 days, eval on remaining 3."""
         out = Path(self.tmp.name) / "out_cal"
