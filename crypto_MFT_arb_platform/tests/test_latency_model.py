@@ -93,15 +93,18 @@ class TestLatencySamplerDistribution:
         assert p[10] < p[50] < p[90] < p[99], "percentiles must be monotone"
 
     def test_per_venue_samplers_independent(self):
-        """Feed and entry samplers must not share state; their sequences differ."""
-        spec = _spec(feed=5.0, entry=50.0, jitter=0.0)
+        """Feed and entry samplers must not share RNG state; the same
+        sequence index produces different values from each."""
+        # Use nonzero jitter so samples are random (not all equal to mean)
+        spec = _spec(feed=10.0, entry=10.0, jitter=3.0)  # same mean — only RNG differs
         vl = VenueLatency("bybit", spec, seed=42)
-        feed_samples = [vl.feed.sample_ms() for _ in range(100)]
-        entry_samples = [vl.entry.sample_ms() for _ in range(100)]
-        assert feed_samples != entry_samples, "feed and entry must use independent samplers"
-        # Means should reflect their configured values
-        assert abs(statistics.mean(feed_samples) - 5.0) < 1.0
-        assert abs(statistics.mean(entry_samples) - 50.0) < 5.0
+        feed_samples = [vl.feed.sample_ms() for _ in range(200)]
+        entry_samples = [vl.entry.sample_ms() for _ in range(200)]
+        # If they shared a single RNG, identical parameters would produce identical sequences.
+        assert feed_samples != entry_samples, "feed and entry must use independent RNG seeds"
+        # Both should be centred near their configured means
+        assert abs(statistics.mean(feed_samples) - 10.0) / 10.0 < 0.10
+        assert abs(statistics.mean(entry_samples) - 10.0) / 10.0 < 0.10
 
 
 # ── Q2: Feed latency applied exactly once ─────────────────────────────────────
@@ -156,22 +159,35 @@ class TestFeedLatencyAppliedOnce:
 
     def test_observe_receive_ts_backlogged_falls_back_to_projection(self):
         """An implausible local_ts (collector backlog) must route through
-        project_receive_ts, not use the raw local_ts."""
+        project_receive_ts, not use the raw local_ts.
+
+        This exercises the tolerance-band path (observe() returns False because
+        d is within hard_cap but outside tolerance_s), not the hard-cap path.
+        """
         spec = _spec(feed=5.0, jitter=0.0)
         aligner = HostClockAligner(warmup=1, tolerance_s=0.10)
         vl = VenueLatency("bybit", spec, seed=13, aligner=aligner)
 
-        # Seed the aligner: host is 0.05s behind exchange (negative offset)
-        vl.observe_receive_ts(1_700_000_000.0, 1_699_999_950.0)
+        # Seed the aligner with a record whose offset is -0.05s (within hard_cap=30s).
+        # exchange_ts=100.0, local_ts=99.95 → d = -0.05s
+        vl.observe_receive_ts(100.0, 99.95)
+        assert aligner.ready
+        assert abs(aligner.offset_s - (-0.05)) < 1e-9
 
-        # Backlogged record: local_ts is 60s after exchange_ts (far outside tolerance)
-        exchange_ts = 1_700_000_001.0
-        local_ts_backlogged = exchange_ts + 60.0
+        # Backlogged record: local_ts is +1.5s after exchange_ts.
+        # d = +1.5s; within hard_cap=30s but |1.5 - (-0.05)| = 1.55 > tolerance=0.10
+        # → observe() returns False → falls back to project_receive_ts
+        exchange_ts = 200.0
+        local_ts_backlogged = exchange_ts + 1.5
         recv, measured = vl.observe_receive_ts(exchange_ts, local_ts_backlogged)
 
         assert measured is False
-        # recv must be based on exchange_ts + aligner.offset + feed, not local_ts_backlogged
-        assert recv < local_ts_backlogged - 50.0, "backlogged local_ts must be discarded"
+        # recv = to_host(200.0) + 5ms = 200.0 + (-0.05) + 0.005 = 199.955
+        # which is far below local_ts_backlogged = 201.5
+        assert recv < local_ts_backlogged - 1.0, "backlogged local_ts must be discarded"
+        # recv must be close to exchange_ts + offset + feed, not local_ts_backlogged
+        expected = exchange_ts + aligner.offset_s + 0.005
+        assert recv == pytest.approx(expected, abs=1e-6)
 
     def test_entry_latency_separate_from_feed_latency(self):
         """entry_delay() uses the *entry* sampler, not the feed sampler."""
