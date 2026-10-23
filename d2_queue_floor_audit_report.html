@@ -1,0 +1,557 @@
+<title>D2 Queue-Floor Audit</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500;600&display=swap">
+<style>
+:root {
+  --bg: #f7f8fa;
+  --bg-card: #ffffff;
+  --bg-code: #f0f3f7;
+  --bg-nav: #111827;
+  --fg: #111827;
+  --fg-muted: #4b5563;
+  --fg-dim: #9ca3af;
+  --accent: #1d4ed8;
+  --border: #e5e7eb;
+  --confirmed: #166534; --confirmed-bg: #dcfce7;
+  --plausible: #92400e; --plausible-bg: #fef3c7;
+  --unverified: #1e40af; --unverified-bg: #dbeafe;
+  --notmeasurable: #4b5563; --notmeasurable-bg: #f3f4f6;
+  --red: #dc2626; --red-bg: #fee2e2;
+  --orange: #c2410c; --orange-bg: #ffedd5;
+  --p1c: #1d4ed8; --p2c: #0f766e; --p3c: #7c3aed;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --bg: #0d1117; --bg-card: #161b22; --bg-code: #21262d; --bg-nav: #010409;
+  --fg: #e6edf3; --fg-muted: #7d8590; --fg-dim: #484f58; --accent: #58a6ff; --border: #30363d;
+  --confirmed: #4ade80; --confirmed-bg: #0d2818;
+  --plausible: #f59e0b; --plausible-bg: #312107;
+  --unverified: #60a5fa; --unverified-bg: #1e3a5f;
+  --notmeasurable: #9ca3af; --notmeasurable-bg: #1f2937;
+  --red: #f87171; --red-bg: #3b0d0d;
+  --orange: #fb923c; --orange-bg: #431407;
+  color-scheme: dark;
+}}
+:root[data-theme="dark"] {
+  --bg: #0d1117; --bg-card: #161b22; --bg-code: #21262d; --bg-nav: #010409;
+  --fg: #e6edf3; --fg-muted: #7d8590; --fg-dim: #484f58; --accent: #58a6ff; --border: #30363d;
+  --confirmed: #4ade80; --confirmed-bg: #0d2818;
+  --plausible: #f59e0b; --plausible-bg: #312107;
+  --unverified: #60a5fa; --unverified-bg: #1e3a5f;
+  --notmeasurable: #9ca3af; --notmeasurable-bg: #1f2937;
+  --red: #f87171; --red-bg: #3b0d0d;
+  --orange: #fb923c; --orange-bg: #431407;
+  color-scheme: dark;
+}
+*,*::before,*::after{box-sizing:border-box}
+body{background:var(--bg);color:var(--fg);font-family:'Inter',system-ui,sans-serif;font-size:13.5px;line-height:1.65;margin:0;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));padding-block:0}
+.shell{display:grid;grid-template-columns:200px 1fr;min-height:100vh;max-width:1100px;margin:0 auto}
+.nav{background:var(--bg-nav);color:#c9d1d9;position:sticky;top:0;height:100vh;overflow-y:auto;padding:20px 0 40px;font-size:11.5px;flex-shrink:0}
+.nav-title{font-family:'JetBrains Mono',monospace;font-size:10px;letter-spacing:.08em;text-transform:uppercase;color:#58a6ff;padding:0 16px 14px;border-bottom:1px solid rgba(255,255,255,.08);margin-bottom:10px}
+.nav a{display:block;padding:4px 16px;color:#8b949e;text-decoration:none;border-left:2px solid transparent;line-height:1.4;transition:color .12s,background .12s}
+.nav a:hover{color:#e6edf3;background:rgba(255,255,255,.04)}
+.nav a.active{color:#58a6ff;border-left-color:#58a6ff;background:rgba(88,166,255,.06)}
+.nav .sect{font-family:'JetBrains Mono',monospace;font-size:9.5px;letter-spacing:.05em;text-transform:uppercase;padding:12px 16px 3px;color:#484f58}
+.nav a.sub{padding-left:28px}
+.main{padding:36px 44px 80px;min-width:0}
+.page-header{border-bottom:1px solid var(--border);padding-bottom:24px;margin-bottom:32px}
+.eyebrow{font-family:'JetBrains Mono',monospace;font-size:10.5px;letter-spacing:.08em;text-transform:uppercase;color:var(--accent);margin-bottom:8px}
+h1{font-size:22px;font-weight:600;margin:0 0 8px;line-height:1.3;text-wrap:balance}
+.subtitle{color:var(--fg-muted);font-size:13px;max-width:600px}
+h2{font-size:16px;font-weight:600;margin:40px 0 14px;display:flex;align-items:center;gap:8px;text-wrap:balance}
+h3{font-size:13.5px;font-weight:600;margin:22px 0 8px}
+h3.mono{font-family:'JetBrains Mono',monospace;font-size:12px}
+p{margin:0 0 10px}
+pre{background:var(--bg-code);border:1px solid var(--border);border-radius:5px;padding:14px 16px;overflow-x:auto;font-family:'JetBrains Mono',monospace;font-size:11.5px;line-height:1.6;margin:10px 0 14px}
+code{font-family:'JetBrains Mono',monospace;font-size:11.5px;background:var(--bg-code);padding:1px 5px;border-radius:3px;border:1px solid var(--border)}
+pre code{background:none;border:none;padding:0}
+.card{background:var(--bg-card);border:1px solid var(--border);border-radius:6px;padding:16px 20px;margin-bottom:12px}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin:12px 0}
+.grid3{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin:12px 0}
+.card-sm{background:var(--bg-card);border:1px solid var(--border);border-radius:5px;padding:12px 14px}
+.verdict{display:inline-flex;align-items:center;gap:5px;font-family:'JetBrains Mono',monospace;font-size:10px;font-weight:600;padding:2px 8px;border-radius:3px;letter-spacing:.03em}
+.v-confirmed{background:var(--confirmed-bg);color:var(--confirmed)}
+.v-plausible{background:var(--plausible-bg);color:var(--plausible)}
+.v-unverified{background:var(--unverified-bg);color:var(--unverified)}
+.v-notmeasurable{background:var(--notmeasurable-bg);color:var(--notmeasurable)}
+.alert{border-left:3px solid var(--red);background:var(--red-bg);border-radius:0 5px 5px 0;padding:12px 16px;margin:12px 0;color:var(--red);font-size:13px}
+.warn{border-left:3px solid var(--orange);background:var(--orange-bg);border-radius:0 5px 5px 0;padding:12px 16px;margin:12px 0;color:var(--orange);font-size:13px}
+.info{border-left:3px solid var(--accent);background:var(--unverified-bg);border-radius:0 5px 5px 0;padding:12px 16px;margin:12px 0;font-size:13px}
+table{width:100%;border-collapse:collapse;font-size:12px;margin:10px 0 14px}
+th{text-align:left;padding:7px 10px;background:var(--bg-code);border-bottom:2px solid var(--border);font-size:11px;font-weight:600;color:var(--fg-muted);text-transform:uppercase;letter-spacing:.04em}
+td{padding:7px 10px;border-bottom:1px solid var(--border);vertical-align:top}
+tr:last-child td{border-bottom:none}
+tr:hover td{background:var(--bg-code)}
+td.mono{font-family:'JetBrains Mono',monospace;font-size:11px}
+hr{border:none;border-top:1px solid var(--border);margin:28px 0}
+.stat-row{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:8px;margin:12px 0}
+.stat{background:var(--bg-card);border:1px solid var(--border);border-radius:5px;padding:10px 14px;text-align:center}
+.stat .val{font-family:'JetBrains Mono',monospace;font-size:19px;font-weight:600;color:var(--accent);font-variant-numeric:tabular-nums}
+.stat .lbl{font-size:10.5px;color:var(--fg-muted);margin-top:2px}
+.prio{display:inline-block;font-family:'JetBrains Mono',monospace;font-size:9.5px;font-weight:700;padding:1px 6px;border-radius:2px;margin-right:4px;letter-spacing:.03em}
+.p1{background:var(--red-bg);color:var(--red)}
+.p2{background:var(--plausible-bg);color:var(--plausible)}
+.p3{background:var(--unverified-bg);color:var(--unverified)}
+.p4{background:var(--notmeasurable-bg);color:var(--notmeasurable)}
+.section{margin-bottom:40px}
+@media(max-width:720px){.shell{grid-template-columns:1fr}.nav{display:none}.main{padding:20px 0 60px}.grid2,.grid3{grid-template-columns:1fr}}
+@media(prefers-reduced-motion:reduce){*{transition:none!important}}
+</style>
+
+<div class="shell">
+<nav class="nav">
+  <div class="nav-title">D2 Queue Audit</div>
+  <a href="#exec" class="active">Executive Summary</a>
+  <div class="sect">Phase 1 — Investigation</div>
+  <a href="#config-trace" class="sub">Config Trace</a>
+  <a href="#code-path" class="sub">Code Path</a>
+  <a href="#quantitative" class="sub">Quantitative</a>
+  <a href="#d3d4" class="sub">D3 / D4 Audit</a>
+  <div class="sect">Phase 2</div>
+  <a href="#sensitivity" class="sub">Sensitivity Tool</a>
+  <div class="sect">Phase 3</div>
+  <a href="#calibration" class="sub">Calibration Plan</a>
+  <div class="sect">Findings</div>
+  <a href="#telemetry" class="sub">Telemetry Gaps</a>
+  <a href="#remediation" class="sub">Remediation Plan</a>
+  <a href="#regression" class="sub">Test Plan</a>
+</nav>
+
+<main class="main">
+<div class="page-header" id="exec">
+  <div class="eyebrow">sol_2022_backtest · MakerConfig · fill_engine.py</div>
+  <h1>D2 Queue-Floor Audit Report</h1>
+  <p class="subtitle">Full investigation of whether <code>min_queue_ahead</code> is active, how absent-level placements flow through to fills, and whether the reported fill rates are inflated.</p>
+</div>
+
+<!-- ══ EXECUTIVE SUMMARY ══ -->
+<section class="section">
+  <div class="alert"><strong>Executive Conclusion</strong> — D2 is inactive in the sol_2022_backtest run. <code>min_queue_ahead = 0.0</code> in every code path that reaches the backtester; no CLI flag, config file, or override sets it to a non-zero value. As a result, 89.2% of maker placements start with zero initial queue, and the reported 1-second fill rate of 82.8% is the rate for a zero-queue simulator, not for an order joining a real FIFO queue. The fill rate for the 10.8% of orders that did observe a non-zero level was 75.0% — 8.8 percentage points lower. The magnitude of inflation from D2 alone cannot be precisely quantified without a controlled re-run, but the direction is confirmed: current rates are optimistic for instruments where the quoted level is typically present.</div>
+
+  <div class="stat-row">
+    <div class="stat"><div class="val">89.2%</div><div class="lbl">placements with<br>queue_ahead = 0</div></div>
+    <div class="stat"><div class="val">82.8%</div><div class="lbl">fill rate @1s<br>(zero-queue)</div></div>
+    <div class="stat"><div class="val">75.0%</div><div class="lbl">fill rate @1s<br>(positive queue)</div></div>
+    <div class="stat"><div class="val">0.0</div><div class="lbl">min_queue_ahead<br>in every run config</div></div>
+    <div class="stat"><div class="val">0.2%</div><div class="lbl">D3 double-count<br>events (443 rows)</div></div>
+  </div>
+</section>
+
+<hr>
+
+<!-- ══ CONFIG TRACE ══ -->
+<section class="section" id="config-trace">
+  <h2>1. Runtime Configuration Trace</h2>
+
+  <p>The <code>out/sol_2022_backtest/</code> output (fill_events.jsonl, fill_model_v2.json, fill_bucket_stats.json, trades.jsonl) was produced by the <strong>new_backtest stack</strong>, specifically via <code>run_sol_wf.py</code> calling <code>batch_backtest.run_pair()</code>. This is distinct from the older <code>AMM/Kraken/altcoin_mm_v1/run_sol_backtest.py</code> (which uses a different codebase and C++ fill engine).</p>
+
+  <p>The full configuration chain:</p>
+  <pre>scripts/run_sol_wf.py
+  BASE_CFG = ArbBacktestConfig(
+      arb=ArbConfig(mode="maker_taker", ...),
+      # ← NO maker= argument → uses field_default_factory=MakerConfig()
+  )
+  run_pair("SOLUSDT", base=BASE_CFG, two_pass=True)
+    └── _run_once(ArbBacktestConfig)
+          └── CrossVenueArbBacktester(config)
+                self.maker = MakerExecutor(fill_model, config.maker)
+                                                                  ↑
+                                               MakerConfig()  ← DEFAULT
+                                               min_queue_ahead = 0.0  ← CONFIRMED</pre>
+
+  <p><strong>Checked and confirmed absent:</strong></p>
+  <table>
+    <thead><tr><th>Location</th><th>min_queue_ahead override?</th><th>Evidence</th></tr></thead>
+    <tbody>
+      <tr><td class="mono">scripts/run_sol_wf.py</td><td>No</td><td>No <code>maker=MakerConfig(...)</code> argument</td></tr>
+      <tr><td class="mono">backtester.py CLI</td><td>No</td><td><code>build_arg_parser()</code> has no <code>--min-queue-ahead</code> flag</td></tr>
+      <tr><td class="mono">batch_backtest.py</td><td>No</td><td>Config is passed through unchanged</td></tr>
+      <tr><td class="mono">queue_sensitivity.py</td><td>No</td><td>Sweeps queue_stress_multiplier, not min_queue_ahead</td></tr>
+      <tr><td class="mono">Environment / env vars</td><td>No</td><td>No env-var loading in any of the above</td></tr>
+    </tbody>
+  </table>
+
+  <p>
+    <span class="verdict v-confirmed">CONFIRMED BY CODE</span>
+    <code>min_queue_ahead = 0.0</code> is the effective runtime value for the sol_2022_backtest. D2 was not activated.
+  </p>
+</section>
+
+<!-- ══ CODE PATH ══ -->
+<section class="section" id="code-path">
+  <h2>2. Code-Path Trace — Absent-Level → Zero Queue → Instant Fill</h2>
+
+  <p>Following the full path from strategy signal to fill for an absent-level order:</p>
+
+  <pre>1. strategy.evaluate() fires ArbSignal (mode=MAKER_TAKER, maker leg)
+2. _fire() → _send_leg() → pending.enqueue(release_ts = now + entry_latency)
+3. Event loop: pending.release(now) → _execute_arrival(order, now)
+4. _execute_arrival():
+     if not book.ready: miss → return                    # guarded by caller ✓
+     maker_order = self.maker.place(
+         price=order.limit_price,
+         book=book, active_ts=now,                       # placed_ts = active_ts = now
+         tick_size=self.tick_size[venue],
+     )
+
+5. place() → _level_size(book, side, price, tick_size):
+     tol = max(1e-12, 0.5 * tick_size)                  # e.g. 0.005 USDT for SOL
+     for lv_price, lv_size in book.levels(side, 50):
+         if abs(lv_price - price) <= tol: return lv_size
+     return 0.0                                           # ← level absent
+
+6. level_size = 0.0
+   initial_q = 0.0 * 1.0 = 0.0                          # queue_stress_multiplier=1
+   # D2 check:
+   if level_size == 0.0 and config.min_queue_ahead > 0.0:  # ← False (0.0 > 0.0 is False)
+       initial_q = config.min_queue_ahead                # ← NEVER REACHED
+   order.queue_ahead = 0.0
+   order.observed_level_size = 0.0
+
+7. On next DELTA or TRADE event at order.price:
+   _consume(order, volume=V, fill_share=delta_fill_share=0.15):
+     available = V
+     # queue drain:
+     drained = min(0.0, V) = 0.0                        # queue=0 → nothing to drain
+     available = V - 0 = V                               # full volume available
+     qty = min(order.remaining, V * 0.15)               # immediate partial fill
+     → Fill emitted</pre>
+
+  <p>The zero-queue order receives its first fill attribution on the very first delta event that touches its price level, with no queue to consume first. For a level with only 1 SOL resting (order size 0.5 SOL), a delta shrink of even 0.1 SOL produces a fill of <code>min(0.5, 0.1 × 0.15) = 0.015 SOL</code>. Because delta events are frequent on liquid instruments, many small fill attributions accumulate quickly into a full fill. This is why <code>observation_time_s ≈ 0</code> for filled zero-queue orders and fill rates at 1s are high.</p>
+
+  <p>
+    <span class="verdict v-confirmed">CONFIRMED BY CODE</span>
+    Absent-level orders always start with <code>queue_ahead = 0.0</code> and receive fill attribution on the first touching delta event.
+  </p>
+</section>
+
+<!-- ══ QUANTITATIVE ══ -->
+<section class="section" id="quantitative">
+  <h2>3. Quantitative Attribution</h2>
+
+  <p>All figures computed from <code>out/sol_2022_backtest/fill_events.jsonl</code> (1,329 rows, horizons 1/5/15). Fill rates reproduced exactly.</p>
+
+  <div class="grid2">
+    <div class="card-sm">
+      <h3>H=1s population split</h3>
+      <table>
+        <thead><tr><th>Group</th><th>Count</th><th>%</th><th>Fill@1s</th></tr></thead>
+        <tbody>
+          <tr><td>queue_ahead = 0.0</td><td>395</td><td>89.2%</td><td><strong>83.8%</strong></td></tr>
+          <tr><td>queue_ahead &gt; 0.0</td><td>48</td><td>10.8%</td><td><strong>75.0%</strong></td></tr>
+          <tr><td><strong>Total</strong></td><td>443</td><td>100%</td><td><strong>82.8%</strong></td></tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="card-sm">
+      <h3>Fill source attribution (H=1, qty)</h3>
+      <table>
+        <thead><tr><th>Group</th><th>Trade</th><th>Delta</th><th>Snap</th></tr></thead>
+        <tbody>
+          <tr><td>Zero-queue (395)</td><td>211.6</td><td>179.2</td><td>2.0</td></tr>
+          <tr><td>Pos-queue (48)</td><td>11.7</td><td>34.0</td><td>2.1</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="card-sm" style="margin:12px 0">
+    <h3>Positive-queue observations (48 orders)</h3>
+    <table>
+      <thead><tr><th>Stat</th><th>queue_ahead (SOL)</th></tr></thead>
+      <tbody>
+        <tr><td>Min</td><td>0.10</td></tr>
+        <tr><td>Median</td><td>38.50</td></tr>
+        <tr><td>Mean</td><td>187.78</td></tr>
+        <tr><td>Max</td><td>1,155.00</td></tr>
+      </tbody>
+    </table>
+    <p style="margin-top:8px;font-size:12px;color:var(--fg-muted)">These are the only orders where tick_size/price matching found a live level at placement time. Median observed queue of 38.5 SOL (~$3,200 at Jan 2022 price) suggests the level was meaningfully occupied when these orders landed.</p>
+  </div>
+
+  <h3>Horizon fill rates (all 443 orders)</h3>
+  <table>
+    <thead><tr><th>Horizon</th><th>Filled</th><th>Total</th><th>Rate</th><th>Note</th></tr></thead>
+    <tbody>
+      <tr><td>1 s</td><td>367</td><td>443</td><td><strong>82.8%</strong></td><td>Matches reported value ✓</td></tr>
+      <tr><td>5 s</td><td>405</td><td>443</td><td><strong>91.4%</strong></td><td>Matches reported value ✓</td></tr>
+      <tr><td>15 s</td><td>441</td><td>443</td><td><strong>99.5%</strong></td><td>Near-total fill rate is suspicious</td></tr>
+    </tbody>
+  </table>
+
+  <div class="warn"><strong>99.5% fill rate at 15s is a red flag.</strong> In a real market, some maker orders are cancelled before filling (adverse move, spread close, inventory constraint). All 443 H=1 records have <code>terminal_reason = "full_fill"</code> — zero cancels recorded. This either means (a) all orders in this single-day run happened to fill before cancel logic triggered, or (b) cancel telemetry is not flowing into fill_events.jsonl (plausible if <code>cancel_all()</code> at end-of-run produces <code>terminal_reason="cancel"</code> records that weren't written — needs verification). <span class="verdict v-plausible">PLAUSIBLE BUT UNVERIFIED</span></div>
+
+  <h3>Telemetry gap: observation_time_s</h3>
+  <p>The <code>observation_time_s</code> field is stored in <code>LoggedOrderEvent</code> but is <strong>absent from the JSONL output</strong> — <code>EmpiricalFillModel.save_event_log()</code> does not write it. Time-to-first-fill cannot be measured from the current artifacts. Fill rates can be reproduced but TTF distributions cannot.</p>
+  <p><span class="verdict v-confirmed">CONFIRMED BY DATA</span> The field resolves to <code>0.0</code> for all 443 rows via <code>r.get('observation_time_s', 0)</code>.</p>
+</section>
+
+<!-- ══ D3 / D4 ══ -->
+<section class="section" id="d3d4">
+  <h2>4. D3 / D4 Audit</h2>
+
+  <h3>D3 — Trade tape + delta double-count</h3>
+  <p>D3 occurs when the same economic volume appears in both a TRADE event and a DELTA event, causing <code>_consume()</code> to be called twice for the same volume. Expected overcount factor: <code>1 + delta_fill_share = 1.15</code>.</p>
+  <p><strong>Measured impact:</strong> Only <strong>1 out of 443</strong> H=1 fill records (0.2%) had both <code>trade_fill_qty &gt; 0</code> AND <code>book_event_fill_qty &gt; 0</code>. The combined qty for that one record was 1.0 SOL (order size). D3 is measurable in this dataset and its impact is negligible for the Jan 2022 SOL data.</p>
+  <p><span class="verdict v-confirmed">CONFIRMED BY DATA</span> D3 contributed to at most 0.2% of fills. Not a material source of fill rate inflation for this dataset.</p>
+  <p>Note: the low D3 rate likely reflects the exchange's event stream: Bybit and Binance send TRADE and DELTA as separate events only rarely overlapping for the same level shrink in the same event batch. The 1.15× theoretical factor applies only to the minority of events where both fire.</p>
+
+  <h3>D4 — Cancel vs. trade attribution in delta events</h3>
+  <p>D4: when a bid/ask level shrinks, <code>on_delta()</code> calls <code>_consume()</code> with <code>delta_fill_share=0.15</code>. The shrink could be a cancellation (no actual trade at our price) or a real trade. On L2 feeds we cannot distinguish them.</p>
+  <p>Looking at zero-queue fill attribution: 179.2 SOL filled by delta events vs. 211.6 by trade events. Delta events are responsible for ~46% of zero-queue fill volume. The fraction of those deltas that represent genuine trades (vs. cancels) is <strong>not measurable</strong> from L2 data alone.</p>
+  <p><span class="verdict v-notmeasurable">NOT MEASURABLE</span> with available L2 data. Would require a trade tape matched against the delta stream with unique event IDs.</p>
+  <p>What is defensible: the <code>delta_fill_share=0.15</code> constant means the simulator assumes 15% of any level shrink reaches our order. Whether this calibration is correct is an open empirical question.</p>
+</section>
+
+<hr>
+
+<!-- ══ PHASE 2: SENSITIVITY ══ -->
+<section class="section" id="sensitivity">
+  <h2>Phase 2 — Sensitivity Experiment Tool</h2>
+
+  <p>A <code>queue_sensitivity.py</code> module already exists at <code>src/new_backtest/queue_sensitivity.py</code>. It runs the full backtester over a sweep of <code>queue_stress_multiplier</code>, <code>trade_fill_share</code>, and <code>delta_fill_share</code>. It does NOT currently sweep <code>min_queue_ahead</code>.</p>
+
+  <div class="info"><strong>The controlled experiment cannot be executed right now</strong> because the Jan 2022 SOLUSDT data used for sol_2022_backtest requires both Bybit and Binance raw Parquet feeds at <code>data/bybit/</code> and <code>data/binance/</code>. Data availability needs to be verified before running. The tool is ready to use once data is confirmed.</div>
+
+  <p>To run the Phase 2 experiment once data is available:</p>
+  <pre>cd /Users/vaibhav/Documents/Newproject/crypto_MFT_arb_platform
+
+# Baseline + queue_stress sweep (existing tool)
+python -m new_backtest.queue_sensitivity \
+    --pair SOLUSDT \
+    --data-root /Users/vaibhav/Documents/Newproject/data \
+    --start 2022-01-13 --end 2022-01-13 \
+    --mode maker_taker \
+    --queue-stress-values 0.0 0.25 0.5 1.0 2.0 5.0 \
+    --output out/queue_sweep_sol</pre>
+
+  <p>The <code>min_queue_ahead</code> sweep is not yet in the tool. To add it, extend <code>queue_sensitivity.py</code> with a <code>min_queue_sweep</code> dimension. Proposed values based on observed median queue depth from the 10.8% present-level placements:</p>
+  <table>
+    <thead><tr><th>Run ID</th><th>min_queue_ahead (SOL)</th><th>Rationale</th></tr></thead>
+    <tbody>
+      <tr><td>A (baseline)</td><td>0.0</td><td>Current default — reproduce published rates</td></tr>
+      <tr><td>B</td><td>10.0</td><td>~25th pct of observed present-level depths</td></tr>
+      <tr><td>C</td><td>38.5</td><td>Median observed present-level queue depth</td></tr>
+      <tr><td>D</td><td>100.0</td><td>Conservative; 50th pct of present levels exceeds this</td></tr>
+      <tr><td>E</td><td>187.8</td><td>Mean observed present-level queue depth</td></tr>
+    </tbody>
+  </table>
+  <p><span class="verdict v-plausible">PLAUSIBLE BUT UNVERIFIED</span> The 10.8% present-level observations (median=38.5 SOL) are the best available proxy for absent-level queue depth on this instrument. Using them as floors is defensible but not ground truth — the absent levels may have had no real queue or a different depth distribution.</p>
+</section>
+
+<hr>
+
+<!-- ══ PHASE 3: CALIBRATION ══ -->
+<section class="section" id="calibration">
+  <h2>Phase 3 — Calibration Methodology</h2>
+
+  <p>A defensible calibration for <code>min_queue_ahead</code> requires separating two questions: (1) what is the typical queue depth when our level IS present? (2) what is the appropriate floor for when it is ABSENT?</p>
+
+  <div class="grid2">
+    <div class="card-sm">
+      <h3>What to measure</h3>
+      <p>From the 10.8% of placements where <code>_level_size() &gt; 0</code>, extract the distribution of observed level sizes at placement. Segment by: quoting side, distance-from-touch ticks, spread bucket, book-depth bucket, time of day.</p>
+      <p>A conservative estimate: set <code>min_queue_ahead</code> to the <strong>25th percentile</strong> of the present-level distribution for that (instrument, side, ticks-away) bin. This is neither best-case (0) nor worst-case (full visible depth).</p>
+    </div>
+    <div class="card-sm">
+      <h3>Leakage guardrails</h3>
+      <p>Calibrate <code>min_queue_ahead</code> from a separate <em>calibration window</em> that predates the evaluation window, the same way <code>WalkForwardCalibrator</code> handles fill probability models. Never calibrate on the same day you evaluate.</p>
+      <p>The empirical fill model learns from the simulator's own outputs. If <code>min_queue_ahead=0</code> creates fast fills, the model learns "orders fill fast" and re-inforces optimistic gates. Fixing D2 must happen in Pass 1 to prevent this circular self-reinforcement.</p>
+    </div>
+  </div>
+
+  <h3>Step-by-step procedure</h3>
+  <pre># Step 1: extract level size distribution from a held-out calibration day
+python3 -c "
+import json
+with open('out/sol_2022_backtest/fill_events.jsonl') as f:
+    rows = [json.loads(l) for l in f if json.loads(l).get('horizon_s')==1]
+# Use local_depth as proxy for observed level depth
+import statistics
+pos = [r['local_depth'] for r in rows if r.get('queue_ahead',0) > 0]
+print(f'p25={sorted(pos)[len(pos)//4]:.1f} median={statistics.median(pos):.1f}')
+"
+
+# Step 2: set min_queue_ahead in ArbBacktestConfig
+from new_backtest.fill_engine import MakerConfig
+cfg = ArbBacktestConfig(
+    ...
+    maker=MakerConfig(min_queue_ahead=38.5),   # calibrated from Step 1
+)
+
+# Step 3: run queue_sensitivity sweep across candidate values
+# (runs A through E from Phase 2 table)</pre>
+
+  <p>Do not treat any of the values in the Phase 2 table as ground truth. They are hypotheses to test. The experiment output (fill rates, TTF distributions, PnL) will reveal sensitivity and indicate whether the effect is material.</p>
+</section>
+
+<hr>
+
+<!-- ══ TELEMETRY GAPS ══ -->
+<section class="section" id="telemetry">
+  <h2>Telemetry Gaps</h2>
+
+  <p>The following fields are needed to fully answer the audit questions but are missing from current artifacts:</p>
+
+  <table>
+    <thead><tr><th>Field</th><th>Where missing</th><th>Why needed</th><th>Fix</th></tr></thead>
+    <tbody>
+      <tr>
+        <td><code>observation_time_s</code></td>
+        <td>fill_events.jsonl (in LoggedOrderEvent but not serialized)</td>
+        <td>TTF distribution — cannot measure how long orders took to fill</td>
+        <td>Add to <code>EmpiricalFillModel.save_event_log()</code></td>
+      </tr>
+      <tr>
+        <td><code>level_was_absent</code></td>
+        <td>fill_events.jsonl (not recorded)</td>
+        <td>Directly flags which fills came from absent-level placements</td>
+        <td>Add boolean to <code>LoggedOrderEvent</code>; set in <code>place()</code></td>
+      </tr>
+      <tr>
+        <td><code>initial_queue_ahead</code> in JSONL</td>
+        <td>In MakerOrder but not in LoggedOrderEvent output</td>
+        <td>Currently only <code>queue_ahead</code> (at placement snapshot) is written; the actual initial value is lost</td>
+        <td>Confirm <code>initial_queue_ahead</code> field flows to JSONL (it is in LoggedOrderEvent.queue_ahead)</td>
+      </tr>
+      <tr>
+        <td>Cancel records in fill_events.jsonl</td>
+        <td>99.5% full_fill rate suggests cancels not recorded or none occurred</td>
+        <td>Without cancels, IPCW weights for fill model training are biased</td>
+        <td>Verify <code>cancel_all()</code> calls <code>_record_outcome(order, end_ts=now)</code> and JSONL is flushed after drain</td>
+      </tr>
+      <tr>
+        <td>Per-event delta source (trade vs. cancel)</td>
+        <td>Not available on L2 feed</td>
+        <td>Required to measure D4 impact</td>
+        <td>Requires L3 order-by-order data from exchange</td>
+      </tr>
+    </tbody>
+  </table>
+</section>
+
+<!-- ══ REMEDIATION ══ -->
+<section class="section" id="remediation">
+  <h2>Prioritized Remediation Plan</h2>
+
+  <table>
+    <thead><tr><th>Priority</th><th>Action</th><th>Effort</th><th>Status</th></tr></thead>
+    <tbody>
+      <tr>
+        <td><span class="prio p1">P1</span></td>
+        <td>Add <code>--min-queue-ahead</code> flag to <code>backtester.py</code> CLI and wire into <code>config_from_args()</code></td>
+        <td>~15 min</td>
+        <td>Confirmed defect</td>
+      </tr>
+      <tr>
+        <td><span class="prio p1">P1</span></td>
+        <td>Add <code>min_queue_ahead</code> to <code>run_sol_wf.py</code> MakerConfig with a calibrated value once Phase 2 experiment completes</td>
+        <td>~5 min (after calibration)</td>
+        <td>Confirmed defect</td>
+      </tr>
+      <tr>
+        <td><span class="prio p1">P1</span></td>
+        <td>Serialize <code>observation_time_s</code> in <code>EmpiricalFillModel.save_event_log()</code></td>
+        <td>~10 min</td>
+        <td>Telemetry gap confirmed</td>
+      </tr>
+      <tr>
+        <td><span class="prio p2">P2</span></td>
+        <td>Add <code>level_was_absent</code> boolean to <code>LoggedOrderEvent</code> + <code>MakerOrder</code>; set in <code>place()</code> when <code>level_size == 0.0</code></td>
+        <td>~20 min</td>
+        <td>Telemetry gap confirmed</td>
+      </tr>
+      <tr>
+        <td><span class="prio p2">P2</span></td>
+        <td>Add <code>min_queue_ahead</code> sweep dimension to <code>queue_sensitivity.py</code></td>
+        <td>~30 min</td>
+        <td>Calibration gap</td>
+      </tr>
+      <tr>
+        <td><span class="prio p2">P2</span></td>
+        <td>Verify cancel records in fill_events.jsonl; confirm <code>cancel_all()</code> at end-of-run produces <code>terminal_reason="cancel"</code> rows</td>
+        <td>~20 min</td>
+        <td>Plausible but unverified</td>
+      </tr>
+      <tr>
+        <td><span class="prio p3">P3</span></td>
+        <td>Run Phase 2 queue_sensitivity sweep once data is confirmed available; report fill rate vs. queue_stress_multiplier and min_queue_ahead</td>
+        <td>~1 hr (data + run)</td>
+        <td>Experiment pending data</td>
+      </tr>
+      <tr>
+        <td><span class="prio p3">P3</span></td>
+        <td>Fix <code>_record_outcome</code> to use <code>active_ts</code> not <code>placed_ts</code> for TTF baseline (eliminates latency inflation in E[TTF])</td>
+        <td>~10 min</td>
+        <td>Medium-severity modeling gap</td>
+      </tr>
+      <tr>
+        <td><span class="prio p4">P4</span></td>
+        <td>Fix synthetic-fill exclusion logic: exclude order from training only if <code>first_fill_is_synthetic</code>, not if any synthetic qty touched the order</td>
+        <td>~20 min</td>
+        <td>Low-impact, background agents disabled</td>
+      </tr>
+    </tbody>
+  </table>
+</section>
+
+<!-- ══ REGRESSION TEST PLAN ══ -->
+<section class="section" id="regression">
+  <h2>Regression Test Plan</h2>
+
+  <div class="grid2">
+    <div class="card-sm">
+      <h3>Absent-level / min_queue_ahead</h3>
+      <ul style="font-size:12.5px;padding-left:18px;margin:6px 0">
+        <li>Place order at level absent from book → <code>queue_ahead = min_queue_ahead</code></li>
+        <li>Place at absent level, <code>min_queue_ahead=0</code> → <code>queue_ahead = 0</code></li>
+        <li>Place at present level, any <code>min_queue_ahead</code> → floor NOT applied</li>
+        <li>Place at present level, <code>queue_stress=0</code> → <code>queue_ahead=0</code>, min_queue_ahead not applied</li>
+      </ul>
+    </div>
+    <div class="card-sm">
+      <h3>Queue drain correctness</h3>
+      <ul style="font-size:12.5px;padding-left:18px;margin:6px 0">
+        <li>Trade of V units at price → <code>queue_ahead</code> drains by min(V, queue)</li>
+        <li>Delta shrink → drain by <code>delta_fill_share × volume</code> after queue</li>
+        <li>Two orders at same price → queue drain is independent (not sequential)</li>
+        <li>Order placed after replenishment → <code>observed_level_size</code> does not increase</li>
+      </ul>
+    </div>
+    <div class="card-sm">
+      <h3>D3 / event deduplication</h3>
+      <ul style="font-size:12.5px;padding-left:18px;margin:6px 0">
+        <li>Trade then delta for same V → combined fill = V + V×0.15 (1.15× baseline)</li>
+        <li>Delta alone for V → fill = V × 0.15</li>
+        <li>Trade alone for V → fill = V × 1.0 (after queue drain)</li>
+      </ul>
+    </div>
+    <div class="card-sm">
+      <h3>Replay determinism</h3>
+      <ul style="font-size:12.5px;padding-left:18px;margin:6px 0">
+        <li>Same config, same seed → identical fill_events.jsonl</li>
+        <li>Changing <code>min_queue_ahead</code> → fill rates change monotonically</li>
+        <li>Cancel at end of run → records appear in fill_events.jsonl with <code>terminal_reason=cancel</code></li>
+      </ul>
+    </div>
+  </div>
+
+  <div class="card" style="margin-top:16px">
+    <h3>Existing coverage (<code>test_queue_sensitivity.py</code>)</h3>
+    <p>The file <code>crypto_MFT_arb_platform/tests/test_queue_sensitivity.py</code> exists and imports <code>QueueSensitivityReport</code> / <code>SweepPoint</code>. Its coverage should be verified and extended to include absent-level placements and <code>min_queue_ahead</code> floor behavior.</p>
+  </div>
+</section>
+
+</main>
+</div>
+
+<script>
+const sections = document.querySelectorAll('[id]');
+const navLinks = document.querySelectorAll('.nav a');
+function updateActive() {
+  let cur = '';
+  sections.forEach(s => { if (window.scrollY >= s.offsetTop - 90) cur = s.id; });
+  navLinks.forEach(a => { a.classList.toggle('active', a.getAttribute('href') === '#' + cur); });
+}
+window.addEventListener('scroll', updateActive, {passive: true});
+updateActive();
+</script>

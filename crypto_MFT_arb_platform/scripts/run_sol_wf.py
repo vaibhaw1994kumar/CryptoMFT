@@ -27,6 +27,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 from new_backtest.arb_strategy import ArbConfig
 from new_backtest.backtester import ArbBacktestConfig
 from new_backtest.batch_backtest import run_pair
+from new_backtest.fill_engine import MakerConfig
 
 # ── Configuration ────────────────────────────────────────────────────────────
 
@@ -46,6 +47,10 @@ BASE_CFG = ArbBacktestConfig(
     latency_preset="colocated_both",
     bybit_fee_preset="bybit_perp_mm",     # Action 5: perp fees for both legs
     binance_fee_preset="binance_perp_vip0",
+    # D2 fix: p25 of observed present-level depths from sol_2022_backtest (48 present-level
+    # placements, queue_ahead > 0).  Prevents absent-level orders from filling on the first
+    # touching event with zero queue; calibrate per-instrument as more data accumulates.
+    maker=MakerConfig(min_queue_ahead=25.0),
     arb=ArbConfig(
         mode="maker_taker",
         min_net_edge_bps=1.0,

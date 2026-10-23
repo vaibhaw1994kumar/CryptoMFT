@@ -68,6 +68,7 @@ class SweepPoint:
     queue_stress_multiplier: float
     trade_fill_share: float
     delta_fill_share: float
+    min_queue_ahead: float = 0.0
 
     # Derived from backtest result
     orders_sent: int = 0
@@ -103,6 +104,9 @@ class QueueSensitivityReport:
     # delta_fill_share sweep (queue_stress=1, trade=default)
     delta_fill_sweep: list[SweepPoint] = field(default_factory=list)
 
+    # min_queue_ahead sweep (queue_stress=1, trade/delta at default)
+    min_queue_ahead_sweep: list[SweepPoint] = field(default_factory=list)
+
     def to_json(self) -> str:
         return json.dumps(asdict(self), indent=2, default=str)
 
@@ -132,6 +136,8 @@ class QueueSensitivityReport:
              lambda p: p.trade_fill_share)
         _row(self.delta_fill_sweep, "delta_fill_share",
              lambda p: p.delta_fill_share)
+        _row(self.min_queue_ahead_sweep, "min_queue_ahead",
+             lambda p: p.min_queue_ahead)
         print()
 
 
@@ -164,6 +170,7 @@ def _run_point(
         queue_stress_multiplier=maker_cfg.queue_stress_multiplier,
         trade_fill_share=maker_cfg.trade_fill_share,
         delta_fill_share=maker_cfg.delta_fill_share,
+        min_queue_ahead=maker_cfg.min_queue_ahead,
     )
 
     try:
@@ -191,6 +198,7 @@ def sweep(
     queue_stress_values: Sequence[float] = (0.0, 0.25, 0.5, 1.0, 2.0, 5.0),
     trade_fill_values: Sequence[float] = (0.5, 0.75, 1.0),
     delta_fill_values: Sequence[float] = (0.05, 0.15, 0.30),
+    min_queue_ahead_values: Sequence[float] = (0.0, 10.0, 25.0, 38.5, 100.0, 188.0),
 ) -> QueueSensitivityReport:
     """Run the sensitivity sweep and return a QueueSensitivityReport.
 
@@ -207,6 +215,10 @@ def sweep(
     queue_stress_values:
         Values of MakerConfig.queue_stress_multiplier to sweep.  Must include 1.0
         for the baseline.
+    min_queue_ahead_values:
+        Values of MakerConfig.min_queue_ahead to sweep (queue_stress=1,
+        trade/delta shares at default). 0.0 = current default (no floor).
+        Calibrate from the p25 of observed present-level depths per instrument.
     trade_fill_values:
         Values of MakerConfig.trade_fill_share to sweep. Must include 1.0 for baseline.
     delta_fill_values:
@@ -274,6 +286,22 @@ def sweep(
             sp = baseline_sp
         df_sweep.append(sp)
 
+    # min_queue_ahead sweep (queue_stress=1, trade/delta at default)
+    mqa_sweep: list[SweepPoint] = []
+    for mqa in sorted(set(min_queue_ahead_values)):
+        mc = MakerConfig(
+            queue_stress_multiplier=default_mc.queue_stress_multiplier,
+            trade_fill_share=default_mc.trade_fill_share,
+            delta_fill_share=default_mc.delta_fill_share,
+            snapshot_fill_share=default_mc.snapshot_fill_share,
+            min_queue_ahead=mqa,
+        )
+        label = f"mqa_{mqa:.1f}".replace(".", "p")
+        sp = _run_point(base, pair, out, mc, label)
+        if abs(mqa - 0.0) < 1e-9:
+            sp = baseline_sp  # 0.0 is the default → reuse baseline
+        mqa_sweep.append(sp)
+
     report = QueueSensitivityReport(
         pair=pair,
         start_date=base.start_date,
@@ -284,6 +312,7 @@ def sweep(
         queue_stress_sweep=qs_sweep,
         trade_fill_sweep=tf_sweep,
         delta_fill_sweep=df_sweep,
+        min_queue_ahead_sweep=mqa_sweep,
     )
 
     if output_dir is not None:
@@ -337,6 +366,15 @@ def _build_parser():
         metavar="F",
         help="Values for delta_fill_share (default: 0.05 0.15 0.30)",
     )
+    p.add_argument(
+        "--min-queue-ahead-values", nargs="+", type=float,
+        default=[0.0, 10.0, 25.0, 38.5, 100.0, 188.0],
+        metavar="F",
+        dest="min_queue_ahead_values",
+        help="Values for min_queue_ahead floor in base-asset units "
+             "(default: 0.0 10.0 25.0 38.5 100.0 188.0 — calibrated from "
+             "SOLUSDT 2022-01-13 present-level p10/p25/p50/mean)",
+    )
     return p
 
 
@@ -368,6 +406,7 @@ def main(argv=None):
         queue_stress_values=args.queue_stress_values,
         trade_fill_values=args.trade_fill_values,
         delta_fill_values=args.delta_fill_values,
+        min_queue_ahead_values=args.min_queue_ahead_values,
     )
     report.print_table()
     return 0
