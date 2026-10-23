@@ -120,6 +120,7 @@ def extract_labels(
             horizon_s = int(payload.get("horizon_s", 0))
             terminal_reason = str(payload.get("terminal_reason", ""))
             filled = bool(payload.get("filled", False))
+            obs_time_present = "observation_time_s" in payload
             obs_time = float(payload.get("observation_time_s", 0.0))
 
             # Leakage guard: skip if label hasn't matured at until_ts
@@ -127,12 +128,14 @@ def extract_labels(
                 continue
 
             # Derive is_censored: order cancelled before this horizon without filling.
-            # Old logs (obs_time == 0.0) default to is_censored=False so behaviour
-            # is unchanged for logs that predate this field.
+            # Use obs_time_present to distinguish two zero cases:
+            #   - field absent (old logs): obs_time_present=False → is_censored=False (compat)
+            #   - field present but zero (same-tick cancel in replay): correctly censored
+            #     because the order was genuinely cancelled before any observable lifetime.
             is_censored = (
                 not filled
                 and terminal_reason == "cancel"
-                and obs_time > 0.0
+                and obs_time_present
                 and obs_time < horizon_s
             )
 

@@ -167,6 +167,54 @@ class TestExtractLabels(unittest.TestCase):
         records = extract_labels(self.log)
         self.assertEqual(len(records), 10)
 
+    # ── P2.1: same-tick cancel censoring fix ──────────────────────────────────
+
+    def test_cancel_zero_obs_time_field_present_is_censored(self):
+        """Cancel with observation_time_s=0.0 in payload (new log, same-tick replay)
+        must be classified as censored — the order was genuinely cancelled before
+        any observable lifetime."""
+        ev = _make_event(ts=1000.0, horizon_s=5, filled=False, terminal_reason="cancel")
+        ev["observation_time_s"] = 0.0   # field present, zero value
+        _write_events(self.log, [ev])
+        rec = extract_labels(self.log)[0]
+        self.assertTrue(
+            rec.is_censored,
+            "Cancel with obs_time_s=0.0 (field present) must be censored, "
+            "not treated as a negative label",
+        )
+
+    def test_cancel_obs_time_field_absent_is_not_censored(self):
+        """Cancel without observation_time_s in payload (old log format) must
+        default to is_censored=False for backward compatibility."""
+        ev = _make_event(ts=1000.0, horizon_s=5, filled=False, terminal_reason="cancel")
+        # _make_event does NOT include observation_time_s — simulates an old log
+        self.assertNotIn("observation_time_s", ev)
+        _write_events(self.log, [ev])
+        rec = extract_labels(self.log)[0]
+        self.assertFalse(
+            rec.is_censored,
+            "Cancel with observation_time_s field absent (old log) must not be "
+            "censored — backward compat preserved",
+        )
+
+    def test_cancel_nonzero_obs_time_before_horizon_is_censored(self):
+        """Cancel with obs_time=2.0 < horizon_s=5 must be censored (unchanged behavior)."""
+        ev = _make_event(ts=1000.0, horizon_s=5, filled=False, terminal_reason="cancel")
+        ev["observation_time_s"] = 2.0
+        _write_events(self.log, [ev])
+        rec = extract_labels(self.log)[0]
+        self.assertTrue(rec.is_censored)
+        self.assertAlmostEqual(rec.observation_time_s, 2.0)
+
+    def test_cancel_obs_time_after_horizon_is_not_censored(self):
+        """Cancel with obs_time=10.0 >= horizon_s=5 was observable for the full
+        horizon — classify as a negative label, not censored."""
+        ev = _make_event(ts=1000.0, horizon_s=5, filled=False, terminal_reason="cancel")
+        ev["observation_time_s"] = 10.0
+        _write_events(self.log, [ev])
+        rec = extract_labels(self.log)[0]
+        self.assertFalse(rec.is_censored)
+
 
 # ── WalkForwardCalibrator ─────────────────────────────────────────────────────
 
