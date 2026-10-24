@@ -294,9 +294,14 @@ class StructuredLogStore:
     ) -> StructuredLogRecord:
         payload = payload or {}
         return StructuredLogRecord(
+            # The id covers what makes a record distinct (its source event, raw_ref and
+            # payload), so INSERT OR IGNORE only drops true re-deliveries. Without them,
+            # distinct records sharing a timestamp were silently lost (Windows' 15.6 ms
+            # clock tick makes equal timestamps common).
             log_id=stable_id(
                 "structured-log", session_id, "CONNECTOR", event_type, ts_ns,
-                venue, host, message,
+                venue, host, message, source_event_id, raw_ref,
+                json.dumps(payload, default=json_default, sort_keys=True, separators=(",", ":")),
             ),
             ts_ns=ts_ns, level=level, component="CONNECTOR",
             event_type=event_type, message=message, correlation_id=session_id,

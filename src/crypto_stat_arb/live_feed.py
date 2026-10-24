@@ -2051,7 +2051,9 @@ class LiveOrderBookService:
             ):
                 self._emit_ohlc(bar)
         self.stats[event.venue].canonical_events += 1
-        if accepted or state != previous_state:
+        # State *transitions* only: every applied update is already in canonical.jsonl and
+        # trace.jsonl with its raw_ref; a log row per update cost ~45% of frame processing.
+        if state != previous_state:
             self._connector_log(
                 "BOOK_STATE", (
                     StructuredLogLevel.INFO if state == BookState.VALID

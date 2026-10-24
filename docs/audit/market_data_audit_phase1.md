@@ -474,3 +474,46 @@ Each fails the matching test.
 - **`run_all_local`:** the stages after its unittest step PASSED.
 
 **Still open in Step 12:** "processing queue overflow" doesn't apply as such, because there is no internal queue: backlog is detected by FEED_DELAYED (Phase 3).
+
+## Phase 6: Step 13 load and degraded conditions (2026-10-24)
+
+**Data.** `runs/paper_watch/` (the 2026-09-14 spot cycles and the spot-regression baseline) was deleted outside this audit before this phase. In its place, the regression baseline is now the 2026-10-22 Bybit capture (39,792 events and 8,275 derivative tickers) plus the two-venue sample and the controlled-gap dataset. It's run through GitHub's code (`594bd65`) and through the changed code (`regress_oct22.py`): **all three identical**.
+
+**Load harness.** `scripts/load_test.py` replays a capture's recorded websocket frames through `LiveOrderBookService` (capture, parse, normalise, validate, apply, timing, gate, recording). These numbers are for this host (macOS arm64, Python 3.12):
+
+| Mode | Frames/s | Per frame p50 / p99 / p99.9 | Live rate in the capture |
+|---|---|---|---|
+| fast | 4,383 | 196 / 634 / 932 µs | 44.3 /s (~99× headroom) |
+| durable (fsync) | 3,046 | 298 / 751 / 1,032 µs | (~69× headroom) |
+
+A single frame per run took ~220 ms (a one-off pause, probably GC or a file open); see Outstanding risks.
+
+**Defects found by load testing (fixed):**
+
+| Sev | Finding | Fix |
+|---|---|---|
+| P1 | **Unbounded memory.** `TimeIntegrityMonitor` kept every event's latency and feed age in lists: ~0.5 GB/day for two venues at live rates. It runs in live paper sessions and (since Phase 3) in the live feed service. | Exact running count, sum, min and max, plus a bounded 200k-event window per venue for percentiles (`LATENCY_WINDOW`). Reports are unchanged for replays under 200k events per venue (identical on the Oct-22 capture). Measured: traced memory stops growing at 13.06 MB after the window fills (318k frames; growth per pass 0.2 → 0.04 → 0.0 MB). |
+| P2 | **Silently dropped log records.** A connector log record's id omitted its source event, raw_ref and payload. `INSERT OR IGNORE` therefore silently dropped *distinct* records that shared a timestamp, type, venue and message. That's rare at nanosecond resolution but common on Windows / Python 3.12 (15.6 ms clock ticks). | The id includes `source_event_id`, `raw_ref` and the canonical payload, so true re-deliveries still deduplicate. |
+| P3 | **A log row per book update.** One `BOOK_STATE` row (an SQLite connect, commit and close) was written for every applied book update, ~45% of frame processing time. Every update is already in `canonical.jsonl` / `trace.jsonl` with its raw_ref. | `BOOK_STATE` is logged on state *transitions* only. Throughput went from 990 to 4,383 frames/s. |
+
+**Degraded-condition tests** (`tests/test_load_degradation.py`, 7):
+
+- **Burst backlog.** 3,000 updates arrive 3 s late: `FEED_DELAYED` once, `FEED_CAUGHT_UP` once, 3,000 delayed events counted. The book stays VALID with 0 gaps and 0 reconnects, and BOOK_STATE logs transitions only.
+- **Slow REST snapshot under continuous flow.** 5,000 buffered updates all apply (VALID at 5,100, 0 gaps). With 12,000 updates the buffer overflows and the slow snapshot is refused (`snapshot_does_not_cover_dropped_deltas`), and the book is VALID only on the second connection.
+- **60 disconnect/reconnect cycles.** 61 connections, 60 reconnects, 61 syncs. No asyncio tasks are left, and retained memory doesn't grow with the cycle count (gc-collected comparison, 20 vs 60 cycles).
+- **Both venues drop together.** Every gate decision was recorded: **the gate never allowed trading while either book was not VALID**. It blocked during the drop and resumed with both VALID.
+- **Unit tests:** bounded latency window with exact statistics, and the log-record collision test.
+
+**Mutation check.** M27 (per-update BOOK_STATE), M28 (unbounded window), M29 (snapshot trusted despite dropped deltas) and M30 (the old log id) each fail the matching test.
+
+**Verification:**
+
+- **Full suite:** 661 passed, 5 of 5 runs. That excludes the other session's `tests/test_latency_model.py`, which still fails at import.
+- **Oct-22 regression:** identical.
+- **`run_all_local`:** the stages after its unittest step PASSED.
+
+**Not covered:**
+
+- Several instruments per service (the service handles one instrument per venue).
+- Real network loss and latency: only simulated drops and silences.
+- Multi-hour soak runs: the memory plateau was shown over 318k frames, about 2 hours of live Bybit rate.

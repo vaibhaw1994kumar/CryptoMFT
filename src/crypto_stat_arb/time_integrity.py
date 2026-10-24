@@ -5,7 +5,6 @@ from collections import deque
 from dataclasses import asdict, dataclass, field
 import json
 from pathlib import Path
-from statistics import mean
 from typing import Any
 
 from .advanced_backtest.latency_model import HostClockAligner
@@ -111,10 +110,19 @@ class HostClockMonitor:
         return asdict(self)
 
 
+LATENCY_WINDOW = 200_000      # events per venue kept for percentiles (bounded memory)
+
+
 @dataclass(slots=True)
 class _VenueTimeStats:
-    latencies_ns: list[int] = field(default_factory=list)
-    feed_ages_ns: list[int] = field(default_factory=list)
+    # Exact running statistics plus a bounded window for percentiles: a live
+    # session runs for days (~4M events/day/venue), so per-event lists must not grow.
+    events: int = 0
+    latency_total_ns: int = 0
+    latency_min_ns: int | None = None
+    latency_max_ns: int | None = None
+    feed_age_max_ns: int | None = None
+    latency_window_ns: deque = field(default_factory=lambda: deque(maxlen=LATENCY_WINDOW))
     negative_latency: int = 0
     corrected_negative_latency: int = 0
     impossible_latency: int = 0
@@ -222,8 +230,12 @@ class TimeIntegrityMonitor:
         elif feed_age > self.policy.max_feed_age_ns:
             flags.append("STALE_FEED")
             stats.stale_feed += 1
-        stats.latencies_ns.append(latency)
-        stats.feed_ages_ns.append(feed_age)
+        stats.events += 1
+        stats.latency_total_ns += latency
+        stats.latency_min_ns = latency if stats.latency_min_ns is None else min(stats.latency_min_ns, latency)
+        stats.latency_max_ns = latency if stats.latency_max_ns is None else max(stats.latency_max_ns, latency)
+        stats.feed_age_max_ns = feed_age if stats.feed_age_max_ns is None else max(stats.feed_age_max_ns, feed_age)
+        stats.latency_window_ns.append(latency)
         self.events += 1
         assessment = TimeAssessment(latency, feed_age, tuple(flags))
         if assessment.blocking:
@@ -254,13 +266,15 @@ class TimeIntegrityMonitor:
         venues = {}
         for venue, stats in sorted(self._venues.items()):
             venues[venue] = {
-                "events": len(stats.latencies_ns),
-                "latency_ns_min": min(stats.latencies_ns) if stats.latencies_ns else None,
-                "latency_ns_mean": int(mean(stats.latencies_ns)) if stats.latencies_ns else None,
-                "latency_ns_p50": self._percentile(stats.latencies_ns, 0.50),
-                "latency_ns_p95": self._percentile(stats.latencies_ns, 0.95),
-                "latency_ns_max": max(stats.latencies_ns) if stats.latencies_ns else None,
-                "feed_age_ns_max": max(stats.feed_ages_ns) if stats.feed_ages_ns else None,
+                "events": stats.events,
+                "latency_ns_min": stats.latency_min_ns,
+                "latency_ns_mean": int(stats.latency_total_ns / stats.events) if stats.events else None,
+                # Percentiles over the last LATENCY_WINDOW events of the venue.
+                "latency_ns_p50": self._percentile(list(stats.latency_window_ns), 0.50),
+                "latency_ns_p95": self._percentile(list(stats.latency_window_ns), 0.95),
+                "latency_percentile_window": len(stats.latency_window_ns),
+                "latency_ns_max": stats.latency_max_ns,
+                "feed_age_ns_max": stats.feed_age_max_ns,
                 "negative_latency_events": stats.negative_latency,
                 "corrected_negative_latency_events": stats.corrected_negative_latency,
                 "impossible_latency_events": stats.impossible_latency,
