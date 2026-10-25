@@ -49,7 +49,9 @@ def decide(h: Harness, t: float):
     """Exactly what run() does at a touch change: evaluate with the live count, fire if a signal comes back."""
     bt = h.bt
     blocked = bt.strategy.rejects["maker_limit"]
-    sig = bt.strategy.evaluate(bt.books, bt.states, bt.inventory, t, live_maker_orders=bt._live_maker_orders(t))
+    sig = bt.strategy.evaluate(
+        bt.books, bt.states, bt.inventory, t, live_maker_orders=bt._live_maker_orders(t),
+        pending=bt._pending_exposure() if bt.config.arb.count_pending_exposure else None)
     if sig is not None:
         bt._fire(sig, t)
     return sig, bt.strategy.rejects["maker_limit"] - blocked
@@ -194,6 +196,94 @@ class PartialFillTests(unittest.TestCase):
         h.assert_ledger_reconciles(self)
         lt = h.lifetime()
         self.assertEqual((lt["expired_after_partial_fill"], lt["cancels_applied"]), (1.0, 1.0))
+
+
+class PendingExposureTests(unittest.TestCase):
+    """With several live orders allowed, position limits must see orders that are not in the inventory yet."""
+
+    @staticmethod
+    def _stack(count_pending, limit=3):
+        h = Harness(ttl=0.0, entry_s=1.0, max_live=limit, max_clip_base=1.0, max_position_base=1.0,
+                    count_pending_exposure=count_pending)
+        warm(h)
+        sizes = []
+        for i in range(10):
+            t = 0.01 + i * 0.01
+            market(h, t)
+            sig, _ = decide(h, t)
+            if sig is not None:
+                sizes.append(round(sig.qty, 9))
+        return h, sizes
+
+    def test_legacy_check_lets_in_flight_orders_stack_past_the_position_limit(self):
+        h, sizes = self._stack(False)
+        self.assertEqual(sizes, [1.0, 1.0, 1.0])
+        self.assertGreater(sum(sizes), 2 * h.bt.config.arb.max_position_base, "3.0 bought against a net limit of 2.0")
+
+    def test_counting_pending_exposure_keeps_the_stack_inside_the_limit(self):
+        h, sizes = self._stack(True)
+        self.assertEqual(sizes, [1.0, 1.0])                  # room: 2.0 net, 1.0 used by each in-flight bid
+        self.assertLessEqual(sum(sizes), 2 * h.bt.config.arb.max_position_base)
+        self.assertEqual(h.bt.strategy.rejects["clip_too_small"] + h.bt.strategy.rejects["inventory"] > 0, True)
+
+    def test_resting_remainders_and_in_flight_hedges_are_in_the_pending_exposure(self):
+        h = Harness(ttl=0.0, max_live=2, max_clip_base=1.0, max_position_base=1.0, count_pending_exposure=True)
+        warm(h)
+        market(h, 0.01)
+        decide(h, 0.01)
+        market(h, 0.014)
+        h.sell_trade(0.02, BYBIT, volume=0.8, price=100.98)      # 0.3 of 1.0 filled; the hedge for 0.3 is in flight
+        pend = h.bt._pending_exposure()
+        self.assertAlmostEqual(pend.buys[BYBIT], 0.7, places=9)  # resting remainder
+        self.assertAlmostEqual(pend.sells[BINANCE], 0.3, places=9)  # in-flight hedge
+        h.advance(0.5)                                            # hedge lands: it is now inventory, not pending
+        pend = h.bt._pending_exposure()
+        self.assertEqual((round(pend.buys[BYBIT], 9), pend.sells), (0.7, {}))
+        self.assertAlmostEqual(h.bt.inventory.base[BINANCE], -0.3, places=9)
+
+    def test_nothing_is_netted_off_in_the_worst_case(self):
+        h = Harness(ttl=0.0, max_live=2, max_position_base=1.0, count_pending_exposure=True)
+        strat, inv = h.bt.strategy, h.bt.inventory
+        from new_backtest.arb_strategy import PendingExposure
+        inv.base[BYBIT] = 0.3                                      # filled, hedge still in flight
+        pend = PendingExposure(buys={BYBIT: 0.7}, sells={BINANCE: 0.3})
+        # bybit buy room: cap 2.0 - (0.3 + 0.7) = 1.0 ; binance sell room: 2.0 - 0.3 = 1.7 ; net: 2.0 - max(|0.3+0.7|, |0.3-0.3|) = 1.0
+        self.assertAlmostEqual(strat._inventory_room(BYBIT, BINANCE, inv, pend), 1.0, places=9)
+        self.assertAlmostEqual(strat._inventory_room(BYBIT, BINANCE, inv, None), 1.7, places=9)   # filled-only view
+
+    def test_each_position_limit_sees_its_own_pending_term(self):
+        from new_backtest.arb_strategy import PendingExposure
+        # (name, max_position_base, venue cap, bybit base, binance base, pending, expected room with, expected room filled-only)
+        cases = [
+            ("buy-venue cap",  10.0, 1.0,  0.3,  0.0, PendingExposure(buys={BYBIT: 0.7}),                  0.0, 0.7),
+            ("sell-venue cap", 10.0, 1.0,  0.0, -0.3, PendingExposure(sells={BINANCE: 0.5}),               0.2, 0.7),
+            ("net, pending buys", 1.0, 100.0, 0.3, 0.0, PendingExposure(buys={BYBIT: 1.0}),                0.7, 1.7),
+            ("net, hedges are not netted off", 1.0, 100.0, 1.5, 0.0, PendingExposure(buys={BYBIT: 0.3}, sells={BINANCE: 1.0}), 0.2, 0.5),
+        ]
+        for name, maxpos, cap, by, bn, pend, with_pending, filled_only in cases:
+            with self.subTest(name):
+                h = Harness(ttl=0.0, max_live=2, max_position_base=maxpos, max_venue_imbalance_base=cap, count_pending_exposure=True)
+                h.bt.inventory.base[BYBIT], h.bt.inventory.base[BINANCE] = by, bn
+                strat, inv = h.bt.strategy, h.bt.inventory
+                self.assertAlmostEqual(strat._inventory_room(BYBIT, BINANCE, inv, pend), with_pending, places=9)
+                self.assertAlmostEqual(strat._inventory_room(BYBIT, BINANCE, inv, None), filled_only, places=9)
+
+    def test_with_the_flag_off_pending_exposure_is_ignored_exactly(self):
+        h = Harness(ttl=0.0, max_live=2, max_position_base=1.0, count_pending_exposure=False)
+        from new_backtest.arb_strategy import PendingExposure
+        pend = PendingExposure(buys={BYBIT: 5.0}, sells={BINANCE: 5.0})
+        self.assertEqual(h.bt.strategy._inventory_room(BYBIT, BINANCE, h.bt.inventory, pend),
+                         h.bt.strategy._inventory_room(BYBIT, BINANCE, h.bt.inventory, None))
+
+    def test_more_than_one_live_order_without_the_flag_warns_and_the_default_does_not(self):
+        def warned(**kw):
+            with warnings.catch_warnings(record=True) as w:
+                warnings.simplefilter("always")
+                Harness(ttl=10.0, **kw)
+            return any("count_pending_exposure" in str(x.message) and issubclass(x.category, RuntimeWarning) for x in w)
+        self.assertTrue(warned(max_live=3))
+        self.assertFalse(warned(max_live=3, count_pending_exposure=True))
+        self.assertFalse(warned(max_live=1))
 
 
 class ReplayInvariantTests(unittest.TestCase):

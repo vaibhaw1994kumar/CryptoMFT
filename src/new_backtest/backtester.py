@@ -35,7 +35,7 @@ import warnings
 from . import virtual_clock
 from .arb_strategy import (
     MAKER_TAKER, TAKER_TAKER, ArbConfig, ArbLeg, ArbSignal,
-    CrossVenueArbStrategy, InventoryBook, validate_maker_lifetime,
+    CrossVenueArbStrategy, InventoryBook, PendingExposure, validate_maker_lifetime,
 )
 from .background_agent_model import AgentFlowConfig, BackgroundAgentModel
 from .config import (
@@ -210,6 +210,14 @@ class CrossVenueArbBacktester:
                 "fill, so one that stops being marketable keeps its place in the queue, blocks the live-order limit "
                 "and can fill much later at a stale price. The engine has no cancel/replace on price moves "
                 "(maker_requote_bps is not used); set maker_max_age_s as a time-in-force.",
+                RuntimeWarning, stacklevel=2,
+            )
+        if (config.arb.mode == "maker_taker" and config.arb.maker_max_live_orders > 1
+                and not config.arb.count_pending_exposure):
+            warnings.warn(
+                f"maker_max_live_orders={config.arb.maker_max_live_orders} with count_pending_exposure=False: position "
+                "limits look at filled inventory only, so several resting or in-flight orders that all fill can exceed "
+                "max_position_base / the venue imbalance cap. Set ArbConfig.count_pending_exposure=True.",
                 RuntimeWarning, stacklevel=2,
             )
         if config.arb.mode == "maker_taker" and not config.arb.maker_count_inflight:
@@ -638,6 +646,15 @@ class CrossVenueArbBacktester:
                 tracker.maker_resting = False
             self._maybe_resolve(sid, now)
 
+    def _pending_exposure(self) -> PendingExposure:
+        """Worst-case base not in the inventory yet: resting maker remainders plus every order still in flight."""
+        pend = PendingExposure()
+        for o in self.maker.orders.values():
+            pend.add(o.venue, o.side_str, o.remaining)
+        for o in self.pending.in_flight():
+            pend.add(o.venue, o.side, o.qty)
+        return pend
+
     def _live_maker_orders(self, now: float) -> int:
         """Maker orders the strategy must treat as possibly executable: resting (incl. cancel-pending), in flight,
         and cancelled at the exchange but not yet acknowledged to the strategy."""
@@ -731,6 +748,7 @@ class CrossVenueArbBacktester:
                     signal = self.strategy.evaluate(
                         self.books, self.states, self.inventory, now,
                         live_maker_orders=self._live_maker_orders(now),
+                        pending=self._pending_exposure() if cfg.arb.count_pending_exposure else None,
                     )
                     if (self.strategy.rejects["maker_limit"] > blocked_before
                             and (self._cancel_acks or any(o.cancel_requested_ts is not None for o in self.maker.orders.values()))):

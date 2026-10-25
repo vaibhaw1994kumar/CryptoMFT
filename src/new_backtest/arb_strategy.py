@@ -98,6 +98,11 @@ class ArbConfig:
     # Inventory
     max_position_base: float = 1.0       # |net base across venues|
     max_venue_imbalance_base: float = 0.0  # 0 => 2x max_position_base
+    # False (default, legacy): position limits look at filled inventory only. True: they also assume the worst case for
+    # orders that are not in the inventory yet (resting maker remainders, maker legs in flight, hedges in flight),
+    # with no netting between them. With maker_max_live_orders > 1 the legacy check can be breached by orders that
+    # all fill; see PendingExposure.
+    count_pending_exposure: bool = False
 
     # Maker-taker
     maker_improve_ticks: int = 1         # how far inside the touch we rest
@@ -156,6 +161,18 @@ class ArbSignal:
     sell_price: float
     depth_limited: bool = False
     inventory_limited: bool = False
+
+
+@dataclass
+class PendingExposure:
+    """Base quantity (positive magnitudes) per venue that would still be bought / sold if every order that is not in the
+    InventoryBook yet executed in full: resting maker remainders, maker legs in flight and hedges in flight."""
+    buys: dict[str, float] = field(default_factory=dict)
+    sells: dict[str, float] = field(default_factory=dict)
+
+    def add(self, venue: str, side: str, qty: float) -> None:
+        book = self.buys if side == "buy" else self.sells
+        book[venue] = book.get(venue, 0.0) + qty
 
 
 @dataclass
@@ -259,7 +276,9 @@ class CrossVenueArbStrategy:
         limit = touch + slack if side == "ask" else touch - slack
         return book.depth_within(side, limit) * cfg.depth_utilisation
 
-    def _inventory_room(self, buy_venue: str, sell_venue: str, inv: InventoryBook) -> float:
+    def _inventory_room(
+        self, buy_venue: str, sell_venue: str, inv: InventoryBook, pending: "PendingExposure | None" = None,
+    ) -> float:
         """How much we can trade before breaching a position limit.
 
         Buying on A and selling on B leaves the net flat but moves A's balance up
@@ -268,9 +287,17 @@ class CrossVenueArbStrategy:
         """
         cfg = self.config
         cap = cfg.max_venue_imbalance_base or (2.0 * cfg.max_position_base)
-        buy_room = max(0.0, cap - inv.base.get(buy_venue, 0.0))
-        sell_room = max(0.0, cap + inv.base.get(sell_venue, 0.0))
-        net_room = max(0.0, cfg.max_position_base * 2.0 - abs(inv.net_base))
+        buy_base, sell_base, net_hi, net_lo = inv.base.get(buy_venue, 0.0), inv.base.get(sell_venue, 0.0), inv.net_base, inv.net_base
+        if pending is not None and cfg.count_pending_exposure:
+            # Worst case per limit: every pending buy lands on the buy venue, every pending sell on the sell venue,
+            # and nothing nets off against anything else.
+            buy_base += pending.buys.get(buy_venue, 0.0)
+            sell_base -= pending.sells.get(sell_venue, 0.0)
+            net_hi += sum(pending.buys.values())
+            net_lo -= sum(pending.sells.values())
+        buy_room = max(0.0, cap - buy_base)
+        sell_room = max(0.0, cap + sell_base)
+        net_room = max(0.0, cfg.max_position_base * 2.0 - max(abs(net_hi), abs(net_lo)))
         return min(buy_room, sell_room, net_room)
 
     # ── Evaluation ───────────────────────────────────────────────────────────
@@ -282,6 +309,7 @@ class CrossVenueArbStrategy:
         inventory: InventoryBook,
         now: float,
         live_maker_orders: int = 0,
+        pending: "PendingExposure | None" = None,
     ) -> ArbSignal | None:
         cfg = self.config
         self.evaluations += 1
@@ -308,7 +336,7 @@ class CrossVenueArbStrategy:
                 if buy_venue == sell_venue:
                     continue
                 sig = self._evaluate_direction(
-                    buy_venue, sell_venue, books, states, inventory, now,
+                    buy_venue, sell_venue, books, states, inventory, now, pending,
                 )
                 if sig is not None and (best is None or sig.net_edge_bps > best.net_edge_bps):
                     best = sig
@@ -326,6 +354,7 @@ class CrossVenueArbStrategy:
         states: dict[str, VenueState],
         inventory: InventoryBook,
         now: float,
+        pending: "PendingExposure | None" = None,
     ) -> ArbSignal | None:
         cfg = self.config
         buy_book, sell_book = books[buy_venue], books[sell_venue]
@@ -343,7 +372,7 @@ class CrossVenueArbStrategy:
 
         if cfg.mode == MAKER_TAKER:
             return self._evaluate_maker_taker(
-                buy_venue, sell_venue, books, states, inventory, now,
+                buy_venue, sell_venue, books, states, inventory, now, pending,
             )
 
         buy_px = buy_book.best_ask      # we lift the offer
@@ -374,7 +403,7 @@ class CrossVenueArbStrategy:
             self.rejects["no_depth"] += 1
             return None
 
-        inv_cap = self._inventory_room(buy_venue, sell_venue, inventory)
+        inv_cap = self._inventory_room(buy_venue, sell_venue, inventory, pending)
         if inv_cap <= 0:
             self.rejects["inventory"] += 1
             return None
@@ -412,6 +441,7 @@ class CrossVenueArbStrategy:
         states: dict[str, VenueState],
         inventory: InventoryBook,
         now: float,
+        pending: "PendingExposure | None" = None,
     ) -> ArbSignal | None:
         """Rest a passive bid on maker_venue, hedge by selling on taker_venue."""
         cfg = self.config
@@ -448,7 +478,7 @@ class CrossVenueArbStrategy:
             self.rejects["no_depth"] += 1
             return None
 
-        inv_cap = self._inventory_room(maker_venue, taker_venue, inventory)
+        inv_cap = self._inventory_room(maker_venue, taker_venue, inventory, pending)
         if inv_cap <= 0:
             self.rejects["inventory"] += 1
             return None

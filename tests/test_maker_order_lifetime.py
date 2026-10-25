@@ -43,7 +43,7 @@ class Harness:
             data_root="unused", venues=venues, pair="BTCUSDT", start_date="2026-10-01", end_date="2026-10-01",
             latency_preset="colocated_both", bybit_fee_preset="bybit_perp_mm", binance_fee_preset="binance_perp_vip0",
             maker=MakerConfig(min_queue_ahead=queue),
-            arb=ArbConfig(mode=MAKER_TAKER, maker_max_age_s=ttl, maker_max_live_orders=max_live, max_position_base=10.0, **arb_kw))
+            arb=ArbConfig(**{**dict(mode=MAKER_TAKER, maker_max_age_s=ttl, maker_max_live_orders=max_live, max_position_base=10.0), **arb_kw}))
         self.bt = CrossVenueArbBacktester(cfg)
         self.entry = entry or {v: entry_s for v in venues}
         self.cancel = cancel or {v: cancel_s for v in venues}

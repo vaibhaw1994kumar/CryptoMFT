@@ -222,6 +222,84 @@ class AmbiguousSubmissionTests(unittest.TestCase):
         self.assertEqual(fills(self.ledger)[0], Decimal("0.01"))
 
 
+class ReconnectReconciliationTests(unittest.TestCase):
+    """After a disconnect the local view may be stale. Recovery goes through reconcile_plan (REST-style snapshots)."""
+
+    def setUp(self):
+        self.ledger = Ledger()
+        self.engine = risk()
+        self.oms = OMS(instrument_master(), self.engine, self.ledger,
+                       router=StrategyDirectedRouter(instrument_master(), adapters={
+                           "BINANCE": RestingAdapter(), "BYBIT": RestingAdapter()}))
+        self.plan = self.oms.execute(opportunity(), books())
+        self.a, self.b = self.plan.children[:2]
+
+    def snap(self, order, state, qty, ts=0):
+        return VenueOrderSnapshot(order.order_id, order.venue, INSTRUMENT, state, Decimal(qty), PRICE, observed_ts_ns=ts)
+
+    def reconcile(self, a_state, a_qty, b_state, b_qty, now, a_ts=10, b_ts=10):
+        listing = {}
+        if a_state is not None:
+            listing[self.a.order_id] = self.snap(self.a, a_state, a_qty, a_ts)
+        if b_state is not None:
+            listing[self.b.order_id] = self.snap(self.b, b_state, b_qty, b_ts)
+        return self.oms.reconcile_plan(self.plan.parent_id, listing, now)
+
+    def reservation_active(self):
+        return [r.active for r in self.engine.reservations.values()]
+
+    def test_changes_that_happened_while_disconnected_are_recovered_and_booked_once(self):
+        self.assertEqual((self.a.state, self.b.state), (OrderState.ACKNOWLEDGED, OrderState.ACKNOWLEDGED))
+        self.reconcile(OrderState.PARTIAL, "0.004", OrderState.CANCELLED, "0", 100)
+        self.assertEqual((self.a.state, self.a.filled_quantity, self.b.state), (OrderState.PARTIAL, Decimal("0.004"), OrderState.CANCELLED))
+        self.assertEqual(self.ledger.positions[("BINANCE", INSTRUMENT)], Decimal("0.004"))
+        for now in (110, 120, 130):                                       # the reconnect handler runs again and again
+            self.reconcile(OrderState.PARTIAL, "0.004", OrderState.CANCELLED, "0", now)
+        self.assertEqual(fills(self.ledger), [Decimal("0.004")])
+        self.assertEqual(self.ledger.positions[("BINANCE", INSTRUMENT)], Decimal("0.004"))
+        self.assertEqual(self.ledger.audit_order_fills(self.oms.plans), [])
+        self.assertNotEqual(self.plan.state, PlanState.CLOSED)             # a is still working: nothing is released yet
+        self.assertEqual(self.reservation_active(), [True])
+
+    def test_a_stale_snapshot_never_lowers_a_recovered_fill(self):
+        self.reconcile(OrderState.PARTIAL, "0.004", OrderState.CANCELLED, "0", 100, a_ts=10)
+        self.reconcile(OrderState.PARTIAL, "0.002", OrderState.CANCELLED, "0", 110, a_ts=5)    # older view of the venue
+        self.assertEqual((self.a.state, self.a.filled_quantity), (OrderState.PARTIAL, Decimal("0.004")))
+        self.assertEqual(fills(self.ledger), [Decimal("0.004")])
+        self.assertEqual(self.ledger.positions[("BINANCE", INSTRUMENT)], Decimal("0.004"))
+
+    def test_a_later_snapshot_books_only_the_increment_and_the_plan_then_moves_to_unwind(self):
+        self.reconcile(OrderState.PARTIAL, "0.004", OrderState.CANCELLED, "0", 100)
+        self.reconcile(OrderState.FILLED, "0.010", OrderState.CANCELLED, "0", 140, a_ts=20)
+        self.assertEqual(fills(self.ledger), [Decimal("0.004"), Decimal("0.006")])
+        self.assertEqual((self.a.state, self.a.filled_quantity), (OrderState.FILLED, Decimal("0.010")))
+        self.assertEqual(self.ledger.positions[("BINANCE", INSTRUMENT)], Decimal("0.010"))
+        self.assertEqual(self.plan.state, PlanState.HEDGE_UNWIND)           # one leg filled, the other cancelled: residual
+        self.assertEqual(self.plan.residual_base, Decimal("0.010"))
+        self.assertEqual(self.reservation_active(), [True])                 # still held until the residual is dealt with
+
+    def test_an_order_missing_from_the_venue_listing_is_not_assumed_cancelled(self):
+        self.reconcile(OrderState.FILLED, "0.010", None, "0", 100)
+        self.assertEqual((self.a.state, self.b.state), (OrderState.FILLED, OrderState.ACKNOWLEDGED))
+        self.assertNotEqual(self.plan.state, PlanState.CLOSED)
+        self.assertEqual(self.reservation_active(), [True])
+        self.assertEqual(self.b.order_id in self.oms._unknown_state_children(self.plan, 100), True)  # still being chased
+        # the venue answers on the next reconnect pass: only now is it resolved
+        self.reconcile(OrderState.FILLED, "0.010", OrderState.FILLED, "0.010", 200, b_ts=15)
+        self.assertEqual((self.b.state, self.plan.state), (OrderState.FILLED, PlanState.CLOSED))
+        self.assertEqual(self.reservation_active(), [False])
+        self.assertEqual(self.ledger.positions[("BINANCE", INSTRUMENT)] + self.ledger.positions[("BYBIT", INSTRUMENT)], 0)
+        self.assertEqual(self.ledger.audit_order_fills(self.oms.plans), [])
+
+    def test_extra_venue_orders_in_a_per_plan_reconcile_are_ignored_not_adopted(self):
+        stranger = VenueOrderSnapshot("not-ours", "BINANCE", INSTRUMENT, OrderState.ACKNOWLEDGED, Decimal("0"), PRICE)
+        self.oms.reconcile_plan(self.plan.parent_id, {self.a.order_id: self.snap(self.a, OrderState.ACKNOWLEDGED, "0"),
+                                                       "not-ours": stranger}, 100)
+        # extra venue orders are ignored by the per-plan path; the account-level path (reconcile_risk_state) owns orphans
+        self.assertEqual((self.a.state, self.b.state), (OrderState.ACKNOWLEDGED, OrderState.ACKNOWLEDGED))
+        self.assertFalse(self.engine.kill_switch)
+
+
 class CancelSweepTests(unittest.TestCase):
     def test_one_venue_failing_to_cancel_does_not_stop_the_sweep(self):
         binance, bybit = RestingAdapter(raise_on_cancel=True), RestingAdapter()

@@ -350,6 +350,10 @@ class PendingOrderQueue:
                 continue
             yield order
 
+    def in_flight(self) -> Iterator[InFlightOrder]:
+        """Orders sent and not yet landed or cancelled (no particular order)."""
+        return (o for _, _, o in self._heap if o.order_id not in self._cancelled)
+
     def maker_legs_in_flight(self) -> int:
         return sum(1 for _, _, o in self._heap if not o.is_taker and o.order_id not in self._cancelled)
 
