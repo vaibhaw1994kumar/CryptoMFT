@@ -360,6 +360,8 @@ def main() -> None:
         help="accept an INCOMPLETE reason (MISSING_PRICE, FEE_ASSET_UNPRICED, FEE_RULE_FALLBACK, FUNDING_DATA, "
              "BORROW_DATA, TRANSFER_DATA, DATA_QUALITY) with a written justification; listed in the result",
     )
+    caps = sub.add_parser("capabilities", help="venue/product/adapter capability matrix (REF05)")
+    caps.add_argument("--venue", action="append", choices=("BINANCE", "BYBIT"))
     tardis = sub.add_parser(
         "compare-tardis",
         help="offline: compare a recorded capture's books against a Tardis incremental_book_L2 CSV",
@@ -575,6 +577,10 @@ def main() -> None:
         print(json.dumps({"venue": args.venue, "records": len(records),
                           "without_mark": sum(1 for r in records if not r["mark_price"]),
                           "output": str(args.output)}, indent=2))
+    elif args.command == "capabilities":
+        from .capabilities import report
+
+        print(json.dumps(report(tuple(args.venue) if args.venue else None), indent=2))
     elif args.command == "compare-tardis":
         from .tardis_compare import compare_with_tardis
 

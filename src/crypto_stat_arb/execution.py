@@ -317,6 +317,11 @@ class VenueRouteStatus:
     )
     supports_post_only: bool = True
     supports_reduce_only: bool = True
+    # From crypto_stat_arb.capabilities (venue ∩ adapter); defaults allow everything.
+    supported_time_in_force: frozenset[TimeInForce] = field(
+        default_factory=lambda: frozenset(TimeInForce)
+    )
+    supports_replace: bool = True
     allow_risk_reducing_when_disabled: bool = True
     allow_risk_reducing_rate_limit_override: bool = True
 
@@ -1575,6 +1580,18 @@ class StrategyDirectedRouter:
         if request.action in (OrderAction.CANCEL, OrderAction.REPLACE):
             if not request.target_order_id:
                 raise ValueError(f"{request.action.value.lower()} requires target_order_id")
+        status = self.route_status.get(request.venue)
+        if status is not None and request.action != OrderAction.CANCEL:
+            # The route's capabilities (crypto_stat_arb.capabilities): refuse what the venue
+            # or our adapter cannot carry out instead of letting it be mistranslated.
+            if request.action == OrderAction.REPLACE and not status.supports_replace:
+                raise ValueError(f"{request.venue} route does not support replace; cancel and resubmit")
+            if request.order_type not in status.supported_order_types:
+                raise ValueError(f"{request.venue} route does not support order type {request.order_type.value}")
+            if request.order_type == OrderType.LIMIT and request.time_in_force not in status.supported_time_in_force:
+                raise ValueError(f"{request.venue} route does not support time in force {request.time_in_force.value}")
+            if request.post_only and not status.supports_post_only:
+                raise ValueError(f"{request.venue} route does not support post-only")
 
     def write_trace(self, path: Path) -> dict[str, Any]:
         path.parent.mkdir(parents=True, exist_ok=True)
