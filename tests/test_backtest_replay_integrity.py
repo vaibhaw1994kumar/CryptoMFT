@@ -124,6 +124,15 @@ class QueueFloorWarningTests(unittest.TestCase):
     def test_a_configured_floor_is_not_flagged(self):
         self.assertEqual(self._warnings(0.8), [])
 
+    def test_no_order_lifetime_in_maker_taker_mode_is_flagged(self):
+        cfg = make_cfg("unused", "2026-10-01", "2026-10-01", "unused", ttl=0.0)
+        with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter("always")
+            CrossVenueArbBacktester(cfg)
+        msgs = [str(x.message) for x in w if issubclass(x.category, RuntimeWarning)]
+        self.assertEqual(len(msgs), 1)
+        self.assertIn("maker_max_age_s", msgs[0])
+
 
 class WalkForwardCannotSeeTheFutureTests(unittest.TestCase):
     """Dataset B equals A except the LAST day. Every fold that evaluates an earlier day must be bit-identical."""

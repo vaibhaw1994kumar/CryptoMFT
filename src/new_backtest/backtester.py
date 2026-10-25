@@ -201,6 +201,14 @@ class CrossVenueArbBacktester:
                 "typical level depth for the instrument (--min-queue-ahead).",
                 RuntimeWarning, stacklevel=2,
             )
+        if config.arb.mode == "maker_taker" and config.arb.maker_max_age_s <= 0.0:
+            warnings.warn(
+                "ArbConfig.maker_max_age_s is 0 in maker_taker mode: a resting maker order is only ever removed by a "
+                "fill, so one that stops being marketable keeps its place in the queue, blocks the live-order limit "
+                "and can fill much later at a stale price. The engine has no cancel/replace on price moves "
+                "(maker_requote_bps is not used); set maker_max_age_s as a time-in-force.",
+                RuntimeWarning, stacklevel=2,
+            )
         all_specs = make_venues(
             config.latency_preset, config.bybit_fee_preset, config.binance_fee_preset,
         )
