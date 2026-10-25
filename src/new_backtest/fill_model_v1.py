@@ -146,8 +146,17 @@ class FillModelV1:
         from sklearn.preprocessing import StandardScaler     # noqa: PLC0415
         from .fill_label import FillLabelRecord              # noqa: PLC0415
 
-        recs = [r for r in records
-                if isinstance(r, FillLabelRecord) and r.horizon_s == horizon_s]
+        from .fill_label import compute_ipcw_weights  # noqa: PLC0415
+
+        all_h_recs = [r for r in records
+                      if isinstance(r, FillLabelRecord) and r.horizon_s == horizon_s]
+        if not all_h_recs:
+            return None
+
+        # IPCW weights: 0 for censored rows (excluded from training), 1/G(t) for rest
+        raw_weights = compute_ipcw_weights(all_h_recs, horizon_s)
+        recs = [r for r, w in zip(all_h_recs, raw_weights) if w > 0]
+        weights = [w for w in raw_weights if w > 0]
         if not recs:
             return None
 
@@ -158,6 +167,7 @@ class FillModelV1:
         ) for r in recs]
         X = np.array(rows, dtype=np.float32)
         y = np.array([int(r.filled) for r in recs], dtype=np.int8)
+        w = np.array(weights, dtype=np.float32)
 
         n_pos = int(y.sum())
         if n_pos == 0 or n_pos == len(y):
@@ -167,7 +177,7 @@ class FillModelV1:
         X_scaled = scaler.fit_transform(X)
 
         lr = LogisticRegression(C=C, max_iter=500, solver="lbfgs")
-        lr.fit(X_scaled, y)
+        lr.fit(X_scaled, y, sample_weight=w)
 
         return cls(
             horizon_s=horizon_s,
@@ -214,8 +224,16 @@ class FillModelV1:
         from sklearn.preprocessing import StandardScaler     # noqa: PLC0415
         from .fill_label import FillLabelRecord              # noqa: PLC0415
 
-        recs = [r for r in records
-                if isinstance(r, FillLabelRecord) and r.horizon_s == horizon_s]
+        from .fill_label import compute_ipcw_weights  # noqa: PLC0415
+
+        all_h_recs = [r for r in records
+                      if isinstance(r, FillLabelRecord) and r.horizon_s == horizon_s]
+        if not all_h_recs:
+            return None
+
+        raw_weights = compute_ipcw_weights(all_h_recs, horizon_s)
+        recs = [r for r, w in zip(all_h_recs, raw_weights) if w > 0]
+        weights = [w for w in raw_weights if w > 0]
         if not recs:
             return None
 
@@ -226,6 +244,7 @@ class FillModelV1:
         ) for r in recs]
         X = np.array(rows, dtype=np.float32)
         y = np.array([int(r.price_moved_through) for r in recs], dtype=np.int8)
+        w = np.array(weights, dtype=np.float32)
 
         n_pos = int(y.sum())
         if n_pos == 0 or n_pos == len(y):
@@ -234,7 +253,7 @@ class FillModelV1:
         scaler = StandardScaler()
         X_scaled = scaler.fit_transform(X)
         lr = LogisticRegression(C=C, max_iter=500, solver="lbfgs")
-        lr.fit(X_scaled, y)
+        lr.fit(X_scaled, y, sample_weight=w)
 
         return cls(
             horizon_s=horizon_s,
@@ -467,14 +486,18 @@ class FillModelV2:
         )
 
 
-def load_fill_model(path: "str | Path") -> "FillModelV1 | FillModelV2":
-    """Load a FillModelV1 or FillModelV2 from a JSON checkpoint (auto-detected).
+def load_fill_model(path: "str | Path"):
+    """Load a fill-gate model from a JSON checkpoint (auto-detected by version).
 
-    Files with ``"version": 2`` or a ``"per_horizon"`` key load as FillModelV2.
-    All other files (including legacy V1 files without a version key) load as
-    FillModelV1.
+    Dispatch table:
+        ``"version": "queue_reactive_v1"`` → QueueReactiveFillEstimator
+        ``"version": 2``  or ``"per_horizon"`` key → FillModelV2
+        anything else (including no version key) → FillModelV1
     """
     data = json.loads(Path(path).read_text(encoding="utf-8"))
+    if data.get("version") == "queue_reactive_v1":
+        from .fill_model_queue import QueueReactiveFillEstimator  # noqa: PLC0415
+        return QueueReactiveFillEstimator.load_json(path)
     if data.get("version", 1) >= 2 or "per_horizon" in data:
         return FillModelV2.load_json(path)
     return FillModelV1.load_json(path)

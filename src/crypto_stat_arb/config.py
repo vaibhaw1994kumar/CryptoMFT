@@ -131,6 +131,7 @@ def load_config(path: Path) -> tuple[AppConfig, dict]:
     raw = json.loads(path.read_text(encoding="utf-8"))
     reject_plaintext_credentials(raw)
     validate_config_keys(raw)
+    _validate_strategy_venues(raw)
     instruments = [
         Instrument(
             instrument_id=x["instrument_id"],
@@ -430,6 +431,16 @@ def _transfer_section(raw: dict) -> dict[str, Any]:
     if len(keys) != len(set(keys)):
         raise ValueError("duplicate transfer route")
     return section
+
+
+def _validate_strategy_venues(raw: dict) -> None:
+    """The cross-venue strategy reads ``venues[0]`` and ``venues[1]``: require two distinct venues."""
+    venues = list(raw["strategy"]["venues"])
+    if len(set(venues)) < 2:
+        raise ValueError(
+            f"strategy.venues must list at least two distinct venues for the "
+            f"cross-venue strategy, got {venues}"
+        )
 
 
 def _margin_section(raw: dict, instruments: list[Instrument]):

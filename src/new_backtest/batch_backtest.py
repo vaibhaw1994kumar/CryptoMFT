@@ -293,12 +293,24 @@ def run_pair(
             return PairOutcome(pair, "ok", detail=f"{common[0]}..{common[-1]}",
                                pass1=asdict(r1))
 
+        # Two-pass fallback: insufficient data for a held-out calibration window.
+        # The fill-probability gate is explicitly disabled (min_fill_prob=0.0) because
+        # no temporally-guarded model exists — any model fitted here would train and
+        # evaluate on the same dates.  Results are in-sample / exploratory only.
         cfg2 = _clone(base, pair=pair, start=common[0], end=common[-1],
                       output_dir=str(pair_dir / "pass2"),
-                      warm_start=r1.fill_log_path)
+                      warm_start=r1.fill_log_path,
+                      arb_overrides={"min_fill_prob": 0.0})
         r2 = _run_once(cfg2)
-        return PairOutcome(pair, "ok", detail=f"{common[0]}..{common[-1]}",
-                           pass1=asdict(r1), pass2=asdict(r2))
+        return PairOutcome(
+            pair, "ok",
+            detail=(
+                f"{common[0]}..{common[-1]} "
+                "[exploratory: two-pass fallback, fill gate disabled — "
+                f"need ≥{wf_window_days + 1} days for a valid walk-forward run]"
+            ),
+            pass1=asdict(r1), pass2=asdict(r2),
+        )
     except Exception as exc:  # one bad pair must not abort a 30-pair batch
         return PairOutcome(pair, "error", detail=f"{type(exc).__name__}: {exc}")
 
@@ -309,8 +321,12 @@ def _clone(
     warm_start_until_ts: float | None = None,
     fill_model_v1_path: str | None = None,
     agent_flow_override=None,
+    arb_overrides: dict | None = None,
 ) -> ArbBacktestConfig:
-    arb = ArbConfig(**{**vars(base.arb), "max_position_base": max_position_for(pair)})
+    arb_fields = {**vars(base.arb), "max_position_base": max_position_for(pair)}
+    if arb_overrides:
+        arb_fields.update(arb_overrides)
+    arb = ArbConfig(**arb_fields)
     return ArbBacktestConfig(
         pair=pair, data_root=base.data_root, venues=base.venues,
         start_date=start, end_date=end, max_events=base.max_events,
@@ -488,7 +504,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
     p.add_argument("--mode", choices=[TAKER_TAKER, MAKER_TAKER], default=TAKER_TAKER)
     p.add_argument("--latency-preset", choices=sorted(LATENCY_PRESETS),
                    default=DEFAULT_LATENCY_PRESET)
-    p.add_argument("--bybit-fees", default="bybit_spot_mm")
+    p.add_argument("--bybit-fees", default="bybit_perp_mm")
     p.add_argument("--binance-fees", default="binance_perp_vip0")
     p.add_argument("--min-edge-bps", type=float, default=1.0)
     p.add_argument("--max-book-age-ms", type=float, default=500.0)
