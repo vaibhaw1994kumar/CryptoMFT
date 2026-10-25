@@ -37,7 +37,7 @@ Config:
             "profiles": {"BINANCE": {"entry": {"base_ms": 35, "std_ms": 6, "model": "lognormal"}}}}
 ```
 
-`preset` reuses `advanced_backtest.config.LATENCY_PRESETS` (singapore, tokyo,
+`preset` reuses `new_backtest.config.LATENCY_PRESETS` (singapore, tokyo,
 neutral, colocated_both). Per-stage `profiles` override it. `enabled: false`
 keeps the zero-latency path, and every summary shows the model source.
 `latency_report.json` holds model draws, measured stages and wall-clock
