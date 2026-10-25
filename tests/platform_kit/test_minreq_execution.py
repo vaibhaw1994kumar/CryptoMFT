@@ -417,6 +417,24 @@ def test_acceptance_report_records_defects_limitations_and_sign_off(
     assert "2026-09-30" in markdown
 
 
+@pytest.mark.parametrize("system, passes", [("Linux", False), ("Windows", True), ("Darwin", True)])
+def test_performance_limits_are_enforced_on_the_target_platform_only(
+    tmp_path: Path, monkeypatch, system: str, passes: bool
+) -> None:
+    from trading_platform_poc.minreq import acceptance, benchmark
+
+    monkeypatch.setattr(acceptance.platform, "system", lambda: system)
+    slow = benchmark.BenchmarkThresholds(max_per_order_overhead_us=0.0)   # any host breaches this
+    real = benchmark.run_benchmark
+    monkeypatch.setattr(acceptance, "run_benchmark",
+                        lambda *args, **kwargs: real(*args, thresholds=slow, **kwargs))
+    check = acceptance.at_14_performance(tmp_path)
+    assert check.passed is passes
+    assert check.detail["within_limits"] is False                # always measured and reported
+    assert check.detail["failures"] == ["per_order_overhead_us above threshold"]
+    assert check.detail["limits_enforced"] is (system == "Linux")
+
+
 def test_paper_mode_checks_carry_the_feed_limitation(tmp_path: Path) -> None:
     report = run_acceptance(tmp_path / "acceptance", only=["AT-12"])
     check = next(item for item in report.checks if item.test_id == "AT-12")
