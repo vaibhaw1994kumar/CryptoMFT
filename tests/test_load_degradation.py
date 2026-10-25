@@ -114,7 +114,7 @@ class LogRecordCollisionTests(unittest.TestCase):
 
 
 class SlowSnapshotTests(unittest.IsolatedAsyncioTestCase):
-    async def run_with_buffered(self, buffered, second_connection, connections_expected=1):
+    async def run_with_buffered(self, buffered, second_connection, connections_expected=1, final_sequence=None):
         released = asyncio.Event()
 
         async def slow_snapshot(url, timeout):
@@ -139,6 +139,9 @@ class SlowSnapshotTests(unittest.IsolatedAsyncioTestCase):
                 stats = service.stats["BINANCE"]        # stop once the expected connection is VALID
                 while not (stats.connections >= connections_expected and stats.book_syncs >= 1):
                     await asyncio.sleep(0.001)
+                if final_sequence is not None:          # VALID is reached before the last frame is applied
+                    while service.books["BINANCE"].sequence != final_sequence:
+                        await asyncio.sleep(0.001)
                 service.request_stop()
 
             await asyncio.wait_for(asyncio.gather(service.run(), release_when_drained()), timeout=60)
@@ -146,14 +149,14 @@ class SlowSnapshotTests(unittest.IsolatedAsyncioTestCase):
             return service
 
     async def test_snapshot_arriving_after_5000_buffered_updates_recovers_them_all(self):
-        service = await self.run_with_buffered(5_000, [])
+        service = await self.run_with_buffered(5_000, [], final_sequence=5_100)
         book = service.books["BINANCE"]
         self.assertEqual((book.state, book.sequence, book.stats.gaps), (BookState.VALID, 5_100, 0))
         self.assertEqual(book.stats.deltas_applied, 5_000)
 
     async def test_buffer_overflow_while_the_snapshot_is_slow_resyncs_instead_of_trusting_it(self):
         recovery = [FakeWebSocket([binance(101, 101), binance(102, 102), binance(103, 103)])]
-        service = await self.run_with_buffered(12_000, recovery, connections_expected=2)
+        service = await self.run_with_buffered(12_000, recovery, connections_expected=2, final_sequence=103)
         reasons = service.resync_reasons
         self.assertTrue(reasons and reasons[0].startswith("snapshot_does_not_cover_dropped_deltas"), reasons)
         self.assertEqual(service.stats["BINANCE"].connections, 2)
