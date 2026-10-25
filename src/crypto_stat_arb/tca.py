@@ -8,7 +8,8 @@ import os
 from pathlib import Path
 from typing import Any, Iterable
 
-from .models import MarketEvent, ParentPlan, Side, stable_id
+from .metrics import plan_total, slippage_per_unit, weighted_slippage_bps
+from .models import MarketEvent, ParentPlan, stable_id
 
 
 def _utc_date(ts_ns: int) -> str:
@@ -106,11 +107,7 @@ class BasicTCA:
                 stats["filled_quantity"] += order.filled_quantity
                 benchmark_notional = order.filled_quantity * order.limit_price
                 fill_notional = order.filled_quantity * order.average_price
-                adverse_per_unit = (
-                    order.average_price - order.limit_price
-                    if order.side == Side.BUY
-                    else order.limit_price - order.average_price
-                )
+                adverse_per_unit = slippage_per_unit(order.side, order.limit_price, order.average_price)
                 stats["benchmark_notional"] += benchmark_notional
                 stats["filled_notional"] += fill_notional
                 stats["slippage_quote"] += adverse_per_unit * order.filled_quantity
@@ -120,11 +117,7 @@ class BasicTCA:
 
         group_rows = []
         for (venue, instrument_id, order_type), stats in sorted(groups.items()):
-            benchmark = stats["benchmark_notional"]
-            slippage_bps = (
-                stats["slippage_quote"] / benchmark * Decimal("10000")
-                if benchmark else Decimal("0")
-            )
+            slippage_bps = weighted_slippage_bps(stats["slippage_quote"], stats["benchmark_notional"])
             group_rows.append({
                 "venue": venue, "instrument_id": instrument_id,
                 "order_type": order_type,
@@ -142,10 +135,7 @@ class BasicTCA:
                 "slippage_quote", "fees",
             )
         }
-        weighted_slippage_bps = (
-            totals["slippage_quote"] / totals["benchmark_notional"] * Decimal("10000")
-            if totals["benchmark_notional"] else Decimal("0")
-        )
+        total_slippage_bps = weighted_slippage_bps(totals["slippage_quote"], totals["benchmark_notional"])
         event_times = [event.receive_ts_ns for event in selected_events]
         plan_times = [plan.opportunity.observed_ts_ns for plan in selected_plans]
         timestamps = event_times or plan_times or [0]
@@ -193,10 +183,10 @@ class BasicTCA:
                 "benchmark_notional": str(totals["benchmark_notional"]),
                 "filled_notional": str(totals["filled_notional"]),
                 "slippage_quote": str(totals["slippage_quote"]),
-                "weighted_slippage_bps": str(weighted_slippage_bps),
+                "weighted_slippage_bps": str(total_slippage_bps),
                 "fees": str(totals["fees"]),
-                "unwind_cost": str(sum((plan.unwind_cost for plan in selected_plans), Decimal("0"))),
-                "net_pnl": str(sum((plan.net_pnl for plan in selected_plans), Decimal("0"))),
+                "unwind_cost": str(plan_total(selected_plans, "unwind_cost")),
+                "net_pnl": str(plan_total(selected_plans, "net_pnl")),
             },
             "groups": group_rows,
             "opportunities": opportunity_rows,
