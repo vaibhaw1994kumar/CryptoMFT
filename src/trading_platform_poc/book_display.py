@@ -195,7 +195,9 @@ async def run_book_display(
         feed = BinancePublicFeed(config.binance, resolved_symbol, run_id)
     stale_after_ms = config.binance.stale_after_ms
 
-    started_ns = time.monotonic_ns()
+    # perf_counter: monotonic and high-resolution everywhere (monotonic_ns ticks
+    # every ~15.6 ms on Windows, so a short window never appeared to elapse).
+    started_ns = time.perf_counter_ns()
     interactive = (
         not as_json
         and hasattr(output, "isatty")
@@ -206,7 +208,7 @@ async def run_book_display(
     synchronized = False
 
     def elapsed() -> float:
-        return (time.monotonic_ns() - started_ns) / 1e9
+        return (time.perf_counter_ns() - started_ns) / 1e9
 
     def draw() -> None:
         if as_json:
