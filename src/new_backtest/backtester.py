@@ -35,7 +35,7 @@ import warnings
 from . import virtual_clock
 from .arb_strategy import (
     MAKER_TAKER, TAKER_TAKER, ArbConfig, ArbLeg, ArbSignal,
-    CrossVenueArbStrategy, InventoryBook,
+    CrossVenueArbStrategy, InventoryBook, validate_maker_lifetime,
 )
 from .background_agent_model import AgentFlowConfig, BackgroundAgentModel
 from .config import (
@@ -44,7 +44,7 @@ from .config import (
 )
 from .cross_venue_feed import CrossVenueFeed, check_coverage
 from .event_loader import BOOK, DELTA, TRADE, delta_fields, snapshot_levels, trade_fields
-from .fill_engine import Fill, MakerConfig, MakerExecutor, TakerExecutor
+from .fill_engine import Fill, MakerConfig, MakerExecutor, MakerOrder, TakerExecutor
 from .fill_model import EmpiricalFillModel
 from .latency_model import InFlightOrder, LatencyBook, MarkoutTracker, PendingOrderQueue
 from .models import Side
@@ -156,6 +156,8 @@ class ArbBacktestResult:
     fill_log_path: str | None = None
     bucket_stats_path: str | None = None
     trades_path: str | None = None
+    # Maker-order lifetime / cancel accounting (all zero when maker_max_age_s == 0). See _expire_maker_orders.
+    maker_lifetime: dict[str, float] = field(default_factory=dict)
 
 
 @dataclass
@@ -185,6 +187,7 @@ def _fee_preset_family(preset: str) -> str:
 class CrossVenueArbBacktester:
     def __init__(self, config: ArbBacktestConfig) -> None:
         self.config = config
+        validate_maker_lifetime(config.arb.maker_max_age_s)   # the arb config may have been mutated after construction
         bybit_family = _fee_preset_family(config.bybit_fee_preset)
         binance_family = _fee_preset_family(config.binance_fee_preset)
         if bybit_family != "unknown" and binance_family != "unknown" and bybit_family != binance_family:
@@ -280,6 +283,10 @@ class CrossVenueArbBacktester:
         self._order_ids = 0
         self._trackers: dict[int, _SignalTracker] = {}
         self._maker_to_signal: dict[int, int] = {}
+        # Exchange-side cancel has landed but the strategy cannot know yet: slot is released at effective_ts + feed delay.
+        self._cancel_acks: list[float] = []
+        self._cancel_watch: dict[int, "MakerOrder"] = {}   # orders with a cancel requested and not yet resolved
+        self.lifetime: Counter[str] = Counter()
         self._last_touch: dict[str, tuple[float, float]] = {v: (0.0, 0.0) for v in config.venues}
 
         self.events_processed = 0
@@ -566,19 +573,112 @@ class CrossVenueArbBacktester:
     # ── Main loop ────────────────────────────────────────────────────────────
 
     def _expire_maker_orders(self, now: float) -> None:
+        """Time-in-force for resting maker orders (ArbConfig.maker_max_age_s, seconds; 0 disables).
+
+        Semantics (all times are replay receive time):
+          * The lifetime clock starts when the order is placed at the exchange (`placed_ts`, the first replay event at or
+            after its release_ts). An order still in flight therefore cannot expire; it is counted toward the live-order
+            limit until it lands.
+          * At `placed_ts + ttl` the strategy requests a cancel. The cancel takes effect after one sampled cancel latency,
+            drawn once and stored on the order, so scanning again can neither move the deadline nor cancel twice.
+          * Between the request and the effective time the order is 'cancel_pending': still resting, still fillable, and
+            still counted as live. Fills in that window are kept.
+          * Tie rule: expiry is processed before the market event it coincides with, so an event stamped exactly at the
+            effective time does not fill the order.
+          * The slot is released to the strategy one feed delay after the cancel lands, not at the instant it lands.
+        """
         ttl = self.config.arb.maker_max_age_s
+        # A cancel that lost the race to a full fill: the order left the book on its own, the cancel finds nothing.
+        for oid, gone in list(self._cancel_watch.items()):
+            if oid not in self.maker.orders:
+                del self._cancel_watch[oid]
+                self.lifetime["cancels_lost_to_fill"] += 1
+                during = gone.filled_qty - gone.filled_at_cancel_request
+                if during > 1e-12:
+                    self.lifetime["fills_while_cancel_pending"] += 1
+                    self.lifetime["qty_filled_while_cancel_pending"] += during
         for order in list(self.maker.orders.values()):
-            cancel_s = self.venue_specs[order.venue].latency.cancel_ms / 1000.0
-            deadline = order.placed_ts + ttl + cancel_s
-            if now < deadline:
+            if order.cancel_requested_ts is None:
+                requested = order.placed_ts + ttl
+                if now < requested:
+                    continue
+                order.cancel_requested_ts = requested
+                order.cancel_effective_ts = requested + self.latency.cancel_delay(order.venue)
+                order.cancel_reason = "expired"
+                order.filled_at_cancel_request = order.filled_qty
+                self._cancel_watch[order.order_id] = order
+                self.lifetime["expiries_triggered"] += 1
+            if now < order.cancel_effective_ts:
                 continue
-            cancelled = self.maker.cancel(order.order_id, deadline)
+            effective = max(order.cancel_effective_ts, order.placed_ts)
+            cancelled = self.maker.cancel(order.order_id, effective)
             if cancelled is None:
                 continue
+            self._cancel_watch.pop(cancelled.order_id, None)
+            self.lifetime["cancels_applied"] += 1
+            self.lifetime["age_at_cancel_sum_s"] += effective - cancelled.placed_ts
+            self.lifetime["cancel_pending_time_sum_s"] += effective - cancelled.cancel_requested_ts
+            if cancelled.filled_qty > 1e-12:
+                self.lifetime["expired_after_partial_fill"] += 1
+            during = cancelled.filled_qty - cancelled.filled_at_cancel_request
+            if during > 1e-12:
+                self.lifetime["fills_while_cancel_pending"] += 1
+                self.lifetime["qty_filled_while_cancel_pending"] += during
+            self._cancel_acks.append(effective + self.venue_specs[cancelled.venue].latency.feed_ms / 1000.0)
             sid = self._maker_to_signal.get(cancelled.order_id, -1)
             tracker = self._trackers.get(sid)
             if tracker is not None:
                 tracker.maker_resting = False
+            self._maybe_resolve(sid, now)
+
+    def _live_maker_orders(self, now: float) -> int:
+        """Maker orders the strategy must treat as possibly executable: resting (incl. cancel-pending), in flight,
+        and cancelled at the exchange but not yet acknowledged to the strategy."""
+        n = len(self.maker.orders)
+        if self.config.arb.maker_count_inflight:
+            n += self.pending.maker_legs_in_flight()
+        if self._cancel_acks:
+            self._cancel_acks = [t for t in self._cancel_acks if t > now]
+            n += len(self._cancel_acks)
+        return n
+
+    def _advance_to(self, now: float) -> None:
+        """Bring order state up to `now`, before the market event stamped `now` is applied.
+
+        Order: in-flight orders land, then expiries/cancels take effect, then the caller applies the event. An order
+        sent at t-latency therefore cannot see the book update arriving right now, and a cancel effective at or before
+        `now` wins a tie against that event.
+        """
+        for order in self.pending.release(now):
+            self._execute_arrival(order, now)
+        if self.config.arb.maker_max_age_s > 0:
+            self._expire_maker_orders(now)
+
+    def _close_out(self, now: float) -> None:
+        """End of data. Orders still in flight land on the last book, resting orders are closed.
+
+        Neither is a real outcome: the data simply stopped. They are counted separately (`maker_landed_after_data_end`,
+        `taker_landed_after_data_end`, `resting_at_data_end`, `cancel_pending_at_data_end`) and never as an applied
+        cancel. The closes only censor the fill-model observations; they add no fills.
+        """
+        self.lifetime["resting_at_data_end"] = len(self.maker.orders)
+        self.lifetime["cancel_pending_at_data_end"] = sum(
+            1 for o in self.maker.orders.values() if o.cancel_requested_ts is not None)
+        for order in self.pending.drain():
+            self.lifetime["taker_landed_after_data_end" if order.is_taker else "maker_landed_after_data_end"] += 1
+            self._execute_arrival(order, now)
+        for mo in self.maker.orders.values():
+            if mo.cancel_requested_ts is None:
+                mo.cancel_reason = "end_of_data"
+        for mo in self.maker.cancel_all(now):
+            sid = self._maker_to_signal.get(mo.order_id, -1)
+            t = self._trackers.get(sid)
+            if t is not None:
+                t.maker_resting = False
+            self._maybe_resolve(sid, now)
+        for sid in list(self._trackers):
+            self._trackers[sid].legs_outstanding = 0
+            self._trackers[sid].maker_resting = False
             self._maybe_resolve(sid, now)
 
     def run(self) -> ArbBacktestResult:
@@ -609,14 +709,7 @@ class CrossVenueArbBacktester:
                 self.events_by_venue[ev.venue] += 1
                 self.events_by_kind[ev.kind] += 1
 
-                # In-flight orders land before the current event is applied: an order
-                # sent at t-latency cannot see the book update arriving right now.
-                for order in self.pending.release(now):
-                    self._execute_arrival(order, now)
-
-                if cfg.arb.maker_max_age_s > 0:
-                    self._expire_maker_orders(now)
-
+                self._advance_to(now)
                 self._apply_event(ev)
 
                 if self.settler is not None:
@@ -625,11 +718,14 @@ class CrossVenueArbBacktester:
                 # Trades can move the touch too, via trade-tape repair.
                 if self._touch_changed(ev.venue):
                     self.markouts.resolve(now, {v: b.mid for v, b in self.books.items()})
+                    blocked_before = self.strategy.rejects["maker_limit"]
                     signal = self.strategy.evaluate(
-                    self.books, self.states, self.inventory, now,
-                    live_maker_orders=len(self.maker.orders) + (
-                        self.pending.maker_legs_in_flight() if cfg.arb.maker_count_inflight else 0),
-                )
+                        self.books, self.states, self.inventory, now,
+                        live_maker_orders=self._live_maker_orders(now),
+                    )
+                    if (self.strategy.rejects["maker_limit"] > blocked_before
+                            and (self._cancel_acks or any(o.cancel_requested_ts is not None for o in self.maker.orders.values()))):
+                        self.lifetime["quotes_blocked_by_unresolved_cancel"] += 1
                     if signal is not None:
                         self._fire(signal, now)
 
@@ -642,19 +738,7 @@ class CrossVenueArbBacktester:
                         flush=True,
                     )
 
-            # Drain: everything in flight lands, resting orders are cancelled.
-            for order in self.pending.drain():
-                self._execute_arrival(order, now)
-            for mo in self.maker.cancel_all(now):
-                sid = self._maker_to_signal.get(mo.order_id, -1)
-                t = self._trackers.get(sid)
-                if t is not None:
-                    t.maker_resting = False
-                self._maybe_resolve(sid, now)
-            for sid in list(self._trackers):
-                self._trackers[sid].legs_outstanding = 0
-                self._trackers[sid].maker_resting = False
-                self._maybe_resolve(sid, now)
+            self._close_out(now)
 
             self.markouts.resolve(now, {v: b.mid for v, b in self.books.items()}, finalize=True)
             return self._build_result(feed, coverage, virtual_clock.real_time() - wall_start)
@@ -748,7 +832,20 @@ class CrossVenueArbBacktester:
             fill_log_path=fill_log_path,
             bucket_stats_path=bucket_stats_path,
             trades_path=trades_path,
+            maker_lifetime=self._lifetime_report(),
         )
+
+    def _lifetime_report(self) -> dict[str, float]:
+        lt = self.lifetime
+        cancels = max(1, lt["cancels_applied"])
+        keys = ("expiries_triggered", "cancels_applied", "cancels_lost_to_fill", "expired_after_partial_fill",
+                "fills_while_cancel_pending", "qty_filled_while_cancel_pending", "quotes_blocked_by_unresolved_cancel",
+                "resting_at_data_end", "cancel_pending_at_data_end", "maker_landed_after_data_end",
+                "taker_landed_after_data_end")
+        out = {k: float(lt[k]) for k in keys}
+        out["mean_age_at_cancel_s"] = lt["age_at_cancel_sum_s"] / cancels
+        out["mean_cancel_pending_s"] = lt["cancel_pending_time_sum_s"] / cancels
+        return out
 
 
 def _infer_tick(bids, asks) -> float:

@@ -167,9 +167,21 @@ class MakerOrder:
     snapshot_fill_qty: float = 0.0
     synthetic_fill_qty: float = 0.0   # qty filled by BackgroundAgentModel synthetic trades
 
+    # Cancel lifecycle (set by the backtester's lifetime handling; None until a cancel is requested).
+    # Between cancel_requested_ts and cancel_effective_ts the order is still resting at the exchange and can fill.
+    cancel_requested_ts: float | None = None
+    cancel_effective_ts: float | None = None
+    cancel_reason: str = ""            # "expired" | "end_of_data"
+    filled_at_cancel_request: float = 0.0
+
     @property
     def is_live(self) -> bool:
         return self.remaining > 1e-12
+
+    @property
+    def state(self) -> str:
+        """'active' (resting, no cancel asked for) or 'cancel_pending' (cancel sent, not yet applied at the exchange)."""
+        return "active" if self.cancel_requested_ts is None else "cancel_pending"
 
     @property
     def side_str(self) -> str:

@@ -45,6 +45,7 @@ Two execution modes:
 from __future__ import annotations
 
 import itertools
+import math
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
@@ -59,6 +60,12 @@ if TYPE_CHECKING:
 
 TAKER_TAKER = "taker_taker"
 MAKER_TAKER = "maker_taker"
+
+
+def validate_maker_lifetime(value: float) -> None:
+    """maker_max_age_s is seconds from exchange arrival; 0 disables expiry. Negative or non-finite values are errors, not 'off'."""
+    if not isinstance(value, (int, float)) or isinstance(value, bool) or not math.isfinite(value) or value < 0:
+        raise ValueError(f"ArbConfig.maker_max_age_s must be a finite number >= 0 (0 disables expiry), got {value!r}")
 
 
 @dataclass
@@ -96,7 +103,7 @@ class ArbConfig:
     maker_improve_ticks: int = 1         # how far inside the touch we rest
     maker_requote_bps: float = 0.5       # requote if fair moves by this much
     maker_max_live_orders: int = 1
-    maker_max_age_s: float = 0.0         # cancel resting maker orders older than this; 0 = rest until filled
+    maker_max_age_s: float = 0.0         # seconds from exchange arrival until a cancel is requested; 0 = off (rest until filled); negative/NaN raise
     maker_count_inflight: bool = True    # orders still in flight count toward maker_max_live_orders (False = legacy stacking)
 
     # Pacing
@@ -117,6 +124,9 @@ class ArbConfig:
     # never simultaneously actionable (e.g. Bybit at T vs Binance at T-490ms).
     # 0.0 = disabled.  Default 0.2 s is half the per-venue max_book_age_s.
     max_cross_venue_skew_s: float = 0.2
+
+    def __post_init__(self) -> None:
+        validate_maker_lifetime(self.maker_max_age_s)
 
 
 @dataclass
