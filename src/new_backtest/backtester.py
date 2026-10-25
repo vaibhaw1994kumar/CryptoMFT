@@ -74,6 +74,10 @@ class ArbBacktestConfig:
 
     consume_liquidity: bool = True
     include_deltas: bool = True
+    # How duplicate trade records are removed when several collector files overlap: "set" (legacy: any repeat of a
+    # record within 3 s is dropped, which also drops genuine identical prints inside one file) or "multiset" (only
+    # cross-file duplicates are dropped). Trade records have no id, so neither is exact; see event_loader._merge_sorted.
+    trade_dedupe: str = "set"
     seed: int = 7
 
     agent_flow: AgentFlowConfig = field(default_factory=AgentFlowConfig)
@@ -158,6 +162,8 @@ class ArbBacktestResult:
     trades_path: str | None = None
     # Maker-order lifetime / cancel accounting (all zero when maker_max_age_s == 0). See _expire_maker_orders.
     maker_lifetime: dict[str, float] = field(default_factory=dict)
+    # Fill-accounting counters from MakerExecutor.diagnostics(): observed trade/depth quantities vs what was allocated.
+    maker_diagnostics: dict[str, float] = field(default_factory=dict)
 
 
 @dataclass
@@ -329,11 +335,20 @@ class CrossVenueArbBacktester:
 
     # ── Event application ────────────────────────────────────────────────────
 
+    def _event_host_ts(self, ev) -> float | None:
+        """When the event executed at the exchange, on the host clock; None when unknown (no exchange time, or the clock
+        aligner has no sample yet). Callers then fall back to receive time."""
+        ex = getattr(ev, "exchange_ts", None)
+        if ex is None or not self.latency.aligner.ready:
+            return None
+        return self.latency.aligner.to_host(ex)
+
     def _apply_event(self, ev) -> None:
         book = self.books[ev.venue]
         state = self.states[ev.venue]
         spec = self.venue_specs[ev.venue]
         now = ev.receive_ts
+        ets = self._event_host_ts(ev)
 
         if ev.kind == BOOK:
             bids, asks = snapshot_levels(ev.payload)
@@ -345,7 +360,7 @@ class CrossVenueArbBacktester:
             state.on_book(book, now)
             self.maker.mark_adverse(ev.venue, book, now, self.tick_size[ev.venue])
             for f in self.maker.on_snapshot(
-                ev.venue, book, now, self.tick_size[ev.venue], spec.fees.maker_bps
+                ev.venue, book, now, self.tick_size[ev.venue], spec.fees.maker_bps, event_ts=ets
             ):
                 self._on_fill(f)
 
@@ -357,7 +372,7 @@ class CrossVenueArbBacktester:
             state.on_book(book, now)
             for f in self.maker.on_delta(
                 ev.venue, side, price, volume, now,
-                self.tick_size[ev.venue], spec.fees.maker_bps,
+                self.tick_size[ev.venue], spec.fees.maker_bps, event_ts=ets,
             ):
                 self._on_fill(f)
 
@@ -378,14 +393,14 @@ class CrossVenueArbBacktester:
                     ):
                         for f in self.maker.on_trade(
                             ev.venue, syn.price, syn.volume, syn.sign,
-                            syn.timestamp, spec.fees.maker_bps, is_synthetic=True,
+                            syn.timestamp, spec.fees.maker_bps, is_synthetic=True, event_ts=syn.timestamp,
                         ):
                             self._on_fill(f)
             self._last_trade_ts[ev.venue] = now
             book.on_trade(price, volume, sign, now)
             state.on_trade(now, price, volume, sign)
             for f in self.maker.on_trade(
-                ev.venue, price, volume, sign, now, spec.fees.maker_bps
+                ev.venue, price, volume, sign, now, spec.fees.maker_bps, event_ts=ets
             ):
                 self._on_fill(f)
 
@@ -466,6 +481,7 @@ class CrossVenueArbBacktester:
             state=state.to_market_state(book, now),
             regime_bucket=state.regime().bucket, now=now, active_ts=now,
             tick_size=self.tick_size[order.venue], signal_id=order.signal_id,
+            arrival_ts=order.release_ts,
         )
         self._maker_to_signal[maker_order.order_id] = order.signal_id
         if tracker is not None:
@@ -722,6 +738,7 @@ class CrossVenueArbBacktester:
             trust_local_ts={v: s.trust_local_ts for v, s in self.venue_specs.items()},
             include_deltas=cfg.include_deltas,
             quality_preflight=True,
+            trade_dedupe=cfg.trade_dedupe,
         )
 
         now = 0.0
@@ -860,6 +877,7 @@ class CrossVenueArbBacktester:
             bucket_stats_path=bucket_stats_path,
             trades_path=trades_path,
             maker_lifetime=self._lifetime_report(),
+            maker_diagnostics=self.maker.diagnostics(),
         )
 
     def _lifetime_report(self) -> dict[str, float]:

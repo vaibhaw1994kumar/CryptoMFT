@@ -62,13 +62,16 @@ class Harness:
         self.event(t, BOOK, venue, {"bids": [list(b) for b in bids], "asks": [list(a) for a in asks]})
         self.bt.tick_size[venue] = 1.0
 
-    def event(self, t, kind, venue, payload):
+    def event(self, t, kind, venue, payload, exchange_ts=None):
         self.bt._advance_to(t)
-        self.bt._apply_event(SimpleNamespace(kind=kind, venue=venue, payload=payload, receive_ts=t))
+        ev = SimpleNamespace(kind=kind, venue=venue, payload=payload, receive_ts=t)
+        if exchange_ts is not None:
+            ev.exchange_ts = exchange_ts
+        self.bt._apply_event(ev)
 
-    def sell_trade(self, t, venue, volume, price=100.0):
+    def sell_trade(self, t, venue, volume, price=100.0, exchange_ts=None):
         """A sell aggressor hitting bids at `price`: reaches our bid quoted at `price`."""
-        self.event(t, TRADE, venue, {"price": price, "volume": volume, "side": "s"})
+        self.event(t, TRADE, venue, {"price": price, "volume": volume, "side": "s"}, exchange_ts=exchange_ts)
 
     def advance(self, t):
         self.bt._advance_to(t)

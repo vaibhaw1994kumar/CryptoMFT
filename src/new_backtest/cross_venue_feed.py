@@ -82,6 +82,7 @@ class CrossVenueFeed:
         venue_roots: dict[str, Path | str] | None = None,
         quality_preflight: bool = False,
         quality_report_only: bool = True,
+        trade_dedupe: str = "set",
     ) -> None:
         self.data_root = Path(data_root)
         self.pair = pair
@@ -93,6 +94,7 @@ class CrossVenueFeed:
         self.include_deltas = include_deltas
         self.venue_roots = venue_roots or {}
         self._run_quality_preflight = quality_preflight
+        self.trade_dedupe = trade_dedupe
         self._quality_report_only = quality_report_only
 
         # Diagnostics — reported at end of run so feed quality is auditable.
@@ -116,6 +118,7 @@ class CrossVenueFeed:
             root, venue, self.pair, self.start_day, self.end_day,
             include_deltas=self.include_deltas,
             stats=self.loader_stats[venue],
+            trade_dedupe=self.trade_dedupe,
         ):
             if trust and ev.local_ts > 0.0:
                 recv, measured = vl.observe_receive_ts(ev.exchange_ts, ev.local_ts)
