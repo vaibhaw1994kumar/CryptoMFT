@@ -194,6 +194,13 @@ class CrossVenueArbBacktester:
                 "Use matching product types (both spot or both perp) unless intentional.",
                 stacklevel=2,
             )
+        if config.arb.mode == "maker_taker" and config.maker.min_queue_ahead <= 0.0:
+            warnings.warn(
+                "MakerConfig.min_queue_ahead is 0 in maker_taker mode: a quote that joins a price level absent from "
+                "the book starts at the front of the queue, so fill rates and edge are optimistic. Set it to a "
+                "typical level depth for the instrument (--min-queue-ahead).",
+                RuntimeWarning, stacklevel=2,
+            )
         all_specs = make_venues(
             config.latency_preset, config.bybit_fee_preset, config.binance_fee_preset,
         )

@@ -51,20 +51,23 @@ class SharedTradeVolumeTests(unittest.TestCase):
         self.assertAlmostEqual(self._two_orders_then_one_trade(MakerConfig(share_trade_volume=False)), 10.0, places=9)
 
 
-class QueueDoubleDrainKnownLimitationTests(unittest.TestCase):
-    """One real 3 BTC execution reported by BOTH the trade tape and the depth feed drains 6 BTC of queue.
+class QueueDoubleDrainTests(unittest.TestCase):
+    """One real 3 BTC execution reported by BOTH the trade tape and the depth feed must drain 3 BTC of queue, not 6."""
 
-    Documented, not fixed (see D3 in test_fill_engine_queue): if this starts failing the engine now de-duplicates
-    the two feeds and this baseline should be updated to 3.0 and 7.0.
-    """
-
-    def test_trade_plus_matching_depth_reduction_drains_twice(self):
+    def _drained(self, config):
         book = _book(bids=[(100.0, 10.0)])
-        ex = _executor(MakerConfig(trade_fill_share=1.0, delta_fill_share=0.15))
+        ex = _executor(config)
         order = _place(ex, book, price=100.0, size=10.0)
         ex.on_trade("bybit", price=100.0, volume=3.0, sign=-1, now=2.0, fee_bps=0.0)
         ex.on_delta("bybit", side="bid", price=100.0, new_size=7.0, now=2.001, tick_size=1.0, fee_bps=0.0)
-        self.assertAlmostEqual(10.0 - order.queue_ahead, 6.0, places=9)
+        return 10.0 - order.queue_ahead
+
+    def test_trade_plus_matching_depth_reduction_drains_once(self):
+        self.assertAlmostEqual(self._drained(MakerConfig(trade_fill_share=1.0, delta_fill_share=0.15)), 3.0, places=9)
+
+    def test_legacy_switch_reproduces_the_double_drain(self):
+        self.assertAlmostEqual(
+            self._drained(MakerConfig(trade_fill_share=1.0, delta_fill_share=0.15, dedupe_trade_depth=False)), 6.0, places=9)
 
 
 class ReplayOnSyntheticDaysTests(unittest.TestCase):
@@ -102,6 +105,24 @@ class ReplayOnSyntheticDaysTests(unittest.TestCase):
         self.assertEqual(len(seen["off"]), 1)
         self.assertIn("bybit", seen["off"][0])
         self.assertEqual(seen["ok"], [])
+
+
+class QueueFloorWarningTests(unittest.TestCase):
+    def _warnings(self, queue, mode="maker_taker"):
+        cfg = make_cfg("unused", "2026-10-01", "2026-10-01", "unused", queue=queue)
+        cfg.arb.mode = mode
+        with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter("always")
+            CrossVenueArbBacktester(cfg)
+        return [str(x.message) for x in w if issubclass(x.category, RuntimeWarning)]
+
+    def test_zero_queue_floor_in_maker_taker_mode_is_flagged(self):
+        msgs = self._warnings(0.0)
+        self.assertEqual(len(msgs), 1)
+        self.assertIn("min_queue_ahead", msgs[0])
+
+    def test_a_configured_floor_is_not_flagged(self):
+        self.assertEqual(self._warnings(0.8), [])
 
 
 class WalkForwardCannotSeeTheFutureTests(unittest.TestCase):

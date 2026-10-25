@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import itertools
 import math
+from collections import deque
 from dataclasses import dataclass, field
 
 from .fill_model import EmpiricalFillModel
@@ -194,6 +195,10 @@ class MakerConfig:
     # One public trade can fill our resting orders only once in total: the volume is shared in
     # price-then-time priority instead of being handed in full to every order (False = legacy).
     share_trade_volume: bool = True
+    # A real execution is published twice, as a trade and as a depth reduction at the same price. Volume already
+    # attributed to an execution by one feed is not drained again when the other feed reports it (False = legacy).
+    dedupe_trade_depth: bool = True
+    dedupe_window_s: float = 0.05
 
 
 class MakerExecutor:
@@ -211,6 +216,37 @@ class MakerExecutor:
         self.orders_placed = 0
         self.orders_filled = 0
         self.orders_cancelled = 0
+        self._explained: dict[str, dict[tuple, deque]] = {"trade": {}, "delta": {}}
+
+    # ── Trade / depth de-duplication ────────────────────────────────
+
+    def _take(self, kind: str, key: tuple, now: float, want: float) -> float:
+        credits = self._explained[kind].get(key)
+        if not credits:
+            return 0.0
+        horizon = now - self.config.dedupe_window_s
+        while credits and credits[0][0] < horizon:
+            credits.popleft()
+        taken = 0.0
+        while credits and taken < want - 1e-12:
+            use = min(credits[0][1], want - taken)
+            taken += use
+            credits[0][1] -= use
+            if credits[0][1] <= 1e-12:
+                credits.popleft()
+        if not credits:
+            del self._explained[kind][key]
+        return taken
+
+    def _add(self, kind: str, key: tuple, now: float, amount: float) -> None:
+        if amount <= 1e-12:
+            return
+        book = self._explained[kind]
+        if len(book) > 4096:
+            horizon = now - self.config.dedupe_window_s
+            for k in [k for k, d in book.items() if not d or d[-1][0] < horizon]:
+                del book[k]
+        book.setdefault(key, deque(maxlen=64)).append([now, amount])
 
     # ── Lifecycle ────────────────────────────────────────────────────────────
 
@@ -294,6 +330,12 @@ class MakerExecutor:
         is_synthetic: bool = False,
     ) -> list[Fill]:
         """A public trade crossed the book. Fill any resting order it reached."""
+        if self.config.dedupe_trade_depth:
+            key = (venue, "bid" if sign < 0 else "ask", round(price, 8))
+            volume -= self._take("delta", key, now, volume)
+            self._add("trade", key, now, volume)
+            if volume <= 1e-12:
+                return []
         fills: list[Fill] = []
         eligible = []
         for order in list(self.orders.values()):
@@ -329,6 +371,7 @@ class MakerExecutor:
         """A book delta shrank our level. Part of the shrink may be our queue."""
         fills: list[Fill] = []
         want = Side.BID if side.startswith("b") else Side.ASK
+        at_level = []
         for order in list(self.orders.values()):
             if order.venue != venue or order.side != want or not order.is_live:
                 continue
@@ -336,9 +379,18 @@ class MakerExecutor:
                 continue
             if abs(price - order.price) > max(1e-12, 0.5 * tick_size):
                 continue
-            prev = order.observed_level_size
-            if prev > new_size:
-                f = self._consume(order, prev - new_size, now, self.config.delta_fill_share, "delta", fee_bps)
+            at_level.append(order)
+        shrinks = {o.order_id: o.observed_level_size - new_size for o in at_level if o.observed_level_size > new_size}
+        explained = 0.0
+        if self.config.dedupe_trade_depth and shrinks:
+            key = (venue, "bid" if want == Side.BID else "ask", round(price, 8))
+            level_shrink = max(shrinks.values())
+            explained = self._take("trade", key, now, level_shrink)
+            self._add("delta", key, now, level_shrink - explained)
+        for order in at_level:
+            shrink = shrinks.get(order.order_id, 0.0) - explained
+            if shrink > 1e-12:
+                f = self._consume(order, shrink, now, self.config.delta_fill_share, "delta", fee_bps)
                 if f is not None:
                     fills.append(f)
             # Never increase observed_level_size: orders that join the level
