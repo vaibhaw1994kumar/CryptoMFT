@@ -52,7 +52,7 @@ class AdvancedBacktestSpec:
     venues: tuple[str, ...] = ("bybit", "binance")
     execution_mode: str = "taker_taker"
     latency_preset: str = "singapore"
-    bybit_fee_preset: str = "bybit_spot_mm"
+    bybit_fee_preset: str = "bybit_perp_mm"
     binance_fee_preset: str = "binance_perp_vip0"
     min_net_edge_bps: float = 1.0
     safety_buffer_bps: float = 0.5
