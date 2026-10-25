@@ -181,7 +181,8 @@ class SessionAuditTests(unittest.IsolatedAsyncioTestCase):
         # Both the forward paper run and its replay must reconcile.
         economics = {check["check"]: check["status"] for check in components["economics"]["checks"]}
         self.assertEqual(economics, {"paper_economics_reconcile": "OK",
-                                     "backtest_replay_economics_reconcile": "OK"})
+                                     "backtest_replay_economics_reconcile": "OK"},
+                         json.dumps(components["economics"], default=str)[:4000])
 
 
 if __name__ == "__main__":

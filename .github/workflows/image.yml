@@ -51,6 +51,8 @@ jobs:
       - name: Run acceptance suite inside the image
         run: |
           mkdir -p out
+          # The image runs as uid 1000; the runner's checkout belongs to another uid.
+          chmod 777 out
           docker run --rm -v "$PWD/out:/out" hft-platform-kit:ci
 
       - name: Check the evidence bundle

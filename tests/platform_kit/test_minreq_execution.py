@@ -427,5 +427,5 @@ def test_paper_mode_checks_carry_the_feed_limitation(tmp_path: Path) -> None:
 @pytest.mark.slow
 def test_full_acceptance_suite_passes(tmp_path: Path) -> None:
     report = run_acceptance(tmp_path / "acceptance")
-    failed = [check.test_id for check in report.checks if not check.passed]
-    assert not failed, json.dumps(failed)
+    failed = {check.test_id: check.detail for check in report.checks if not check.passed}
+    assert not failed, json.dumps(failed, default=str)[:4000]
