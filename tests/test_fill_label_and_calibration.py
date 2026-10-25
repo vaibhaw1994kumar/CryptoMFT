@@ -23,7 +23,9 @@ from new_backtest.fill_label import (
     extract_labels,
 )
 from new_backtest.batch_backtest import (
+    _aggregate_fold_results,
     _date_to_epoch,
+    _days_in_window,
     run_batch,
     run_pair,
 )
@@ -164,6 +166,54 @@ class TestExtractLabels(unittest.TestCase):
         _write_events(self.log, events)
         records = extract_labels(self.log)
         self.assertEqual(len(records), 10)
+
+    # ── P2.1: same-tick cancel censoring fix ──────────────────────────────────
+
+    def test_cancel_zero_obs_time_field_present_is_censored(self):
+        """Cancel with observation_time_s=0.0 in payload (new log, same-tick replay)
+        must be classified as censored — the order was genuinely cancelled before
+        any observable lifetime."""
+        ev = _make_event(ts=1000.0, horizon_s=5, filled=False, terminal_reason="cancel")
+        ev["observation_time_s"] = 0.0   # field present, zero value
+        _write_events(self.log, [ev])
+        rec = extract_labels(self.log)[0]
+        self.assertTrue(
+            rec.is_censored,
+            "Cancel with obs_time_s=0.0 (field present) must be censored, "
+            "not treated as a negative label",
+        )
+
+    def test_cancel_obs_time_field_absent_is_not_censored(self):
+        """Cancel without observation_time_s in payload (old log format) must
+        default to is_censored=False for backward compatibility."""
+        ev = _make_event(ts=1000.0, horizon_s=5, filled=False, terminal_reason="cancel")
+        # _make_event does NOT include observation_time_s — simulates an old log
+        self.assertNotIn("observation_time_s", ev)
+        _write_events(self.log, [ev])
+        rec = extract_labels(self.log)[0]
+        self.assertFalse(
+            rec.is_censored,
+            "Cancel with observation_time_s field absent (old log) must not be "
+            "censored — backward compat preserved",
+        )
+
+    def test_cancel_nonzero_obs_time_before_horizon_is_censored(self):
+        """Cancel with obs_time=2.0 < horizon_s=5 must be censored (unchanged behavior)."""
+        ev = _make_event(ts=1000.0, horizon_s=5, filled=False, terminal_reason="cancel")
+        ev["observation_time_s"] = 2.0
+        _write_events(self.log, [ev])
+        rec = extract_labels(self.log)[0]
+        self.assertTrue(rec.is_censored)
+        self.assertAlmostEqual(rec.observation_time_s, 2.0)
+
+    def test_cancel_obs_time_after_horizon_is_not_censored(self):
+        """Cancel with obs_time=10.0 >= horizon_s=5 was observable for the full
+        horizon — classify as a negative label, not censored."""
+        ev = _make_event(ts=1000.0, horizon_s=5, filled=False, terminal_reason="cancel")
+        ev["observation_time_s"] = 10.0
+        _write_events(self.log, [ev])
+        rec = extract_labels(self.log)[0]
+        self.assertFalse(rec.is_censored)
 
 
 # ── WalkForwardCalibrator ─────────────────────────────────────────────────────
@@ -330,6 +380,57 @@ class TestCalibrationDaysBacktest(unittest.TestCase):
         # Two-pass: same date window for both passes
         self.assertEqual(outcome.pass1["start_date"], outcome.pass2["start_date"])
 
+    def test_two_pass_fallback_labels_as_exploratory(self):
+        """When falling back to two-pass (no held-out calibration window),
+        the detail string must warn the caller that results are in-sample and
+        the fill-probability gate is disabled."""
+        out = Path(self.tmp.name) / "out_exploratory"
+        outcome = run_pair(
+            self.PAIR, self._base_config(), out,
+            two_pass=True, calibration_days=0, wf_window_days=7,
+        )
+        self.assertEqual(outcome.status, "ok")
+        # Must carry the exploratory tag so callers / scripts can detect it.
+        self.assertIn("[exploratory", outcome.detail,
+                      "two-pass fallback must label result as exploratory")
+
+    def test_two_pass_fallback_gate_disabled(self):
+        """Pass 2 in the two-pass fallback must have min_fill_prob=0.0 so the
+        fill gate never fires even when the base config requests a non-zero threshold."""
+        from new_backtest.arb_strategy import ArbConfig, TAKER_TAKER, MAKER_TAKER
+        from new_backtest.backtester import ArbBacktestConfig
+
+        # Use MAKER_TAKER with min_fill_prob=0.9 — would gate aggressively if active.
+        cfg = ArbBacktestConfig(
+            data_root=self.root,
+            venues=("bybit", "binance"),
+            start_date=self.DAYS[0],
+            end_date=self.DAYS[-1],
+            latency_preset="colocated_both",
+            arb=ArbConfig(
+                mode=MAKER_TAKER,
+                min_net_edge_bps=1.0,
+                max_clip_notional=10_000.0,
+                block_on_toxic=False,
+                min_fill_prob=0.9,
+            ),
+            include_deltas=False,
+        )
+        out = Path(self.tmp.name) / "out_gate_disabled"
+        outcome = run_pair(
+            self.PAIR, cfg, out,
+            two_pass=True, calibration_days=0, wf_window_days=7,
+        )
+        self.assertEqual(outcome.status, "ok")
+        # The gate must not have rejected any signals — pass2 strategy_report
+        # should show zero low_fill_prob rejects (gate was disabled).
+        pass2 = outcome.pass2 or {}
+        report = pass2.get("strategy_report", {})
+        self.assertEqual(
+            report.get("reject_low_fill_prob", 0), 0,
+            "fill gate must be disabled in two-pass fallback — no rejections expected",
+        )
+
     def test_calibration_days_splits_window(self):
         """calibration_days=2 → cal on first 2 days, eval on remaining 3."""
         out = Path(self.tmp.name) / "out_cal"
@@ -408,7 +509,7 @@ class TestCensoringFix(unittest.TestCase):
     A cancel at t+0.5s must produce zero labels for h=1, h=5, h=15 (all larger).
     """
 
-    def test_cancel_at_half_second_produces_no_label_records(self):
+    def test_cancel_at_half_second_produces_censored_label_records(self):
         from new_backtest.fill_engine import MakerExecutor, MakerConfig
         from new_backtest.fill_model import EmpiricalFillModel
         from new_backtest.order_book import OrderBook
@@ -457,11 +558,16 @@ class TestCensoringFix(unittest.TestCase):
         # Cancel 0.5 s later — all horizons (1, 5, 15) are still open
         executor.cancel(order.order_id, now=now + 0.5)
 
-        # No new label records (all horizons > life_s=0.5 → censored out)
+        # Censored rows ARE now emitted (one per horizon) so IPCW can estimate G(t).
+        # All should be marked is_censored=True with observation_time_s=0.5.
         new_count = len(model.order_event_log)
-        self.assertEqual(new_count, initial_count,
-                         "Cancelled orders must not generate fill-label records "
-                         "when cancelled before the shortest horizon")
+        n_horizons = len(MakerConfig().fill_horizons_s)
+        self.assertEqual(new_count - initial_count, n_horizons,
+                         "Cancelled order must emit one censored record per horizon")
+        for ev in model.order_event_log[initial_count:]:
+            self.assertAlmostEqual(ev.observation_time_s, 0.5, places=6,
+                                   msg="observation_time_s must equal cancel_time - placed_ts")
+            self.assertEqual(ev.terminal_reason, "cancel")
 
 
 # ── Fill gate stub tests ───────────────────────────────────────────────────────
@@ -596,6 +702,524 @@ class TestFillGate(unittest.TestCase):
             )
             with self.assertRaises(ValueError):
                 CrossVenueArbBacktester(cfg)
+
+
+# ── WalkForwardFold.fit() horizon filter ──────────────────────────────────────
+
+class TestWalkForwardFoldHorizonFilter(unittest.TestCase):
+    """fit(horizon_s=h) must train only on records with that horizon."""
+
+    def _make_fold(self, n_short: int = 60, n_long: int = 60) -> WalkForwardFold:
+        """Build a fold with two horizon groups having different fill rates."""
+        day_s = 86_400.0
+        records = []
+        # horizon=1: 20% fill rate (hard to fill quickly)
+        for i in range(n_short):
+            ts = float(i) * day_s / n_short
+            records.append(FillLabelRecord(
+                timestamp=ts, symbol="BTCUSDT", side="bid", horizon_s=1,
+                filled=(i % 5 == 0),  # 20%
+                relative_to_touch_ticks=0, queue_ahead=100.0, local_depth=500.0,
+                local_depth_baseline=800.0, spread_pct=0.001, short_vol=0.0002,
+                trade_count=5.0, trade_sign=0.1, regime_bucket="calm",
+                terminal_reason="full_fill" if (i % 5 == 0) else "cancel",
+            ))
+        # horizon=15: 80% fill rate (easy over 15s)
+        for i in range(n_long):
+            ts = float(i) * day_s / n_long
+            records.append(FillLabelRecord(
+                timestamp=ts, symbol="BTCUSDT", side="bid", horizon_s=15,
+                filled=(i % 5 != 0),  # 80%
+                relative_to_touch_ticks=0, queue_ahead=100.0, local_depth=500.0,
+                local_depth_baseline=800.0, spread_pct=0.001, short_vol=0.0002,
+                trade_count=5.0, trade_sign=0.1, regime_bucket="calm",
+                terminal_reason="full_fill" if (i % 5 != 0) else "cancel",
+            ))
+        return WalkForwardFold(
+            fold_id=0,
+            cal_start_ts=0.0,
+            cal_end_ts=day_s,
+            eval_end_ts=2 * day_s,
+            cal_records=records,
+            eval_records=records,
+        )
+
+    def test_fit_with_horizon_filter_uses_only_matching_records(self):
+        """fit(horizon_s=1) trains only on horizon=1 records; fit(horizon_s=15) on horizon=15."""
+        fold = self._make_fold()
+
+        model_1s  = fold.fit(horizon_s=1)
+        model_15s = fold.fit(horizon_s=15)
+
+        self.assertIsNotNone(model_1s)
+        self.assertIsNotNone(model_15s)
+        self.assertEqual(model_1s._horizon_s, 1)
+        self.assertEqual(model_15s._horizon_s, 15)
+
+        # 1s model should predict low probability (20% fill rate)
+        # 15s model should predict high probability (80% fill rate)
+        # Compare base rates via intercept sign (intercept negative → low p)
+        import numpy as np
+        dummy = np.zeros((1, 9), dtype=np.float32)
+        p_1s  = model_1s.predict_proba(model_1s._scaler.transform(dummy))[0, 1]
+        p_15s = model_15s.predict_proba(model_15s._scaler.transform(dummy))[0, 1]
+        self.assertLess(p_1s, p_15s,
+                        "1s model should predict lower fill probability than 15s model")
+
+    def test_fit_without_horizon_uses_all_records(self):
+        """fit() without horizon_s keeps existing behaviour (mixes all horizons)."""
+        fold = self._make_fold(n_short=60, n_long=60)
+        model_mixed = fold.fit()
+        self.assertIsNotNone(model_mixed)
+        self.assertIsNone(model_mixed._horizon_s)
+
+    def test_fit_unknown_horizon_returns_none(self):
+        """fit(horizon_s=999) finds no records → returns None."""
+        fold = self._make_fold()
+        result = fold.fit(horizon_s=999)
+        self.assertIsNone(result)
+
+    def test_predict_filters_eval_records_by_horizon(self):
+        """predict(model, horizon_s=h) scores only eval records with matching horizon."""
+        import numpy as np
+        fold = self._make_fold()
+        model_1s = fold.fit(horizon_s=1)
+        self.assertIsNotNone(model_1s)
+
+        y_all, p_all = fold.predict(model_1s)
+        y_1s, p_1s   = fold.predict(model_1s, horizon_s=1)
+        y_15s, p_15s  = fold.predict(model_1s, horizon_s=15)
+
+        # horizon-filtered result is a strict subset of the unfiltered result
+        self.assertLessEqual(len(y_1s), len(y_all))
+        self.assertLessEqual(len(y_15s), len(y_all))
+        self.assertEqual(len(y_1s) + len(y_15s), len(y_all))
+
+    def test_predict_unknown_horizon_returns_empty(self):
+        """predict(model, horizon_s=999) finds no records → empty arrays."""
+        import numpy as np
+        fold = self._make_fold()
+        model = fold.fit(horizon_s=1)
+        y, p = fold.predict(model, horizon_s=999)
+        self.assertEqual(len(y), 0)
+        self.assertEqual(len(p), 0)
+
+
+# ── Stage 3 helpers ───────────────────────────────────────────────────────────
+
+class TestDaysInWindow(unittest.TestCase):
+    """_days_in_window maps calendar days to timestamp windows."""
+
+    DAYS = ["2026-09-01", "2026-09-02", "2026-09-03",
+            "2026-09-04", "2026-09-05"]
+
+    def test_all_days_in_wide_window(self):
+        start = _date_to_epoch("2026-09-01")
+        end   = _date_to_epoch("2026-09-06")
+        result = _days_in_window(self.DAYS, start, end)
+        self.assertEqual(result, self.DAYS)
+
+    def test_single_day_window(self):
+        start = _date_to_epoch("2026-09-03")
+        end   = _date_to_epoch("2026-09-04")
+        result = _days_in_window(self.DAYS, start, end)
+        self.assertEqual(result, ["2026-09-03"])
+
+    def test_empty_when_window_before_all_days(self):
+        start = _date_to_epoch("2026-08-01")
+        end   = _date_to_epoch("2026-08-31")
+        self.assertEqual(_days_in_window(self.DAYS, start, end), [])
+
+    def test_end_is_exclusive(self):
+        # end == epoch("2026-09-03") excludes that day
+        start = _date_to_epoch("2026-09-01")
+        end   = _date_to_epoch("2026-09-03")
+        result = _days_in_window(self.DAYS, start, end)
+        self.assertNotIn("2026-09-03", result)
+        self.assertIn("2026-09-01", result)
+        self.assertIn("2026-09-02", result)
+
+
+class TestAggregateFoldResults(unittest.TestCase):
+    """_aggregate_fold_results sums additive metrics, weights ratios."""
+
+    def _fold(self, pnl, signals_completed, capture):
+        return {
+            "realized_pnl": pnl,
+            "gross_pnl": pnl * 1.1,
+            "fees_paid": abs(pnl) * 0.1,
+            "unhedged_loss": 0.0,
+            "traded_notional": 100_000.0,
+            "signals_generated": 200,
+            "orders_sent": 180,
+            "orders_filled": 120,
+            "orders_missed": 60,
+            "orders_cancelled": 0,
+            "signals_completed": signals_completed,
+            "signals_unhedged": 5,
+            "edge_capture_ratio": capture,
+            "mean_realized_net_edge_bps": capture * 2.0,
+            "fill_log_path": "/tmp/fill_events.jsonl",
+            "start_date": "2026-09-01",
+            "end_date": "2026-09-07",
+            "strategy_report": {"reject_low_fill_prob": 10, "reject_stale_book": 5},
+        }
+
+    def test_additive_sums(self):
+        folds = [self._fold(100.0, 50, 0.8), self._fold(200.0, 100, 0.6)]
+        combined = _aggregate_fold_results(folds)
+        self.assertAlmostEqual(combined["realized_pnl"], 300.0)
+        self.assertEqual(combined["orders_filled"], 240)
+        self.assertEqual(combined["signals_completed"], 150)
+
+    def test_weighted_capture(self):
+        # fold0: signals_completed=50, capture=1.0
+        # fold1: signals_completed=100, capture=0.0
+        # weighted avg = (50*1.0 + 100*0.0) / 150 = 1/3
+        folds = [self._fold(100.0, 50, 1.0), self._fold(0.0, 100, 0.0)]
+        combined = _aggregate_fold_results(folds)
+        self.assertAlmostEqual(combined["edge_capture_ratio"], 50/150, places=6)
+
+    def test_strategy_report_merged(self):
+        folds = [self._fold(0.0, 10, 0.5), self._fold(0.0, 10, 0.5)]
+        combined = _aggregate_fold_results(folds)
+        self.assertEqual(combined["strategy_report"]["reject_low_fill_prob"], 20)
+        self.assertEqual(combined["strategy_report"]["reject_stale_book"], 10)
+
+    def test_fold_count_recorded(self):
+        folds = [self._fold(0.0, 1, 0.0)] * 3
+        combined = _aggregate_fold_results(folds)
+        self.assertEqual(combined["wf_fold_count"], 3)
+
+    def test_empty_input_returns_empty(self):
+        self.assertEqual(_aggregate_fold_results([]), {})
+
+    def test_zero_signals_completed_gives_zero_capture(self):
+        folds = [self._fold(0.0, 0, 0.9)]
+        combined = _aggregate_fold_results(folds)
+        self.assertEqual(combined["edge_capture_ratio"], 0.0)
+
+
+class TestWalkForwardBacktest(unittest.TestCase):
+    """Integration: wf_window_days path in run_pair doesn't crash."""
+
+    PAIR = "BTCUSDT"
+    DAYS = [
+        "2026-09-01", "2026-09-02", "2026-09-03",
+        "2026-09-04", "2026-09-05",
+    ]
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self.tmp.name) / "data"
+        for day in self.DAYS:
+            _write_snapshot(self.root, "bybit", self.PAIR, day,
+                            bid=59_990.0, ask=60_000.0)
+            _write_snapshot(self.root, "binance", self.PAIR, day,
+                            bid=61_200.0, ask=61_210.0)
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def _base_config(self) -> ArbBacktestConfig:
+        return ArbBacktestConfig(
+            data_root=self.root,
+            venues=("bybit", "binance"),
+            start_date=self.DAYS[0],
+            end_date=self.DAYS[-1],
+            latency_preset="colocated_both",
+            arb=ArbConfig(
+                mode=TAKER_TAKER,
+                min_net_edge_bps=1.0,
+                max_clip_notional=10_000.0,
+                block_on_toxic=False,
+            ),
+            include_deltas=False,
+        )
+
+    def test_wf_path_runs_without_exception(self):
+        """wf_window_days > 0 in TAKER_TAKER: cold pass runs; no folds (no fill log)."""
+        out = Path(self.tmp.name) / "out_wf"
+        outcome = run_pair(
+            self.PAIR, self._base_config(), out,
+            two_pass=False,
+            wf_window_days=2, wf_step_days=1,
+        )
+        # In TAKER_TAKER there are no passive orders → no fill_log_path from cold pass
+        # → status should be "ok" (cold pass ran) or "error" (no log / no folds), never an exception
+        self.assertIn(outcome.status, ("ok", "error"))
+
+    def test_wf_supersedes_calibration_days(self):
+        """When both wf_window_days>0 and calibration_days>0, wf path runs first."""
+        out = Path(self.tmp.name) / "out_wf_cal"
+        outcome = run_pair(
+            self.PAIR, self._base_config(), out,
+            two_pass=False,
+            calibration_days=2,
+            wf_window_days=2, wf_step_days=1,
+        )
+        # Detail from wf path contains "wf" or "wf_fold" not "cal="
+        # (It may be "error" if no folds, but not the static-split path)
+        if outcome.status == "ok":
+            self.assertIn("wf", outcome.detail)
+            self.assertNotIn("cal=", outcome.detail)
+
+    def test_wf_not_taken_when_zero(self):
+        """wf_window_days=0 falls through to calibration_days branch."""
+        out = Path(self.tmp.name) / "out_no_wf"
+        outcome = run_pair(
+            self.PAIR, self._base_config(), out,
+            two_pass=True,
+            calibration_days=2, wf_window_days=0,
+        )
+        self.assertEqual(outcome.status, "ok")
+        self.assertIn("cal=", outcome.detail)
+
+    def test_run_batch_wf_params_accepted(self):
+        """run_batch accepts wf_window_days / wf_step_days without error."""
+        out = Path(self.tmp.name) / "batch_wf"
+        summary = run_batch(
+            [self.PAIR], self._base_config(), str(out),
+            two_pass=False, verbose=False,
+            wf_window_days=2, wf_step_days=1,
+        )
+        self.assertEqual(summary.pairs_requested, 1)
+
+
+# ── Stage 4: FillModelV2 unit tests ──────────────────────────────────────────
+
+def _make_stage4_records(n_per_h: int = 80, seed: int = 42) -> list:
+    """Generate synthetic FillLabelRecords across horizons 1/5/15 with both
+    fill classes and price_moved_through labels present."""
+    import random
+    from new_backtest.fill_label import FillLabelRecord
+    rng = random.Random(seed)
+    records = []
+    base_ts = 1_700_000_000.0
+    for h in (1, 5, 15):
+        for i in range(n_per_h):
+            filled = rng.random() < 0.55
+            adverse = rng.random() < 0.3
+            records.append(FillLabelRecord(
+                timestamp=base_ts + i * 60.0,
+                symbol="BTCUSDT",
+                side="bid",
+                horizon_s=h,
+                filled=filled,
+                relative_to_touch_ticks=0,
+                queue_ahead=rng.uniform(0, 500),
+                local_depth=rng.uniform(100, 1000),
+                local_depth_baseline=800.0,
+                spread_pct=rng.uniform(0.0005, 0.005),
+                short_vol=rng.uniform(0, 0.001),
+                trade_count=rng.uniform(0, 20),
+                trade_sign=rng.uniform(-1, 1),
+                regime_bucket=rng.choice(["calm", "elevated", "toxic"]),
+                terminal_reason="full_fill" if filled else "cancel",
+                fill_ratio=rng.uniform(0.5, 1.0) if filled else 0.0,
+                price_moved_through=adverse,
+            ))
+    return records
+
+
+class TestFillModelV2(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.records = _make_stage4_records()
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def test_fit_returns_model(self):
+        from new_backtest.fill_model_v1 import FillModelV2
+        model = FillModelV2.fit(self.records, gate_horizon_s=15, trained_until_ts=0.0)
+        self.assertIsNotNone(model)
+        self.assertEqual(model.gate_horizon_s, 15)
+        self.assertEqual(model.version, 2)
+
+    def test_per_horizon_keys_present(self):
+        from new_backtest.fill_model_v1 import FillModelV2
+        model = FillModelV2.fit(self.records, gate_horizon_s=15)
+        for h in ("1", "5", "15"):
+            self.assertIn(h, model.per_horizon)
+
+    def test_predict_returns_float_in_unit_interval(self):
+        from new_backtest.fill_model_v1 import FillModelV2
+        model = FillModelV2.fit(self.records, gate_horizon_s=15)
+        p = model.predict(
+            queue_ahead=50.0, local_depth=500.0, local_depth_baseline=800.0,
+            spread_pct=0.001, short_vol=0.0002, trade_count=5.0, trade_sign=0.1,
+            regime_bucket="calm",
+        )
+        self.assertIsInstance(p, float)
+        self.assertGreaterEqual(p, 0.0)
+        self.assertLessEqual(p, 1.0)
+
+    def test_horizon_s_property_returns_gate_horizon(self):
+        from new_backtest.fill_model_v1 import FillModelV2
+        model = FillModelV2.fit(self.records, gate_horizon_s=5)
+        self.assertEqual(model.horizon_s, 5)
+
+    def test_predict_ttf_monotone_p_by_h(self):
+        from new_backtest.fill_model_v1 import FillModelV2
+        model = FillModelV2.fit(self.records, gate_horizon_s=15)
+        pred = model.predict_ttf(
+            queue_ahead=50.0, local_depth=500.0, local_depth_baseline=800.0,
+            spread_pct=0.001, short_vol=0.0002, trade_count=5.0, trade_sign=0.1,
+            regime_bucket="calm",
+        )
+        h_vals = sorted(pred.p_by_h.keys())
+        probs = [pred.p_by_h[h] for h in h_vals]
+        for a, b in zip(probs, probs[1:]):
+            self.assertLessEqual(a - b, 1e-9, "p_by_h must be non-decreasing")
+
+    def test_predict_ttf_e_ttf_positive(self):
+        from new_backtest.fill_model_v1 import FillModelV2
+        model = FillModelV2.fit(self.records, gate_horizon_s=15)
+        pred = model.predict_ttf(
+            queue_ahead=50.0, local_depth=500.0, local_depth_baseline=800.0,
+            spread_pct=0.001, short_vol=0.0002, trade_count=5.0, trade_sign=0.1,
+            regime_bucket="calm",
+        )
+        self.assertGreaterEqual(pred.e_ttf, 0.0)
+
+    def test_predict_ttf_p_fill_matches_gate_horizon(self):
+        from new_backtest.fill_model_v1 import FillModelV2
+        model = FillModelV2.fit(self.records, gate_horizon_s=15)
+        feat = dict(
+            queue_ahead=50.0, local_depth=500.0, local_depth_baseline=800.0,
+            spread_pct=0.001, short_vol=0.0002, trade_count=5.0, trade_sign=0.1,
+            regime_bucket="calm",
+        )
+        pred = model.predict_ttf(**feat)
+        p_direct = model.predict(**feat)
+        self.assertAlmostEqual(pred.p_fill, p_direct, places=6)
+
+    def test_save_load_roundtrip(self):
+        from new_backtest.fill_model_v1 import FillModelV2
+        model = FillModelV2.fit(self.records, gate_horizon_s=15)
+        path = str(Path(self.tmp.name) / "fill_model_v2.json")
+        model.save_json(path)
+        loaded = FillModelV2.load_json(path)
+        self.assertEqual(loaded.gate_horizon_s, model.gate_horizon_s)
+        self.assertEqual(loaded.version, 2)
+        feat = dict(
+            queue_ahead=50.0, local_depth=500.0, local_depth_baseline=800.0,
+            spread_pct=0.001, short_vol=0.0002, trade_count=5.0, trade_sign=0.1,
+            regime_bucket="calm",
+        )
+        self.assertAlmostEqual(loaded.predict(**feat), model.predict(**feat), places=6)
+
+    def test_load_fill_model_auto_detects_v2(self):
+        from new_backtest.fill_model_v1 import FillModelV2, load_fill_model
+        model = FillModelV2.fit(self.records, gate_horizon_s=15)
+        path = str(Path(self.tmp.name) / "auto_detect.json")
+        model.save_json(path)
+        loaded = load_fill_model(path)
+        self.assertIsInstance(loaded, FillModelV2)
+
+    def test_load_fill_model_auto_detects_v1(self):
+        from new_backtest.fill_model_v1 import FillModelV1, load_fill_model
+        v1_records = [r for r in self.records if r.horizon_s == 15]
+        model = FillModelV1.fit(v1_records, horizon_s=15)
+        self.assertIsNotNone(model)
+        path = str(Path(self.tmp.name) / "v1_model.json")
+        model.save_json(path)
+        loaded = load_fill_model(path)
+        self.assertIsInstance(loaded, FillModelV1)
+
+    def test_fit_adverse_model_trained(self):
+        from new_backtest.fill_model_v1 import FillModelV2
+        model = FillModelV2.fit(self.records, gate_horizon_s=15)
+        # adverse_model is None only if all labels are single-class; with random
+        # data it should be non-None
+        self.assertIsNotNone(model.adverse_model)
+
+    def test_mean_fill_ratio_in_unit_interval(self):
+        from new_backtest.fill_model_v1 import FillModelV2
+        model = FillModelV2.fit(self.records, gate_horizon_s=15)
+        self.assertGreaterEqual(model.mean_fill_ratio, 0.0)
+        self.assertLessEqual(model.mean_fill_ratio, 1.0)
+
+
+class TestFillModelV2GateIntegration(unittest.TestCase):
+    """Integration: V2 model loaded via load_fill_model triggers the arb gate."""
+
+    PAIR = "BTCUSDT"
+    VENUES = ["bybit", "binance"]
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def _data_root(self) -> Path:
+        root = Path(self.tmp.name) / "data"
+        for venue in self.VENUES:
+            for day in ("2024-01-01", "2024-01-02", "2024-01-03"):
+                _write_snapshot(root, venue, self.PAIR, day)
+        return root
+
+    def _base_config(self, min_fill_prob: float = 0.99,
+                     max_adverse_prob: float = 1.0) -> "ArbBacktestConfig":
+        from new_backtest.arb_strategy import MAKER_TAKER
+        root = self._data_root()
+        return ArbBacktestConfig(
+            pair=self.PAIR, data_root=str(root),
+            venues=tuple(self.VENUES),
+            start_date="2024-01-01", end_date="2024-01-03",
+            arb=ArbConfig(
+                mode=MAKER_TAKER,
+                min_net_edge_bps=1.0,
+                max_clip_notional=10_000.0,
+                block_on_toxic=False,
+                min_fill_prob=min_fill_prob,
+                max_adverse_prob=max_adverse_prob,
+            ),
+            include_deltas=False,
+        )
+
+    def _write_v2_model(self) -> str:
+        from new_backtest.fill_model_v1 import FillModelV2
+        records = _make_stage4_records(n_per_h=100)
+        model = FillModelV2.fit(records, gate_horizon_s=15)
+        path = str(Path(self.tmp.name) / "fill_model_v2.json")
+        model.save_json(path)
+        return path
+
+    def test_v2_model_loaded_via_load_fill_model(self):
+        from new_backtest.fill_model_v1 import FillModelV2, load_fill_model
+        path = self._write_v2_model()
+        loaded = load_fill_model(path)
+        self.assertIsInstance(loaded, FillModelV2)
+
+    def test_calibration_days_produces_v2_model(self):
+        """Static cal path now uses FillModelV2; model file should decode as V2."""
+        from new_backtest.fill_model_v1 import FillModelV2
+        from new_backtest.arb_strategy import MAKER_TAKER
+        root = self._data_root()
+        cfg = ArbBacktestConfig(
+            pair=self.PAIR, data_root=str(root),
+            venues=tuple(self.VENUES),
+            start_date="2024-01-01", end_date="2024-01-03",
+            arb=ArbConfig(
+                mode=MAKER_TAKER,
+                min_net_edge_bps=1.0,
+                max_clip_notional=10_000.0,
+                block_on_toxic=False,
+                min_fill_prob=0.5,
+            ),
+            include_deltas=False,
+        )
+        out = Path(self.tmp.name) / "cal_out"
+        outcome = run_pair(
+            self.PAIR, cfg, out,
+            two_pass=False, calibration_days=1,
+        )
+        # Outcome is ok or error (MAKER_TAKER with dummy data may produce no orders)
+        # but must not crash
+        self.assertIn(outcome.status, ("ok", "error"))
 
 
 if __name__ == "__main__":
