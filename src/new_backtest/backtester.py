@@ -52,6 +52,9 @@ from .order_book import OrderBook
 from .venue_state import VenueState, VenueStateConfig
 
 
+CLOCK_OFFSET_WARN_MS = 5.0   # a venue whose receive times average this far before its exchange stamps is flagged
+
+
 @dataclass
 class ArbBacktestConfig:
     pair: str = "BTCUSDT"
@@ -547,6 +550,22 @@ class CrossVenueArbBacktester:
 
     # ── Main loop ────────────────────────────────────────────────────────────
 
+    def _expire_maker_orders(self, now: float) -> None:
+        ttl = self.config.arb.maker_max_age_s
+        for order in list(self.maker.orders.values()):
+            cancel_s = self.venue_specs[order.venue].latency.cancel_ms / 1000.0
+            deadline = order.placed_ts + ttl + cancel_s
+            if now < deadline:
+                continue
+            cancelled = self.maker.cancel(order.order_id, deadline)
+            if cancelled is None:
+                continue
+            sid = self._maker_to_signal.get(cancelled.order_id, -1)
+            tracker = self._trackers.get(sid)
+            if tracker is not None:
+                tracker.maker_resting = False
+            self._maybe_resolve(sid, now)
+
     def run(self) -> ArbBacktestResult:
         cfg = self.config
         virtual_clock.install_virtual_clock(0.0)
@@ -580,6 +599,9 @@ class CrossVenueArbBacktester:
                 for order in self.pending.release(now):
                     self._execute_arrival(order, now)
 
+                if cfg.arb.maker_max_age_s > 0:
+                    self._expire_maker_orders(now)
+
                 self._apply_event(ev)
 
                 if self.settler is not None:
@@ -590,7 +612,8 @@ class CrossVenueArbBacktester:
                     self.markouts.resolve(now, {v: b.mid for v, b in self.books.items()})
                     signal = self.strategy.evaluate(
                     self.books, self.states, self.inventory, now,
-                    live_maker_orders=len(self.maker.orders),
+                    live_maker_orders=len(self.maker.orders) + (
+                        self.pending.maker_legs_in_flight() if cfg.arb.maker_count_inflight else 0),
                 )
                     if signal is not None:
                         self._fire(signal, now)
@@ -641,6 +664,16 @@ class CrossVenueArbBacktester:
         capture = (mean_real / mean_exp) if abs(mean_exp) > 1e-12 else 0.0
         mean_slip = self.slippage_sum / self.slippage_count if self.slippage_count else 0.0
 
+        feed_report = feed.report()
+        for venue, rep in feed_report.items():
+            lat = None if venue.startswith("_") else rep.get("mean_feed_latency_vs_host_ms")
+            if lat is not None and lat < -CLOCK_OFFSET_WARN_MS:
+                warnings.warn(
+                    f"{venue}: recorded receive times average {-lat:.1f} ms BEFORE the exchange timestamps after "
+                    "host-clock correction. The collector clock for this venue is probably offset; the replay then "
+                    "shows this venue's updates early and results can be look-ahead biased.",
+                    RuntimeWarning, stacklevel=2)
+
         fill_log_path = bucket_stats_path = trades_path = None
         if cfg.output_dir:
             out = Path(cfg.output_dir)
@@ -690,7 +723,7 @@ class CrossVenueArbBacktester:
             net_base_position=self.inventory.net_base,
             traded_notional=self.traded_notional,
             strategy_report=self.strategy.report(),
-            feed_report=feed.report(),
+            feed_report=feed_report,
             latency_report=self.latency.report(),
             book_stats={v: b.stats() for v, b in self.books.items()},
             maker_stats=self.maker.stats(),

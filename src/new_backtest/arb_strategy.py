@@ -96,6 +96,8 @@ class ArbConfig:
     maker_improve_ticks: int = 1         # how far inside the touch we rest
     maker_requote_bps: float = 0.5       # requote if fair moves by this much
     maker_max_live_orders: int = 1
+    maker_max_age_s: float = 0.0         # cancel resting maker orders older than this; 0 = rest until filled
+    maker_count_inflight: bool = True    # orders still in flight count toward maker_max_live_orders (False = legacy stacking)
 
     # Pacing
     min_resignal_gap_s: float = 0.0      # throttle repeat fires on one edge

@@ -191,6 +191,9 @@ class MakerConfig:
     # is max(level_size * queue_stress_multiplier, min_queue_ahead).  It is a
     # floor for absent levels only, not a blanket override of the multiplier.
     min_queue_ahead: float = 0.0
+    # One public trade can fill our resting orders only once in total: the volume is shared in
+    # price-then-time priority instead of being handed in full to every order (False = legacy).
+    share_trade_volume: bool = True
 
 
 class MakerExecutor:
@@ -292,18 +295,31 @@ class MakerExecutor:
     ) -> list[Fill]:
         """A public trade crossed the book. Fill any resting order it reached."""
         fills: list[Fill] = []
+        eligible = []
         for order in list(self.orders.values()):
             if order.venue != venue or not order.is_live or now + 1e-12 < order.active_ts:
                 continue
             # sign=-1: sell aggressor hits bids. sign=+1: buy aggressor lifts asks.
             if sign < 0 and order.side == Side.BID and price <= order.price + 1e-12:
-                f = self._consume(order, volume, now, self.config.trade_fill_share, "trade", fee_bps, is_synthetic)
+                eligible.append(order)
             elif sign > 0 and order.side == Side.ASK and price >= order.price - 1e-12:
-                f = self._consume(order, volume, now, self.config.trade_fill_share, "trade", fee_bps, is_synthetic)
-            else:
-                continue
+                eligible.append(order)
+        share = self.config.share_trade_volume
+        if share:
+            eligible.sort(key=lambda o: (-o.price if o.side == Side.BID else o.price, o.placed_ts, o.order_id))
+        remaining = volume
+        for order in eligible:
+            queue_before = order.queue_ahead
+            f = self._consume(order, remaining if share else volume, now, self.config.trade_fill_share, "trade", fee_bps, is_synthetic)
             if f is not None:
                 fills.append(f)
+            if share:
+                absorbed = queue_before - order.queue_ahead
+                if f is not None and self.config.trade_fill_share > 0:
+                    absorbed += f.qty / self.config.trade_fill_share
+                remaining -= absorbed
+                if remaining <= 1e-12:
+                    break
         return fills
 
     def on_delta(
