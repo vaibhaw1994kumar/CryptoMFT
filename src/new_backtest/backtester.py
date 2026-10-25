@@ -212,6 +212,13 @@ class CrossVenueArbBacktester:
                 "(maker_requote_bps is not used); set maker_max_age_s as a time-in-force.",
                 RuntimeWarning, stacklevel=2,
             )
+        if config.arb.mode == "maker_taker" and not config.arb.maker_count_inflight:
+            warnings.warn(
+                "ArbConfig.maker_count_inflight is False in maker_taker mode: orders still in flight are not counted "
+                "toward maker_max_live_orders, so one signal can be repeated until the first order lands (21 identical "
+                "orders in the original audit). Legacy behaviour, kept for comparison only.",
+                RuntimeWarning, stacklevel=2,
+            )
         all_specs = make_venues(
             config.latency_preset, config.bybit_fee_preset, config.binance_fee_preset,
         )
@@ -680,6 +687,8 @@ class CrossVenueArbBacktester:
             self._trackers[sid].legs_outstanding = 0
             self._trackers[sid].maker_resting = False
             self._maybe_resolve(sid, now)
+        self._cancel_watch.clear()
+        self._cancel_acks.clear()
 
     def run(self) -> ArbBacktestResult:
         cfg = self.config

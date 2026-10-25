@@ -38,12 +38,12 @@ class Harness:
     """A backtester with pinned latencies, driven by hand through the same methods run() uses."""
 
     def __init__(self, ttl=10.0, entry_s=0.003, cancel_s=0.05, venues=(BYBIT, BINANCE), max_live=1, queue=0.5,
-                 entry=None, cancel=None):
+                 entry=None, cancel=None, **arb_kw):
         cfg = ArbBacktestConfig(
             data_root="unused", venues=venues, pair="BTCUSDT", start_date="2026-10-01", end_date="2026-10-01",
             latency_preset="colocated_both", bybit_fee_preset="bybit_perp_mm", binance_fee_preset="binance_perp_vip0",
             maker=MakerConfig(min_queue_ahead=queue),
-            arb=ArbConfig(mode=MAKER_TAKER, maker_max_age_s=ttl, maker_max_live_orders=max_live, max_position_base=10.0))
+            arb=ArbConfig(mode=MAKER_TAKER, maker_max_age_s=ttl, maker_max_live_orders=max_live, max_position_base=10.0, **arb_kw))
         self.bt = CrossVenueArbBacktester(cfg)
         self.entry = entry or {v: entry_s for v in venues}
         self.cancel = cancel or {v: cancel_s for v in venues}

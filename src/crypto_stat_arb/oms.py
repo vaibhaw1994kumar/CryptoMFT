@@ -243,6 +243,7 @@ class OMS:
             "new_risk_held_residual_breach": 0,
             "residual_breach_kill_escalations": 0,
             "resting_fill_reports": 0,
+            "ambiguous_dispatch_errors": 0,
         }
         self._books: dict[tuple[str, str], OrderBook] = {}
         self._flatten_book_marker: dict[str, tuple[int, str]] = {}
@@ -453,6 +454,7 @@ class OMS:
         if self.order_owner_guard is not None:
             self.order_owner_guard()
         cancelled = 0
+        cancel_errors = 0
         for plan in self.plans.values():
             self._recompute_plan_economics(plan, now_ns)
             for order in plan.children:
@@ -501,7 +503,14 @@ class OMS:
                         time_in_force=TimeInForce.GTC,
                         created_ts_ns=now_ns,
                     )
-                    callbacks = self.router.route(request)
+                    try:
+                        callbacks = self.router.route(request)
+                    except Exception as exc:
+                        # One venue failing must not stop the sweep: the other orders still have to be cancelled.
+                        # This order stays as it was (not cancelled) and is re-queried immediately.
+                        self._note_ambiguous_dispatch(plan, order, request.idempotency_key, "CANCEL", exc, now_ns)
+                        cancel_errors += 1
+                        continue
                     self._record_order_action(
                         plan, order, request, "CANCEL", "DISPATCHED", now_ns,
                         target_order_id=order.order_id,
@@ -522,6 +531,7 @@ class OMS:
             venue=venue or "ALL",
             preserve_risk_reducing=preserve_risk_reducing,
             cancelled_orders=cancelled,
+            **({"cancel_errors": cancel_errors} if cancel_errors else {}),
         )
         return cancelled
 
@@ -1939,6 +1949,23 @@ class OMS:
             self.ledger.apply_fill(order, ts_ns)
             self._update_exposure_control(ts_ns)
 
+    def _note_ambiguous_dispatch(
+        self, plan: ParentPlan, order: ChildOrder, idempotency_key: str, action: str, exc: BaseException, ts_ns: int,
+    ) -> None:
+        """A submit/cancel call raised: the venue may or may not have acted. Record it and make sure it is re-queried."""
+        self.realism_counters["ambiguous_dispatch_errors"] += 1
+        error = f"{type(exc).__name__}: {exc}"
+        self.ledger.record(
+            "DISPATCH_EXCEPTION_AMBIGUOUS", ts_ns, parent_id=plan.parent_id, order_id=order.order_id,
+            venue=order.venue, action=action, idempotency_key=idempotency_key, error=error,
+            local_state=order.state.value,
+        )
+        self._persist(
+            plan, ts_ns, "DISPATCH_EXCEPTION_AMBIGUOUS", order_id=order.order_id, venue=order.venue,
+            action=action, idempotency_key=idempotency_key, error=error,
+        )
+        self._watch_order(order, ts_ns, immediate=(action == "CANCEL"))
+
     def check_order_deadlines(self, now_ns: int) -> int:
         """Query venues for orders past their report deadline; never resend."""
         policy = self.order_timeout_policy
@@ -2504,7 +2531,14 @@ class OMS:
                 idempotency_key=stable_id("submit", order.order_id),
                 risk_reducing=risk_reducing,
             )
-            routing = self.route_strategy_order(instruction, books)
+            try:
+                routing = self.route_strategy_order(instruction, books)
+            except Exception as exc:
+                # The adapter raised after the order may already have been handed to the venue, so the order is
+                # neither accepted nor rejected as far as we know. Keep the reservation, never resend, and put the
+                # order under the normal report-deadline recovery (venue query -> time out -> kill switch).
+                self._note_ambiguous_dispatch(plan, order, instruction.idempotency_key, "SUBMIT", exc, dispatch_started_ts)
+                raise
             if risk_reducing:
                 self._record_legging_control_override(
                     plan, order, routing, dispatch_started_ts,
