@@ -35,12 +35,9 @@ DATA_ROOT   = "/Users/vaibhav/Documents/Newproject/data"
 OUTPUT_ROOT = Path("/Users/vaibhav/Documents/Newproject/out/sol_wf_backtest")
 
 # Date window — extend as data becomes available.
-START_DATE = "2022-01-13"
-END_DATE   = "2022-01-13"   # ← extend to cover ≥14 days once data is downloaded
-                             # e.g. START_DATE="2022-01-01", END_DATE="2022-01-14"
-                             # With ≥14 days the WF path fires (wf_window_days=7,
-                             # wf_step_days=1 → 7 folds), FillModelV2 is fitted per
-                             # fold on past-only labels, and the gates become valid.
+START_DATE = "2022-01-06"
+END_DATE   = "2022-01-10"   # 5 clean common days (Jan 06-10) → 1 WF fold (cal=06-09, test=10).
+                             # Bybit Jan 04-11 good. Binance Jan 06-10 good.
 
 BASE_CFG = ArbBacktestConfig(
     data_root=DATA_ROOT,
@@ -66,9 +63,10 @@ BASE_CFG = ArbBacktestConfig(
         # data activate the WF fold loop and FillModelV2.fit() succeeds per fold.
         min_fill_prob=0.5,             # skip signals with P(fill@5s) < 0.5
         max_adverse_prob=0.15,         # skip signals with P(adverse) > 0.15
-        max_ttf_s=8.0,                 # skip signals where E[TTF] > 8s
+        max_ttf_s=3.0,                 # skip signals where E[TTF] > 3s (must be < fill_gate_horizon_s=5s)
         max_cross_venue_skew_s=0.2,    # reject if books differ by > 200 ms
         fill_gate_horizon_s=5,         # horizon used for all gates (int, matches FillModelV2)
+        maker_max_age_s=15.0,          # cancel maker order after 15s to prevent stale fills
     ),
     output_dir=str(OUTPUT_ROOT / "SOLUSDT"),
 )
@@ -81,7 +79,7 @@ BASE_CFG = ArbBacktestConfig(
 # To actually exercise the walk-forward, set START_DATE at least 8 days before
 # END_DATE, e.g. START_DATE="2022-01-06", END_DATE="2022-02-06".
 
-WF_WINDOW_DAYS = 7    # calibration window: 7 days of fill events → fit model
+WF_WINDOW_DAYS = 4    # calibration window: 4 days of fill events → fit model
 WF_STEP_DAYS   = 1    # step 1 calendar day forward between folds
 
 # ── Run ──────────────────────────────────────────────────────────────────────
