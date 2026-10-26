@@ -176,8 +176,8 @@ class MakerOrder:
     # Host time at which the order reached the exchange (InFlightOrder.release_ts). Events that executed at the exchange
     # before this may correct the queue estimate but cannot fill the order. Defaults to active_ts.
     arrival_ts: float = 0.0
-    # Public trade volume printed at this order's price since the displayed level size was last observed to shrink; used to
-    # avoid draining the queue a second time when a snapshot later shows the same execution as a smaller level.
+    # Public trade volume printed at this order's price since the level was last observed (by a depth event or a snapshot);
+    # used to avoid draining the queue a second time when a snapshot shows the same execution as a smaller level.
     trade_vol_since_obs: float = 0.0
     # Latest displayed size of this order's price level in the feed (others' orders only; unlike observed_level_size it
     # does follow the level upward, because volume that joined behind us dilutes the share of a cancel that was ahead).
@@ -233,6 +233,10 @@ class MakerConfig:
     # unknown. "all_ahead" (legacy): the whole decrease was ahead of us. "proportional": it is spread over the displayed
     # level, so only queue_ahead / level_size of it advances us, and a delta can fill us only once the queue is exhausted.
     cancel_model: str = "all_ahead"
+    # Price priority. True: a public print strictly THROUGH our price (a sell below our bid, a buy above our ask) means the
+    # level we rest on has been consumed, so the order fills in full, as in the core queue engines. The print's volume is
+    # not charged to the shared budget. False (default, legacy): the print only burns queue and fills what is left.
+    fill_through_prints: bool = False
 
 
 class MakerExecutor:
@@ -257,7 +261,7 @@ class MakerExecutor:
             "trade_volume_to_queue_ahead", "trade_volume_to_fills", "pre_arrival_event_drains", "pre_arrival_queue_drained",
             "delta_shrink_events", "delta_shrink_total", "delta_shrink_explained_by_trades", "delta_queue_drained",
             "snapshot_shrink_total", "snapshot_shrink_explained_by_trades", "snapshot_queue_drained",
-            "fills_from_trade", "fills_from_delta", "fills_from_snapshot")}
+            "fills_from_trade", "fills_from_delta", "fills_from_snapshot", "fills_from_through_print")}
 
     # ── Trade / depth de-duplication ────────────────────────────────
 
@@ -399,7 +403,7 @@ class MakerExecutor:
                 return []
         self.diag["trade_volume_net"] += volume
         fills: list[Fill] = []
-        eligible, pre = [], []
+        eligible, pre, through = [], [], []
         for order in list(self.orders.values()):
             if order.venue != venue or not order.is_live or now + 1e-12 < order.active_ts:
                 continue
@@ -410,7 +414,19 @@ class MakerExecutor:
                 continue
             if cfg.dedupe_trade_depth and abs(price - order.price) <= 1e-9 * max(1.0, abs(price)):
                 order.trade_vol_since_obs += volume
-            (pre if self._pre_arrival(order, event_ts) else eligible).append(order)
+            if self._pre_arrival(order, event_ts):
+                pre.append(order)
+            elif cfg.fill_through_prints and abs(price - order.price) > 1e-9 * max(1.0, abs(price)):
+                through.append(order)
+            else:
+                eligible.append(order)
+        for order in through:
+            order.queue_ahead = 0.0
+            f = self._fill_from(order, order.remaining / max(cfg.trade_fill_share, 1e-12), now, cfg.trade_fill_share,
+                                "trade", fee_bps, is_synthetic)
+            if f is not None:
+                fills.append(f)
+                self.diag["fills_from_through_print"] += f.qty
         for order in pre:
             drained = min(order.queue_ahead, volume)
             order.queue_ahead -= drained
@@ -485,8 +501,9 @@ class MakerExecutor:
                     self.diag["pre_arrival_queue_drained"] += queue_before - order.queue_ahead
                 if f is not None:
                     fills.append(f)
-            if full > 0:
-                order.trade_vol_since_obs = max(0.0, order.trade_vol_since_obs - full)
+            # Any depth event is a fresh observation of this level: trade volume printed before it is already reflected
+            # in the size it reports, so it must not be credited against a later snapshot shrink.
+            order.trade_vol_since_obs = 0.0
             # Never increase observed_level_size: orders that join the level
             # after our placement arrive behind us in the FIFO queue.  Allowing
             # the tracked size to grow upward would incorrectly trigger fills

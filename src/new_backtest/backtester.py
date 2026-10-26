@@ -78,6 +78,10 @@ class ArbBacktestConfig:
     # record within 3 s is dropped, which also drops genuine identical prints inside one file) or "multiset" (only
     # cross-file duplicates are dropped). Trade records have no id, so neither is exact; see event_loader._merge_sorted.
     trade_dedupe: str = "set"
+    # True: the maker engine is given the level size left in the book after each depth event. False (legacy): the raw
+    # `volume` field, which for the hybrid collector format's 'cancel' events is the removed size, so level removals
+    # never drained any queue.
+    delta_uses_book_size: bool = True
     seed: int = 7
 
     agent_flow: AgentFlowConfig = field(default_factory=AgentFlowConfig)
@@ -179,6 +183,10 @@ class _SignalTracker:
     missed: int = 0
     hedged_qty: float = 0.0   # cumulative qty for which a hedge leg was dispatched
     maker_resting: bool = False
+
+
+def cfg_delta_book_size(config: "ArbBacktestConfig") -> bool:
+    return config.delta_uses_book_size
 
 
 def _fee_preset_family(preset: str) -> str:
@@ -370,8 +378,11 @@ class CrossVenueArbBacktester:
                 return
             book.apply_delta(side, price, volume, event_type, now)
             state.on_book(book, now)
+            # The maker engine needs the level's NEW size. `volume` is that only for absolute feeds; in the hybrid
+            # collector format a 'cancel' carries the size that was removed, so ask the book what is left.
+            new_size = book.level_size(side, price) if cfg_delta_book_size(self.config) else volume
             for f in self.maker.on_delta(
-                ev.venue, side, price, volume, now,
+                ev.venue, side, price, new_size, now,
                 self.tick_size[ev.venue], spec.fees.maker_bps, event_ts=ets,
             ):
                 self._on_fill(f)

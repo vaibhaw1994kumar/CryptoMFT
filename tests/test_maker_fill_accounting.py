@@ -149,6 +149,15 @@ class SnapshotTradeOverlapTests(unittest.TestCase):
     def test_snapshot_only_legacy_switch_drains_twice(self):
         self.assertAlmostEqual(self._trade_then_snapshot(snapshot_trade_explain=False).queue_ahead, 4.0, places=9)
 
+    def test_a_depth_event_in_between_ends_the_credit(self):
+        # A trade of 3, then a depth event that leaves the level unchanged (others refilled it), then a snapshot showing the
+        # level 3 lower because someone cancelled. The old trade must not be credited with that cancel.
+        ex, o = queue10()
+        trade(ex, 3.0, receive=1.0, exchange=1.0)             # queue 10 -> 7
+        delta(ex, 10.0, receive=2.0, exchange=2.0)            # level refilled to 10: a fresh observation
+        ex.on_snapshot("bybit", _book(bids=[(100.0, 7.0)]), now=5.0, tick_size=1.0, fee_bps=0.0, event_ts=5.0)
+        self.assertAlmostEqual(o.queue_ahead, 4.0, places=9)  # the 3 that left is a new decrease, drained in full
+
     def test_a_snapshot_decrease_larger_than_the_trade_drains_the_difference(self):
         ex, o = queue10()
         trade(ex, 3.0, receive=1.0, exchange=1.0)
