@@ -378,8 +378,13 @@ class FillModelV2:
             p_by_h[max(p_by_h)] if p_by_h else 0.0,
         )
 
-        # Trapezoidal integral of S(t) from 0 to H_max
+        # E[min(TTF, H_max) | fill by H_max] via trapezoidal survival integral.
+        # RMST = E[min(T, H_max)] = integral_0^H_max S(t) dt  (area under survival curve).
+        # Conditional mean: E[T | T <= H_max] = (RMST - H_max*(1 - p_H)) / p_H.
+        # Without the truncation correction the formula reduces to RMST/p_H, which
+        # overestimates by H_max*(1/p_H - 1) and is unbounded when p_H is small.
         sorted_hs = sorted(p_by_h)
+        H_max = sorted_hs[-1] if sorted_hs else 0
         t_vals = [0] + sorted_hs
         s_vals = [1.0] + [1.0 - p_by_h[h] for h in sorted_hs]
         rmst = sum(
@@ -387,7 +392,7 @@ class FillModelV2:
             for i in range(len(t_vals) - 1)
         )
         p_H = p_by_h[sorted_hs[-1]] if sorted_hs else 0.0
-        e_ttf = rmst / max(p_H, 1e-9)
+        e_ttf = (rmst - H_max * (1.0 - p_H)) / max(p_H, 1e-9)
 
         p_adverse = (
             self.adverse_model.predict(**feat)
@@ -486,14 +491,18 @@ class FillModelV2:
         )
 
 
-def load_fill_model(path: "str | Path") -> "FillModelV1 | FillModelV2":
-    """Load a FillModelV1 or FillModelV2 from a JSON checkpoint (auto-detected).
+def load_fill_model(path: "str | Path"):
+    """Load a fill-gate model from a JSON checkpoint (auto-detected by version).
 
-    Files with ``"version": 2`` or a ``"per_horizon"`` key load as FillModelV2.
-    All other files (including legacy V1 files without a version key) load as
-    FillModelV1.
+    Dispatch table:
+        ``"version": "queue_reactive_v1"`` → QueueReactiveFillEstimator
+        ``"version": 2``  or ``"per_horizon"`` key → FillModelV2
+        anything else (including no version key) → FillModelV1
     """
     data = json.loads(Path(path).read_text(encoding="utf-8"))
+    if data.get("version") == "queue_reactive_v1":
+        from .fill_model_queue import QueueReactiveFillEstimator  # noqa: PLC0415
+        return QueueReactiveFillEstimator.load_json(path)
     if data.get("version", 1) >= 2 or "per_horizon" in data:
         return FillModelV2.load_json(path)
     return FillModelV1.load_json(path)

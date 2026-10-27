@@ -35,9 +35,10 @@ DATA_ROOT   = "/Users/vaibhav/Documents/Newproject/data"
 OUTPUT_ROOT = Path("/Users/vaibhav/Documents/Newproject/out/sol_wf_backtest")
 
 # Date window — extend as data becomes available.
-START_DATE = "2022-01-06"
-END_DATE   = "2022-01-10"   # 5 clean common days (Jan 06-10) → 1 WF fold (cal=06-09, test=10).
-                             # Bybit Jan 04-11 good. Binance Jan 06-10 good.
+START_DATE = "2022-01-05"
+END_DATE   = "2022-01-10"   # 6 clean common days (Jan 05-10) → 2 WF folds:
+                             #   fold 1: cal=Jan 05-08, test=Jan 09
+                             #   fold 2: cal=Jan 06-09, test=Jan 10
 
 BASE_CFG = ArbBacktestConfig(
     data_root=DATA_ROOT,
@@ -63,7 +64,7 @@ BASE_CFG = ArbBacktestConfig(
         # data activate the WF fold loop and FillModelV2.fit() succeeds per fold.
         min_fill_prob=0.5,             # skip signals with P(fill@5s) < 0.5
         max_adverse_prob=0.15,         # skip signals with P(adverse) > 0.15
-        max_ttf_s=3.0,                 # skip signals where E[TTF] > 3s (must be < fill_gate_horizon_s=5s)
+        max_ttf_s=2.5,                 # skip signals where E[TTF|fill] > 2.5s (corrected formula: ~2s typical)
         max_cross_venue_skew_s=0.2,    # reject if books differ by > 200 ms
         fill_gate_horizon_s=5,         # horizon used for all gates (int, matches FillModelV2)
         maker_max_age_s=15.0,          # cancel maker order after 15s to prevent stale fills
