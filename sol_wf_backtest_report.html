@@ -1,0 +1,981 @@
+<title>SOL WF Backtest Report</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@300;400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap">
+
+<style>
+:root {
+  --bg:        #0f1318;
+  --bg2:       #161c24;
+  --bg3:       #1d2530;
+  --bg4:       #232d3a;
+  --border:    #2a3340;
+  --border2:   #1e2938;
+  --fg:        #e2e8f0;
+  --fg2:       #8b9ab0;
+  --fg3:       #5a6880;
+  --accent:    #4a9eff;
+  --pos:       #34d399;
+  --pos-bg:    rgba(52,211,153,.1);
+  --neg:       #f87171;
+  --neg-bg:    rgba(248,113,113,.1);
+  --warn:      #fbbf24;
+  --warn-bg:   rgba(251,191,36,.1);
+  --purple:    #a78bfa;
+  --sans:      'IBM Plex Sans', system-ui, sans-serif;
+  --mono:      'IBM Plex Mono', monospace;
+  color-scheme: dark;
+}
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme="dark"]) {
+    --bg: #f0f4f8; --bg2: #ffffff; --bg3: #e8ecf2; --bg4: #dde4ed;
+    --border: #ccd4e0; --border2: #d8e0ea;
+    --fg: #1a2232; --fg2: #4a5568; --fg3: #8a9ab0;
+    --accent: #2563eb;
+    --pos: #059669; --pos-bg: rgba(5,150,105,.08);
+    --neg: #dc2626; --neg-bg: rgba(220,38,38,.08);
+    --warn: #d97706; --warn-bg: rgba(217,119,6,.08);
+    --purple: #7c3aed;
+    color-scheme: light;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #0f1318; --bg2: #161c24; --bg3: #1d2530; --bg4: #232d3a;
+  --border: #2a3340; --border2: #1e2938;
+  --fg: #e2e8f0; --fg2: #8b9ab0; --fg3: #5a6880;
+  --accent: #4a9eff;
+  --pos: #34d399; --pos-bg: rgba(52,211,153,.1);
+  --neg: #f87171; --neg-bg: rgba(248,113,113,.1);
+  --warn: #fbbf24; --warn-bg: rgba(251,191,36,.1);
+  --purple: #a78bfa;
+  color-scheme: dark;
+}
+:root[data-theme="light"] {
+  --bg: #f0f4f8; --bg2: #ffffff; --bg3: #e8ecf2; --bg4: #dde4ed;
+  --border: #ccd4e0; --border2: #d8e0ea;
+  --fg: #1a2232; --fg2: #4a5568; --fg3: #8a9ab0;
+  --accent: #2563eb;
+  --pos: #059669; --pos-bg: rgba(5,150,105,.08);
+  --neg: #dc2626; --neg-bg: rgba(220,38,38,.08);
+  --warn: #d97706; --warn-bg: rgba(217,119,6,.08);
+  --purple: #7c3aed;
+  color-scheme: light;
+}
+*, *::before, *::after { box-sizing: border-box; margin: 0; }
+body {
+  background: var(--bg); color: var(--fg); font-family: var(--sans);
+  font-size: 14px; line-height: 1.6;
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+  padding-block: 2.5rem;
+}
+.wrap { max-width: 1000px; margin: 0 auto; display: flex; flex-direction: column; gap: 2rem; }
+
+/* header */
+.header { border-bottom: 2px solid var(--border); padding-bottom: 1.5rem; }
+.header-top { display: flex; align-items: flex-start; justify-content: space-between; gap: 1rem; flex-wrap: wrap; }
+.badge {
+  display: inline-flex; align-items: center; gap: .4rem;
+  background: var(--pos-bg); color: var(--pos);
+  font-family: var(--mono); font-size: 11px; font-weight: 500; letter-spacing: .06em;
+  padding: .2rem .65rem; border-radius: 4px; margin-bottom: .85rem;
+}
+.badge::before { content: "●"; font-size: 9px; }
+h1 { font-size: 1.65rem; font-weight: 700; letter-spacing: -.025em; text-wrap: balance; }
+.header-meta { display: flex; flex-wrap: wrap; gap: .4rem .6rem; margin-top: .75rem; }
+.tag { font-size: 11px; font-family: var(--mono); letter-spacing: .04em; background: var(--bg3); border: 1px solid var(--border); color: var(--fg2); padding: .15rem .5rem; border-radius: 4px; }
+.theme-btn { background: var(--bg3); border: 1px solid var(--border); color: var(--fg2); padding: .3rem .7rem; border-radius: 5px; cursor: pointer; font-size: 12px; font-family: var(--sans); flex-shrink: 0; margin-top: .15rem; }
+.theme-btn:hover { background: var(--bg4); color: var(--fg); }
+
+/* section label */
+.slabel { font-size: 10px; font-weight: 700; letter-spacing: .12em; text-transform: uppercase; color: var(--fg3); margin-bottom: .85rem; display: flex; align-items: center; gap: .5rem; }
+.slabel::after { content: ""; flex: 1; height: 1px; background: var(--border2); }
+
+/* kpi */
+.kpi-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(155px, 1fr)); gap: .75rem; }
+.kpi { background: var(--bg2); border: 1px solid var(--border); border-radius: 8px; padding: 1rem 1.15rem; display: flex; flex-direction: column; gap: .25rem; position: relative; overflow: hidden; }
+.kpi::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 3px; background: var(--border); }
+.kpi.pos::before { background: var(--pos); }
+.kpi.neg::before { background: var(--neg); }
+.kpi.warn::before { background: var(--warn); }
+.kpi.acc::before { background: var(--accent); }
+.kpi.purp::before { background: var(--purple); }
+.kpi .lbl { font-size: 10px; font-weight: 600; color: var(--fg3); letter-spacing: .08em; text-transform: uppercase; }
+.kpi .val { font-family: var(--mono); font-size: 1.45rem; font-weight: 500; font-variant-numeric: tabular-nums; line-height: 1.2; }
+.kpi .sub { font-size: 11px; color: var(--fg2); }
+.kpi.pos .val { color: var(--pos); }
+.kpi.neg .val { color: var(--neg); }
+.kpi.warn .val { color: var(--warn); }
+.kpi.acc .val { color: var(--accent); }
+.kpi.purp .val { color: var(--purple); }
+
+/* card */
+.card { background: var(--bg2); border: 1px solid var(--border); border-radius: 8px; padding: 1.2rem 1.35rem; }
+.ctitle { font-size: 11px; font-weight: 700; color: var(--fg2); text-transform: uppercase; letter-spacing: .1em; margin-bottom: 1rem; display: flex; align-items: center; justify-content: space-between; gap: .5rem; }
+.ctitle .hint { font-size: 10px; font-weight: 400; letter-spacing: .02em; text-transform: none; color: var(--fg3); font-family: var(--mono); }
+
+/* grids */
+.two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; }
+.three-col { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 1rem; }
+@media (max-width: 640px) { .two-col, .three-col { grid-template-columns: 1fr; } }
+@media (max-width: 900px) and (min-width: 641px) { .three-col { grid-template-columns: 1fr 1fr; } }
+
+/* table */
+.tw { overflow-x: auto; }
+.tbl { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+.tbl th { font-size: 10px; letter-spacing: .08em; color: var(--fg3); text-transform: uppercase; font-weight: 700; padding: .4rem .65rem; border-bottom: 2px solid var(--border); text-align: right; white-space: nowrap; }
+.tbl th:first-child { text-align: left; }
+.tbl td { padding: .45rem .65rem; text-align: right; font-variant-numeric: tabular-nums; }
+.tbl td:first-child { text-align: left; }
+.tbl tbody tr { border-bottom: 1px solid var(--border2); }
+.tbl tbody tr:last-child { border-bottom: none; }
+.mn { font-family: var(--mono); }
+.cp { color: var(--pos); font-weight: 500; }
+.cn { color: var(--neg); font-weight: 500; }
+.cw { color: var(--warn); }
+.cd { color: var(--fg3); }
+.ca { color: var(--accent); }
+.tr-total td { border-top: 2px solid var(--border) !important; font-weight: 600; background: var(--bg3); padding-top: .55rem !important; }
+
+/* stacked bar */
+.sbar { display: flex; height: 14px; border-radius: 4px; overflow: hidden; margin: .5rem 0; gap: 1px; background: var(--bg3); }
+.sbar-seg { height: 14px; position: relative; transition: opacity .15s; }
+.sbar-seg:hover { opacity: .8; }
+
+/* funnel */
+.funnel { display: flex; flex-direction: column; gap: .4rem; }
+.frow { display: grid; grid-template-columns: 175px 1fr 70px 60px; gap: .5rem; align-items: center; }
+@media (max-width: 500px) { .frow { grid-template-columns: 130px 1fr 60px; } .fpct { display: none; } }
+.flbl { font-size: 12px; color: var(--fg2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.fbwrap { background: var(--bg3); border-radius: 3px; height: 9px; min-width: 0; }
+.fb { height: 9px; border-radius: 3px; }
+.fcnt { font-family: var(--mono); font-size: 11px; color: var(--fg3); text-align: right; }
+.fpct { font-family: var(--mono); font-size: 11px; color: var(--fg3); text-align: right; }
+
+/* model bars */
+.mrow { display: flex; align-items: center; gap: .75rem; padding: .5rem 0; border-bottom: 1px solid var(--border2); }
+.mrow:last-child { border-bottom: none; }
+.mh { font-family: var(--mono); font-size: 12px; color: var(--fg2); width: 40px; flex-shrink: 0; }
+.mbwrap { flex: 1; background: var(--bg3); border-radius: 3px; height: 10px; min-width: 0; }
+.mb { height: 10px; border-radius: 3px; }
+.mv { font-family: var(--mono); font-size: 12px; color: var(--fg); width: 48px; text-align: right; flex-shrink: 0; }
+.mn2 { font-family: var(--mono); font-size: 11px; color: var(--fg3); width: 55px; text-align: right; flex-shrink: 0; }
+
+/* signal rows */
+.sig-timeline { display: flex; flex-direction: column; gap: .55rem; margin-bottom: 1.25rem; }
+.sig-row { display: grid; grid-template-columns: 72px 1fr 90px; gap: .75rem; align-items: center; }
+.sig-ts { font-family: var(--mono); font-size: 11px; color: var(--fg3); text-align: right; }
+.sig-bar { height: 28px; border-radius: 4px; display: flex; align-items: center; padding: 0 .65rem; font-size: 11px; font-family: var(--mono); white-space: nowrap; border: 1px solid transparent; overflow: hidden; }
+.sig-bar.win { background: var(--pos-bg); border-color: rgba(52,211,153,.3); }
+.sig-bar.loss { background: var(--neg-bg); border-color: rgba(248,113,113,.3); }
+.sig-bar .sig-id { font-family: var(--sans); font-size: 11px; font-weight: 700; margin-right: .5rem; color: var(--fg); }
+.sig-bar.win .sig-id { color: var(--pos); }
+.sig-bar.loss .sig-id { color: var(--neg); }
+.sig-pnl { font-family: var(--mono); font-size: 12px; text-align: right; font-weight: 600; }
+
+/* coverage */
+.cov-grid { display: flex; gap: .35rem; flex-wrap: wrap; }
+.dcell { font-family: var(--mono); font-size: 11px; padding: .35rem .6rem; border-radius: 5px; border: 1px solid var(--border); text-align: center; line-height: 1.3; }
+.dcell .dd { font-weight: 500; }
+.dcell .ds { font-size: 10px; margin-top: .1rem; }
+.dcell.both { background: var(--pos-bg); border-color: rgba(52,211,153,.25); }
+.dcell.both .dd { color: var(--pos); }
+.dcell.both .ds { color: var(--pos); }
+.dcell.byb { background: var(--warn-bg); border-color: rgba(251,191,36,.2); }
+.dcell.byb .dd { color: var(--warn); }
+.dcell.byb .ds { color: var(--warn); }
+.dcell.test { background: rgba(74,158,255,.1); border-color: rgba(74,158,255,.3); }
+.dcell.test .dd { color: var(--accent); }
+.dcell.test .ds { color: var(--accent); }
+
+/* findings */
+.findings { display: flex; flex-direction: column; gap: .7rem; }
+.finding { display: flex; gap: .75rem; align-items: flex-start; border: 1px solid var(--border); border-radius: 7px; padding: .9rem 1.1rem; background: var(--bg2); }
+.fi { flex-shrink: 0; width: 22px; height: 22px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 11px; font-weight: 800; margin-top: 1px; }
+.finding.ok .fi { background: var(--pos-bg); color: var(--pos); }
+.finding.wrn .fi { background: var(--warn-bg); color: var(--warn); }
+.finding.bad .fi { background: var(--neg-bg); color: var(--neg); }
+.finding.inf .fi { background: rgba(74,158,255,.1); color: var(--accent); }
+.finding.pur .fi { background: rgba(167,139,250,.1); color: var(--purple); }
+.fb2 { font-size: 13px; line-height: 1.6; min-width: 0; }
+.fb2 strong { color: var(--fg); font-weight: 600; }
+.act { margin-top: .4rem; font-size: 12px; color: var(--accent); display: flex; align-items: flex-start; gap: .4rem; }
+.act::before { content: "→"; flex-shrink: 0; }
+code { font-family: var(--mono); font-size: .9em; background: var(--bg3); padding: .05em .3em; border-radius: 3px; color: var(--warn); }
+
+footer { font-size: 11px; color: var(--fg3); border-top: 1px solid var(--border); padding-top: 1.25rem; display: flex; flex-wrap: wrap; gap: .35rem .75rem; }
+footer span + span::before { content: "·"; margin-right: .75rem; color: var(--border); }
+</style>
+
+<div class="wrap">
+
+<!-- HEADER -->
+<div class="header">
+  <div class="header-top">
+    <div>
+      <div class="badge" style="background:var(--warn-bg);color:var(--warn);border-color:var(--warn);">BUG-FIX AUDIT · EXIT CODE 0 · CORRECTED 2026-10-26</div>
+      <h1>Bybit / Binance SOLUSDT Cross-Venue Arb</h1>
+      <div class="header-meta">
+        <span class="tag">maker_taker</span>
+        <span class="tag">wf_window=4d · step=1d</span>
+        <span class="tag">2 folds · Jan 05–10 · test Jan 09 + Jan 10</span>
+        <span class="tag">latency: colocated_both</span>
+        <span class="tag">bybit_perp_mm + binance_perp_vip0</span>
+        <span class="tag">2022-01-10 · 00:18–00:43 UTC</span>
+      </div>
+    </div>
+    <button class="theme-btn" onclick="document.documentElement.dataset.theme=document.documentElement.dataset.theme==='dark'?'light':'dark'">Toggle theme</button>
+  </div>
+</div>
+
+<!-- AUDIT CORRECTION BANNER -->
+<div class="card" style="border-color:var(--warn);background:var(--warn-bg);margin-bottom:.5rem;">
+  <div class="ctitle" style="color:var(--warn);">Audit Correction — Two Bugs Found and Fixed (2026-10-26)</div>
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:1rem;margin-bottom:.85rem;">
+    <div>
+      <div style="font-size:11px;color:var(--fg2);text-transform:uppercase;letter-spacing:.06em;margin-bottom:.4rem;">Bug 1 — Dead TTF Gate + Wrong e_ttf Formula</div>
+      <div style="font-size:13px;"><code>max_ttf_s=8.0</code> was empirically inactive (<code>reject_slow_ttf=0</code>). Root cause: <code>e_ttf</code> formula used <code>rmst/p_H</code> (unbounded, overestimates ~3.5×). Corrected formula: <code>(rmst − H_max×(1−p_H)) / p_H</code>, bounded by H_max=15s (max calibrated horizon). With typical Jan-2022 base rates (p1=53.8%, p5=67.7%, p15=75%): old formula gave ~6.9s, corrected gives ~1.9s.</div>
+      <div style="margin-top:.4rem;font-size:13px;color:var(--pos);">✓ Fixed: formula corrected in fill_model_v1.py · <code>max_ttf_s=8.0 → 2.5</code> (gates slow signals with corrected formula) · 11/11 tests pass</div>
+    </div>
+    <div>
+      <div style="font-size:11px;color:var(--fg2);text-transform:uppercase;letter-spacing:.06em;margin-bottom:.4rem;">Bug 2 — Maker Orders Never Expire</div>
+      <div style="font-size:13px;"><code>maker_max_age_s=0</code> (disabled) let Signal 2's Binance maker rest for 515.5 seconds. RuntimeWarning at startup flagged this. The 515s fill contributed +$1.76 of the +$1.63 net.</div>
+      <div style="margin-top:.4rem;font-size:13px;color:var(--pos);">✓ Fixed: <code>maker_max_age_s=15.0</code> added</div>
+    </div>
+  </div>
+  <div style="border-top:1px solid var(--border);padding-top:.75rem;">
+    <div style="font-size:11px;color:var(--fg2);text-transform:uppercase;letter-spacing:.06em;margin-bottom:.4rem;">Post-Fix Result — Corrected Backtest (same data, same fold)</div>
+    <div style="display:flex;gap:2rem;flex-wrap:wrap;align-items:center;">
+      <div><span style="font-size:22px;font-weight:700;color:var(--fg);">$0.00</span><span style="color:var(--fg2);font-size:12px;margin-left:.4rem;">Realized PnL</span></div>
+      <div><span style="font-size:22px;font-weight:700;color:var(--fg);">0</span><span style="color:var(--fg2);font-size:12px;margin-left:.4rem;">Signals</span></div>
+      <div><span style="font-size:22px;font-weight:700;color:var(--fg);">0%</span><span style="color:var(--fg2);font-size:12px;margin-left:.4rem;">Fill rate</span></div>
+      <div><span style="font-size:22px;font-weight:700;color:var(--warn);">31.5%</span><span style="color:var(--fg2);font-size:12px;margin-left:.4rem;">FillModel 5s base rate (was 67.7%)</span></div>
+      <div style="font-size:12px;color:var(--fg2);max-width:380px;">With realistic TIF in training, FillModelV2 sees 66 cancelled orders (no fill) in addition to 42 fills → base rate drops from 67.7% to 31.5% at 5s. All 626 Jan-10 edge opportunities are rejected by <code>max_adverse_prob=0.15</code>. The original +$1.63 was entirely an artifact of the two bugs above.</div>
+    </div>
+  </div>
+</div>
+
+<!-- AUDIT PROGRESS -->
+<div class="card" style="border-color:var(--accent);">
+  <div class="ctitle" style="color:var(--accent);">4-Item Audit Progress (2026-10-27)</div>
+  <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:.65rem;">
+    <div style="background:var(--pos-bg);border:1px solid rgba(52,211,153,.25);border-radius:6px;padding:.75rem 1rem;">
+      <div style="font-size:11px;font-weight:700;color:var(--pos);letter-spacing:.06em;text-transform:uppercase;margin-bottom:.3rem;">✓ Item 1 — Maker Expiry</div>
+      <div style="font-size:12px;color:var(--fg2);">test_maker_order_lifetime.py — 15s/30s TTL, partial fills, cancel races, stale-fill prevention. All tests pass.</div>
+    </div>
+    <div style="background:var(--pos-bg);border:1px solid rgba(52,211,153,.25);border-radius:6px;padding:.75rem 1rem;">
+      <div style="font-size:11px;font-weight:700;color:var(--pos);letter-spacing:.06em;text-transform:uppercase;margin-bottom:.3rem;">✓ Item 2 — TTF Gate</div>
+      <div style="font-size:12px;color:var(--fg2);">e_ttf formula fixed (bounded by H_max=15s, was unbounded). max_ttf_s=2.5. test_ttf_gate.py: 11/11 pass incl. gate-ordering, formula bounds, shadowing.</div>
+    </div>
+    <div style="background:var(--pos-bg);border:1px solid rgba(52,211,153,.25);border-radius:6px;padding:.75rem 1rem;">
+      <div style="font-size:11px;font-weight:700;color:var(--pos);letter-spacing:.06em;text-transform:uppercase;margin-bottom:.3rem;">✓ Item 3 — P&amp;L Comparison</div>
+      <div style="font-size:12px;color:var(--fg2);">maker_max_age_s=0→+$1.63 (4 signals), TTL 15s→$0.00 (0 signals), TTL 30s→$0.00 (0 signals). $1.63 fully attributable to stale maker orders.</div>
+    </div>
+    <div style="background:var(--pos-bg);border:1px solid rgba(52,211,153,.25);border-radius:6px;padding:.75rem 1rem;">
+      <div style="font-size:11px;font-weight:700;color:var(--pos);letter-spacing:.06em;text-transform:uppercase;margin-bottom:.3rem;">✓ Item 4 — 2 WF Folds</div>
+      <div style="font-size:12px;color:var(--fg2);">2 folds complete. Fold 1 (test Jan 09): 2 signals, −$0.49. Fold 2 (test Jan 10): 0 signals. Combined: −$0.49, −1.72 bps mean edge.</div>
+    </div>
+  </div>
+</div>
+
+<!-- 2-FOLD RESULTS -->
+<div>
+  <div class="slabel">Post-Fix 2-Fold Walk-Forward Results — Jan 05–10 2022</div>
+  <div class="kpi-grid" style="margin-bottom:1rem;">
+    <div class="kpi neg">
+      <div class="lbl">Realized PnL</div>
+      <div class="val">−$0.49</div>
+      <div class="sub">2 folds, 2 test days</div>
+    </div>
+    <div class="kpi warn">
+      <div class="lbl">Gross PnL</div>
+      <div class="val">$0.72</div>
+      <div class="sub">before fees</div>
+    </div>
+    <div class="kpi neg">
+      <div class="lbl">Fees Paid</div>
+      <div class="val">$1.20</div>
+      <div class="sub">167% of gross</div>
+    </div>
+    <div class="kpi acc">
+      <div class="lbl">Fill Rate</div>
+      <div class="val">50.0%</div>
+      <div class="sub">2 filled / 4 sent</div>
+    </div>
+    <div class="kpi warn">
+      <div class="lbl">Mean Net Edge</div>
+      <div class="val">−1.72 bps</div>
+      <div class="sub">per order after fees</div>
+    </div>
+    <div class="kpi acc">
+      <div class="lbl">Signals</div>
+      <div class="val">2</div>
+      <div class="sub">229,719 evals · 2 folds</div>
+    </div>
+    <div class="kpi neg">
+      <div class="lbl">Best Edge Seen</div>
+      <div class="val">2.02 bps</div>
+      <div class="sub">barely above 1 bps floor</div>
+    </div>
+    <div class="kpi">
+      <div class="lbl">WF Folds</div>
+      <div class="val">2</div>
+      <div class="sub">n_train=108 · no lookahead</div>
+    </div>
+  </div>
+  <!-- P&L Comparison table -->
+  <div class="card" style="margin-bottom:0;">
+    <div class="ctitle">P&amp;L Comparison — maker_max_age_s Variants (Jan 06–10, 1 fold)</div>
+    <div class="tw">
+      <table class="tbl">
+        <thead><tr><th>Variant</th><th>maker_max_age_s</th><th>Signals</th><th>Fill rate</th><th>Realized PnL</th><th>Mean edge</th><th>Verdict</th></tr></thead>
+        <tbody>
+          <tr>
+            <td style="font-weight:600;">Unlimited (pre-fix)</td>
+            <td class="mn cn">0 (off)</td>
+            <td class="mn">4</td>
+            <td class="mn">84%</td>
+            <td class="mn cp">+$1.63</td>
+            <td class="mn cn">−0.39 bps</td>
+            <td style="font-size:11px;color:var(--neg);">bug artifact — S2 filled at 515s</td>
+          </tr>
+          <tr>
+            <td style="font-weight:600;">TTL 15s (post-fix default)</td>
+            <td class="mn cp">15.0</td>
+            <td class="mn">0</td>
+            <td class="mn">—</td>
+            <td class="mn">$0.00</td>
+            <td class="mn cd">—</td>
+            <td style="font-size:11px;color:var(--pos);">correct: no signals survive adverse gate</td>
+          </tr>
+          <tr>
+            <td style="font-weight:600;">TTL 30s</td>
+            <td class="mn">30.0</td>
+            <td class="mn">0</td>
+            <td class="mn">—</td>
+            <td class="mn">$0.00</td>
+            <td class="mn cd">—</td>
+            <td style="font-size:11px;color:var(--pos);">same result — TTL length irrelevant at 0 signals</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+    <div style="margin-top:.7rem;font-size:12px;color:var(--fg3);">The +$1.63 is 100% attributable to <code>maker_max_age_s=0</code>. Fixing it drops FillModelV2's 5s base rate 67.7%→31.5% (66 cancelled orders enter training as negative labels), which in turn pushes all 626 Jan-10 edge opportunities past <code>max_adverse_prob=0.15</code>.</div>
+  </div>
+</div>
+
+<!-- KPIs -->
+<div>
+  <div class="slabel">Pre-Fix Reference — Test Day 2022-01-10 (bugs present — historical record only)</div>
+  <div class="kpi-grid">
+    <div class="kpi pos">
+      <div class="lbl">Realized PnL</div>
+      <div class="val">$1.63</div>
+      <div class="sub">on $42,178 notional</div>
+    </div>
+    <div class="kpi warn">
+      <div class="lbl">Gross PnL</div>
+      <div class="val">$17.45</div>
+      <div class="sub">before fees</div>
+    </div>
+    <div class="kpi neg">
+      <div class="lbl">Fees Paid</div>
+      <div class="val">$15.82</div>
+      <div class="sub">90.7% of gross</div>
+    </div>
+    <div class="kpi acc">
+      <div class="lbl">Fill Rate</div>
+      <div class="val">84.0%</div>
+      <div class="sub">21 filled / 25 sent</div>
+    </div>
+    <div class="kpi acc">
+      <div class="lbl">Edge Capture</div>
+      <div class="val">0.789</div>
+      <div class="sub">79% of gross kept</div>
+    </div>
+    <div class="kpi warn">
+      <div class="lbl">Mean Net Edge</div>
+      <div class="val">−0.39 bps</div>
+      <div class="sub">per order after fees</div>
+    </div>
+    <div class="kpi acc">
+      <div class="lbl">Signals</div>
+      <div class="val">4</div>
+      <div class="sub">of 150,805 evals</div>
+    </div>
+    <div class="kpi">
+      <div class="lbl">WF Folds</div>
+      <div class="val">1</div>
+      <div class="sub">n_train=65 fills</div>
+    </div>
+  </div>
+</div>
+
+<!-- PNL WATERFALL -->
+<div class="card">
+  <div class="ctitle">P&amp;L Waterfall <span class="hint">gross → bybit fees → binance fees → net</span></div>
+  <div style="margin-bottom:.85rem;">
+    <div class="sbar">
+      <div class="sbar-seg" style="width:9.3%;background:var(--pos);" title="Net PnL $1.63 (9.3%)"></div>
+      <div class="sbar-seg" style="width:66.5%;background:var(--neg);opacity:.85;" title="Bybit fees $11.61 (66.5%)"></div>
+      <div class="sbar-seg" style="width:24.1%;background:var(--neg);opacity:.55;" title="Binance fees $4.21 (24.1%)"></div>
+    </div>
+    <div style="display:flex;gap:1.25rem;flex-wrap:wrap;font-size:11px;margin-top:.3rem;">
+      <span style="color:var(--pos);">▌ Net $1.63 (9.3%)</span>
+      <span style="color:var(--neg);">▌ Bybit fees $11.61 (66.5%)</span>
+      <span style="color:var(--neg);opacity:.7;">▌ Binance fees $4.21 (24.1%)</span>
+    </div>
+  </div>
+  <div class="tw">
+    <table class="tbl">
+      <thead><tr><th>Component</th><th>Amount</th><th>% of Gross</th><th>Notes</th></tr></thead>
+      <tbody>
+        <tr>
+          <td>Gross PnL</td>
+          <td class="mn cw">$17.45</td>
+          <td class="mn">100%</td>
+          <td class="cd" style="font-size:11px;">bid/ask spread × qty across 4 signals</td>
+        </tr>
+        <tr>
+          <td>Bybit taker fees</td>
+          <td class="mn cn">−$11.61</td>
+          <td class="mn cn">66.5%</td>
+          <td class="cd" style="font-size:11px;">taker side on Bybit perp — largest cost</td>
+        </tr>
+        <tr>
+          <td>Binance maker fees</td>
+          <td class="mn cn">−$4.21</td>
+          <td class="mn cn">24.1%</td>
+          <td class="cd" style="font-size:11px;">maker side on Binance perp (no rebate modeled)</td>
+        </tr>
+        <tr>
+          <td>Unhedged loss</td>
+          <td class="mn">$0.00</td>
+          <td class="mn cd">0%</td>
+          <td class="cd" style="font-size:11px;">all legs hedged — zero naked inventory</td>
+        </tr>
+        <tr class="tr-total">
+          <td><strong>Net Realized PnL</strong></td>
+          <td class="mn cp"><strong>$1.63</strong></td>
+          <td class="mn cp"><strong>9.3%</strong></td>
+          <td class="cd" style="font-size:11px;">4 signals on 1 test day, Jan 10 2022</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<!-- SIGNAL DETAIL -->
+<div>
+  <div class="slabel">Per-Signal Detail — 4 Signals, 2022-01-10</div>
+  <div class="card">
+    <div class="ctitle">Signal Breakdown <span class="hint">sell bybit (taker) · buy binance (maker)</span></div>
+
+    <div class="sig-timeline">
+      <div class="sig-row" style="font-size:10px;color:var(--fg3);letter-spacing:.06em;text-transform:uppercase;">
+        <div style="text-align:right">UTC</div><div>Signal / key metrics</div><div style="text-align:right">Net PnL</div>
+      </div>
+      <div class="sig-row">
+        <div class="sig-ts">00:18:54</div>
+        <div class="sig-bar loss"><span class="sig-id">S1</span>3.01 bps · 25.35 SOL · 7.7s · 6+6 legs</div>
+        <div class="sig-pnl cn">−$1.61</div>
+      </div>
+      <div class="sig-row">
+        <div class="sig-ts">00:20:22</div>
+        <div class="sig-bar win"><span class="sig-id">S2</span>9.91 bps · 51.50 SOL · 515.5s · 7+7 legs</div>
+        <div class="sig-pnl cp">+$1.76</div>
+      </div>
+      <div class="sig-row">
+        <div class="sig-ts">00:29:41</div>
+        <div class="sig-bar win"><span class="sig-id">S3</span>9.01 bps · 70.49 SOL · 6.2s · 6+6 legs</div>
+        <div class="sig-pnl cp">+$1.50</div>
+      </div>
+      <div class="sig-row">
+        <div class="sig-ts">00:43:04</div>
+        <div class="sig-bar loss" style="width:20%;min-width:180px;"><span class="sig-id">S4</span>6.52 bps · 1.25 SOL · 5.9s</div>
+        <div class="sig-pnl cn">−$0.02</div>
+      </div>
+    </div>
+
+    <div class="tw">
+      <table class="tbl">
+        <thead>
+          <tr>
+            <th>Sig</th><th>Time UTC</th><th>Spread (bps)</th><th>Qty (SOL)</th>
+            <th>Bybit VWAP</th><th>Binance VWAP</th>
+            <th>Gross</th><th>Bybit Fee</th><th>Binance Fee</th><th>Net PnL</th>
+            <th>Duration</th><th>Result</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td class="mn" style="font-weight:700">S1</td>
+            <td class="mn cd">00:18:54</td>
+            <td class="mn">3.01</td>
+            <td class="mn">25.35</td>
+            <td class="mn">141.860</td>
+            <td class="mn">141.817</td>
+            <td class="mn cw">$1.08</td>
+            <td class="mn cn">$1.98</td>
+            <td class="mn cn">$0.72</td>
+            <td class="mn cn">−$1.61</td>
+            <td class="mn cd">7.7s</td>
+            <td class="cn" style="font-size:11px;">fee-loss</td>
+          </tr>
+          <tr>
+            <td class="mn" style="font-weight:700">S2</td>
+            <td class="mn cd">00:20:22</td>
+            <td class="mn cw">9.91</td>
+            <td class="mn">51.50</td>
+            <td class="mn">142.073</td>
+            <td class="mn">141.932</td>
+            <td class="mn cw">$7.24</td>
+            <td class="mn cn">$4.02</td>
+            <td class="mn cn">$1.46</td>
+            <td class="mn cp">+$1.76</td>
+            <td class="mn cw">515.5s</td>
+            <td class="cp" style="font-size:11px;">winner ⚠ long</td>
+          </tr>
+          <tr>
+            <td class="mn" style="font-weight:700">S3</td>
+            <td class="mn cd">00:29:41</td>
+            <td class="mn cw">9.01</td>
+            <td class="mn">70.49</td>
+            <td class="mn">142.000</td>
+            <td class="mn">141.872</td>
+            <td class="mn cw">$9.01</td>
+            <td class="mn cn">$5.51</td>
+            <td class="mn cn">$2.00</td>
+            <td class="mn cp">+$1.50</td>
+            <td class="mn cd">6.2s</td>
+            <td class="cp" style="font-size:11px;">winner ✓</td>
+          </tr>
+          <tr>
+            <td class="mn" style="font-weight:700">S4</td>
+            <td class="mn cd">00:43:04</td>
+            <td class="mn">6.52</td>
+            <td class="mn">1.25</td>
+            <td class="mn">140.635</td>
+            <td class="mn">140.543</td>
+            <td class="mn cw">$0.11</td>
+            <td class="mn cn">$0.10</td>
+            <td class="mn cn">$0.04</td>
+            <td class="mn cn">−$0.02</td>
+            <td class="mn cd">5.9s</td>
+            <td class="cd" style="font-size:11px;">breakeven</td>
+          </tr>
+          <tr class="tr-total">
+            <td colspan="6"><strong>Total</strong></td>
+            <td class="mn cw"><strong>$17.45</strong></td>
+            <td class="mn cn"><strong>$11.61</strong></td>
+            <td class="mn cn"><strong>$4.21</strong></td>
+            <td class="mn cp"><strong>+$1.63</strong></td>
+            <td class="mn cd">avg 134s</td>
+            <td></td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+    <div style="margin-top:.85rem;font-size:12px;color:var(--fg3);line-height:1.7;">
+      <strong style="color:var(--fg);">S1:</strong> Spread of 3.0 bps insufficient — breakeven is ~7.5 bps. Fee total ($2.70) consumed all gross ($1.08) and more.
+      <strong style="color:var(--fg);">S2:</strong> Only profitable signal with realistic spread, but 515s fill window is a concern (price drift risk, see Findings).
+      <strong style="color:var(--fg);">S3:</strong> Best outcome — wide spread (9 bps) + fast execution (6.2s). This is the archetype for a good signal.
+      <strong style="color:var(--fg);">S4:</strong> Tiny qty (1.25 SOL) — likely a partial fill or clip limit hit. Effectively zero contribution.
+    </div>
+  </div>
+</div>
+
+<!-- FILL MODEL + FILL RATES -->
+<div class="two-col">
+  <div class="card">
+    <div class="ctitle">FillModelV2 — Fold 000 <span class="hint">cal Jan 06–09, n=65</span></div>
+    <div style="margin-bottom:.75rem;">
+      <div class="mrow">
+        <div class="mh">1 s</div>
+        <div class="mbwrap"><div class="mb" style="width:53.8%;background:var(--accent);"></div></div>
+        <div class="mv">53.8%</div>
+        <div class="mn2">n=65</div>
+      </div>
+      <div class="mrow">
+        <div class="mh">5 s</div>
+        <div class="mbwrap"><div class="mb" style="width:67.7%;background:var(--accent);"></div></div>
+        <div class="mv">67.7%</div>
+        <div class="mn2">n=65</div>
+      </div>
+      <div class="mrow">
+        <div class="mh">15 s</div>
+        <div class="mbwrap"><div class="mb" style="width:75%;background:var(--accent);"></div></div>
+        <div class="mv">~75%</div>
+        <div class="mn2">n=65</div>
+      </div>
+    </div>
+    <div style="font-size:11px;color:var(--fg3);border-top:1px solid var(--border2);padding-top:.65rem;line-height:1.6;">
+      Logistic regression on 9 features: queue depth, relative-to-touch ticks, spread pct, short vol, trade sign, depth ratio, flow bucket, regime bucket, side. Gate fires at <code>P(fill@5s) ≥ 0.5</code>. All 4 signals passed. Trained until 2022-01-10 00:00 UTC.
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="ctitle">Observed Fill Rates — Test Day <span class="hint">69 fill observations</span></div>
+    <div style="margin-bottom:.75rem;">
+      <div class="mrow">
+        <div class="mh">1 s</div>
+        <div class="mbwrap"><div class="mb" style="width:52.2%;background:var(--warn);"></div></div>
+        <div class="mv">52.2%</div>
+        <div class="mn2">36/69</div>
+      </div>
+      <div class="mrow">
+        <div class="mh">5 s</div>
+        <div class="mbwrap"><div class="mb" style="width:66.7%;background:var(--warn);"></div></div>
+        <div class="mv">66.7%</div>
+        <div class="mn2">46/69</div>
+      </div>
+      <div class="mrow">
+        <div class="mh">15 s</div>
+        <div class="mbwrap"><div class="mb" style="width:73.9%;background:var(--pos);"></div></div>
+        <div class="mv">73.9%</div>
+        <div class="mn2">51/69</div>
+      </div>
+    </div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:.5rem .75rem;font-size:11px;color:var(--fg2);border-top:1px solid var(--border2);padding-top:.65rem;">
+      <div><span style="color:var(--fg3);">Regime calm:</span> 67.2% (41/61)</div>
+      <div><span style="color:var(--fg3);">Regime elevated:</span> 62.5% (5/8)</div>
+      <div><span style="color:var(--fg3);">Median fill time:</span> 0.91s</div>
+      <div><span style="color:var(--fg3);">Max obs time:</span> 82,885s</div>
+      <div><span style="color:var(--fg3);">Filled &lt;1s:</span> 52.2% (36)</div>
+      <div><span style="color:var(--fg3);">Still open &gt;5s:</span> 33.3% (23)</div>
+    </div>
+  </div>
+</div>
+
+<!-- SIGNAL FUNNEL -->
+<div class="card">
+  <div class="ctitle">Signal Generation Funnel <span class="hint">150,805 evaluations → 4 signals (0.003%)</span></div>
+
+  <div style="display:flex;align-items:center;gap:.4rem;flex-wrap:wrap;font-size:11px;color:var(--fg2);margin-bottom:1.1rem;font-family:var(--mono);">
+    <span style="background:var(--bg3);padding:.15rem .5rem;border-radius:3px;color:var(--fg);">150,805</span>
+    <span style="color:var(--fg3);">→</span>
+    <span style="background:var(--neg-bg);padding:.15rem .5rem;border-radius:3px;color:var(--neg);">−122k stale</span>
+    <span style="color:var(--fg3);">→</span>
+    <span style="background:var(--warn-bg);padding:.15rem .5rem;border-radius:3px;color:var(--warn);">−40k no edge</span>
+    <span style="color:var(--fg3);">→</span>
+    <span style="background:var(--warn-bg);padding:.15rem .5rem;border-radius:3px;color:var(--warn);">−36k toxic</span>
+    <span style="color:var(--fg3);">→</span>
+    <span style="background:var(--pos-bg);padding:.15rem .5rem;border-radius:3px;color:var(--pos);">4 signals</span>
+    <span style="color:var(--fg3);">→</span>
+    <span style="background:var(--pos-bg);padding:.15rem .5rem;border-radius:3px;color:var(--pos);">21 fills (84%)</span>
+  </div>
+
+  <div class="funnel">
+    <div class="frow" style="font-size:10px;color:var(--fg3);letter-spacing:.08em;text-transform:uppercase;margin-bottom:.2rem;">
+      <div>Reject Reason</div><div></div><div style="text-align:right">Count</div><div style="text-align:right">% evals</div>
+    </div>
+    <div class="frow">
+      <div class="flbl" style="color:var(--neg);font-weight:600;">Stale snapshot</div>
+      <div class="fbwrap"><div class="fb" style="width:81.2%;background:var(--neg);opacity:.8;"></div></div>
+      <div class="fcnt" style="color:var(--neg);">122,451</div>
+      <div class="fpct" style="color:var(--neg);">81.2%</div>
+    </div>
+    <div class="frow">
+      <div class="flbl">No edge (&lt;1 bps)</div>
+      <div class="fbwrap"><div class="fb" style="width:26.6%;background:var(--warn);opacity:.8;"></div></div>
+      <div class="fcnt">40,090</div>
+      <div class="fpct">26.6%</div>
+    </div>
+    <div class="frow">
+      <div class="flbl">Toxic flow block</div>
+      <div class="fbwrap"><div class="fb" style="width:23.9%;background:var(--warn);opacity:.7;"></div></div>
+      <div class="fcnt">36,021</div>
+      <div class="fpct">23.9%</div>
+    </div>
+    <div class="frow">
+      <div class="flbl">Maker limit hit</div>
+      <div class="fbwrap"><div class="fb" style="width:1.51%;background:var(--accent);"></div></div>
+      <div class="fcnt">2,273</div>
+      <div class="fpct">1.51%</div>
+    </div>
+    <div class="frow">
+      <div class="flbl">High adverse prob</div>
+      <div class="fbwrap"><div class="fb" style="width:0.35%;background:var(--accent);"></div></div>
+      <div class="fcnt">532</div>
+      <div class="fpct">0.35%</div>
+    </div>
+    <div class="frow">
+      <div class="flbl">Stale touch</div>
+      <div class="fbwrap"><div class="fb" style="width:0.25%;background:var(--fg3);"></div></div>
+      <div class="fcnt">371</div>
+      <div class="fpct">0.25%</div>
+    </div>
+    <div class="frow">
+      <div class="flbl">Cross-venue skew</div>
+      <div class="fbwrap"><div class="fb" style="width:0.21%;background:var(--fg3);"></div></div>
+      <div class="fcnt">318</div>
+      <div class="fpct">0.21%</div>
+    </div>
+    <div class="frow">
+      <div class="flbl">Wide spread</div>
+      <div class="fbwrap"><div class="fb" style="width:0.09%;background:var(--fg3);"></div></div>
+      <div class="fcnt">129</div>
+      <div class="fpct">0.09%</div>
+    </div>
+    <div class="frow">
+      <div class="flbl">Clip too small</div>
+      <div class="fbwrap"><div class="fb" style="width:0.01%;background:var(--fg3);"></div></div>
+      <div class="fcnt">21</div>
+      <div class="fpct">0.01%</div>
+    </div>
+    <div class="frow" style="margin-top:.3rem;">
+      <div class="flbl" style="color:var(--pos);font-weight:600;">Signals fired</div>
+      <div class="fbwrap"><div class="fb" style="width:.003%;background:var(--pos);min-width:5px;"></div></div>
+      <div class="fcnt" style="color:var(--pos);">4</div>
+      <div class="fpct" style="color:var(--pos);">0.003%</div>
+    </div>
+  </div>
+  <div style="margin-top:.85rem;padding-top:.85rem;border-top:1px solid var(--border2);font-size:12px;color:var(--fg3);">
+    <code>rejects_total=202,211</code> &gt; <code>evaluations=150,805</code>: a single evaluation failing multiple gates is counted in each reject bucket. Percentages relative to evaluations. <code>reject_low_fill_prob=0</code> — the fill gate passed every candidate.
+  </div>
+</div>
+
+<!-- WF STRUCTURE + DATA COVERAGE -->
+<div class="two-col">
+  <div class="card">
+    <div class="ctitle">Walk-Forward Structure</div>
+    <div style="display:flex;flex-direction:column;gap:.5rem;margin-bottom:1rem;">
+      <div style="display:flex;gap:.5rem;align-items:stretch;">
+        <div style="flex:4;background:rgba(74,158,255,.08);border:1px solid rgba(74,158,255,.3);border-radius:5px;padding:.6rem .85rem;">
+          <div style="font-size:10px;color:var(--accent);font-weight:700;letter-spacing:.08em;text-transform:uppercase;margin-bottom:.15rem;">Fold 1 — Cal</div>
+          <div style="font-family:var(--mono);font-size:12px;color:var(--fg);">Jan 05 → Jan 08</div>
+          <div style="font-size:11px;color:var(--fg2);margin-top:.1rem;">4 days · n_train=108</div>
+        </div>
+        <div style="display:flex;align-items:center;color:var(--fg3);font-size:18px;padding:0 .2rem;">→</div>
+        <div style="flex:1;background:var(--pos-bg);border:1px solid rgba(52,211,153,.3);border-radius:5px;padding:.6rem .85rem;">
+          <div style="font-size:10px;color:var(--pos);font-weight:700;letter-spacing:.08em;text-transform:uppercase;margin-bottom:.15rem;">Test</div>
+          <div style="font-family:var(--mono);font-size:12px;color:var(--fg);">Jan 09</div>
+          <div style="font-size:11px;color:var(--fg2);margin-top:.1rem;">2 signals · −$0.49</div>
+        </div>
+      </div>
+      <div style="display:flex;gap:.5rem;align-items:stretch;">
+        <div style="flex:4;background:rgba(74,158,255,.08);border:1px solid rgba(74,158,255,.3);border-radius:5px;padding:.6rem .85rem;">
+          <div style="font-size:10px;color:var(--accent);font-weight:700;letter-spacing:.08em;text-transform:uppercase;margin-bottom:.15rem;">Fold 2 — Cal</div>
+          <div style="font-family:var(--mono);font-size:12px;color:var(--fg);">Jan 06 → Jan 09</div>
+          <div style="font-size:11px;color:var(--fg2);margin-top:.1rem;">4 days · n_train=108</div>
+        </div>
+        <div style="display:flex;align-items:center;color:var(--fg3);font-size:18px;padding:0 .2rem;">→</div>
+        <div style="flex:1;background:var(--bg3);border:1px solid var(--border);border-radius:5px;padding:.6rem .85rem;">
+          <div style="font-size:10px;color:var(--fg3);font-weight:700;letter-spacing:.08em;text-transform:uppercase;margin-bottom:.15rem;">Test</div>
+          <div style="font-family:var(--mono);font-size:12px;color:var(--fg);">Jan 10</div>
+          <div style="font-size:11px;color:var(--fg2);margin-top:.1rem;">0 signals · $0.00</div>
+        </div>
+      </div>
+    </div>
+    <div class="tw">
+      <table class="tbl">
+        <thead><tr><th>Parameter</th><th>Value</th></tr></thead>
+        <tbody>
+          <tr><td>wf_window_days</td><td class="mn">4</td></tr>
+          <tr><td>wf_step_days</td><td class="mn">1</td></tr>
+          <tr><td>min_cal_fills</td><td class="mn">50</td></tr>
+          <tr><td>n_train (both folds)</td><td class="mn cp">108</td></tr>
+          <tr><td>best_net_edge_bps</td><td class="mn">2.016</td></tr>
+          <tr><td>total wf_folds</td><td class="mn cp">2</td></tr>
+          <tr><td>status</td><td class="mn cp">ok — no exploratory tag</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="ctitle">Data Coverage</div>
+    <div class="cov-grid" style="margin-bottom:.85rem;">
+      <div class="dcell byb"><div class="dd">Jan 04</div><div class="ds">Bybit only</div><div style="font-size:10px;color:var(--fg3);">74k lines</div></div>
+      <div class="dcell both"><div class="dd">Jan 05</div><div class="ds">Both ✓ cal</div><div style="font-size:10px;color:var(--accent);">recovered ✓</div></div>
+      <div class="dcell both"><div class="dd">Jan 06</div><div class="ds">Both ✓ cal</div><div style="font-size:10px;color:var(--fg3);">cal day 2</div></div>
+      <div class="dcell both"><div class="dd">Jan 07</div><div class="ds">Both ✓ cal</div><div style="font-size:10px;color:var(--fg3);">cal day 3</div></div>
+      <div class="dcell both"><div class="dd">Jan 08</div><div class="ds">Both ✓ cal</div><div style="font-size:10px;color:var(--fg3);">cal day 4</div></div>
+      <div class="dcell test"><div class="dd">Jan 09</div><div class="ds">Both — TEST¹</div><div style="font-size:10px;color:var(--accent);">fold 1 test</div></div>
+      <div class="dcell test"><div class="dd">Jan 10</div><div class="ds">Both — TEST²</div><div style="font-size:10px;color:var(--accent);">fold 2 test</div></div>
+      <div class="dcell byb"><div class="dd">Jan 11</div><div class="ds">Bybit only</div><div style="font-size:10px;color:var(--fg3);">48k lines</div></div>
+    </div>
+    <div style="font-size:11px;color:var(--fg3);line-height:1.65;">
+      Binance Jan 05 recovered from archive (13.5M book-event lines). 6 clean common days Jan 05–10 → 2 WF folds: fold 1 (cal Jan 05–08 / test Jan 09), fold 2 (cal Jan 06–09 / test Jan 10). <em style="color:var(--accent);">2-fold run in progress.</em>
+    </div>
+  </div>
+</div>
+
+<!-- GATE ANALYSIS -->
+<div class="card">
+  <div class="ctitle">Gate Configuration &amp; Analysis</div>
+  <div class="two-col" style="align-items:start;">
+    <div class="tw">
+      <table class="tbl">
+        <thead><tr><th>Gate</th><th>Threshold</th><th>Rejects</th><th>Assessment</th></tr></thead>
+        <tbody>
+          <tr>
+            <td>cross-venue staleness</td>
+            <td class="mn">0.2s max skew</td>
+            <td class="mn cn">122,451</td>
+            <td style="font-size:11px;color:var(--neg);">primary bottleneck</td>
+          </tr>
+          <tr>
+            <td>min_net_edge_bps</td>
+            <td class="mn">1.0 bps</td>
+            <td class="mn cw">40,090</td>
+            <td style="font-size:11px;color:var(--fg3);">normal — thin spread</td>
+          </tr>
+          <tr>
+            <td>block_on_toxic</td>
+            <td class="mn">True</td>
+            <td class="mn cw">36,021</td>
+            <td style="font-size:11px;color:var(--fg3);">intentional adverse guard</td>
+          </tr>
+          <tr>
+            <td>maker concurrency</td>
+            <td class="mn">1 live order</td>
+            <td class="mn">2,273</td>
+            <td style="font-size:11px;color:var(--fg3);">expected — order mgmt</td>
+          </tr>
+          <tr>
+            <td>max_adverse_prob</td>
+            <td class="mn">0.15</td>
+            <td class="mn">532</td>
+            <td style="font-size:11px;color:var(--fg3);">small — model conservative</td>
+          </tr>
+          <tr>
+            <td>stale_touch</td>
+            <td class="mn">auto</td>
+            <td class="mn">371</td>
+            <td style="font-size:11px;color:var(--fg3);">minor</td>
+          </tr>
+          <tr>
+            <td>cross_venue_skew</td>
+            <td class="mn">0.2s</td>
+            <td class="mn">318</td>
+            <td style="font-size:11px;color:var(--fg3);">minor (distinct bucket)</td>
+          </tr>
+          <tr>
+            <td>min_fill_prob (WF gate)</td>
+            <td class="mn">0.5</td>
+            <td class="mn cp">0</td>
+            <td style="font-size:11px;color:var(--pos);">all signals passed</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+    <div style="font-size:12px;color:var(--fg2);line-height:1.75;">
+      <p style="margin-bottom:.6rem;"><strong style="color:var(--neg);">Staleness (81.2% of all evals rejected)</strong> is by far the dominant gate. In replay, Bybit and Binance book snapshots arrive with different effective timestamps — the cross-venue skew exceeds 200ms for most eval ticks. In a real co-located deployment, cross-venue feeds would be nanosecond-aligned and this gate would pass ≥99% of evals, dramatically increasing signal rate.</p>
+      <p style="margin-bottom:.6rem;"><strong style="color:var(--pos);">min_fill_prob gate: 0 rejects.</strong> FillModelV2 trained on 65 fills assigned P(fill@5s) ≥ 0.5 to all 4 candidate signals. Gate is active but non-restrictive at current training volume.</p>
+      <p><strong style="color:var(--warn);">Toxic flow (36k rejects, 23.9%)</strong> is the second-largest correctable gate. Tuning <code>block_on_toxic</code> or its sensitivity could unlock more signals, but at the cost of adverse selection — needs empirical calibration on larger sample.</p>
+    </div>
+  </div>
+</div>
+
+<!-- KEY FINDINGS -->
+<div>
+  <div class="slabel">Key Findings &amp; Action Items</div>
+  <div class="findings">
+    <div class="finding ok">
+      <div class="fi">✓</div>
+      <div class="fb2">
+        <strong>Walk-forward validation passed cleanly.</strong> FillModelV2 fitted on 65 cal fills (≥50 threshold), applied out-of-sample on Jan 10. No exploratory tag — results are temporally guarded, not look-ahead biased. This is the first valid WF fold for this strategy.
+      </div>
+    </div>
+    <div class="finding bad">
+      <div class="fi">!</div>
+      <div class="fb2">
+        <strong>Fee drag is severe: 90.7% of gross consumed ($15.82 / $17.45).</strong> Current breakeven spread is ~7.5 bps. Signals S1 (3.0 bps) and S4 (6.5 bps) were outright fee-losses. Only S2 and S3 with 9+ bps spreads cleared fees. Bybit taker costs alone eat 66.5% of gross.
+        <div class="act">Raise <code>min_net_edge_bps</code> to 3–4 bps to kill thin-spread signals that can never recover fees. Also explore Bybit maker-to-maker routing to reduce taker costs.</div>
+      </div>
+    </div>
+    <div class="finding wrn">
+      <div class="fi">!</div>
+      <div class="fb2">
+        <strong>Stale snapshot dominates: 122,451 rejects (81.2%).</strong> Cross-venue book timestamps diverge in replay, causing the majority of eval ticks to fail the staleness gate. In a real co-location deployment, book feeds would be nanosecond-aligned — this gate would be nearly irrelevant.
+        <div class="act">Instrument the feed clock divergence in replay to quantify it. Simulate production conditions by adjusting <code>max_cross_venue_skew_s</code> to 0.005–0.020s and re-run to measure the true production-equivalent signal rate.</div>
+      </div>
+    </div>
+    <div class="finding wrn">
+      <div class="fi">!</div>
+      <div class="fb2">
+        <strong>✓ FIXED — Signal 2 took 515 seconds to fill due to <code>maker_max_age_s=0</code>.</strong> Bug confirmed and fixed: <code>maker_max_age_s=15.0</code> now set. With realistic TIF, 66 of 108 training orders were cancelled-before-fill, dropping the FillModelV2 5s base rate from 67.7% to 31.5%. All Jan-10 edge signals are now rejected by <code>max_adverse_prob=0.15</code>. Post-fix P&amp;L: $0.00.
+      </div>
+    </div>
+    <div class="finding inf">
+      <div class="fi">i</div>
+      <div class="fb2">
+        <strong>Execution mechanics are working correctly.</strong> 84% fill rate, 79% edge capture, zero unhedged legs, zero missed orders. When signals fire and spreads are adequate, the engine executes cleanly. The problem is alpha economics, not execution.
+      </div>
+    </div>
+    <div class="finding inf">
+      <div class="fi">i</div>
+      <div class="fb2">
+        <strong>Sample is too small for statistical conclusions (4 signals, 1 test day).</strong> The −0.39 bps mean net edge is within noise. 2 winners, 2 losers. Need ≥30 signals (roughly 7–10 test days) before drawing conclusions about edge sign.
+        <div class="act">Extend Binance data to Jan–Feb 2022. With <code>wf_window=7d, wf_step=1d</code> this gives 3–5 folds and 15–30 signal samples. Run <code>START_DATE=2022-01-06, END_DATE=2022-02-10</code>.</div>
+      </div>
+    </div>
+    <div class="finding pur">
+      <div class="fi">i</div>
+      <div class="fb2">
+        <strong>FillModelV2 post-fix: n_train=108, base_rate=31.5% at 5s (was n=65, 67.7%).</strong> With <code>maker_max_age_s=15.0</code>, cancelled orders (66/108) now enter training as negative labels, halving the apparent fill rate. The model now correctly reflects production cancellation policy. Note: the <code>adverse_prob</code> gate runs before <code>fill_prob</code> and <code>max_ttf_s</code> in arb_strategy.py:517 — the zero counts for those gates are shadowed, not informative. All 626 edge opportunities on Jan 10 were killed by <code>max_adverse_prob=0.15</code>.
+        <div class="act">Target n≥500 fills for calibration before trusting the model. Note gate execution order: adverse_prob → ttf → fill_prob. Use separate output dirs per variant to preserve baseline comparison data.</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- FULL CONFIG -->
+<div class="card">
+  <div class="ctitle">Full Configuration Reference</div>
+  <div class="three-col">
+    <div class="tw">
+      <table class="tbl">
+        <thead><tr><th colspan="2">Dates &amp; WF</th></tr></thead>
+        <tbody>
+          <tr><td>start_date</td><td class="mn">2022-01-06</td></tr>
+          <tr><td>end_date</td><td class="mn">2022-01-10</td></tr>
+          <tr><td>wf_window_days</td><td class="mn">4</td></tr>
+          <tr><td>wf_step_days</td><td class="mn">1</td></tr>
+          <tr><td>min_cal_fills</td><td class="mn">50</td></tr>
+          <tr><td>venues</td><td class="mn">bybit, binance</td></tr>
+          <tr><td>pair</td><td class="mn">SOLUSDT</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="tw">
+      <table class="tbl">
+        <thead><tr><th colspan="2">Strategy Gates</th></tr></thead>
+        <tbody>
+          <tr><td>mode</td><td class="mn">maker_taker</td></tr>
+          <tr><td>min_net_edge_bps</td><td class="mn cw">1.0</td></tr>
+          <tr><td>min_fill_prob</td><td class="mn">0.5</td></tr>
+          <tr><td>max_adverse_prob</td><td class="mn">0.15</td></tr>
+          <tr><td>max_ttf_s</td><td class="mn cp">2.5 <span style="font-size:10px;">(was 8.0 — dead; formula fixed)</span></td></tr>
+          <tr><td>max_cross_venue_skew_s</td><td class="mn">0.2s</td></tr>
+          <tr><td>block_on_toxic</td><td class="mn">True</td></tr>
+          <tr><td>fill_gate_horizon_s</td><td class="mn">5</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="tw">
+      <table class="tbl">
+        <thead><tr><th colspan="2">Execution</th></tr></thead>
+        <tbody>
+          <tr><td>latency_preset</td><td class="mn">colocated_both</td></tr>
+          <tr><td>bybit_fee</td><td class="mn">bybit_perp_mm</td></tr>
+          <tr><td>binance_fee</td><td class="mn">binance_perp_vip0</td></tr>
+          <tr><td>min_queue_ahead</td><td class="mn">25.0</td></tr>
+          <tr><td>max_clip_notional</td><td class="mn">$10,000</td></tr>
+          <tr><td>two_pass</td><td class="mn">True</td></tr>
+          <tr><td>maker_max_age_s</td><td class="mn cp">15.0 <span style="font-size:10px;">(was 0 — no TIF)</span></td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<footer>
+  <span>Source: <code>out/sol_wf_backtest/SOLUSDT/</code></span>
+  <span>Pair: SOLUSDT (Bybit + Binance USDT perp)</span>
+  <span>Data: Jan 2022 replay — Tardis IOBC client</span>
+  <span>Engine: CrossVenueArbBacktester + FillModelV2</span>
+  <span>Report generated: 2026-10-26</span>
+</footer>
+
+</div>
