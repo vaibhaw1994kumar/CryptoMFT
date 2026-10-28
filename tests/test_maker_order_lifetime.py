@@ -408,7 +408,7 @@ class LongReplayTests(unittest.TestCase):
             maker=MakerConfig(min_queue_ahead=0.8),
             arb=ArbConfig(mode=MAKER_TAKER, min_net_edge_bps=1.0, max_clip_notional=2_000.0, max_adverse_prob=0.15,
                           max_ttf_s=8.0, max_cross_venue_skew_s=0.2, fill_gate_horizon_s=5, maker_max_age_s=ttl),
-            output_dir=str(out))
+            output_dir=str(out), allow_rejected_data="synthetic test fixture, too small for the quality gate by design")
 
     def test_with_a_lifetime_quoting_continues_to_the_last_day_and_without_one_a_stuck_order_appears(self):
         with tempfile.TemporaryDirectory() as d, warnings.catch_warnings():

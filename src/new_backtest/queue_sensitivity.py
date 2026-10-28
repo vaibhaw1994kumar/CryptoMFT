@@ -164,6 +164,7 @@ def _run_point(
         output_dir=str(out_dir / label),
         warm_start_fill_events=cfg.warm_start_fill_events,
         warm_start_until_ts=cfg.warm_start_until_ts,
+        allow_rejected_data=cfg.allow_rejected_data,
     )
 
     sp = SweepPoint(

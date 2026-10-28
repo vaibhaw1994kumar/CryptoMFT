@@ -251,5 +251,47 @@ class SimultaneousRecoveryTests(unittest.IsolatedAsyncioTestCase):
             self.assertTrue(any(not d[0] for d in decisions))       # and was blocked during the drop
 
 
+class BufferedDeltaCostTests(unittest.IsolatedAsyncioTestCase):
+    async def test_buffered_deltas_do_not_rescan_the_buffer(self):
+        """Waiting for a snapshot, each buffered delta must cost O(1): the pending-id map
+        was rebuilt per event (quadratic, ~280 updates/s at 12,000 buffered)."""
+        scans = {"values": 0}
+
+        class CountingPending(dict):
+            def values(self):
+                scans["values"] += 1
+                return super().values()
+
+        released = asyncio.Event()
+
+        async def slow_snapshot(url, timeout):
+            await released.wait()
+            return json.dumps({"lastUpdateId": 100, "bids": [["99", "1"]], "asks": [["102", "1"]]}), 1
+
+        frames = [binance(101 + i, 101 + i) for i in range(300)]
+        with tempfile.TemporaryDirectory() as directory:
+            service = LiveOrderBookService(
+                CONFIG, Path(directory), "cost", LiveFeedSettings(venues=("BINANCE",), durable=False),
+                websocket_connector=FakeConnector({"BINANCE": [FakeWebSocket(frames)]}),
+                http_getter=slow_snapshot, clock_ns=StepClock())
+            book = service.books["BINANCE"]
+            book.pending_deltas = CountingPending()
+            stats = service.stats["BINANCE"]
+
+            async def drive():
+                while stats.canonical_events < 300:
+                    await asyncio.sleep(0)
+                buffered_scans = scans["values"]
+                released.set()
+                while book.sequence != 400:
+                    await asyncio.sleep(0.001)
+                service.request_stop()
+                return buffered_scans
+
+            _, buffered_scans = await asyncio.wait_for(asyncio.gather(service.run(), drive()), timeout=120)
+        self.assertEqual(buffered_scans, 0)                  # no scan while only buffering
+        self.assertEqual((book.state, book.sequence), (BookState.VALID, 400))
+
+
 if __name__ == "__main__":
     unittest.main()

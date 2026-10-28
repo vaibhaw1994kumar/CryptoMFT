@@ -65,6 +65,30 @@ class PreflightBlockingTests(unittest.TestCase):
                         warm_start=None)
         self.assertEqual(cloned.allow_rejected_data, "fixture")
 
+    def test_the_sdk_passes_the_justification_to_the_engine(self):
+        from crypto_stat_arb.sdk import AdvancedBacktestSpec, BacktestAPI, RuntimeMode
+
+        spec = AdvancedBacktestSpec(pair="BTCUSDT", data_root=self.root, start_date=DAY, end_date=DAY,
+                                    allow_rejected_data="fixture")
+        self.assertEqual(BacktestAPI(RuntimeMode.BACKTEST)._config(spec).allow_rejected_data, "fixture")
+        blocking = AdvancedBacktestSpec(pair="BTCUSDT", data_root=self.root, start_date=DAY, end_date=DAY)
+        self.assertIsNone(BacktestAPI(RuntimeMode.BACKTEST)._config(blocking).allow_rejected_data)
+
+    def test_the_queue_sensitivity_sweep_carries_the_justification(self):
+        from new_backtest import queue_sensitivity
+        from new_backtest.fill_engine import MakerConfig
+
+        seen = []
+
+        def recording_run(cfg):
+            seen.append(cfg.allow_rejected_data)
+            raise RuntimeError("stop after capturing the config")
+
+        with mock.patch.object(queue_sensitivity, "_run_once", recording_run):
+            point = queue_sensitivity._run_point(self.config(allow_rejected_data="fixture"), "BTCUSDT",
+                                                 self.root / "out", MakerConfig(), "p")
+        self.assertEqual(seen, ["fixture"])
+        self.assertEqual(point.status, "error")
 
 if __name__ == "__main__":
     unittest.main()

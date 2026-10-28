@@ -2123,9 +2123,14 @@ class LiveOrderBookService:
         book = self.books[event.venue]
         previous_event_id = book.last_event_id
         previous_state = book.state
-        pending_events = {
-            pending.event_id: pending for pending in book.pending_deltas.values()
-        }
+        # Buffered deltas are applied only when a snapshot drains them, so the id map that
+        # finds the last one applied is needed only then. Built on every event it was
+        # O(buffered) per delta: quadratic while a slow snapshot is awaited (12,000
+        # buffered updates ran at ~280/s, exactly when the feed is behind).
+        pending_events = (
+            {pending.event_id: pending for pending in book.pending_deltas.values()}
+            if event.event_type == EventType.BOOK_SNAPSHOT and book.pending_deltas else {}
+        )
         self._reconcile_before(event, book)
         state = book.apply(event)
         state = self._reconcile_after(event, book, state)

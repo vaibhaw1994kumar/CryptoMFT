@@ -417,6 +417,7 @@ class TestCalibrationDaysBacktest(unittest.TestCase):
                 min_fill_prob=0.9,
             ),
             include_deltas=False,
+            allow_rejected_data="synthetic test fixture, too small for the quality gate by design",
         )
         out = Path(self.tmp.name) / "out_gate_disabled"
         outcome = run_pair(
@@ -937,6 +938,7 @@ class TestWalkForwardBacktest(unittest.TestCase):
                 block_on_toxic=False,
             ),
             include_deltas=False,
+            allow_rejected_data="synthetic test fixture, too small for the quality gate by design",
         )
 
     def test_wf_path_runs_without_exception(self):
@@ -1180,6 +1182,7 @@ class TestFillModelV2GateIntegration(unittest.TestCase):
                 max_adverse_prob=max_adverse_prob,
             ),
             include_deltas=False,
+            allow_rejected_data="synthetic test fixture, too small for the quality gate by design",
         )
 
     def _write_v2_model(self) -> str:
