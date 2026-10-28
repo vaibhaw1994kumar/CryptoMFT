@@ -39,9 +39,13 @@ class ReplayOrderRuleTests(unittest.TestCase):
 
 
 class LivePaperReplayTests(unittest.TestCase):
-    def run_paper(self, base: Path, yields_before_snapshot: int):
+    def run_paper(self, base: Path, yields_before_snapshot: int, *, stamp_before_waiting: bool = False):
         """The live session from test_forward_testnet_calibration, with the REST snapshot
-        returning after a set number of event-loop turns instead of a wall-clock sleep."""
+        returning after a set number of event-loop turns instead of a wall-clock sleep.
+
+        ``stamp_before_waiting`` stamps the response before the frames drain, as a slow
+        REST round trip does: the snapshot is then always applied after frames stamped
+        later, whatever the event loop's scheduling."""
         binance = FakeWebSocket([json.dumps({"e": "depthUpdate", "E": 1000, "T": 1000, "s": "BTCUSDT",
                                              "U": 101, "u": 101, "b": [["59999.90", "2"]], "a": []})])
         bybit = FakeWebSocket([
@@ -53,10 +57,11 @@ class LivePaperReplayTests(unittest.TestCase):
         clock = StepClock()
 
         async def http_getter(url, timeout):
+            stamp = clock() if stamp_before_waiting else None
             for _ in range(yields_before_snapshot):
                 await asyncio.sleep(0)
             return json.dumps({"lastUpdateId": 100, "bids": [["59999.90", "1"]],
-                               "asks": [["60000.00", "1"]]}), clock()
+                               "asks": [["60000.00", "1"]]}), stamp if stamp is not None else clock()
 
         paper = LivePaperSession(
             CONFIG, base / "live", "paper", LiveFeedSettings(
@@ -67,12 +72,13 @@ class LivePaperReplayTests(unittest.TestCase):
         return asyncio.run(asyncio.wait_for(paper.run(), timeout=5)), paper.output_dir
 
     def test_replay_matches_the_session_for_every_interleaving(self):
-        # 5 turns: the snapshot is stamped before the last Bybit delta but applied after it,
-        # the interleaving windows-latest hit (paper 1 opportunity, receive-time replay 2).
-        for turns in (0, 2, 4, 5, 6, 8, 20):
-            with self.subTest(turns=turns), tempfile.TemporaryDirectory() as directory:
+        # Stamped early, the snapshot is applied after Bybit frames stamped later: the
+        # interleaving windows-latest hit (paper 1 opportunity, receive-time replay 2).
+        cases = [(turns, False) for turns in (0, 2, 4, 5, 6, 8, 20)] + [(turns, True) for turns in (5, 20)]
+        for turns, early in cases:
+            with self.subTest(turns=turns, stamp_before_waiting=early), tempfile.TemporaryDirectory() as directory:
                 base = Path(directory)
-                summary, paper_dir = self.run_paper(base, turns)
+                summary, paper_dir = self.run_paper(base, turns, stamp_before_waiting=early)
                 rows = [json.loads(line) for line in (paper_dir / "canonical_events.jsonl").read_text().splitlines()]
                 self.assertEqual([row["processing_ordinal"] for row in rows], list(range(1, len(rows) + 1)))
                 replay = run_backtest(CONFIG, paper_dir / "canonical_events.jsonl", base / "replay")
@@ -83,7 +89,7 @@ class LivePaperReplayTests(unittest.TestCase):
 
     def test_the_diverging_interleaving_is_out_of_receive_time_order(self):
         with tempfile.TemporaryDirectory() as directory:
-            _, paper_dir = self.run_paper(Path(directory), 5)
+            _, paper_dir = self.run_paper(Path(directory), 20, stamp_before_waiting=True)
             stamps = [json.loads(line)["receive_ts_ns"]
                       for line in (paper_dir / "canonical_events.jsonl").read_text().splitlines()]
             self.assertNotEqual(stamps, sorted(stamps))      # the case receive-time replay got wrong
