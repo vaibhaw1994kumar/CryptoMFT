@@ -112,7 +112,13 @@ class LivePaperCliTests(unittest.TestCase):
                                                 "--output-dir", directory, "--binance-market", "linear",
                                                 "--bybit-market", "linear", *extra]):
             cli.main()
-        return captured["paper"]
+            paper = captured["paper"]
+            # Never run: release what the session opened so Windows can remove the directory.
+            paper._timestamps.close()
+            paper.service.recorder.abort()
+            paper.service.ohlc_writer.close()
+            paper.service.ltp_writer.close()
+        return paper
 
     def test_perpetual_paper_runs_poll_instrument_status(self):
         poller = self.paper_session().status_poller

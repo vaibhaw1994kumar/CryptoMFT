@@ -22,6 +22,14 @@ def service_for(directory, frames, **settings):
         websocket_connector=FakeConnector({"BYBIT": [FakeWebSocket(frames)]}), clock_ns=StepClock())
 
 
+def release(service):
+    """Close the files a service opens at construction when it is never run (Windows
+    cannot delete a temporary directory holding open files)."""
+    service.recorder.abort()
+    service.ohlc_writer.close()
+    service.ltp_writer.close()
+
+
 async def run_until(service, frames):
     stats = service.stats["BYBIT"]
 
@@ -106,7 +114,8 @@ class RecorderAccountingTests(unittest.TestCase):
     def test_a_frame_counts_once_however_many_dispositions_it_gets(self):
         # A trade frame can carry several ticks (one record each, or a rejection per tick).
         with tempfile.TemporaryDirectory() as directory:
-            recorder = service_for(directory, []).recorder
+            service = service_for(directory, [])
+            recorder = service.recorder
             wire = recorder.capture_wire(venue="BYBIT", channel="publicTrade", host="h", transport="WEBSOCKET",
                                          receive_ts_ns=1, original_frame="{}")
             for disposition in ("TRADE", "TRADE", "REJECTED"):
@@ -114,7 +123,7 @@ class RecorderAccountingTests(unittest.TestCase):
             frames = recorder.frame_accounting()
             self.assertEqual(frames["dispositions"], {"TRADE": 1})
             self.assertTrue(frames["consistent"])
-            recorder.abort()
+            release(service)
 
     def test_a_trade_message_without_prints_is_a_control_frame_not_a_lost_one(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -123,7 +132,7 @@ class RecorderAccountingTests(unittest.TestCase):
             self.assertEqual(service._process_trade_frame("BYBIT", "wss://x", frame, channel="publicTrade"), 0)
             frames = service.recorder.frame_accounting()
             self.assertEqual((frames["dispositions"], frames["consistent"]), ({"CONTROL": 1}, True))
-            service.recorder.abort()
+            release(service)
 
 
 if __name__ == "__main__":
