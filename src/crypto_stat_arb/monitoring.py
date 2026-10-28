@@ -130,6 +130,12 @@ class PipelineMonitor:
                 MonitorHealth.DEGRADED,
             ),
         ]
+        if "active_reconnect_storms" in live:
+            # A venue reconnecting repeatedly without a valid book (live_feed RECONNECT_STORM).
+            metrics.append(self._metric(
+                "active_reconnect_storms", int(live["active_reconnect_storms"]), "count", "<=", 0,
+                MonitorHealth.CRITICAL,
+            ))
         if mode != "REPLAY":
             metrics = [m for m in metrics if m.name != "replay_events_per_second"]
         strategy_execution = strategy_execution or {}

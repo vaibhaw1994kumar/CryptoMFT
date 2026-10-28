@@ -3,6 +3,7 @@ from __future__ import annotations
 from decimal import Decimal
 
 import asyncio
+from collections import deque
 from collections.abc import Awaitable, Callable
 from contextlib import AbstractAsyncContextManager, suppress
 from functools import wraps
@@ -149,6 +150,8 @@ class VenueLiveStats:
     trade_normalization_errors: int = 0
     trade_stale_disconnects: int = 0
     invalid_trades: int = 0
+    reconnect_storms: int = 0             # episodes of >= reconnect_alarm_count in the window
+    reconnect_storm_active: bool = False  # until the book is VALID again
     last_error: str = ""
 
 
@@ -194,8 +197,17 @@ class LiveFeedSettings:
     cross_venue_divergence_bps: float = 25.0
     cross_venue_stall_seconds: float = 5.0
     max_trade_deviation_bps: float = 500.0
+    # Reconnect-storm alarm: this many book reconnects of one venue within the
+    # window raise RECONNECT_STORM (once per episode, cleared by a VALID book).
+    # The book is already untradeable while it reconnects; the alarm tells people.
+    reconnect_alarm_count: int = 5
+    reconnect_alarm_window_seconds: float = 300.0
 
     def validate(self) -> None:
+        if self.reconnect_alarm_count < 2:
+            raise ValueError("reconnect_alarm_count must be at least 2")
+        if self.reconnect_alarm_window_seconds <= 0:
+            raise ValueError("reconnect_alarm_window_seconds must be positive")
         if self.rest_reconcile_seconds is not None and self.rest_reconcile_seconds <= 0:
             raise ValueError("rest_reconcile_seconds must be positive")
         if not self.venues:
@@ -751,6 +763,7 @@ class LiveOrderBookService:
             for venue in self.settings.venues
         }
         self.stats = {venue: VenueLiveStats() for venue in self.settings.venues}
+        self._reconnect_times: dict[str, deque[int]] = {venue: deque() for venue in self.settings.venues}
         self.book_gate = BookIntegrityGate(
             self.config.max_book_age_ns,
             cancel_callback or (lambda _reason, _now_ns: 0),
@@ -1119,6 +1132,7 @@ class LiveOrderBookService:
             live={
                 "reconnects": reconnects,
                 "stale_disconnects": stale_disconnects,
+                "active_reconnect_storms": sum(row.reconnect_storm_active for row in self.stats.values()),
                 "persistence_lag_ns": self.recorder.max_persistence_lag_ns,
                 "durable_fsync": self.settings.durable,
             },
@@ -1179,6 +1193,7 @@ class LiveOrderBookService:
             if self.stop_event.is_set():
                 break
             stats.reconnects += 1
+            self._note_reconnect(venue)
             # Progress is a valid book, not a connect: a connection whose subscription
             # was refused or whose snapshot failed must not reset the backoff
             # (each Binance attempt costs REST snapshot weight).
@@ -1194,6 +1209,35 @@ class LiveOrderBookService:
             except TimeoutError:
                 pass
             backoff = min(self.settings.reconnect_max_seconds, backoff * 2)
+
+    def _note_reconnect(self, venue: str) -> None:
+        """Raise RECONNECT_STORM once when reconnects crowd into the alarm window."""
+        stats = self.stats[venue]
+        now = self.monotonic_ns()
+        window_ns = int(self.settings.reconnect_alarm_window_seconds * 1_000_000_000)
+        times = self._reconnect_times[venue]
+        times.append(now)
+        while times and now - times[0] > window_ns:
+            times.popleft()
+        if stats.reconnect_storm_active or len(times) < self.settings.reconnect_alarm_count:
+            return
+        stats.reconnect_storm_active = True
+        stats.reconnect_storms += 1
+        message = (f"{venue} reconnected {len(times)} times in "
+                   f"{self.settings.reconnect_alarm_window_seconds:g}s without a valid book: {stats.last_error}")
+        LOGGER.error("RECONNECT_STORM %s", message)
+        self._connector_log("RECONNECT_STORM", StructuredLogLevel.ERROR, message, venue=venue,
+                            payload={"reconnects_in_window": len(times),
+                                     "window_seconds": self.settings.reconnect_alarm_window_seconds,
+                                     "last_error": stats.last_error})
+
+    def _clear_reconnect_storm(self, venue: str) -> None:
+        stats = self.stats[venue]
+        self._reconnect_times[venue].clear()
+        if stats.reconnect_storm_active:
+            stats.reconnect_storm_active = False
+            self._connector_log("RECONNECT_STORM_CLEARED", StructuredLogLevel.INFO,
+                                f"{venue} order book valid again after a reconnect storm", venue=venue)
 
     async def _trade_forever(self, venue: str) -> None:
         stats = self.stats[venue]
@@ -2031,6 +2075,7 @@ class LiveOrderBookService:
         state = self._reconcile_after(event, book, state)
         if state == BookState.VALID and previous_state != BookState.VALID:
             self.stats[event.venue].book_syncs += 1
+            self._clear_reconnect_storm(event.venue)
         accepted = book.last_event_id is not None and book.last_event_id != previous_event_id
         if accepted:
             self._last_book_mono_ns[event.venue] = self.monotonic_ns()
