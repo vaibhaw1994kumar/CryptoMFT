@@ -153,7 +153,8 @@ class SubscriptionTests(unittest.IsolatedAsyncioTestCase):
         with tempfile.TemporaryDirectory() as directory:
             drops = [ClosedSocket([SNAPSHOT]) for _ in range(3)]
             service, _ = service_for(directory, [*drops, FakeWebSocket([SNAPSHOT, DELTA])], max_events=5)
-            await asyncio.wait_for(service.run(), timeout=5)
+            # A hang guard, not a speed limit (windows-latest: one 3.45 s loop step).
+            await asyncio.wait_for(service.run(), timeout=30)
             waits = [row["payload"]["backoff_seconds"] for row in logged(service, "RECONNECT_SCHEDULED")]
             self.assertEqual(waits[:3], [0.001, 0.001, 0.001])
 

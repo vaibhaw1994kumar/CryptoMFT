@@ -982,8 +982,12 @@ class LiveOrderBookService:
         timer: asyncio.Task[None] | None = None
         if self.settings.max_runtime_seconds is not None:
             timer = asyncio.create_task(self._stop_after(self.settings.max_runtime_seconds))
+        cancelled = False
         try:
             await self.stop_event.wait()
+        except asyncio.CancelledError:
+            cancelled = True
+            raise
         finally:
             self.stop_event.set()
             for task in tasks:
@@ -1033,6 +1037,13 @@ class LiveOrderBookService:
                 self._write_monitoring(self.stopped_ts_ns or self.clock_ns(), final=True)
             except (OSError, PersistenceFailure) as exc:
                 self._fail_closed_on_persistence("", exc)
+            if cancelled:
+                # run() itself was cancelled (e.g. a caller's timeout): the return below is
+                # skipped, so seal here; otherwise every part file stays open, unsealed.
+                self._seal_recorder()
+        return self._seal_recorder()
+
+    def _seal_recorder(self) -> dict[str, Any]:
         try:
             self._check_stage_counts()
             return self.recorder.close(self._service_summary())

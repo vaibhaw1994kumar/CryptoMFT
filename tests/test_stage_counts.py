@@ -109,6 +109,20 @@ class StageCountTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(part["stage_counts"]["canonical"], {"recorded": 2, "on_disk": 1})
             self.assertFalse(part["stage_counts"]["consistent"])
 
+    async def test_a_cancelled_session_still_seals_and_releases_its_files(self):
+        # A caller's timeout cancels run(); the files must not stay open (Windows could
+        # not remove the directory) and the session must still be sealed.
+        with tempfile.TemporaryDirectory() as directory:
+            service = service_for(directory, [SNAPSHOT, D1])          # then the socket idles forever
+            with self.assertRaises(TimeoutError):
+                await asyncio.wait_for(service.run(), timeout=0.5)
+            recorder = service.recorder
+            manifest = json.loads((recorder.session_dir / "live_manifest.json").read_text())
+            self.assertEqual(manifest["canonical_events"], 2)
+            self.assertTrue(manifest["frame_accounting"]["consistent"])
+            for handle in (recorder._wire_handle, recorder._canonical_handle, recorder._trace_handle):
+                self.assertTrue(handle.closed)
+
 
 class RecorderAccountingTests(unittest.TestCase):
     def test_a_frame_counts_once_however_many_dispositions_it_gets(self):
