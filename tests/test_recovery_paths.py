@@ -88,7 +88,9 @@ class BinanceRecoveryTests(unittest.IsolatedAsyncioTestCase):
         with tempfile.TemporaryDirectory() as directory:
             # events: one delta per failed connection (3) + snapshot and delta on the 4th
             service, _ = make_service(directory, ("BINANCE",), {"BINANCE": sockets}, http=http, max_events=5)
-            await asyncio.wait_for(service.run(), timeout=5)
+            # A hang guard, not a speed limit: windows-latest once spent 4.5 s in one loop step
+            # (synchronous structured-log commits) and tripped the old 5 s guard.
+            await asyncio.wait_for(service.run(), timeout=30)
             book = service.books["BINANCE"]
             self.assertEqual((book.state, book.sequence), (BookState.VALID, 101))
             self.assertEqual(http.calls, 4)
