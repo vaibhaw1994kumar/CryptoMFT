@@ -125,7 +125,8 @@ async def _run_live_paper(args: argparse.Namespace) -> dict:
     if args.maker_dry_run:
         paper.cfg.strategies.setdefault("maker_simulation", {})["enabled"] = True
         paper.maker_simulator = maker_simulator_from_config(paper.cfg)
-    if args.status_poll_seconds > 0 and args.binance_market == "spot" and args.bybit_market == "spot":
+    # Each instrument is polled on its own product's endpoint (spot or linear perpetual).
+    if args.status_poll_seconds > 0:
         paper.status_poller = InstrumentStatusPoller(
             paper.cfg.instruments,
             {
@@ -578,9 +579,9 @@ def main() -> None:
                           "without_mark": sum(1 for r in records if not r["mark_price"]),
                           "output": str(args.output)}, indent=2))
     elif args.command == "capabilities":
-        from .capabilities import report
+        from .capabilities import report as capability_report
 
-        print(json.dumps(report(tuple(args.venue) if args.venue else None), indent=2))
+        print(json.dumps(capability_report(tuple(args.venue) if args.venue else None), indent=2))
     elif args.command == "compare-tardis":
         from .tardis_compare import compare_with_tardis
 

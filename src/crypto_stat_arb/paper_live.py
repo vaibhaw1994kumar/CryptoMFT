@@ -225,8 +225,11 @@ class LivePaperSession:
         self._timestamps.close()
         canonical = self.output_dir / "canonical_events.jsonl"
         with canonical.open("w", encoding="utf-8") as handle:
-            for event in self.events:
-                handle.write(json.dumps(asdict(event), default=json_default, sort_keys=True) + "\n")
+            # processing_ordinal: the order this session applied its events, which a
+            # replay reproduces (replay.replay_order); receive time alone can differ.
+            for ordinal, event in enumerate(self.events, start=1):
+                row = {**asdict(event), "processing_ordinal": ordinal}
+                handle.write(json.dumps(row, default=json_default, sort_keys=True) + "\n")
         timings = [
             row for adapter in self.session.router.adapters.values()
             for row in getattr(adapter, "timings", ())

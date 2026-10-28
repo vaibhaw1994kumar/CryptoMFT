@@ -13,7 +13,7 @@ from .economics import Valuation, reconcile
 from .canonical import CallbackEventSink, CanonicalEventDispatcher, CanonicalEventRecorder
 from .metrics import metrics_report, plan_total
 from .models import MarketEvent, canonical_json, utc_now_iso
-from .replay import deterministic_order
+from .replay import RECORDED_ORDER, replay_order
 from .quality import QualityGate, QualitySnapshot
 from .session import ExecutionMode, TradingSession
 from .monitoring import PipelineMonitor
@@ -30,8 +30,20 @@ def file_sha256(path: Path) -> str:
 
 
 def load_events(path: Path) -> list[MarketEvent]:
+    return load_events_with_order(path)[0]
+
+
+def load_events_with_order(path: Path) -> tuple[list[MarketEvent], list[int | None]]:
+    """Events plus each row's recorded ``processing_ordinal`` (None where absent)."""
+    events, ordinals = [], []
     with path.open(encoding="utf-8") as handle:
-        return [MarketEvent.from_dict(json.loads(line)) for line in handle if line.strip()]
+        for line in handle:
+            if line.strip():
+                row = json.loads(line)
+                events.append(MarketEvent.from_dict(row))
+                ordinal = row.get("processing_ordinal")
+                ordinals.append(int(ordinal) if ordinal is not None else None)
+    return events, ordinals
 
 
 def enforce_data_quality(summary: dict, run_dir: Path, justification: str | None) -> str:
@@ -706,20 +718,28 @@ def run_backtest(
     session = TradingSession(
         cfg, execution_mode=ExecutionMode(cfg.execution_mode), live_data=False
     )
-    events = deterministic_order(load_events(events_path))
+    events, replay_ordering = replay_order(*load_events_with_order(events_path))
     # Recorded mark/index/funding tickers replay in receive order, each before
     # the first market event received at or after it (causal; never past the data).
     tickers = load_derivatives(derivatives_log) if derivatives_log is not None else []
     ticker_index = 0
+    # In the recorded processing order an event can be applied after one received
+    # later (a REST snapshot), so its own receive time would step the clock back.
+    # The recording session decided on a processing clock that never runs backwards.
+    monotonic_now = replay_ordering == RECORDED_ORDER
+    replay_now = 0
 
     def process_strategy_event(event: MarketEvent) -> None:
-        nonlocal timed_events, ticker_index
+        nonlocal timed_events, ticker_index, replay_now
         while ticker_index < len(tickers) and tickers[ticker_index].receive_ts_ns <= event.receive_ts_ns:
             session.on_derivative(tickers[ticker_index])
             ticker_index += 1
         recorded_now = event_timing.get(event.event_id)
         if recorded_now is not None:
             timed_events += 1
+        elif monotonic_now:
+            replay_now = max(replay_now, event.receive_ts_ns)
+            recorded_now = replay_now
         session.on_event(event, now_ns=recorded_now)
 
     replay_started_ns = time.perf_counter_ns()
@@ -748,6 +768,7 @@ def run_backtest(
         "config_sha256": file_sha256(config_path),
         "events_sha256": file_sha256(events_path),
         "config": raw_config,
+        "replay_ordering": replay_ordering,
         "deterministic_result_sha256": sha256(canonical_json(summary).encode()).hexdigest(),
     }
     (output_dir / "manifest.json").write_text(json.dumps(manifest, indent=2, sort_keys=True), encoding="utf-8")
@@ -756,6 +777,6 @@ def run_backtest(
     write_dataset_manifest(output_dir, build_dataset_manifest(
         cfg=cfg, raw_config=raw_config, config_path=config_path, events_path=events_path,
         events=events, output_dir=output_dir, derivatives_log=derivatives_log,
-        comparison_reports=comparison_reports,
+        comparison_reports=comparison_reports, replay_ordering=replay_ordering,
     ))
     return summary

@@ -27,7 +27,7 @@ from typing import Any
 
 from . import __version__
 from .models import BookState, MarketEvent, canonical_json
-from .replay import event_order_key
+from .replay import RECEIVE_TIME_ORDER, event_order_key
 
 MAX_INTERVALS = 500
 
@@ -116,11 +116,17 @@ def _feed(events: list[MarketEvent], venue: str) -> str:
     return venue
 
 
-def _venue_blocks(events: list[MarketEvent], cfg) -> tuple[dict[str, Any], dict[str, Any], dict[str, list]]:
-    """Per-venue description, book statistics and not-VALID intervals (independent rebuild)."""
+def _venue_blocks(events: list[MarketEvent], cfg) -> tuple[
+    dict[str, dict[str, Any]], dict[str, dict[str, Any]], dict[str, list[dict[str, Any]]],
+    dict[str, list[dict[str, Any]]],
+]:
+    """Per-venue description, book statistics, not-VALID intervals and silent gaps (independent rebuild)."""
     describe: dict[str, dict[str, Any]] = {}
-    books, intervals, open_interval = {}, {}, {}
-    silent, last_book_receive = {}, {}
+    books: dict[tuple[str, str], Any] = {}
+    intervals: dict[str, list[dict[str, Any]]] = {}
+    open_interval: dict[tuple[str, str], dict[str, Any]] = {}
+    silent: dict[str, list[dict[str, Any]]] = {}
+    last_book_receive: dict[tuple[str, str], int] = {}
     for event in events:
         row = describe.setdefault(event.venue, {
             "instrument_ids": set(), "event_types": {}, "adapter_versions": set(), "schema_versions": set(),
@@ -133,8 +139,8 @@ def _venue_blocks(events: list[MarketEvent], cfg) -> tuple[dict[str, Any], dict[
         row["adapter_versions"].add(event.adapter_version)
         row["schema_versions"].add(event.schema_version)
         row["with_raw_ref"] += bool(event.raw_ref)
-        for key, value in (("exchange", event.exchange_ts_ns), ("receive", event.receive_ts_ns)):
-            first, last = f"first_{key}_ts_ns", f"last_{key}_ts_ns"
+        for clock, value in (("exchange", event.exchange_ts_ns), ("receive", event.receive_ts_ns)):
+            first, last = f"first_{clock}_ts_ns", f"last_{clock}_ts_ns"
             row[first] = value if row[first] is None else min(row[first], value)
             row[last] = value if row[last] is None else max(row[last], value)
         if event.event_type.value not in ("BOOK_SNAPSHOT", "BOOK_DELTA"):
@@ -156,7 +162,7 @@ def _venue_blocks(events: list[MarketEvent], cfg) -> tuple[dict[str, Any], dict[
             open_interval[key] = {"instrument_id": event.instrument_id, "start_receive_ts_ns": event.receive_ts_ns,
                                   "start_raw_ref": event.raw_ref, "reasons": {book.invalid_reason or state.value},
                                   "events": 1}
-        elif state != BookState.VALID:
+        elif state != BookState.VALID and current is not None:
             current["events"] += 1
             current["reasons"].add(book.invalid_reason or state.value)
         elif current is not None:
@@ -170,7 +176,7 @@ def _venue_blocks(events: list[MarketEvent], cfg) -> tuple[dict[str, Any], dict[
             row["reasons"] = sorted(row["reasons"])
             end = row["end_receive_ts_ns"]
             row["duration_ns"] = None if end is None else end - row["start_receive_ts_ns"]
-    stats = {venue: {} for venue in describe}
+    stats: dict[str, dict[str, Any]] = {venue: {} for venue in describe}
     for (venue, instrument), book in books.items():
         s = book.stats
         stats[venue][instrument] = {"final_state": book.state.value, "snapshots": s.snapshots,
@@ -184,21 +190,23 @@ def _venue_blocks(events: list[MarketEvent], cfg) -> tuple[dict[str, Any], dict[
         row["instrument_ids"] = sorted(row["instrument_ids"])
         row["adapter_versions"] = sorted(row["adapter_versions"])
         row["schema_versions"] = sorted(row["schema_versions"])
-        for key in ("first_exchange_ts", "last_exchange_ts", "first_receive_ts", "last_receive_ts"):
-            row[f"{key}_utc"] = _iso(row[f"{key}_ns"])
+        for field in ("first_exchange_ts", "last_exchange_ts", "first_receive_ts", "last_receive_ts"):
+            row[f"{field}_utc"] = _iso(row[f"{field}_ns"])
     return describe, stats, intervals, silent
 
 
 def build_dataset_manifest(
     *, cfg, raw_config: dict, config_path: Path, events_path: Path, events: list[MarketEvent],
     output_dir: Path, derivatives_log: Path | None = None, comparison_reports: list[Path] | None = None,
+    replay_ordering: str = RECEIVE_TIME_ORDER,
 ) -> dict[str, Any]:
     describe, book_stats, intervals, silent = _venue_blocks(events, cfg)
     reordered = sum(1 for a, b in zip(sorted(events, key=event_order_key), events) if a is not b)
     quality = _read(output_dir / "data_quality_report.json") or {}
     timing = _read(output_dir / "time_integrity_report.json") or {}
     override = _read(output_dir / "data_quality_override.json")
-    inputs = {"events": {"path": str(events_path), "sha256": _sha256(events_path), "events": len(events)}}
+    inputs: dict[str, dict[str, Any]] = {
+        "events": {"path": str(events_path), "sha256": _sha256(events_path), "events": len(events)}}
     if derivatives_log is not None:
         inputs["derivatives"] = {"path": str(derivatives_log), "sha256": _sha256(derivatives_log)}
     comparisons = []
@@ -228,8 +236,7 @@ def build_dataset_manifest(
             "rows": [{k: x.get(k) for k in ("venue", "instrument_id", "symbol", "product_type", "effective_from")}
                      for x in instruments],
         },
-        "replay_ordering": "receive_ts_ns total order across streams; within a book stream, deltas between "
-                           "snapshots in venue sequence order (replay.deterministic_order)",
+        "replay_ordering": replay_ordering,
         "message_counts": {
             "by_venue": {venue: row["event_types"] for venue, row in describe.items()},
             "quality_gate_counts": quality.get("counts"),

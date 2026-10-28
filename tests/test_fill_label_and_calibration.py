@@ -365,6 +365,8 @@ class TestCalibrationDaysBacktest(unittest.TestCase):
                 block_on_toxic=False,
             ),
             include_deltas=False,
+            # A few synthetic events per day: the preflight rejects it (INSUFFICIENT_EVENTS).
+            allow_rejected_data="synthetic test fixture, too small for the quality gate by design",
         )
 
     def test_calibration_days_zero_uses_two_pass(self):
