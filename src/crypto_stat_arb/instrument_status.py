@@ -5,6 +5,13 @@ effective-dated ``InstrumentMaster`` version whenever the trading status or a
 trading rule (tick, lot step, minimum quantity/notional) changes. History is
 never rewritten, so a replay after the change uses the rules that applied at
 each event's time. No credentials are involved.
+
+Each instrument is polled on its own product's endpoint: spot on Binance
+``/api/v3/exchangeInfo`` and Bybit ``category=spot``; perpetuals on Binance
+USD-M ``/fapi/v1/exchangeInfo`` and Bybit ``category=linear``. Any status other
+than trading (e.g. Binance ``SETTLING``/``CLOSE``, Bybit ``Delivering``/``Closed``)
+is recorded as the instrument's status, so a perpetual being delisted or
+settled is seen like a spot halt.
 """
 
 from __future__ import annotations
@@ -21,6 +28,7 @@ from .instruments import InstrumentMaster
 
 
 BINANCE_SPOT_PUBLIC_URL = "https://api.binance.com"
+BINANCE_FUTURES_PUBLIC_URL = "https://fapi.binance.com"
 BYBIT_PUBLIC_URL = "https://api.bybit.com"
 RULE_FIELDS = ("tick_size", "quantity_step", "min_quantity", "min_notional")
 
@@ -59,24 +67,50 @@ class InstrumentStatusPoller:
         self, instruments: InstrumentMaster, symbols: dict[str, tuple[str, str]], *,
         http_get: Callable[[str], dict[str, Any]] = public_json_get,
         binance_base_url: str = BINANCE_SPOT_PUBLIC_URL,
-        bybit_base_url: str = BYBIT_PUBLIC_URL, bybit_category: str = "spot",
+        binance_futures_base_url: str = BINANCE_FUTURES_PUBLIC_URL,
+        bybit_base_url: str = BYBIT_PUBLIC_URL, bybit_category: str | None = None,
         apply_rule_changes: bool = True,
     ) -> None:
-        for url in (binance_base_url, bybit_base_url):
+        for url in (binance_base_url, binance_futures_base_url, bybit_base_url):
             if urlparse(url).scheme != "https":
                 raise ValueError("instrument status endpoints must use https")
         self.instruments = instruments
         self.symbols = dict(symbols)
         self.http_get = http_get
         self.binance_base_url = binance_base_url.rstrip("/")
+        self.binance_futures_base_url = binance_futures_base_url.rstrip("/")
         self.bybit_base_url = bybit_base_url.rstrip("/")
+        # None: chosen per instrument from its product type (spot / linear).
         self.bybit_category = bybit_category
         self.apply_rule_changes = apply_rule_changes
+
+    def _perpetual(self, venue: str, instrument_id: str) -> bool:
+        from .funding import is_perpetual
+
+        return is_perpetual(self.instruments.get(venue, instrument_id).product_type)
 
     def fetch(self) -> dict[str, dict[str, Any]]:
         fetched = {}
         for venue, (instrument_id, symbol) in sorted(self.symbols.items()):
-            if venue == "BINANCE":
+            perpetual = self._perpetual(venue, instrument_id)
+            if venue == "BINANCE" and perpetual:
+                # USD-M exchangeInfo lists every contract; it takes no symbol filter.
+                data = _retrying_get(self.http_get, f"{self.binance_futures_base_url}/fapi/v1/exchangeInfo")
+                rows = [row for row in data.get("symbols", []) if row.get("symbol") == symbol]
+                if not rows:
+                    raise ValueError(f"binance USD-M exchangeInfo does not list {symbol}")
+                row = rows[0]
+                filters = {item["filterType"]: item for item in row.get("filters", [])}
+                fetched[venue] = {
+                    "instrument_id": instrument_id,
+                    "native_status": row["status"],
+                    "status": "TRADING" if row["status"] == "TRADING" else row["status"],
+                    "tick_size": filters.get("PRICE_FILTER", {}).get("tickSize"),
+                    "quantity_step": filters.get("LOT_SIZE", {}).get("stepSize"),
+                    "min_quantity": filters.get("LOT_SIZE", {}).get("minQty"),
+                    "min_notional": filters.get("MIN_NOTIONAL", {}).get("notional"),
+                }
+            elif venue == "BINANCE":
                 data = _retrying_get(
                     self.http_get,
                     f"{self.binance_base_url}/api/v3/exchangeInfo?"
@@ -98,7 +132,8 @@ class InstrumentStatusPoller:
                 data = _retrying_get(
                     self.http_get,
                     f"{self.bybit_base_url}/v5/market/instruments-info?"
-                    + urlencode({"category": self.bybit_category, "symbol": symbol}),
+                    + urlencode({"category": self.bybit_category or ("linear" if perpetual else "spot"),
+                                 "symbol": symbol}),
                 )
                 if data.get("retCode") != 0 or not data.get("result", {}).get("list"):
                     raise ValueError(f"bybit instruments-info failed: {data.get('retMsg')}")
