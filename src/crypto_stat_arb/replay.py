@@ -19,6 +19,35 @@ def event_order_key(event: MarketEvent) -> tuple[int | str, ...]:
     )
 
 
+RECORDED_ORDER = "recorded processing order (processing_ordinal written by the recording session)"
+RECEIVE_TIME_ORDER = ("receive_ts_ns total order across streams; within a book stream, deltas between "
+                      "snapshots in venue sequence order (replay.deterministic_order)")
+
+
+def complete_processing_order(ordinals: list[int | None] | None, count: int) -> bool:
+    """True when every event carries a distinct recorded processing ordinal."""
+    return (ordinals is not None and len(ordinals) == count and None not in ordinals
+            and len(set(ordinals)) == count)
+
+
+def replay_order(events: list[MarketEvent], ordinals: list[int | None] | None = None
+                 ) -> tuple[list[MarketEvent], str]:
+    """The order to replay ``events`` in, and which rule produced it.
+
+    A file recorded by a live/paper session carries ``processing_ordinal``: the order
+    the session actually applied its events. That order is not always receive-time
+    order (a REST snapshot is stamped when its response arrives but applied after
+    frames of another venue that arrived later), so a replay that re-sorted by
+    receive time would diverge from the session it replays. With a complete set of
+    ordinals the recorded order is reproduced exactly; otherwise (older files,
+    synthetic data, merged files) ``deterministic_order`` applies.
+    """
+    if complete_processing_order(ordinals, len(events)):
+        ranked = sorted(range(len(events)), key=lambda index: ordinals[index])   # type: ignore[index]
+        return [events[index] for index in ranked], RECORDED_ORDER
+    return deterministic_order(events), RECEIVE_TIME_ORDER
+
+
 def deterministic_order(events: Iterable[MarketEvent]) -> list[MarketEvent]:
     """``ORDERING_RULE`` across streams; venue sequence order within a book stream.
 

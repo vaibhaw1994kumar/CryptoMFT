@@ -27,7 +27,7 @@ from typing import Any
 
 from . import __version__
 from .models import BookState, MarketEvent, canonical_json
-from .replay import event_order_key
+from .replay import RECEIVE_TIME_ORDER, event_order_key
 
 MAX_INTERVALS = 500
 
@@ -192,6 +192,7 @@ def _venue_blocks(events: list[MarketEvent], cfg) -> tuple[dict[str, Any], dict[
 def build_dataset_manifest(
     *, cfg, raw_config: dict, config_path: Path, events_path: Path, events: list[MarketEvent],
     output_dir: Path, derivatives_log: Path | None = None, comparison_reports: list[Path] | None = None,
+    replay_ordering: str = RECEIVE_TIME_ORDER,
 ) -> dict[str, Any]:
     describe, book_stats, intervals, silent = _venue_blocks(events, cfg)
     reordered = sum(1 for a, b in zip(sorted(events, key=event_order_key), events) if a is not b)
@@ -228,8 +229,7 @@ def build_dataset_manifest(
             "rows": [{k: x.get(k) for k in ("venue", "instrument_id", "symbol", "product_type", "effective_from")}
                      for x in instruments],
         },
-        "replay_ordering": "receive_ts_ns total order across streams; within a book stream, deltas between "
-                           "snapshots in venue sequence order (replay.deterministic_order)",
+        "replay_ordering": replay_ordering,
         "message_counts": {
             "by_venue": {venue: row["event_types"] for venue, row in describe.items()},
             "quality_gate_counts": quality.get("counts"),
