@@ -291,6 +291,11 @@ class RotatingLiveRecorder:
         self._derivative_handle: Any = None
         self.rejected_count = 0
         self.control_count = 0
+        # Frame accounting: every captured wire frame stays open until one disposition
+        # (canonical, trade, derivative, control, rejected) resolves it.
+        self._open_frames: dict[str, None] = {}
+        self.frame_dispositions: dict[str, int] = {}
+        self._part_start_counts: dict[str, int] = {}
         self.last_persisted_receive_ts_ns: int | None = None
         self.max_persistence_lag_ns = 0
         self.parts: list[dict[str, Any]] = []
@@ -347,6 +352,8 @@ class RotatingLiveRecorder:
         self.part_started_ns = now_ns
         self._wire_previous_hash = GENESIS_HASH
         self._wire_ordinal = 0
+        self._part_start_counts = {"canonical": self.canonical_count, "trades": self.trade_count,
+                                   "derivatives": self.derivative_count}
 
     def _should_rotate(self, now_ns: int) -> bool:
         if self._raw_writer is None:
@@ -415,7 +422,32 @@ class RotatingLiveRecorder:
         self._flush(self._wire_handle)
         self._wire_previous_hash = record_hash
         self.wire_count += 1
+        self._open_frames[wire.wire_ref] = None
         return wire
+
+    def _resolve_frame(self, wire: WireFrame, disposition: str) -> None:
+        """The frame's first disposition counts once (a trade frame may carry several ticks)."""
+        if self._open_frames.pop(wire.wire_ref, "resolved") is None:
+            self.frame_dispositions[disposition] = self.frame_dispositions.get(disposition, 0) + 1
+
+    def frame_accounting(self) -> dict[str, Any]:
+        """Received = sum of dispositions, nothing left open: no frame silently dropped."""
+        resolved = sum(self.frame_dispositions.values())
+        unresolved = list(self._open_frames)
+        return {
+            "captured": self.wire_count,
+            "dispositions": dict(sorted(self.frame_dispositions.items())),
+            "unresolved": len(unresolved),
+            "unresolved_wire_refs": unresolved[:20],
+            "consistent": not unresolved and resolved == self.wire_count,
+        }
+
+    @staticmethod
+    def _line_count(path: Path) -> int:
+        if not path.exists():
+            return 0
+        with path.open("rb") as handle:
+            return sum(1 for line in handle if line.strip())
 
     @_persisting
     def append_payload(
@@ -474,6 +506,7 @@ class RotatingLiveRecorder:
             self.max_persistence_lag_ns, max(0, persisted_ns - event.receive_ts_ns)
         )
         self.canonical_count += 1
+        self._resolve_frame(wire, "CANONICAL")
 
     @_persisting
     def record_trade(self, wire: WireFrame, raw: RawFrame, tick: TradeTick) -> None:
@@ -497,6 +530,7 @@ class RotatingLiveRecorder:
             self.max_persistence_lag_ns, max(0, persisted_ns - tick.receive_ts_ns)
         )
         self.trade_count += 1
+        self._resolve_frame(wire, "TRADE")
 
     @_persisting
     def record_derivative(self, wire: WireFrame, raw: RawFrame, ticker: Any) -> None:
@@ -518,6 +552,7 @@ class RotatingLiveRecorder:
             self.max_persistence_lag_ns, max(0, persisted_ns - ticker.receive_ts_ns)
         )
         self.derivative_count += 1
+        self._resolve_frame(wire, "DERIVATIVE")
 
     @_persisting
     def record_control(self, wire: WireFrame, raw: RawFrame) -> None:
@@ -531,6 +566,7 @@ class RotatingLiveRecorder:
         }) + "\n")
         self._flush(self._trace_handle)
         self.control_count += 1
+        self._resolve_frame(wire, "CONTROL")
 
     @_persisting
     def record_rejection(
@@ -552,6 +588,7 @@ class RotatingLiveRecorder:
         }) + "\n")
         self._flush(self._quarantine_handle)
         self.rejected_count += 1
+        self._resolve_frame(wire, "REJECTED")
 
     def _close_part(self) -> None:
         if self._raw_writer is None or self._part_dir is None:
@@ -580,6 +617,15 @@ class RotatingLiveRecorder:
         if self._derivative_handle is not None:
             paths["derivatives"] = self._part_dir / "derivatives.jsonl"
             self._derivative_handle = None
+        # Persisted = recorded: the part's files hold exactly the events counted into them.
+        recorded = {"canonical": self.canonical_count, "trades": self.trade_count,
+                    "derivatives": self.derivative_count}
+        stage_counts = {
+            name: {"recorded": recorded[name] - self._part_start_counts.get(name, 0),
+                   "on_disk": self._line_count(self._part_dir / f"{name}.jsonl")}
+            for name in recorded
+        }
+        stage_counts_consistent = all(row["recorded"] == row["on_disk"] for row in stage_counts.values())
         part = {
             "part": self.part_number,
             "directory": str(self._part_dir),
@@ -591,7 +637,10 @@ class RotatingLiveRecorder:
                 for name, path in paths.items()
             },
             "terminal_wire_record_hash": self._wire_previous_hash,
+            "stage_counts": {**stage_counts, "consistent": stage_counts_consistent},
         }
+        if not stage_counts_consistent:
+            LOGGER.error("STAGE_COUNT_MISMATCH part %s: %s", self.part_number, stage_counts)
         (self._part_dir / "live_part_manifest.json").write_text(
             json.dumps(part, indent=2, sort_keys=True), encoding="utf-8"
         )
@@ -625,6 +674,7 @@ class RotatingLiveRecorder:
             **({"derivative_ticks": self.derivative_count} if self.derivative_count else {}),
             "control_frames": self.control_count,
             "rejected_frames": self.rejected_count,
+            "frame_accounting": self.frame_accounting(),
             "parts": [
                 {
                     "part": x["part"],
@@ -984,6 +1034,7 @@ class LiveOrderBookService:
             except (OSError, PersistenceFailure) as exc:
                 self._fail_closed_on_persistence("", exc)
         try:
+            self._check_stage_counts()
             return self.recorder.close(self._service_summary())
         except (OSError, PersistenceFailure) as exc:
             self._fail_closed_on_persistence("", exc)
@@ -1882,6 +1933,11 @@ class LiveOrderBookService:
                 wire, exc, raw_ref=raw.raw_ref, stage="TRADE_NORMALIZE"
             )
             return 0
+        if not ticks:
+            # A trade message with no prints (empty data list) carries no market data.
+            self.stats[venue].control_frames += 1
+            self.recorder.record_control(wire, raw)
+            return 0
         valid_ticks = []
         for tick in ticks:
             reason = self._trade_rejection(venue, tick)
@@ -2133,6 +2189,29 @@ class LiveOrderBookService:
         if self.publisher is not None:
             self.publisher.publish_ltp_ohlc(bar, self.clock_ns())
 
+    def stage_counts(self) -> dict[str, Any]:
+        """Received / applied / persisted agree (requirement 3c).
+
+        Every captured frame has exactly one disposition, and every event the feed
+        applied (book) or accepted (trade, derivative) was written by the recorder.
+        """
+        frames = self.recorder.frame_accounting()
+        applied = {
+            "canonical": (sum(s.canonical_events for s in self.stats.values()), self.recorder.canonical_count),
+            "trades": (sum(s.trade_ticks for s in self.stats.values()), self.recorder.trade_count),
+            "derivatives": (sum(s.derivative_ticks for s in self.stats.values()), self.recorder.derivative_count),
+        }
+        persisted = {name: {"applied": a, "persisted": p} for name, (a, p) in applied.items()}
+        return {"frames": frames, "applied_vs_persisted": persisted,
+                "consistent": frames["consistent"] and all(a == p for a, p in applied.values())}
+
+    def _check_stage_counts(self) -> None:
+        counts = self.stage_counts()
+        if not counts["consistent"]:
+            LOGGER.error("STAGE_COUNT_MISMATCH %s", counts)
+            self._connector_log("STAGE_COUNT_MISMATCH", StructuredLogLevel.ERROR,
+                                "received, applied and persisted counts disagree", payload=counts)
+
     def _service_summary(self) -> dict[str, Any]:
         return {
             "mode": "PUBLIC_MARKET_DATA_ONLY",
@@ -2147,6 +2226,7 @@ class LiveOrderBookService:
             "max_book_age_ns": self.config.max_book_age_ns,
             "events_seen": self.events_seen,
             "persistence_failure": self.persistence_failure or None,
+            "stage_counts": self.stage_counts(),
             "cross_venue": None if self.cross_venue is None else self.cross_venue.report(),
             "time_integrity": {
                 "clock_offset_estimate_ns": self.time_monitor.clock_offset_estimate_ns,
