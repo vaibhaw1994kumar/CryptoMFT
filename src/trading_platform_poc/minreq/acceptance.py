@@ -23,7 +23,7 @@ from trading_platform_poc.minreq.backtest import (
     BacktestRunner,
     build_dataset,
 )
-from trading_platform_poc.minreq.benchmark import run_benchmark
+from trading_platform_poc.minreq.benchmark import median_report, run_benchmark
 from trading_platform_poc.minreq.canonical import (
     BookPayload,
     CanonicalEvent,
@@ -1778,9 +1778,17 @@ def at_13_monitoring_and_tca(workspace: Path) -> AcceptanceCheck:
 PERFORMANCE_TARGET_SYSTEMS = ("Linux",)
 
 
+# Shared CI runners are noisy: one short run can be tripled by a single slow moment
+# (per-order overhead 37-53 ms against 20 ms with no code change). The check uses the
+# median of an odd number of runs; every run's value is kept in the evidence.
+PERFORMANCE_RUNS = 3
+
+
 def at_14_performance(workspace: Path) -> AcceptanceCheck:
-    report = run_benchmark(workspace / "at14", steps=500, seed=1414)
-    target = workspace / "at14" / "benchmark.json"
+    runs = [run_benchmark(workspace / "at14" / f"run-{index}", steps=500, seed=1414)
+            for index in range(1, PERFORMANCE_RUNS + 1)]
+    report = median_report(runs)
+    target = report.write(workspace / "at14" / "benchmark.json")
     system = platform.system()
     enforced = system in PERFORMANCE_TARGET_SYSTEMS
     return AcceptanceCheck(
@@ -1791,8 +1799,8 @@ def at_14_performance(workspace: Path) -> AcceptanceCheck:
             "Historical ingestion, replay and OMS/EMS simulation complete "
             "within agreed limits for the intended universe; paper overhead is "
             "measured by component. Limits are enforced on the target platform "
-            f"({', '.join(PERFORMANCE_TARGET_SYSTEMS)}); other hosts record "
-            "the measurements only."
+            f"({', '.join(PERFORMANCE_TARGET_SYSTEMS)}) to the median of "
+            f"{PERFORMANCE_RUNS} runs; other hosts record the measurements only."
         ),
         owner="platform engineering",
         detail={
@@ -1802,6 +1810,8 @@ def at_14_performance(workspace: Path) -> AcceptanceCheck:
             "thresholds": report.thresholds.to_dict(),
             "failures": report.failures,
             "within_limits": report.passed,
+            "aggregate": f"median of {PERFORMANCE_RUNS} runs",
+            "run_failures": [run.failures for run in runs],
             "limits_enforced": enforced,
             "target_systems": list(PERFORMANCE_TARGET_SYSTEMS),
             "host_system": system,

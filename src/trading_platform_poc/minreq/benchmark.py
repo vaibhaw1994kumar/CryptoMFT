@@ -9,9 +9,10 @@ from __future__ import annotations
 
 import json
 import shutil
+import statistics
 import time
 import tracemalloc
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any, Callable
 
@@ -297,6 +298,13 @@ def run_benchmark(
         failures=[],
     )
 
+    report.failures = evaluate_limits(report, limits)
+    report.write(root / "benchmark.json")
+    return report
+
+
+def evaluate_limits(report: BenchmarkReport, limits: BenchmarkThresholds) -> list[str]:
+    """Every breached limit, by name. Shared by a single run and a median of runs."""
     failures: list[str] = []
     if (
         report.value("ingestion_events_per_second")
@@ -327,6 +335,31 @@ def run_benchmark(
         > limits.max_peak_memory_mb
     ):
         failures.append("simulation_peak_memory_mb above threshold")
-    report.failures = failures
-    report.write(root / "benchmark.json")
-    return report
+    return failures
+
+
+def median_report(reports: list[BenchmarkReport]) -> BenchmarkReport:
+    """The per-measurement median of several runs on one host, judged by the same limits.
+
+    A single short run on a shared CI runner can be tripled by one slow moment; the
+    median of an odd number of runs removes such spikes without loosening any limit.
+    Each run's value stays in the measurement's ``detail``.
+    """
+    if not reports or len(reports) % 2 == 0:
+        raise ValueError("median_report needs an odd number of runs")
+    first = reports[0]
+    measurements = []
+    for measurement in first.measurements:
+        values = [report.value(measurement.name) for report in reports]
+        measurements.append(replace(
+            measurement, value=statistics.median(values),
+            detail={**measurement.detail, "runs": values, "aggregate": "median"},
+        ))
+    median = BenchmarkReport(
+        build=first.build, seed=first.seed,
+        workload={**first.workload, "runs": len(reports)},
+        measurements=measurements, thresholds=first.thresholds, failures=[],
+    )
+    median.failures = evaluate_limits(median, first.thresholds)
+    return median
+
