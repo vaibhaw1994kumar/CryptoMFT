@@ -320,6 +320,7 @@ def _clone(
         arb=arb, maker=base.maker, venue_state=base.venue_state,
         consume_liquidity=base.consume_liquidity,
         include_deltas=base.include_deltas, seed=base.seed,
+        allow_rejected_data=base.allow_rejected_data,
         output_dir=output_dir, warm_start_fill_events=warm_start,
         warm_start_until_ts=warm_start_until_ts,
         fill_model_v1_path=fill_model_v1_path,
@@ -499,6 +500,8 @@ def build_arg_parser() -> argparse.ArgumentParser:
     p.add_argument("--no-toxic-gate", action="store_true")
     p.add_argument("--seed", type=int, default=7)
     p.add_argument("--progress-every", type=int, default=0)
+    p.add_argument("--allow-rejected-data", metavar="JUSTIFICATION",
+                   help="run pairs whose data the quality preflight rejects; recorded per result")
     g = p.add_mutually_exclusive_group()
     g.add_argument("--two-pass", dest="two_pass", action="store_true", default=None)
     g.add_argument("--single-pass", dest="two_pass", action="store_false")
@@ -569,6 +572,7 @@ def main(argv: Iterable[str] | None = None) -> int:
         ),
         include_deltas=not args.no_deltas, seed=args.seed,
         progress_every=args.progress_every,
+        allow_rejected_data=args.allow_rejected_data,
     )
     run_batch(args.pairs, base, args.output_dir, two_pass=two_pass,
               calibration_days=args.calibration_days,

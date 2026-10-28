@@ -88,6 +88,10 @@ class ArbBacktestConfig:
     markout_horizons_s: tuple[float, ...] = (1.0, 5.0, 30.0)
     progress_every: int = 0          # print every N events; 0 = silent
     max_trade_log: int = 200_000     # cap in-memory fill log on long runs
+    # The data-quality preflight blocks the run when a venue's data is CRITICAL
+    # (QualityGate REJECTED). A written justification here runs it anyway; the
+    # justification and the gate decisions are recorded in the result.
+    allow_rejected_data: str | None = None
 
 
 @dataclass
@@ -148,6 +152,8 @@ class ArbBacktestResult:
     fill_log_path: str | None = None
     bucket_stats_path: str | None = None
     trades_path: str | None = None
+    # Preflight decision per venue, whether it blocked, and any recorded override.
+    data_quality: dict | None = None
 
 
 @dataclass
@@ -546,6 +552,7 @@ class CrossVenueArbBacktester:
             trust_local_ts={v: s.trust_local_ts for v, s in self.venue_specs.items()},
             include_deltas=cfg.include_deltas,
             quality_preflight=True,
+            quality_report_only=_preflight_override(cfg) is not None,
         )
 
         now = 0.0
@@ -679,7 +686,34 @@ class CrossVenueArbBacktester:
             fill_log_path=fill_log_path,
             bucket_stats_path=bucket_stats_path,
             trades_path=trades_path,
+            data_quality=_data_quality(feed, cfg),
         )
+
+
+def _preflight_override(cfg: ArbBacktestConfig) -> str | None:
+    if cfg.allow_rejected_data is None:
+        return None
+    if not cfg.allow_rejected_data.strip():
+        raise ValueError("allow_rejected_data needs a written justification")
+    return cfg.allow_rejected_data.strip()
+
+
+def _data_quality(feed, cfg: ArbBacktestConfig) -> dict:
+    preflight = {
+        venue: {"decision": report.get("decision"), "health": report.get("health"),
+                "skipped": bool(report.get("skipped")),
+                "active_flag_codes": [flag.get("code") for flag in report.get("active_flags", [])]}
+        for venue, report in sorted(feed.preflight_reports.items())
+    }
+    rejected = [venue for venue, row in preflight.items() if row["health"] == "CRITICAL"]
+    override = _preflight_override(cfg)
+    return {
+        "preflight": preflight,
+        "blocking": override is None,
+        "rejected_venues": rejected,
+        "override": ({"justification": override, "rejected_venues": rejected}
+                     if override is not None else None),
+    }
 
 
 def _infer_tick(bids, asks) -> float:
@@ -725,6 +759,9 @@ def build_arg_parser() -> argparse.ArgumentParser:
     p.add_argument("--output-dir")
     p.add_argument("--warm-start", dest="warm_start_fill_events")
     p.add_argument("--progress-every", type=int, default=0)
+    p.add_argument("--allow-rejected-data", metavar="JUSTIFICATION",
+                   help="run even if the data-quality preflight rejects the data; "
+                        "the justification is recorded in the result")
     return p
 
 
@@ -750,6 +787,7 @@ def config_from_args(args) -> ArbBacktestConfig:
         output_dir=args.output_dir,
         warm_start_fill_events=args.warm_start_fill_events,
         progress_every=args.progress_every,
+        allow_rejected_data=args.allow_rejected_data,
     )
 
 
