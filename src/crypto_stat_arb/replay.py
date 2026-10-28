@@ -42,8 +42,9 @@ def replay_order(events: list[MarketEvent], ordinals: list[int | None] | None = 
     ordinals the recorded order is reproduced exactly; otherwise (older files,
     synthetic data, merged files) ``deterministic_order`` applies.
     """
-    if complete_processing_order(ordinals, len(events)):
-        ranked = sorted(range(len(events)), key=lambda index: ordinals[index])   # type: ignore[index]
+    if ordinals is not None and complete_processing_order(ordinals, len(events)):
+        recorded = [int(ordinal) for ordinal in ordinals if ordinal is not None]   # all present (checked)
+        ranked = sorted(range(len(events)), key=recorded.__getitem__)
         return [events[index] for index in ranked], RECORDED_ORDER
     return deterministic_order(events), RECEIVE_TIME_ORDER
 

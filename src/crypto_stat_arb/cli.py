@@ -579,9 +579,9 @@ def main() -> None:
                           "without_mark": sum(1 for r in records if not r["mark_price"]),
                           "output": str(args.output)}, indent=2))
     elif args.command == "capabilities":
-        from .capabilities import report
+        from .capabilities import report as capability_report
 
-        print(json.dumps(report(tuple(args.venue) if args.venue else None), indent=2))
+        print(json.dumps(capability_report(tuple(args.venue) if args.venue else None), indent=2))
     elif args.command == "compare-tardis":
         from .tardis_compare import compare_with_tardis
 
