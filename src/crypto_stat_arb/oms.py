@@ -58,9 +58,15 @@ ORDER_STATE_BY_EVENT = {
     ExecutionEventType.CANCELLED: OrderState.CANCELLED,
     ExecutionEventType.REPLACED: OrderState.ACKNOWLEDGED,
     ExecutionEventType.TIMED_OUT: OrderState.TIMED_OUT,
+    ExecutionEventType.SENT: OrderState.SENT,
+    ExecutionEventType.CANCEL_REQUESTED: OrderState.CANCEL_PENDING,
 }
+# Only picks which update's reason is reported; the state itself is resolved from the
+# facts (_resolve_order_state).
 ORDER_STATE_RANK = {
     OrderState.CREATED: 0,
+    OrderState.SENT: 0,
+    OrderState.CANCEL_PENDING: 1,
     OrderState.ACKNOWLEDGED: 1,
     OrderState.PARTIAL: 2,
     OrderState.TIMED_OUT: 3,
@@ -78,12 +84,51 @@ SOURCE_RANK = {
 TERMINAL_ORDER_STATES = {
     OrderState.FILLED, OrderState.REJECTED, OrderState.TIMED_OUT, OrderState.CANCELLED
 }
-# Orders that may still be live at the venue (risk, cancel sweeps, unwind sizing).
-LIVE_ORDER_STATES = frozenset({OrderState.CREATED, OrderState.ACKNOWLEDGED, OrderState.PARTIAL})
+# Orders that may still be live at the venue (risk, cancel sweeps, unwind sizing). A cancel
+# in flight does not make an order dead: CANCEL_PENDING counts until confirmed.
+LIVE_ORDER_STATES = frozenset({
+    OrderState.CREATED, OrderState.SENT, OrderState.ACKNOWLEDGED, OrderState.PARTIAL,
+    OrderState.CANCEL_PENDING,
+})
 # Live with nothing filled yet.
-UNFILLED_LIVE_ORDER_STATES = frozenset({OrderState.CREATED, OrderState.ACKNOWLEDGED})
+UNFILLED_LIVE_ORDER_STATES = frozenset({OrderState.CREATED, OrderState.SENT, OrderState.ACKNOWLEDGED})
 # Confirmed by the venue and working: a quiet GTC order here is resting, not unknown.
 RESTING_ORDER_STATES = frozenset({OrderState.ACKNOWLEDGED, OrderState.PARTIAL})
+# OMS02. The lifecycle matches src/new_backtest/order_state_machine.py:
+#   CREATED (OMS only: built, not sent)   SENT = SUBMITTED   ACKNOWLEDGED = ACKNOWLEDGED/RESTING
+#   PARTIAL = PARTIALLY_FILLED   CANCEL_PENDING = CANCEL_REQUESTED   TIMED_OUT = UNKNOWN
+#   FILLED / REJECTED / CANCELLED as there.
+# A step outside this table is recorded (ORDER_TRANSITION_UNEXPECTED) but never raised:
+# a venue quirk must not stop the session.
+ALLOWED_ORDER_TRANSITIONS: dict[OrderState, frozenset[OrderState]] = {
+    OrderState.CREATED: frozenset(set(OrderState) - {OrderState.CREATED}),   # reports may overtake SENT
+    OrderState.SENT: frozenset({
+        OrderState.ACKNOWLEDGED, OrderState.PARTIAL, OrderState.FILLED, OrderState.REJECTED,
+        OrderState.CANCELLED, OrderState.CANCEL_PENDING, OrderState.TIMED_OUT,
+    }),
+    OrderState.ACKNOWLEDGED: frozenset({
+        OrderState.PARTIAL, OrderState.FILLED, OrderState.CANCELLED, OrderState.CANCEL_PENDING,
+        OrderState.TIMED_OUT,
+    }),
+    OrderState.PARTIAL: frozenset({
+        OrderState.FILLED, OrderState.CANCELLED, OrderState.CANCEL_PENDING, OrderState.TIMED_OUT,
+    }),
+    OrderState.CANCEL_PENDING: frozenset({
+        OrderState.CANCELLED, OrderState.FILLED, OrderState.PARTIAL, OrderState.ACKNOWLEDGED,
+        OrderState.TIMED_OUT,      # PARTIAL / ACKNOWLEDGED: a venue query says the cancel did not take
+    }),
+    OrderState.TIMED_OUT: frozenset({      # later venue evidence clears an unknown state (D-04)
+        OrderState.ACKNOWLEDGED, OrderState.PARTIAL, OrderState.FILLED, OrderState.REJECTED,
+        OrderState.CANCELLED, OrderState.CANCEL_PENDING,
+    }),
+    OrderState.CANCELLED: frozenset({OrderState.FILLED}),     # a late fill completing the order
+    OrderState.FILLED: frozenset(),
+    OrderState.REJECTED: frozenset(),
+}
+VENUE_SOURCES = frozenset({
+    OrderUpdateSource.ADAPTER_CALLBACK.value, OrderUpdateSource.PRIVATE_STREAM.value,
+    OrderUpdateSource.REST_QUERY.value,
+})
 ALLOWED_PLAN_TRANSITIONS = {
     PlanState.CREATED: {PlanState.RISK_RESERVED, PlanState.REJECTED},
     PlanState.RISK_RESERVED: {PlanState.DISPATCHED, PlanState.REJECTED},
@@ -246,6 +291,8 @@ class OMS:
             "unresolved_after_queries": 0,
             "close_deferrals": 0,
             "rejected_cancels_requeried": 0,
+            "unexpected_order_transitions": 0,
+            "late_evidence_after_timeout": 0,
             "new_risk_held_residual_breach": 0,
             "residual_breach_kill_escalations": 0,
             "resting_fill_reports": 0,
@@ -409,6 +456,13 @@ class OMS:
             instrument_id=request.instrument_id,
         )
         self._persist(plan, ts_ns, "ORDER_LIFECYCLE", **payload)
+        if order in plan.children:
+            if action == "SUBMIT" and status in ("DISPATCHED", "RELEASED"):
+                self._record_internal_update(plan, order, ExecutionEventType.SENT, ts_ns, request.request_id)
+            elif action == "CANCEL" and status == "DISPATCHED":
+                self._record_internal_update(
+                    plan, order, ExecutionEventType.CANCEL_REQUESTED, ts_ns, request.request_id,
+                )
 
     def _transition(
         self,
@@ -1799,7 +1853,9 @@ class OMS:
             return
         self.ingest_execution_callback(callback, observed_ts_ns)
 
-    def _watch_order(self, order: ChildOrder, ts_ns: int, *, immediate: bool = False) -> None:
+    def _watch_order(
+        self, order: ChildOrder, ts_ns: int, *, immediate: bool = False, count_unknown: bool = True,
+    ) -> None:
         if immediate:
             self._requery_orders.add(order.order_id)
         if order.order_id in self._report_deadlines:
@@ -1808,7 +1864,8 @@ class OMS:
             return
         deadline = ts_ns if immediate else ts_ns + self.order_timeout_policy.report_timeout_ns
         self._report_deadlines[order.order_id] = [deadline, 0, order.parent_id]
-        self.realism_counters["unknown_state_orders"] += 1
+        if count_unknown:
+            self.realism_counters["unknown_state_orders"] += 1
         self.ledger.record(
             "ORDER_REPORT_DEADLINE_SET", ts_ns,
             parent_id=order.parent_id, order_id=order.order_id,
@@ -2096,6 +2153,53 @@ class OMS:
         }
 
     @staticmethod
+    def _resolve_order_state(order: ChildOrder) -> OrderState:
+        """The order's state from every update held, in arrival order (OMS02).
+
+        1. Terminal venue facts win: full fill, then cancel, then reject. A reject after a
+           fill is contradictory: the fill is kept and the order reads PARTIAL (D-06); the
+           reducer re-queries the venue.
+        2. A timeout (TIMER) that arrived after every piece of venue evidence and after the
+           last cancel request means the state is unknown: TIMED_OUT. Venue evidence that
+           arrives after it clears it (D-04); the query loop's last-resort timeout of a
+           quiet acknowledged order still applies.
+        3. A cancel sent and not answered by a later venue query: CANCEL_PENDING (D-05).
+        4. Otherwise the best venue evidence: a fill (PARTIAL), then an acknowledgement.
+        5. Nothing heard back: SENT once dispatched, else CREATED.
+        """
+        rows = order.state_updates
+        states = [OrderState(str(row["resolved_order_state"])) for row in rows]
+        filled = order.filled_quantity
+
+        def last(predicate) -> int:
+            return max((i for i, row in enumerate(rows) if predicate(row, states[i])), default=-1)
+
+        if filled >= order.quantity or OrderState.FILLED in states:
+            return OrderState.FILLED
+        if OrderState.CANCELLED in states:
+            return OrderState.CANCELLED
+        if OrderState.REJECTED in states:
+            return OrderState.PARTIAL if filled > 0 else OrderState.REJECTED
+        timeout = last(lambda row, state: state == OrderState.TIMED_OUT)
+        evidence = last(lambda row, state: str(row["source"]) in VENUE_SOURCES
+                        and state != OrderState.TIMED_OUT)
+        cancel = last(lambda row, state: state == OrderState.CANCEL_PENDING)
+        query = last(lambda row, state: str(row["source"]) == OrderUpdateSource.REST_QUERY.value)
+        if timeout >= 0 and timeout > evidence and timeout > cancel:
+            return OrderState.TIMED_OUT
+        if cancel >= 0 and cancel > query:
+            return OrderState.CANCEL_PENDING
+        if filled > 0 or OrderState.PARTIAL in states:
+            return OrderState.PARTIAL
+        if OrderState.ACKNOWLEDGED in states:
+            return OrderState.ACKNOWLEDGED
+        if timeout >= 0:
+            return OrderState.TIMED_OUT
+        if OrderState.SENT in states:
+            return OrderState.SENT
+        return OrderState.CREATED
+
+    @staticmethod
     def _order_update_key(row: dict[str, object]) -> tuple[object, ...]:
         state = OrderState(str(row["resolved_order_state"]))
         return (
@@ -2115,9 +2219,11 @@ class OMS:
             target = PlanState.REJECTED
         elif OrderState.TIMED_OUT in states:
             target = PlanState.TIMED_OUT
-        elif any(state in (OrderState.PARTIAL, OrderState.FILLED) for state in states):
+        elif any(state in (OrderState.PARTIAL, OrderState.FILLED) for state in states) or any(
+            order.state == OrderState.CANCEL_PENDING and order.filled_quantity > 0 for order in plan.children
+        ):
             target = PlanState.PARTIAL
-        elif OrderState.ACKNOWLEDGED in states:
+        elif OrderState.ACKNOWLEDGED in states or OrderState.CANCEL_PENDING in states:
             target = PlanState.ACKNOWLEDGED
         else:
             return
@@ -2208,8 +2314,8 @@ class OMS:
         row = update.to_dict()
         row["resolved_order_state"] = ORDER_STATE_BY_EVENT[update.state].value
         order.state_updates.append(row)
+        previous_state = order.state
         winner = max(order.state_updates, key=self._order_update_key)
-        order.state = OrderState(str(winner["resolved_order_state"]))
         fill_winner = max(
             order.state_updates,
             key=lambda item: (
@@ -2220,6 +2326,7 @@ class OMS:
         )
         order.filled_quantity = Decimal(str(fill_winner["cumulative_filled_quantity"]))
         order.average_price = Decimal(str(fill_winner["average_price"]))
+        order.state = self._resolve_order_state(order)
         # Fees never regress in magnitude: the OMS may have priced a fill
         # before a venue snapshot without fee data arrives. Compared by
         # magnitude so a rebate (negative fee) is not replaced by zero.
@@ -2287,8 +2394,61 @@ class OMS:
                 order_id=order.order_id, claims=terminal_claims,
                 winner=order.state.value,
             )
+        self._after_order_state_change(plan, order, previous_state, update)
         self._derive_execution_state(plan, update.observed_ts_ns)
         return plan
+
+    def _after_order_state_change(
+        self, plan: ParentPlan, order: ChildOrder, previous: OrderState, update: CanonicalOrderUpdate,
+    ) -> None:
+        """Checks and follow-ups once an update has changed the resolved state."""
+        state, ts_ns = order.state, update.observed_ts_ns
+        if update.state == ExecutionEventType.REJECTED and state == OrderState.PARTIAL:
+            # D-06: a reject after a fill contradicts the fill (the state stays PARTIAL, so
+            # this is checked before the no-change return). Keep the fill, ask the venue.
+            self.ledger.record(
+                "REJECT_AFTER_FILL_REQUERIED", ts_ns, parent_id=plan.parent_id, order_id=order.order_id,
+                filled=str(order.filled_quantity), reason=update.reason,
+            )
+            self._watch_order(order, ts_ns, immediate=True)
+        if state == previous:
+            return
+        if state not in ALLOWED_ORDER_TRANSITIONS[previous]:
+            self.realism_counters["unexpected_order_transitions"] += 1
+            self.ledger.record(
+                "ORDER_TRANSITION_UNEXPECTED", ts_ns, parent_id=plan.parent_id, order_id=order.order_id,
+                from_state=previous.value, to_state=state.value, update_id=update.update_id,
+                source=update.source.value,
+            )
+        if previous == OrderState.TIMED_OUT and state in LIVE_ORDER_STATES:
+            # D-04: the order was given up for unknown but the venue says it is live; it counts as
+            # live for risk from here. If the plan is already unwinding against it (the unwind was
+            # sized as if it were dead), pull it so it cannot fill on top of the unwind.
+            self.realism_counters["late_evidence_after_timeout"] += 1
+            self.ledger.record(
+                "LATE_EVIDENCE_AFTER_TIMEOUT", ts_ns, parent_id=plan.parent_id, order_id=order.order_id,
+                state=state.value, source=update.source.value, plan_state=plan.state.value,
+            )
+            if plan.state == PlanState.HEDGE_UNWIND and state != OrderState.CANCEL_PENDING:
+                self._cancel_working_orders(plan, [order], ts_ns)
+        if state == OrderState.CANCEL_PENDING and previous != OrderState.CANCEL_PENDING:
+            # A cancel that is never answered must not stay pending: query on the report deadline.
+            self._watch_order(order, ts_ns, count_unknown=False)
+
+    def _record_internal_update(
+        self, plan: ParentPlan, order: ChildOrder, state: ExecutionEventType, ts_ns: int, key: str,
+    ) -> None:
+        """SENT / CANCEL_REQUESTED, through the one reducer so the ledger records them too."""
+        if plan.state == PlanState.CLOSED or order.state in TERMINAL_ORDER_STATES - {OrderState.TIMED_OUT}:
+            return
+        self.ingest_order_update(CanonicalOrderUpdate(
+            update_id=stable_id("internal", state.value, order.order_id, key),
+            source=OrderUpdateSource.INTERNAL,
+            parent_order_id=plan.parent_id, order_id=order.order_id, venue=order.venue,
+            instrument_id=order.instrument_id, state=state,
+            cumulative_filled_quantity=order.filled_quantity, average_price=order.average_price,
+            event_ts_ns=ts_ns, observed_ts_ns=ts_ns,
+        ))
 
     def ingest_private_stream_update(self, update: CanonicalOrderUpdate) -> ParentPlan:
         if update.source != OrderUpdateSource.PRIVATE_STREAM:
@@ -2709,6 +2869,9 @@ class OMS:
                 OrderState.TIMED_OUT: ExecutionEventType.TIMED_OUT,
                 OrderState.CANCELLED: ExecutionEventType.CANCELLED,
                 OrderState.CREATED: ExecutionEventType.ACKNOWLEDGED,
+                # A venue never reports these (they are OMS-side); an order it holds is working.
+                OrderState.SENT: ExecutionEventType.ACKNOWLEDGED,
+                OrderState.CANCEL_PENDING: ExecutionEventType.ACKNOWLEDGED,
             }[snapshot.state]
             update_ts = snapshot.observed_ts_ns or now_ns
             self.ingest_order_update(CanonicalOrderUpdate(

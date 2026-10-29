@@ -47,7 +47,11 @@ class PlanState(StrEnum):
 
 
 class OrderState(StrEnum):
-    CREATED = "CREATED"
+    """Child-order lifecycle (OMS02). The OMS resolves it from the facts reported so far
+    (``oms.OMS._resolve_order_state``); ACKNOWLEDGED is the working state."""
+    CREATED = "CREATED"                  # built, not yet sent
+    SENT = "SENT"                        # sent, nothing heard back yet
+    CANCEL_PENDING = "CANCEL_PENDING"    # cancel sent, not confirmed: still live, can still fill
     ACKNOWLEDGED = "ACKNOWLEDGED"
     PARTIAL = "PARTIAL"
     FILLED = "FILLED"

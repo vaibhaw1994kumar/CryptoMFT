@@ -110,6 +110,9 @@ class ExecutionEventType(StrEnum):
     CANCELLED = "CANCELLED"
     REPLACED = "REPLACED"
     TIMED_OUT = "TIMED_OUT"
+    # Recorded by the OMS itself (source INTERNAL) when it dispatches, not by a venue.
+    SENT = "SENT"
+    CANCEL_REQUESTED = "CANCEL_REQUESTED"
 
 
 class OrderUpdateSource(StrEnum):
