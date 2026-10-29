@@ -206,6 +206,18 @@ def configure_route(status: VenueRouteStatus, venue: str, product_type: str, *, 
     return status
 
 
+def scoped_rate_limiter(routes: dict[str, str], *, cancel_reserve: float = 0.2,
+                        risk_reducing_reserve: float = 0.1):
+    """EMS02: a ScopedRateLimiter for ``{venue: product_type}`` from the matrix's rate limits."""
+    from .rate_limits import ScopedRateLimiter
+
+    limits = {}
+    for venue, product_type in routes.items():
+        caps = capabilities(venue, product_type)
+        limits[(venue, caps.product)] = caps.rate_limits
+    return ScopedRateLimiter(limits, cancel_reserve=cancel_reserve, risk_reducing_reserve=risk_reducing_reserve)
+
+
 def report(venues: tuple[str, ...] | None = None) -> list[dict[str, Any]]:
     rows = []
     for (venue, product), caps in sorted(VENUES.items()):

@@ -824,6 +824,8 @@ class StrategyDirectedRouter:
         self._pending_by_idempotency: dict[str, PendingRoute] = {}
         self._queue_ordinal = 0
         self.trace: list[dict[str, Any]] = []
+        # EMS02: per-scope venue limits (rate_limits.ScopedRateLimiter); None = per-venue budget only.
+        self.scoped_limits: Any | None = None
 
     def route_controlled(
         self,
@@ -966,9 +968,27 @@ class StrategyDirectedRouter:
                             status.throttle_delay_ns
                             if action == ThrottleAction.DELAY else 0
                         )
+            scoped = self._scoped_check(
+                venue, instruction.instrument_id, "SUBMIT",
+                "RISK_REDUCING" if instruction.risk_reducing else "NEW_RISK", instruction.created_ts_ns,
+            )
+            if scoped is not None and not scoped.admitted:
+                # No override: even a risk-reducing order cannot exceed a venue limit.
+                limit_bound = True
+                reasons.append("scoped_rate_limited")
+                self.scoped_limits.note_throttle(scoped)
+                if status.rate_limit_policy == RateLimitPolicy.REJECT or action == ThrottleAction.REJECT:
+                    action = ThrottleAction.REJECT
+                    candidate_release_ts = None
+                else:
+                    action = ThrottleAction(status.rate_limit_policy.value)
+                    candidate_release_ts = max(candidate_release_ts or 0, scoped.next_free_ns) + (
+                        status.throttle_delay_ns if action == ThrottleAction.DELAY else 0)
+                self.trace.append(self._scoped_record("SCOPED_RATE_LIMITED", scoped, instruction.created_ts_ns,
+                                                      venue=venue, order_id=instruction.order_id))
             non_rate_reasons = [
                 reason for reason in reasons
-                if reason not in {"rate_limit_exhausted"}
+                if reason not in {"rate_limit_exhausted", "scoped_rate_limited"}
             ]
             if non_rate_reasons and action in {
                 ThrottleAction.QUEUE, ThrottleAction.DELAY
@@ -1113,6 +1133,7 @@ class StrategyDirectedRouter:
                 throttle_action=selected_action, release_ts_ns=release_ts_ns,
             )
         status.rate_limit_used += 1
+        self._scoped_charge(request, instruction.created_ts_ns)
         if self.latency_model is not None:
             pending = self._send_in_flight(
                 route_id, request, books[(selected, instruction.instrument_id)],
@@ -1291,7 +1312,20 @@ class StrategyDirectedRouter:
                     "rate_limit_headroom": status.rate_limit_headroom,
                 })
                 continue
+            scoped = self._scoped_check(
+                pending.request.venue, pending.request.instrument_id, "SUBMIT",
+                self._request_tier(pending.request), now_ns,
+            )
+            if scoped is not None and not scoped.admitted:
+                rescheduled = replace(pending, release_ts_ns=scoped.next_free_ns)
+                self._pending.append(rescheduled)
+                self._pending_by_idempotency[pending.request.idempotency_key] = rescheduled
+                self.trace.append(self._scoped_record("SCOPED_RATE_LIMIT_RESCHEDULED", scoped, now_ns,
+                                                      venue=pending.request.venue,
+                                                      order_id=pending.request.order_id))
+                continue
             status.rate_limit_used += 1
+            self._scoped_charge(pending.request, now_ns)
             self._pending_by_idempotency.pop(pending.request.idempotency_key, None)
             self.trace.append({
                 "record_type": "THROTTLE_RELEASED",
@@ -1382,6 +1416,7 @@ class StrategyDirectedRouter:
         })
         if query is None:
             return None
+        self._scoped_charge_query(venue, order_id, now_ns)
         try:
             status = query(order_id)
         except Exception as exc:  # venue/transport failure is an unanswered query
@@ -1446,6 +1481,7 @@ class StrategyDirectedRouter:
             ),
             "undelivered_reports": len(self._deliveries),
             "venues": venues,
+            **({"scoped": self.scoped_limits.snapshot(now_ns)} if self.scoped_limits is not None else {}),
         }
 
     def has_pending_parent(self, parent_order_id: str) -> bool:
@@ -1495,6 +1531,9 @@ class StrategyDirectedRouter:
         """Send a request. With a latency model it travels and its reports are
         delivered later through ``process_throttled``; otherwise the adapter
         answers synchronously."""
+        duplicate = (request.idempotency_key in self._results
+                     or request.idempotency_key in self._pending_by_idempotency)
+        send_ts = request.created_ts_ns if duplicate else self._scoped_admit_direct(request)
         if self.latency_model is None:
             return self._execute(request, book, deliver=True)
         key = request.idempotency_key
@@ -1509,10 +1548,83 @@ class StrategyDirectedRouter:
         self._validate(request)
         self._send_in_flight(
             stable_id("route-direct", request.request_id), request, book, (),
-            False, request.created_ts_ns,
+            False, send_ts,
             "cancel" if request.action == OrderAction.CANCEL else "entry",
         )
         return ()
+
+    # -- EMS02 scoped limits --------------------------------------------------------------
+    def _product(self, venue: str, instrument_id: str, ts_ns: int) -> str:
+        from .capabilities import product_of
+
+        try:
+            return product_of(self.instruments.get(venue, instrument_id, ts_ns).product_type)
+        except ValueError:
+            return "SPOT"
+
+    @staticmethod
+    def _request_tier(request: CanonicalOrderRequest) -> str:
+        """A request carries no risk flag of its own: a reduce-only order is risk-reducing."""
+        return "RISK_REDUCING" if request.reduce_only else "NEW_RISK"
+
+    def _scoped_check(self, venue: str, instrument_id: str, action: str, tier: str, ts_ns: int):
+        if self.scoped_limits is None:
+            return None
+        return self.scoped_limits.check(venue, self._product(venue, instrument_id, ts_ns), action, tier, ts_ns)
+
+    def _scoped_charge(self, request: CanonicalOrderRequest, ts_ns: int, action: str | None = None) -> None:
+        if self.scoped_limits is not None:
+            self.scoped_limits.charge(request.venue, self._product(request.venue, request.instrument_id, ts_ns),
+                                      action or request.action.value, ts_ns)
+
+    def _scoped_charge_query(self, venue: str, order_id: str, ts_ns: int) -> None:
+        """A query spends IP weight (recovery traffic: the CANCEL tier); it is still made at the limit."""
+        if self.scoped_limits is None:
+            return
+        request = next((r for r in self._requests_by_idempotency.values()
+                        if r.order_id == order_id and r.venue == venue), None)
+        product = self._product(venue, request.instrument_id, ts_ns) if request is not None else "SPOT"
+        decision = self.scoped_limits.check(venue, product, "QUERY", "CANCEL", ts_ns)
+        if not decision.admitted:
+            self.scoped_limits.note_throttle(decision)
+            self.scoped_limits.over_limit_sent += 1
+            self.trace.append(self._scoped_record("SCOPED_RATE_LIMIT_EXCEEDED", decision, ts_ns,
+                                                  venue=venue, order_id=order_id, action="QUERY"))
+        self.scoped_limits.charge(venue, product, "QUERY", ts_ns)
+
+    @staticmethod
+    def _scoped_record(kind: str, decision, ts_ns: int, **fields) -> dict[str, Any]:
+        bucket = decision.binding
+        return {"record_type": kind, "ts_ns": ts_ns, "tier": decision.tier,
+                "bucket": "|".join(bucket.key) if bucket else None,
+                "limit_status": bucket.status if bucket else None,
+                "next_free_ts_ns": decision.next_free_ns, **fields}
+
+    def _scoped_admit_direct(self, request: CanonicalOrderRequest) -> int:
+        """Cancels (and other direct sends) are never refused locally (EMS02): with a latency
+        model they wait until every bucket has room; synchronously they are sent and flagged."""
+        ts = request.created_ts_ns
+        if self.scoped_limits is None:
+            return ts
+        action = request.action.value
+        tier = "CANCEL" if request.action == OrderAction.CANCEL else self._request_tier(request)
+        decision = self._scoped_check(request.venue, request.instrument_id, action, tier, ts)
+        if decision is not None and not decision.admitted:
+            self.scoped_limits.note_throttle(decision)
+            if self.latency_model is not None:
+                if request.action == OrderAction.CANCEL:
+                    self.scoped_limits.cancels_delayed += 1
+                self.trace.append(self._scoped_record("SCOPED_RATE_LIMIT_DELAYED", decision, ts,
+                                                      venue=request.venue, order_id=request.order_id,
+                                                      action=action))
+                ts = decision.next_free_ns
+            else:
+                self.scoped_limits.over_limit_sent += 1
+                self.trace.append(self._scoped_record("SCOPED_RATE_LIMIT_EXCEEDED", decision, ts,
+                                                      venue=request.venue, order_id=request.order_id,
+                                                      action=action))
+        self._scoped_charge(request, ts)
+        return ts
 
     def _execute(
         self, request: CanonicalOrderRequest, book: OrderBook | None, *,

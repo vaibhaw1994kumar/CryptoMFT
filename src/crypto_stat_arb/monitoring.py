@@ -350,7 +350,12 @@ class PipelineMonitor:
             "rate_limits": {
                 **rate_limit_state,
                 "utilization_by_venue": utilization_by_venue,
-                "max_utilization": max(utilization_by_venue.values(), default=0.0),
+                # The binding limit: the per-venue budget or any scoped bucket (EMS02).
+                "max_utilization": max(
+                    [*utilization_by_venue.values(),
+                     float((rate_limit_state.get("scoped") or {}).get("max_utilization", 0.0))],
+                    default=0.0,
+                ),
             },
             "connectors": {
                 "unhealthy": sum(not row["healthy"] for row in connectors.values()),
