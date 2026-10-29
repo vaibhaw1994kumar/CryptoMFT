@@ -129,7 +129,9 @@ class SlowSnapshotTests(unittest.IsolatedAsyncioTestCase):
                     venues=("BINANCE",), durable=False, reconnect_min_seconds=0.001,
                     reconnect_max_seconds=0.002),
                 websocket_connector=FakeConnector({"BINANCE": sockets}), http_getter=slow_snapshot,
-                clock_ns=StepClock())
+                # A frozen monotonic clock: staleness is not under test, and on a slow runner
+                # real gaps between frames marked the book STALE and back (book_syncs 3, not 1).
+                clock_ns=StepClock(), monotonic_ns=lambda: 0)
 
             async def release_when_drained():
                 while service.stats["BINANCE"].canonical_events < min(buffered, 10_000):
