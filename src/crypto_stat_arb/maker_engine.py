@@ -81,14 +81,17 @@ def _sha256(path: Path) -> str | None:
 
 
 def cpp_source_sha256() -> str | None:
-    """Hash of the C++ sources the compiled engine should be built from (sim_engine/)."""
-    files = sorted([*(SIM_ENGINE_DIR / "include").rglob("*.hpp"), *(SIM_ENGINE_DIR / "src").rglob("*.cpp")])
+    """Hash of the C++ sources the compiled engine should be built from (sim_engine/).
+
+    The same scheme the top-level CMakeLists.txt compiles into the binary: one
+    "<relative path>:<sha256>\\n" line per file, sorted by path, then sha256 of that.
+    """
+    files = [*(SIM_ENGINE_DIR / "include").rglob("*.hpp"), *(SIM_ENGINE_DIR / "src").rglob("*.cpp")]
     if not files:
         return None
-    digest = hashlib.sha256()
-    for path in files:
-        digest.update(path.relative_to(SIM_ENGINE_DIR).as_posix().encode() + b"\0" + path.read_bytes())
-    return digest.hexdigest()
+    lines = sorted(f"{path.relative_to(SIM_ENGINE_DIR).as_posix()}:{hashlib.sha256(path.read_bytes()).hexdigest()}\n"
+                   for path in files)
+    return hashlib.sha256("".join(lines).encode()).hexdigest()
 
 
 def engine_identity(engine: Any) -> dict[str, Any]:
@@ -96,13 +99,19 @@ def engine_identity(engine: Any) -> dict[str, Any]:
     ext_suffix = sysconfig.get_config_var("EXT_SUFFIX") or ""
     if isinstance(engine, CppQueueEngine):
         binary = Path(getattr(engine._m, "__file__", "") or "")
+        build_info = dict(getattr(engine._m, "__build_info__", None) or {})
+        built_from = build_info.get("source_sha256") or None
+        source = cpp_source_sha256()
         return {
             "engine": engine.name,
             "binary": binary.name,
             "binary_sha256": _sha256(binary) if binary.name else None,
             "interpreter_ext_suffix": ext_suffix,
             "built_for_this_interpreter": binary.name.endswith(ext_suffix) if ext_suffix else None,
-            "source_sha256": cpp_source_sha256(),
+            "source_sha256": source,
+            "build_info": build_info,             # empty: built outside the packaged CMake build
+            # True / False when the binary says what it was built from; None when it cannot.
+            "built_from_current_source": (built_from == source) if built_from and source else None,
         }
     return {"engine": getattr(engine, "name", type(engine).__name__),
             "cpp_unavailable_reason": getattr(engine, "cpp_unavailable_reason", ""),

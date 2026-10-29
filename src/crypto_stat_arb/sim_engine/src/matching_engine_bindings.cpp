@@ -22,6 +22,29 @@ PYBIND11_MODULE(mm_matching_engine, m) {
     m.doc() = "Bybit matching engine simulator — price-time priority, "
               "queue position tracking, and fee engine.";
 
+    // Build identity (set by the top-level CMakeLists.txt; empty for other builds):
+    // crypto_stat_arb.maker_engine.engine_identity compares source_sha256 with the
+    // sources on disk, so a stale binary is reported, not trusted.
+#ifndef MM_BUILD_SOURCE_SHA256
+#define MM_BUILD_SOURCE_SHA256 ""
+#endif
+#ifndef MM_BUILD_COMPILER
+#define MM_BUILD_COMPILER ""
+#endif
+#ifndef MM_BUILD_TYPE
+#define MM_BUILD_TYPE ""
+#endif
+#ifndef MM_BUILD_PYBIND11
+#define MM_BUILD_PYBIND11 ""
+#endif
+    py::dict build_info;
+    build_info["source_sha256"] = MM_BUILD_SOURCE_SHA256;
+    build_info["compiler"] = MM_BUILD_COMPILER;
+    build_info["build_type"] = MM_BUILD_TYPE;
+    build_info["pybind11"] = MM_BUILD_PYBIND11;
+    build_info["cplusplus"] = static_cast<long>(__cplusplus);
+    m.attr("__build_info__") = build_info;
+
     // ── Side enum ──────────────────────────────────────────────────────────
     py::enum_<Side>(m, "Side")
         .value("BID", Side::kBid)
