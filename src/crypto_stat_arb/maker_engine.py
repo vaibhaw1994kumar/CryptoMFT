@@ -29,9 +29,11 @@ book crossings or touch probabilities.
 from __future__ import annotations
 
 from dataclasses import dataclass
+import hashlib
 import importlib
 from pathlib import Path
 import sys
+import sysconfig
 from typing import Any, Protocol
 
 
@@ -40,14 +42,71 @@ CPP_ENGINE_NAME = "cpp_mm_matching_engine"
 PYTHON_ENGINE_NAME = "python_queue_model"
 
 
+REQUIRED_CPP_ATTRIBUTES = ("MatchingEngine", "FeeConfig")
+# Why the last load_cpp_module() call returned None ("" when it loaded).
+_last_load_error = ""
+
+
 def load_cpp_module() -> Any | None:
-    """Import the compiled ``mm_matching_engine`` built into ``sim_engine/``."""
+    """Import the compiled ``mm_matching_engine`` built into ``sim_engine/``.
+
+    Returns None, and records the reason (``cpp_load_error()``), when it is missing,
+    cannot be loaded (wrong platform or ABI, corrupt file) or lacks the classes used.
+    """
+    global _last_load_error
     if str(SIM_ENGINE_DIR) not in sys.path:
         sys.path.insert(0, str(SIM_ENGINE_DIR))
     try:
-        return importlib.import_module("mm_matching_engine")
-    except ImportError:
+        module = importlib.import_module("mm_matching_engine")
+    except (ImportError, OSError) as exc:
+        _last_load_error = f"{type(exc).__name__}: {exc}"
         return None
+    missing = [name for name in REQUIRED_CPP_ATTRIBUTES if not hasattr(module, name)]
+    if missing:
+        _last_load_error = f"mm_matching_engine at {getattr(module, '__file__', '?')} lacks {', '.join(missing)}"
+        return None
+    _last_load_error = ""
+    return module
+
+
+def cpp_load_error() -> str:
+    return _last_load_error
+
+
+def _sha256(path: Path) -> str | None:
+    try:
+        return hashlib.sha256(path.read_bytes()).hexdigest()
+    except OSError:
+        return None
+
+
+def cpp_source_sha256() -> str | None:
+    """Hash of the C++ sources the compiled engine should be built from (sim_engine/)."""
+    files = sorted([*(SIM_ENGINE_DIR / "include").rglob("*.hpp"), *(SIM_ENGINE_DIR / "src").rglob("*.cpp")])
+    if not files:
+        return None
+    digest = hashlib.sha256()
+    for path in files:
+        digest.update(path.relative_to(SIM_ENGINE_DIR).as_posix().encode() + b"\0" + path.read_bytes())
+    return digest.hexdigest()
+
+
+def engine_identity(engine: Any) -> dict[str, Any]:
+    """Which engine ran and, for the C++ one, exactly which binary (GAP01)."""
+    ext_suffix = sysconfig.get_config_var("EXT_SUFFIX") or ""
+    if isinstance(engine, CppQueueEngine):
+        binary = Path(getattr(engine._m, "__file__", "") or "")
+        return {
+            "engine": engine.name,
+            "binary": binary.name,
+            "binary_sha256": _sha256(binary) if binary.name else None,
+            "interpreter_ext_suffix": ext_suffix,
+            "built_for_this_interpreter": binary.name.endswith(ext_suffix) if ext_suffix else None,
+            "source_sha256": cpp_source_sha256(),
+        }
+    return {"engine": getattr(engine, "name", type(engine).__name__),
+            "cpp_unavailable_reason": getattr(engine, "cpp_unavailable_reason", ""),
+            "interpreter_ext_suffix": ext_suffix}
 
 
 @dataclass(frozen=True, slots=True)
@@ -134,6 +193,7 @@ class PythonQueueEngine:
     """Pure-Python mirror of the C++ engine's queue arithmetic."""
 
     name = PYTHON_ENGINE_NAME
+    cpp_unavailable_reason = ""            # set by make_queue_engine("auto") when C++ did not load
 
     def __init__(self, queue_position_frac: float = 1.0) -> None:
         _check_frac(queue_position_frac)
@@ -242,7 +302,10 @@ def make_queue_engine(preference: str = "auto", *, queue_position_frac: float = 
             return CppQueueEngine(module, queue_position_frac)
         if preference == "cpp":
             raise RuntimeError(
-                "mm_matching_engine is not importable; build it with "
+                f"mm_matching_engine is not usable ({cpp_load_error()}); build it with "
                 "cmake -S src/crypto_stat_arb/sim_engine -B build && cmake --build build"
             )
-    return PythonQueueEngine(queue_position_frac)
+    engine = PythonQueueEngine(queue_position_frac)
+    # "auto" falling back is reported, never silent: the reason travels with the engine.
+    engine.cpp_unavailable_reason = "" if preference == "python" else (cpp_load_error() or "not loaded")
+    return engine
