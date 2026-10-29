@@ -91,10 +91,16 @@ jobs:
       - uses: actions/checkout@v7
       - name: Build wheels
         uses: pypa/cibuildwheel@v4.1.1
+      # SDK04: a CycloneDX SBOM next to every wheel (scripts/sbom.py, from uv.lock and the
+      # wheel's own native extensions).
+      - name: SBOM per wheel
+        run: python scripts/sbom.py --wheelhouse wheelhouse
       - uses: actions/upload-artifact@v7
         with:
           name: wheels-${{ matrix.os }}
-          path: ./wheelhouse/*.whl
+          path: |
+            ./wheelhouse/*.whl
+            ./wheelhouse/*.cdx.json
 
   target:
     # GAP03. The validated target runtime is Linux x86_64 with CPython 3.12: the Docker
@@ -189,6 +195,9 @@ jobs:
           # sweep any archive that later appears inside the evidence bundle
           # into the release as though it were a distributable.
           find artifacts -path 'artifacts/wheels-*' -name '*.whl' -exec cp {} dist/ \;
+          find artifacts -path 'artifacts/wheels-*' -name '*.cdx.json' -exec cp {} dist/ \;
+          cp artifacts/build-record-linux-x86_64-cp312/build_record.json dist/build_record-linux-x86_64-cp312.json
+          test -n "$(find dist -name '*.cdx.json' -print -quit)"
           find artifacts/sdist -name '*.tar.gz' -exec cp {} dist/ \;
           ls dist
           test -n "$(find dist -name '*.whl' -print -quit)"
