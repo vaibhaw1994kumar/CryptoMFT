@@ -78,6 +78,12 @@ SOURCE_RANK = {
 TERMINAL_ORDER_STATES = {
     OrderState.FILLED, OrderState.REJECTED, OrderState.TIMED_OUT, OrderState.CANCELLED
 }
+# Orders that may still be live at the venue (risk, cancel sweeps, unwind sizing).
+LIVE_ORDER_STATES = frozenset({OrderState.CREATED, OrderState.ACKNOWLEDGED, OrderState.PARTIAL})
+# Live with nothing filled yet.
+UNFILLED_LIVE_ORDER_STATES = frozenset({OrderState.CREATED, OrderState.ACKNOWLEDGED})
+# Confirmed by the venue and working: a quiet GTC order here is resting, not unknown.
+RESTING_ORDER_STATES = frozenset({OrderState.ACKNOWLEDGED, OrderState.PARTIAL})
 ALLOWED_PLAN_TRANSITIONS = {
     PlanState.CREATED: {PlanState.RISK_RESERVED, PlanState.REJECTED},
     PlanState.RISK_RESERVED: {PlanState.DISPATCHED, PlanState.REJECTED},
@@ -322,7 +328,7 @@ class OMS:
                         continue
                     if (
                         order.time_in_force == TimeInForce.GTC.value
-                        and order.state in {OrderState.ACKNOWLEDGED, OrderState.PARTIAL}
+                        and order.state in RESTING_ORDER_STATES
                     ):
                         continue
                     self._watch_order(order, recovery_ts_ns, immediate=True)
@@ -464,7 +470,7 @@ class OMS:
                     order.reduce_only or self._order_reduces_residual(plan, order)
                 ):
                     continue
-                if order.state in (OrderState.CREATED, OrderState.ACKNOWLEDGED, OrderState.PARTIAL):
+                if order.state in LIVE_ORDER_STATES:
                     pending = self.router.cancel_pending_order(
                         order.order_id, now_ns=now_ns, reason=reason
                     )
@@ -727,7 +733,7 @@ class OMS:
                     order.limit_price for plan in self.plans.values() for order in plan.children
                     if order.venue == venue and order.instrument_id == instrument_id and order.side == Side.BUY
                     and order.order_role != "PRIMARY"
-                    and order.state in {OrderState.CREATED, OrderState.ACKNOWLEDGED, OrderState.PARTIAL}
+                    and order.state in LIVE_ORDER_STATES
                 ), default=Decimal("0"))
                 fee, fee_asset = self.risk._reserve_fee(venue, instrument_id, 0) if hasattr(self.risk, "_reserve_fee") else (Decimal("0"), "QUOTE")
                 amount = buys * price * (Decimal("1") + (fee if fee_asset == "QUOTE" else Decimal("0")))
@@ -755,9 +761,7 @@ class OMS:
         out: dict[tuple[str, str], tuple[Decimal, Decimal]] = {}
         for plan in self.plans.values():
             for order in plan.children:
-                if order.order_role == "PRIMARY" or order.state not in {
-                    OrderState.CREATED, OrderState.ACKNOWLEDGED, OrderState.PARTIAL,
-                }:
+                if order.order_role == "PRIMARY" or order.state not in LIVE_ORDER_STATES:
                     continue
                 remaining = order.quantity - order.filled_quantity
                 buys, sells = out.get((order.venue, order.instrument_id), (Decimal("0"), Decimal("0")))
@@ -1092,7 +1096,7 @@ class OMS:
             remaining_hedges = [
                 order.order_id for order in plan.children
                 if order.order_role == "PRIMARY"
-                and order.state in {OrderState.CREATED, OrderState.ACKNOWLEDGED}
+                and order.state in UNFILLED_LIVE_ORDER_STATES
                 and self._order_reduces_residual(plan, order)
             ]
             action = (
@@ -1180,9 +1184,7 @@ class OMS:
         return [
             order for order in plan.children
             if order.order_role == "UNWIND"
-            and order.state in {
-                OrderState.CREATED, OrderState.ACKNOWLEDGED, OrderState.PARTIAL
-            }
+            and order.state in LIVE_ORDER_STATES
         ]
 
     def _cancel_expired_unwinds(self, plan: ParentPlan, ts_ns: int) -> None:
@@ -1415,9 +1417,7 @@ class OMS:
             )
             if self._residual_within_bound(plan):
                 return True
-            if order.state in {
-                OrderState.CREATED, OrderState.ACKNOWLEDGED, OrderState.PARTIAL
-            }:
+            if order.state in LIVE_ORDER_STATES:
                 return False
         return self._residual_within_bound(plan)
 
@@ -1569,17 +1569,13 @@ class OMS:
         self._residual_breach_since.pop(plan.parent_id, None)
         working = [
             order for order in plan.children
-            if order.state in {
-                OrderState.CREATED, OrderState.ACKNOWLEDGED, OrderState.PARTIAL
-            }
+            if order.state in LIVE_ORDER_STATES
         ]
         if working:
             self._cancel_working_orders(plan, working, ts_ns)
             still_working = tuple(
                 order.order_id for order in plan.children
-                if order.state in {
-                    OrderState.CREATED, OrderState.ACKNOWLEDGED, OrderState.PARTIAL
-                }
+                if order.state in LIVE_ORDER_STATES
             )
             if still_working or self.router.has_pending_parent(plan.parent_id):
                 self._defer_close(
@@ -1824,9 +1820,7 @@ class OMS:
         for order in plan.children:
             if order.state in TERMINAL_ORDER_STATES:
                 continue
-            if order.time_in_force == TimeInForce.GTC.value and order.state in {
-                OrderState.ACKNOWLEDGED, OrderState.PARTIAL,
-            }:
+            if order.time_in_force == TimeInForce.GTC.value and order.state in RESTING_ORDER_STATES:
                 continue
             unknown.append(order.order_id)
             self._watch_order(order, ts_ns)
@@ -1985,7 +1979,7 @@ class OMS:
                 continue
             if order.state in TERMINAL_ORDER_STATES or (
                 order.time_in_force == TimeInForce.GTC.value
-                and order.state in {OrderState.ACKNOWLEDGED, OrderState.PARTIAL}
+                and order.state in RESTING_ORDER_STATES
                 and order_id not in self._requery_orders
             ):
                 self._report_deadlines.pop(order_id, None)
@@ -2011,7 +2005,7 @@ class OMS:
                 self._apply_venue_status(plan, order, status, query_ts)
                 if order.state in TERMINAL_ORDER_STATES or (
                     order.time_in_force == TimeInForce.GTC.value
-                    and order.state in {OrderState.ACKNOWLEDGED, OrderState.PARTIAL}
+                    and order.state in RESTING_ORDER_STATES
                 ):
                     self.realism_counters["resolved_by_query"] += 1
                     self._report_deadlines.pop(order_id, None)
