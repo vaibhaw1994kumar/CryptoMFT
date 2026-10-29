@@ -6,6 +6,7 @@
 #include <functional>
 #include <map>
 #include <optional>
+#include <stdexcept>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -26,6 +27,19 @@
 // the live book's total volume at P into `queue_ahead`.  Each incoming
 // market trade at P decrements `queue_ahead_remaining` in FIFO order.
 // When `queue_ahead_remaining` reaches 0 the order becomes fillable.
+//
+// Queue accounting (crypto_stat_arb copy; differs from the FAST_MM original):
+//   • Level sizes come only from the book feed.  A trade never edits them,
+//     so a trade and the book delta that reflects it are not double counted.
+//   • Trades are the only source that *burns* queue ahead.  A book update can
+//     only cap `queue_ahead_remaining` at the visible level size; the amount
+//     capped is held as `clamp_credit` until the next update at that level,
+//     so a book-delta-then-trade pair burns the same queue as trade-then-delta.
+//   • Several of our orders at one level share the trade volume: only our own
+//     fills absorb volume, so a later order's queue advances by the same print.
+//   • A print strictly through our price means the level was swept: the order
+//     fills in full at its own price.
+//   • A level update to size 0 keeps our resting orders in the queue.
 //
 // Fee engine:
 //   PostOnly fill → maker_rebate_rate (negative = we earn)
@@ -61,6 +75,7 @@ struct OrderEntry {
     // Queue position tracking
     double    queue_ahead{0.0};           // total book volume ahead at placement
     double    queue_ahead_remaining{0.0}; // decremented by market trades
+    double    clamp_credit{0.0};          // queue removed by the last book cap
     bool      queue_satisfied{false};     // true once queue_ahead_remaining <= 0
 
     OrderType order_type{OrderType::kPostOnly};
@@ -168,24 +183,23 @@ public:
 
     explicit MatchingEngine(FeeConfig fee_cfg = {}) : fee_engine_(fee_cfg) {}
 
+    // Fraction of the visible level assumed ahead of a newly placed order
+    // (1.0 = back of the queue, the conservative default; 0.0 = front).
+    void set_queue_position_frac(double frac) {
+        if (!(frac >= 0.0 && frac <= 1.0))
+            throw std::invalid_argument("queue_position_frac must be within [0, 1]");
+        queue_position_frac_ = frac;
+    }
+    [[nodiscard]] double queue_position_frac() const noexcept { return queue_position_frac_; }
+
     // ── Live book update (from WS L2 snapshots/deltas) ─────────────────────
 
     void update_bid_level(double price, double size) {
-        if (size <= 0.0) {
-            bid_book_.erase(price);
-        } else {
-            bid_book_[price].price             = price;
-            bid_book_[price].market_total_size = size;
-        }
+        _update_level(bid_book_, price, size);
     }
 
     void update_ask_level(double price, double size) {
-        if (size <= 0.0) {
-            ask_book_.erase(price);
-        } else {
-            ask_book_[price].price             = price;
-            ask_book_[price].market_total_size = size;
-        }
+        _update_level(ask_book_, price, size);
     }
 
     // Bulk snapshot reset (call on reconnect or full L2 snapshot)
@@ -215,11 +229,11 @@ public:
             if (side == Side::kBid) {
                 auto it = bid_book_.find(price);
                 if (it != bid_book_.end())
-                    queue_ahead = it->second.market_total_size;
+                    queue_ahead = it->second.market_total_size * queue_position_frac_;
             } else {
                 auto it = ask_book_.find(price);
                 if (it != ask_book_.end())
-                    queue_ahead = it->second.market_total_size;
+                    queue_ahead = it->second.market_total_size * queue_position_frac_;
             }
         }
         // IOC/market → queue_ahead = 0 (fills immediately against opposite side)
@@ -270,12 +284,12 @@ public:
         double new_queue = 0.0;
         if (e.side == Side::kBid) {
             auto bit = bid_book_.find(new_price);
-            if (bit != bid_book_.end()) new_queue = bit->second.market_total_size;
+            if (bit != bid_book_.end()) new_queue = bit->second.market_total_size * queue_position_frac_;
             bid_book_[new_price].price = new_price;
             bid_book_[new_price].our_order_ids.push_back(oid);
         } else {
             auto ait = ask_book_.find(new_price);
-            if (ait != ask_book_.end()) new_queue = ait->second.market_total_size;
+            if (ait != ask_book_.end()) new_queue = ait->second.market_total_size * queue_position_frac_;
             ask_book_[new_price].price = new_price;
             ask_book_[new_price].our_order_ids.push_back(oid);
         }
@@ -283,6 +297,7 @@ public:
         e.price                 = new_price;
         e.queue_ahead           = new_queue;
         e.queue_ahead_remaining = new_queue;
+        e.clamp_credit          = 0.0;
         e.queue_satisfied       = (new_queue <= 0.0);
         return true;
     }
@@ -435,6 +450,7 @@ private:
     std::unordered_map<uint64_t, OrderEntry> orders_;  // O(1) by order_id
     FeeEngine  fee_engine_;
     uint64_t   next_order_id_{0};
+    double     queue_position_frac_{1.0};
 
     // ── Internal helpers ───────────────────────────────────────────────────
 
@@ -461,11 +477,52 @@ private:
     }
 
     template<typename BookMap>
+    void _update_level(BookMap& book, double price, double size) {
+        auto it = book.find(price);
+        if (it == book.end()) {
+            if (size > 0.0) {
+                book[price].price             = price;
+                book[price].market_total_size = size;
+            }
+            return;
+        }
+        PriceLevel& lvl = it->second;
+        lvl.market_total_size = size > 0.0 ? size : 0.0;
+        for (uint64_t oid : lvl.our_order_ids) {
+            auto oit = orders_.find(oid);
+            if (oit == orders_.end() || !oit->second.active) continue;
+            OrderEntry& e = oit->second;
+            e.clamp_credit = 0.0;
+            if (e.queue_ahead_remaining > lvl.market_total_size) {
+                e.clamp_credit          = e.queue_ahead_remaining - lvl.market_total_size;
+                e.queue_ahead_remaining = lvl.market_total_size;
+            }
+            if (e.queue_ahead_remaining <= 0.0) e.queue_satisfied = true;
+        }
+        if (lvl.market_total_size <= 0.0 && lvl.our_order_ids.empty())
+            book.erase(it);
+    }
+
+    void _record_fill(OrderEntry& e, double fill_qty, double level_price,
+                      Side our_side, bool is_maker,
+                      std::vector<FillResult>& fills) {
+        double fee = fee_engine_.compute(fill_qty, level_price, is_maker);
+        fee_engine_.record(fee, is_maker);
+        double pnl_delta = (our_side == Side::kBid)
+            ? -fill_qty * level_price - fee   // bought: negative cash
+            :  fill_qty * level_price - fee;  // sold:   positive cash
+        fills.push_back({e.order_id, fill_qty, level_price, fee, pnl_delta,
+                         is_maker});
+        e.remaining_size -= fill_qty;
+        if (e.remaining_size <= 0.0) e.active = false;
+    }
+
+    template<typename BookMap>
     void _process_trades_on_side(BookMap& book, double trade_price,
                                   double trade_vol, Side our_side,
                                   bool is_maker,
                                   std::vector<FillResult>& fills) {
-        for (auto it = book.begin(); it != book.end() && trade_vol > 0.0; ) {
+        for (auto it = book.begin(); it != book.end(); ) {
             double level_price = it->first;
             PriceLevel& lvl    = it->second;
 
@@ -475,67 +532,47 @@ private:
                            ? (level_price >= trade_price)
                            : (level_price <= trade_price);
             if (!swept) break;
+            bool through = level_price != trade_price;
 
-            // Decrement queue_ahead_remaining in FIFO order
+            double our_filled = 0.0;  // volume absorbed by our own fills
             auto qit = lvl.our_order_ids.begin();
-            while (qit != lvl.our_order_ids.end() && trade_vol > 0.0) {
-                uint64_t oid = *qit;
-                auto oit = orders_.find(oid);
+            while (qit != lvl.our_order_ids.end()) {
+                auto oit = orders_.find(*qit);
                 if (oit == orders_.end() || !oit->second.active) {
                     qit = lvl.our_order_ids.erase(qit);
                     continue;
                 }
                 OrderEntry& e = oit->second;
-
-                // Still burning through queue ahead of us?
-                if (e.queue_ahead_remaining > 0.0) {
-                    double consumed = std::min(e.queue_ahead_remaining, trade_vol);
-                    e.queue_ahead_remaining -= consumed;
-                    trade_vol               -= consumed;
-                    if (e.queue_ahead_remaining > 0.0) {
-                        // Queue not yet cleared — move to next order
-                        ++qit;
-                        continue;
-                    }
-                    // Queue just cleared — fall through to fill
-                    e.queue_satisfied = true;
-                }
-
-                // Queue cleared → fill this order
-                e.queue_satisfied = true;
-                double fill_qty = std::min(e.remaining_size, trade_vol);
-                if (fill_qty <= 0.0) { ++qit; continue; }
-
-                double fee = fee_engine_.compute(fill_qty, level_price, is_maker);
-                fee_engine_.record(fee, is_maker);
-
-                double pnl_delta = (our_side == Side::kBid)
-                    ? -fill_qty * level_price - fee   // bought: negative cash
-                    :  fill_qty * level_price - fee;  // sold:   positive cash
-
-                fills.push_back({oid, fill_qty, level_price, fee, pnl_delta,
-                                 is_maker});
-
-                e.remaining_size -= fill_qty;
-                trade_vol        -= fill_qty;
-
-                if (e.remaining_size <= 0.0) {
-                    e.active = false;
-                    qit = lvl.our_order_ids.erase(qit);
+                double fill_qty = 0.0;
+                if (through) {
+                    // The print is beyond our price: the whole level traded.
+                    e.queue_ahead_remaining = 0.0;
+                    e.clamp_credit          = 0.0;
+                    fill_qty                = e.remaining_size;
                 } else {
-                    ++qit;
+                    double passing = trade_vol - our_filled;
+                    if (passing <= 0.0) break;
+                    double ahead = e.queue_ahead_remaining + e.clamp_credit;
+                    double burn  = std::min(ahead, passing);
+                    double credit_left = std::max(0.0, e.clamp_credit - passing);
+                    e.queue_ahead_remaining = std::max(0.0, ahead - burn - credit_left);
+                    e.clamp_credit          = credit_left;
+                    fill_qty = std::min(e.remaining_size, passing - burn);
                 }
+                if (e.queue_ahead_remaining <= 0.0) e.queue_satisfied = true;
+                if (fill_qty > 0.0) {
+                    _record_fill(e, fill_qty, level_price, our_side, is_maker, fills);
+                    our_filled += fill_qty;
+                }
+                if (!e.active) qit = lvl.our_order_ids.erase(qit);
+                else ++qit;
             }
-
-            // Consume market volume at this level
-            double market_consumed = std::min(lvl.market_total_size, trade_vol);
-            lvl.market_total_size -= market_consumed;
-            trade_vol             -= market_consumed;
 
             if (lvl.market_total_size <= 0.0 && lvl.our_order_ids.empty())
                 it = book.erase(it);
             else
                 ++it;
+            if (!through) break;  // the print's own level is the last one hit
         }
     }
 };
