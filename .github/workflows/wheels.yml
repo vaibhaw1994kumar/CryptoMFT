@@ -163,6 +163,10 @@ jobs:
     timeout-minutes: 15
     permissions:
       contents: write
+      # SDK04 provenance: signed (Sigstore) build attestations for the release assets.
+      # Granted to this tag-only job alone, not to the workflow.
+      id-token: write
+      attestations: write
     steps:
       - uses: actions/checkout@v7
 
@@ -228,6 +232,17 @@ jobs:
             echo "  ghcr.io/${GITHUB_REPOSITORY}:${{ steps.version.outputs.version }}"
             echo '```'
           } >>notes.md
+
+      # Anyone can check where an asset was built:
+      #   gh attestation verify <file> --repo ${{ github.repository }}
+      - name: Attest build provenance of every release asset
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: |
+            dist/*.whl
+            dist/*.tar.gz
+            dist/*.cdx.json
+            dist/build_record-*.json
 
       - name: Create the release
         env:
