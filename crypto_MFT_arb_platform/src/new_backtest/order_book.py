@@ -409,6 +409,10 @@ class OrderBook:
 
     # ── Depth queries ────────────────────────────────────────────────────────
 
+    def level_size(self, side: str, price: float) -> float:
+        """Displayed size at one price after all events so far (0.0 when the level is absent)."""
+        return (self._bids if side.startswith("b") else self._asks).get(price, 0.0)
+
     def levels(self, side: str, n: int = 10) -> list[tuple[float, float]]:
         if side.startswith("b"):
             prices, book = self._sorted_bids(), self._bids
