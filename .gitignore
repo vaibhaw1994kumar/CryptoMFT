@@ -48,10 +48,13 @@ src/crypto_stat_arb/sim_engine/*.so
 src/crypto_stat_arb/sim_engine/*.pyd
 
 # crypto_MFT_arb_platform/ had its own nested .git; its non-source files
-# (docs, configs, Dockerfile, .github/) are not tracked by this outer repo.
-# Already-tracked files under src/new_backtest/ and tests/ are unaffected
-# by this rule (gitignore never un-tracks files already in the index).
-crypto_MFT_arb_platform/
+# (docs, configs, Dockerfile, .github/, _backups/) are not tracked by this outer repo.
+# Source, tests and scripts are visible so new test files are not silently dropped
+# (before, a new tests/ file needed `git add -f`).
+crypto_MFT_arb_platform/*
+!crypto_MFT_arb_platform/src/
+!crypto_MFT_arb_platform/tests/
+!crypto_MFT_arb_platform/scripts/
 
 # macOS metadata
 .DS_Store
