@@ -27,11 +27,13 @@ from __future__ import annotations
 
 import itertools
 import math
+from collections import deque
 from dataclasses import dataclass, field
 
 from .fill_model import EmpiricalFillModel
 from .models import LambdaBucket, LoggedOrderEvent, Side
 from .order_book import OrderBook, WalkResult
+from .postonly import would_cross
 
 
 # ── Results ───────────────────────────────────────────────────────────────────
@@ -50,6 +52,7 @@ class Fill:
     order_id: int = 0
     signal_id: int = 0
     is_synthetic: bool = False    # True when triggered by BackgroundAgentModel
+    cause: str = ""               # maker fills only: trade | delta_share | delta_vanish | snapshot (what produced the fill)
 
     @property
     def notional(self) -> float:
@@ -166,9 +169,30 @@ class MakerOrder:
     snapshot_fill_qty: float = 0.0
     synthetic_fill_qty: float = 0.0   # qty filled by BackgroundAgentModel synthetic trades
 
+    # Cancel lifecycle (set by the backtester's lifetime handling; None until a cancel is requested).
+    # Between cancel_requested_ts and cancel_effective_ts the order is still resting at the exchange and can fill.
+    cancel_requested_ts: float | None = None
+    cancel_effective_ts: float | None = None
+    cancel_reason: str = ""            # "expired" | "end_of_data"
+    filled_at_cancel_request: float = 0.0
+    # Host time at which the order reached the exchange (InFlightOrder.release_ts). Events that executed at the exchange
+    # before this may correct the queue estimate but cannot fill the order. Defaults to active_ts.
+    arrival_ts: float = 0.0
+    # Public trade volume printed at this order's price since the level was last observed (by a depth event or a snapshot);
+    # used to avoid draining the queue a second time when a snapshot shows the same execution as a smaller level.
+    trade_vol_since_obs: float = 0.0
+    # Latest displayed size of this order's price level in the feed (others' orders only; unlike observed_level_size it
+    # does follow the level upward, because volume that joined behind us dilutes the share of a cancel that was ahead).
+    level_now: float = 0.0
+
     @property
     def is_live(self) -> bool:
         return self.remaining > 1e-12
+
+    @property
+    def state(self) -> str:
+        """'active' (resting, no cancel asked for) or 'cancel_pending' (cancel sent, not yet applied at the exchange)."""
+        return "active" if self.cancel_requested_ts is None else "cancel_pending"
 
     @property
     def side_str(self) -> str:
@@ -191,6 +215,60 @@ class MakerConfig:
     # is max(level_size * queue_stress_multiplier, min_queue_ahead).  It is a
     # floor for absent levels only, not a blanket override of the multiplier.
     min_queue_ahead: float = 0.0
+    # One public trade can fill our resting orders only once in total: the volume is shared in
+    # price-then-time priority instead of being handed in full to every order (False = legacy).
+    share_trade_volume: bool = True
+    # A real execution is published twice, as a trade and as a depth reduction at the same price. Volume already
+    # attributed to an execution by one feed is not drained again when the other feed reports it (False = legacy).
+    dedupe_trade_depth: bool = True
+    dedupe_window_s: float = 0.05
+    # Window clock for the trade/depth overlap: "exchange" (the events' exchange times, host-aligned; reliable because both
+    # feeds stamp the match time) or "receive" (delivery times; legacy, jittery on collector data).
+    dedupe_time_basis: str = "exchange"
+    # A snapshot that shows a trade's volume as a smaller level does not drain the queue a second time (needs
+    # dedupe_trade_depth). False: legacy, the snapshot shrink drains in full.
+    snapshot_trade_explain: bool = True
+    # True: an event that executed at the exchange before the order arrived there cannot fill it (it may still drain the
+    # stale queue estimate). False: legacy, any event received after placement can fill.
+    exchange_time_eligibility: bool = True
+    # How a depth decrease that no trade explains moves the queue ahead of us. The feed has no order ids, so who cancelled
+    # is unknown. None = not chosen: behaves as "all_ahead", and a backtest warns that it relied on the default.
+    #   "all_ahead":     every decrease BELOW the level size we last saw (observed_level_size, a running minimum that never
+    #                    rises) is charged in full to the queue ahead of us. Growth after we joined is ignored, so a
+    #                    decrease of volume that arrived behind us, or any cancel hidden by such growth, is not seen at
+    #                    all. The queue therefore advances in full steps on some decreases and not at all on others;
+    #                    on real fills it is the SLOWER model, because the ignored decreases include cancels ahead of us.
+    #   "proportional":  every decrease of the level as displayed (level_now, which does follow growth) is split between
+    #                    ahead and behind by size, so queue_ahead / level_before of it advances us. A delta can fill us only
+    #                    once the queue is exhausted.
+    #   "power":         as proportional but the share ahead is ahead**n / (ahead**n + behind**n), n = cancel_power_n.
+    #                    n = 1 is exactly "proportional"; n > 1 assumes cancels favour the larger side.
+    cancel_model: str | None = None
+    cancel_power_n: float = 1.0
+
+    CANCEL_MODELS = ("all_ahead", "proportional", "power")
+
+    def __post_init__(self) -> None:
+        if self.cancel_model is not None and self.cancel_model not in self.CANCEL_MODELS:
+            raise ValueError(f"cancel_model must be one of {self.CANCEL_MODELS} or None, got {self.cancel_model!r}")
+        if not (self.cancel_power_n > 0.0):
+            raise ValueError(f"cancel_power_n must be > 0, got {self.cancel_power_n!r}")
+
+    @property
+    def effective_cancel_model(self) -> str:
+        return self.cancel_model or "all_ahead"
+    # Price priority. True: a public print strictly THROUGH our price (a sell below our bid, a buy above our ask) means the
+    # level we rest on has been consumed, so the order fills in full, as in the core queue engines. The print's volume is
+    # not charged to the shared budget. False (default, legacy): the print only burns queue and fills what is left.
+    fill_through_prints: bool = False
+
+
+@dataclass
+class AmendResult:
+    order: "MakerOrder | None"     # the replacement, or None when it was rejected / the order was unknown
+    rejected: bool                 # the replacement was refused (PostOnly would take liquidity)
+    old_cancelled: bool            # the original order (and its queue position) is gone
+    reason: str
 
 
 class MakerExecutor:
@@ -208,6 +286,46 @@ class MakerExecutor:
         self.orders_placed = 0
         self.orders_filled = 0
         self.orders_cancelled = 0
+        self.amends_requested = 0
+        self.amends_rejected_postonly = 0
+        self._explained: dict[str, dict[tuple, deque]] = {"trade": {}, "delta": {}}
+        # Aggregate counters, all in base-asset units unless named *_events.
+        self.diag: dict[str, float] = {k: 0.0 for k in (
+            "trade_events", "trade_volume_observed", "trade_volume_credited_to_depth", "trade_volume_net",
+            "trade_volume_to_queue_ahead", "trade_volume_to_fills", "pre_arrival_event_drains", "pre_arrival_queue_drained",
+            "delta_shrink_events", "delta_shrink_total", "delta_shrink_explained_by_trades", "delta_queue_drained",
+            "snapshot_shrink_total", "snapshot_shrink_explained_by_trades", "snapshot_queue_drained",
+            "fills_from_trade", "fills_from_delta", "fills_from_snapshot", "fills_from_through_print")}
+
+    # ── Trade / depth de-duplication ────────────────────────────────
+
+    def _take(self, kind: str, key: tuple, now: float, want: float) -> float:
+        credits = self._explained[kind].get(key)
+        if not credits:
+            return 0.0
+        horizon = now - self.config.dedupe_window_s
+        while credits and credits[0][0] < horizon:
+            credits.popleft()
+        taken = 0.0
+        while credits and taken < want - 1e-12:
+            use = min(credits[0][1], want - taken)
+            taken += use
+            credits[0][1] -= use
+            if credits[0][1] <= 1e-12:
+                credits.popleft()
+        if not credits:
+            del self._explained[kind][key]
+        return taken
+
+    def _add(self, kind: str, key: tuple, now: float, amount: float) -> None:
+        if amount <= 1e-12:
+            return
+        book = self._explained[kind]
+        if len(book) > 4096:
+            horizon = now - self.config.dedupe_window_s
+            for k in [k for k, d in book.items() if not d or d[-1][0] < horizon]:
+                del book[k]
+        book.setdefault(key, deque(maxlen=64)).append([now, amount])
 
     # ── Lifecycle ────────────────────────────────────────────────────────────
 
@@ -226,6 +344,7 @@ class MakerExecutor:
         active_ts: float,
         tick_size: float,
         signal_id: int = 0,
+        arrival_ts: float | None = None,
     ) -> MakerOrder:
         level_size = self._level_size(book, side, price, tick_size)
         touch = book.best_bid if side == Side.BID else book.best_ask
@@ -248,6 +367,7 @@ class MakerExecutor:
             side=side, price=price, size=size, remaining=size,
             queue_ahead=initial_q, initial_queue_ahead=initial_q,
             placed_ts=now, active_ts=active_ts, signal_id=signal_id,
+            arrival_ts=active_ts if arrival_ts is None else arrival_ts,
             level_was_absent=level_was_absent,
             relative_to_touch_ticks=rel_ticks,
             local_depth=state.top_depth,
@@ -258,6 +378,7 @@ class MakerExecutor:
             trade_sign=state.trade_sign,
             regime_bucket=regime_bucket,
             observed_level_size=level_size,
+            level_now=level_size,
         )
         self.orders[order.order_id] = order
         self.orders_placed += 1
@@ -270,6 +391,27 @@ class MakerExecutor:
         self._record_outcome(order, end_ts=now)
         self.orders_cancelled += 1
         return order
+
+    def amend(
+        self, order_id: int, new_price: float, new_size: float, *, book: OrderBook, state, regime_bucket: LambdaBucket, now: float,
+        active_ts: float, tick_size: float, postonly: bool = True, arrival_ts: float | None = None,
+    ) -> AmendResult:
+        """Cancel/replace. The old order and its queue position are gone whatever happens next (the venue treats an amend as a
+        cancel followed by a new order). The replacement is checked like any new passive order: with `postonly`, a price that
+        would take liquidity against `book` (the exchange-time book at the amend's arrival, supplied by the caller) is rejected,
+        and then nothing rests. The strategy in this backtester never amends, so this path has no effect on any result."""
+        old = self.orders.get(order_id)
+        if old is None:
+            return AmendResult(None, False, False, "unknown_order")
+        venue, pair, symbol, side, signal_id = old.venue, old.pair, old.symbol, old.side, old.signal_id
+        self.cancel(order_id, now)
+        self.amends_requested += 1
+        if postonly and would_cross("buy" if side == Side.BID else "sell", new_price, book.best_bid, book.best_ask):
+            self.amends_rejected_postonly += 1
+            return AmendResult(None, True, True, "postonly_would_take_liquidity")
+        new = self.place(venue, pair, symbol, side, new_price, new_size, book, state, regime_bucket, now, active_ts, tick_size,
+                         signal_id=signal_id, arrival_ts=arrival_ts)
+        return AmendResult(new, False, True, "")
 
     def cancel_all(self, now: float) -> list[MakerOrder]:
         out = []
@@ -286,33 +428,98 @@ class MakerExecutor:
 
     # ── Fill triggers ────────────────────────────────────────────────────────
 
+    def _pre_arrival(self, order: MakerOrder, event_ts: float | None) -> bool:
+        """True when the event executed at the exchange before the order got there (it can drain the queue, not fill)."""
+        return (self.config.exchange_time_eligibility and event_ts is not None
+                and event_ts + 1e-12 < order.arrival_ts)
+
+    def _credit_time(self, now: float, event_ts: float | None) -> float:
+        return event_ts if (event_ts is not None and self.config.dedupe_time_basis == "exchange") else now
+
     def on_trade(
         self, venue: str, price: float, volume: float, sign: int, now: float, fee_bps: float,
-        is_synthetic: bool = False,
+        is_synthetic: bool = False, event_ts: float | None = None,
     ) -> list[Fill]:
-        """A public trade crossed the book. Fill any resting order it reached."""
+        """A public trade crossed the book. Fill any resting order it reached.
+
+        `now` is when the trade reached us; `event_ts` (optional) is when it executed at the exchange, on the host clock.
+        """
+        cfg = self.config
+        ct = self._credit_time(now, event_ts)
+        self.diag["trade_events"] += 1
+        self.diag["trade_volume_observed"] += volume
+        if cfg.dedupe_trade_depth:
+            key = (venue, "bid" if sign < 0 else "ask", round(price, 8))
+            credited = self._take("delta", key, ct, volume)
+            volume -= credited
+            self.diag["trade_volume_credited_to_depth"] += credited
+            self._add("trade", key, ct, volume)
+            if volume <= 1e-12:
+                return []
+        self.diag["trade_volume_net"] += volume
         fills: list[Fill] = []
+        eligible, pre, through = [], [], []
         for order in list(self.orders.values()):
             if order.venue != venue or not order.is_live or now + 1e-12 < order.active_ts:
                 continue
             # sign=-1: sell aggressor hits bids. sign=+1: buy aggressor lifts asks.
-            if sign < 0 and order.side == Side.BID and price <= order.price + 1e-12:
-                f = self._consume(order, volume, now, self.config.trade_fill_share, "trade", fee_bps, is_synthetic)
-            elif sign > 0 and order.side == Side.ASK and price >= order.price - 1e-12:
-                f = self._consume(order, volume, now, self.config.trade_fill_share, "trade", fee_bps, is_synthetic)
-            else:
+            reaches = ((sign < 0 and order.side == Side.BID and price <= order.price + 1e-12)
+                       or (sign > 0 and order.side == Side.ASK and price >= order.price - 1e-12))
+            if not reaches:
                 continue
+            if cfg.dedupe_trade_depth and abs(price - order.price) <= 1e-9 * max(1.0, abs(price)):
+                order.trade_vol_since_obs += volume
+            if self._pre_arrival(order, event_ts):
+                pre.append(order)
+            elif cfg.fill_through_prints and abs(price - order.price) > 1e-9 * max(1.0, abs(price)):
+                through.append(order)
+            else:
+                eligible.append(order)
+        for order in through:
+            order.queue_ahead = 0.0
+            f = self._fill_from(order, order.remaining / max(cfg.trade_fill_share, 1e-12), now, cfg.trade_fill_share,
+                                "trade", fee_bps, is_synthetic, cause="trade_through")
             if f is not None:
                 fills.append(f)
+                self.diag["fills_from_through_print"] += f.qty
+        for order in pre:
+            drained = min(order.queue_ahead, volume)
+            order.queue_ahead -= drained
+            self.diag["pre_arrival_event_drains"] += 1
+            self.diag["pre_arrival_queue_drained"] += drained
+        share = cfg.share_trade_volume
+        if share:
+            eligible.sort(key=lambda o: (-o.price if o.side == Side.BID else o.price, o.placed_ts, o.order_id))
+        remaining = volume
+        for order in eligible:
+            queue_before = order.queue_ahead
+            f = self._consume(order, remaining if share else volume, now, cfg.trade_fill_share, "trade", fee_bps, is_synthetic, cause="trade")
+            self.diag["trade_volume_to_queue_ahead"] += queue_before - order.queue_ahead
+            if f is not None:
+                fills.append(f)
+                self.diag["trade_volume_to_fills"] += f.qty
+            if share:
+                absorbed = queue_before - order.queue_ahead
+                if f is not None and cfg.trade_fill_share > 0:
+                    absorbed += f.qty / cfg.trade_fill_share
+                remaining -= absorbed
+                if remaining <= 1e-12:
+                    break
         return fills
 
     def on_delta(
         self, venue: str, side: str, price: float, new_size: float, now: float,
-        tick_size: float, fee_bps: float,
+        tick_size: float, fee_bps: float, event_ts: float | None = None,
     ) -> list[Fill]:
-        """A book delta shrank our level. Part of the shrink may be our queue."""
+        """A depth event changed a level we rest on. A decrease that no trade explains advances our queue according to
+        MakerConfig.cancel_model (see there): "all_ahead" counts only decreases below the lowest size seen since we joined
+        and charges them in full to the queue ahead; the "proportional" family counts every decrease of the displayed level
+        and charges the share that was ahead of us."""
+        cfg = self.config
+        ct = self._credit_time(now, event_ts)
         fills: list[Fill] = []
         want = Side.BID if side.startswith("b") else Side.ASK
+        at_level = []
         for order in list(self.orders.values()):
             if order.venue != venue or order.side != want or not order.is_live:
                 continue
@@ -320,34 +527,83 @@ class MakerExecutor:
                 continue
             if abs(price - order.price) > max(1e-12, 0.5 * tick_size):
                 continue
-            prev = order.observed_level_size
-            if prev > new_size:
-                f = self._consume(order, prev - new_size, now, self.config.delta_fill_share, "delta", fee_bps)
+            at_level.append(order)
+        proportional = cfg.effective_cancel_model in ("proportional", "power")
+        power_n = cfg.cancel_power_n if cfg.effective_cancel_model == "power" else 1.0
+        if proportional:
+            shrinks = {o.order_id: o.level_now - new_size for o in at_level if o.level_now > new_size}
+        else:
+            shrinks = {o.order_id: o.observed_level_size - new_size for o in at_level if o.observed_level_size > new_size}
+        explained = 0.0
+        if shrinks:
+            level_shrink = max(shrinks.values())
+            self.diag["delta_shrink_events"] += 1
+            self.diag["delta_shrink_total"] += level_shrink
+            if cfg.dedupe_trade_depth:
+                key = (venue, "bid" if want == Side.BID else "ask", round(price, 8))
+                explained = self._take("trade", key, ct, level_shrink)
+                self._add("delta", key, ct, level_shrink - explained)
+                self.diag["delta_shrink_explained_by_trades"] += explained
+        for order in at_level:
+            full = shrinks.get(order.order_id, 0.0)
+            shrink = full - explained
+            if shrink > 1e-12:
+                queue_before = order.queue_ahead
+                can_fill = not self._pre_arrival(order, event_ts)
+                if proportional:
+                    f = self._consume_proportional(order, shrink, order.level_now, now, cfg.delta_fill_share, "delta", fee_bps, can_fill,
+                                                   power_n=power_n, cause="delta_vanish" if new_size <= 1e-12 else "delta_share")
+                else:
+                    f = self._consume(order, shrink, now, cfg.delta_fill_share, "delta", fee_bps, can_fill=can_fill,
+                                      cause="delta_vanish" if new_size <= 1e-12 else "delta_share")
+                self.diag["delta_queue_drained"] += queue_before - order.queue_ahead
+                if not can_fill:
+                    self.diag["pre_arrival_event_drains"] += 1
+                    self.diag["pre_arrival_queue_drained"] += queue_before - order.queue_ahead
                 if f is not None:
                     fills.append(f)
-            # Never increase observed_level_size: orders that join the level
-            # after our placement arrive behind us in the FIFO queue.  Allowing
-            # the tracked size to grow upward would incorrectly trigger fills
-            # when those behind-us orders later cancel or trade.
+            # Any depth event is a fresh observation of this level: trade volume printed before it is already reflected
+            # in the size it reports, so it must not be credited against a later snapshot shrink.
+            order.trade_vol_since_obs = 0.0
+            # observed_level_size is a running MINIMUM (the 'all_ahead' baseline): it never rises, so volume that joins
+            # behind us cannot later be mistaken for queue ahead, but a cancel that is hidden by such growth is never
+            # counted either. level_now below does follow growth and is what the proportional family uses.
             order.observed_level_size = min(order.observed_level_size, new_size)
+            order.level_now = new_size
         return fills
 
     def on_snapshot(
         self, venue: str, book: OrderBook, now: float, tick_size: float, fee_bps: float,
+        event_ts: float | None = None,
     ) -> list[Fill]:
-        """Level shrank between snapshots — weakest signal, smallest share."""
+        """Level shrank between snapshots — weakest signal, smallest share.
+
+        With dedupe_trade_depth, the part of the shrink that public trades at this price already accounted for (and that
+        has not been matched to a delta) is not drained a second time."""
+        cfg = self.config
         fills: list[Fill] = []
         for order in list(self.orders.values()):
             if order.venue != venue or not order.is_live or now + 1e-12 < order.active_ts:
                 continue
             curr = self._level_size(book, order.side, order.price, tick_size)
             if order.observed_level_size > curr:
-                f = self._consume(order, order.observed_level_size - curr, now,
-                                  self.config.snapshot_fill_share, "snapshot", fee_bps)
-                if f is not None:
-                    fills.append(f)
+                shrink = order.observed_level_size - curr
+                self.diag["snapshot_shrink_total"] += shrink
+                if cfg.dedupe_trade_depth and cfg.snapshot_trade_explain:
+                    explained = min(shrink, order.trade_vol_since_obs)
+                    order.trade_vol_since_obs -= explained
+                    shrink -= explained
+                    self.diag["snapshot_shrink_explained_by_trades"] += explained
+                if shrink > 1e-12:
+                    queue_before = order.queue_ahead
+                    can_fill = not self._pre_arrival(order, event_ts)
+                    f = self._consume(order, shrink, now, cfg.snapshot_fill_share, "snapshot", fee_bps, can_fill=can_fill, cause="snapshot")
+                    self.diag["snapshot_queue_drained"] += queue_before - order.queue_ahead
+                    if f is not None:
+                        fills.append(f)
             # Same invariant as on_delta: never increase observed_level_size.
             order.observed_level_size = min(order.observed_level_size, curr)
+            order.level_now = curr
         return fills
 
     def mark_adverse(self, venue: str, book: OrderBook, now: float, tick_size: float) -> None:
@@ -366,9 +622,10 @@ class MakerExecutor:
     def _consume(
         self, order: MakerOrder, volume: float, now: float,
         fill_share: float, source: str, fee_bps: float,
-        is_synthetic: bool = False,
+        is_synthetic: bool = False, can_fill: bool = True, cause: str | None = None,
     ) -> Fill | None:
-        """Drain queue first, then fill our own size from what is left."""
+        """Drain queue first, then fill our own size from what is left (if the event may fill this order). The whole
+        `volume` is charged to the queue ahead of this order (the 'all_ahead' rule when called for a depth decrease)."""
         if volume <= 0 or not order.is_live:
             return None
 
@@ -377,6 +634,39 @@ class MakerExecutor:
             drained = min(order.queue_ahead, available)
             order.queue_ahead -= drained
             available -= drained
+        if not can_fill:
+            return None
+        return self._fill_from(order, available, now, fill_share, source, fee_bps, is_synthetic, cause=cause)
+
+    def _consume_proportional(
+        self, order: MakerOrder, shrink: float, prev_level: float, now: float, fill_share: float, source: str, fee_bps: float,
+        can_fill: bool, power_n: float = 1.0, cause: str | None = None,
+    ) -> Fill | None:
+        """Unattributed depth decrease, split between the queue ahead of us and the volume behind us: only the share that
+        was ahead advances us. With power_n == 1 the share is ahead / level_before ('proportional'); otherwise
+        ahead**n / (ahead**n + behind**n) with behind = level_before - ahead.
+
+        The feed carries no order ids, so we do not know who cancelled. A fill is possible only once no queue is left ahead."""
+        if shrink <= 0 or not order.is_live:
+            return None
+        ahead = order.queue_ahead
+        if ahead <= 0:
+            frac = 0.0
+        elif power_n == 1.0:
+            frac = min(1.0, ahead / max(prev_level, 1e-12))
+        else:
+            behind = max(prev_level - ahead, 0.0)
+            frac = (ahead ** power_n) / (ahead ** power_n + behind ** power_n)
+        drained = min(order.queue_ahead, shrink * frac)
+        order.queue_ahead -= drained
+        if not can_fill or order.queue_ahead > 1e-12:
+            return None
+        return self._fill_from(order, shrink - drained, now, fill_share, source, fee_bps, False, cause=cause)
+
+    def _fill_from(
+        self, order: MakerOrder, available: float, now: float, fill_share: float, source: str, fee_bps: float,
+        is_synthetic: bool, cause: str | None = None,
+    ) -> Fill | None:
         if available <= 0 or fill_share <= 0:
             return None
 
@@ -386,6 +676,7 @@ class MakerExecutor:
 
         order.remaining -= qty
         order.filled_qty += qty
+        self.diag[f"fills_from_{source}"] += qty
         if order.first_fill_ts is None:
             order.first_fill_ts = now
             order.first_fill_is_synthetic = is_synthetic
@@ -403,7 +694,7 @@ class MakerExecutor:
         fill = Fill(
             ts=now, venue=order.venue, side=order.side_str, qty=qty, price=order.price,
             fee=fee, is_taker=False, order_id=order.order_id, signal_id=order.signal_id,
-            is_synthetic=is_synthetic,
+            is_synthetic=is_synthetic, cause=cause or source,
         )
 
         if not order.is_live:
@@ -500,6 +791,10 @@ class MakerExecutor:
                     level_was_absent=order.level_was_absent,
                 )
             )
+
+    def diagnostics(self) -> dict[str, float]:
+        """Aggregate fill-accounting counters (observed vs modelled quantities, base-asset units)."""
+        return {k: round(v, 9) for k, v in self.diag.items()}
 
     def stats(self) -> dict[str, float]:
         return {
