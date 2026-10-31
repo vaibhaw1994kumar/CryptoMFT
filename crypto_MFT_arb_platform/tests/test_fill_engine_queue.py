@@ -278,7 +278,7 @@ class TestDeltaFillsAndObservedLevel(unittest.TestCase):
     def test_growth_then_further_shrink_fires_correctly(self):
         """After growth, a shrink BELOW original level fires a fill."""
         book = _book(bids=[(100.0, 50.0)])
-        ex = _executor(MakerConfig(delta_fill_share=0.15))
+        ex = _executor(MakerConfig(delta_fill_share=0.15, cancel_model="all_ahead"))
         order = _place(ex, book, price=100.0, size=10.0)
 
         # Level grows from 50 to 200
@@ -291,6 +291,17 @@ class TestDeltaFillsAndObservedLevel(unittest.TestCase):
                             now=3.0, tick_size=1.0, fee_bps=0.0)
         self.assertEqual(len(fills), 0)  # still has queue ahead
         self.assertAlmostEqual(order.queue_ahead, 40.0)
+
+    def test_growth_then_further_shrink_proportional_counts_the_whole_displayed_decrease(self):
+        """proportional: 50 -> 200 -> 40 is a displayed decrease of 160, of which 50/200 was ahead of us: 40 drained."""
+        book = _book(bids=[(100.0, 50.0)])
+        ex = _executor(MakerConfig(delta_fill_share=0.15, cancel_model="proportional"))
+        order = _place(ex, book, price=100.0, size=10.0)
+        ex.on_delta("bybit", side="bid", price=100.0, new_size=200.0, now=2.0, tick_size=1.0, fee_bps=0.0)
+        fills = ex.on_delta("bybit", side="bid", price=100.0, new_size=40.0, now=3.0, tick_size=1.0, fee_bps=0.0)
+        self.assertEqual(len(fills), 0)                       # queue is not exhausted, so no fill
+        self.assertAlmostEqual(order.queue_ahead, 10.0)
+        self.assertAlmostEqual(order.observed_level_size, 40.0)   # the running minimum is unchanged in meaning
 
 
 # ── Snapshot fills ────────────────────────────────────────────────────────────
@@ -507,7 +518,7 @@ class TestLevelDisappearReappear(unittest.TestCase):
         # Level grows (replenishment from behind) then disappears entirely.
         # Only the original-baseline portion (50 units) counts toward queue drain.
         book = _book(bids=[(100.0, 50.0)])
-        ex = _executor(MakerConfig(delta_fill_share=0.15))
+        ex = _executor(MakerConfig(delta_fill_share=0.15, cancel_model="all_ahead"))
         order = _place(ex, book, price=100.0, size=10.0)  # queue=50, observed=50
 
         # Replenishment: level grows to 200
@@ -589,17 +600,17 @@ class TestD3TradeAndDeltaDoubleCount(unittest.TestCase):
     independently against the same resting order.  The test below measures the
     double-count and records it as a regression baseline.
 
-    This is a KNOWN LIMITATION, not a bug introduced by the D1/D2 fixes.
-    Fixing it properly requires correlating trade and delta events, which would
-    add significant complexity.  The test ensures it does not silently worsen.
+    This was a KNOWN LIMITATION. It is now fixed by default (MakerConfig.dedupe_trade_depth); the
+    legacy numbers below are kept under dedupe_trade_depth=False as a regression baseline.
     """
 
-    def _setup_order_with_drained_queue(self):
+    def _setup_order_with_drained_queue(self, dedupe=True):
         """Place order at level=50, drain queue to 0 with a separate trade."""
         book = _book(bids=[(100.0, 50.0)])
         ex = _executor(MakerConfig(
             trade_fill_share=1.0,
             delta_fill_share=0.15,
+            dedupe_trade_depth=dedupe,
         ))
         order = _place(ex, book, price=100.0, size=10.0)
         # Drain the 50-unit queue so subsequent fills are immediate
@@ -623,10 +634,10 @@ class TestD3TradeAndDeltaDoubleCount(unittest.TestCase):
         self.assertAlmostEqual(total, 0.75, places=9,
             msg="delta alone: fill = shrink * delta_fill_share = 5 * 0.15 = 0.75")
 
-    def test_d3_trade_then_delta_exceeds_V(self):
-        # D3: process TRADE then DELTA for the same 5 units of real activity.
+    def test_d3_legacy_trade_then_delta_exceeds_V(self):
+        # D3 (legacy, dedupe_trade_depth=False): process TRADE then DELTA for the same 5 units of real activity.
         # Expected ideal fill: 5.0; actual (double-count): 5.75
-        ex, order = self._setup_order_with_drained_queue()
+        ex, order = self._setup_order_with_drained_queue(dedupe=False)
 
         # Event A: trade tape
         fills_a = ex.on_trade("bybit", price=100.0, volume=5.0, sign=-1, now=2.0, fee_bps=0.0)
@@ -648,6 +659,29 @@ class TestD3TradeAndDeltaDoubleCount(unittest.TestCase):
         double_count_factor = total / 5.0
         self.assertAlmostEqual(double_count_factor, 1.15, places=9,
             msg="D3 double-count factor should be 1 + delta_fill_share = 1.15")
+
+    def test_d3_trade_then_delta_fills_V_once(self):
+        # Default (dedupe_trade_depth=True): the depth reduction that mirrors the trade is not counted again.
+        ex, order = self._setup_order_with_drained_queue()
+        fills_a = ex.on_trade("bybit", price=100.0, volume=5.0, sign=-1, now=2.0, fee_bps=0.0)
+        fills_b = ex.on_delta("bybit", side="bid", price=100.0, new_size=45.0,
+                              now=2.001, tick_size=1.0, fee_bps=0.0)
+        self.assertAlmostEqual(sum(f.qty for f in fills_a), 5.0, places=9)
+        self.assertAlmostEqual(sum(f.qty for f in fills_b), 0.0, places=9)
+
+    def test_delta_then_trade_does_not_double_count_either(self):
+        # Feeds can arrive in either order. The delta is applied first (0.75 at its share); the trade that
+        # mirrors it is then not applied again, so the total stays at or below the 5 units that really traded.
+        ex, order = self._setup_order_with_drained_queue()
+        fills_b = ex.on_delta("bybit", side="bid", price=100.0, new_size=45.0, now=2.0, tick_size=1.0, fee_bps=0.0)
+        fills_a = ex.on_trade("bybit", price=100.0, volume=5.0, sign=-1, now=2.001, fee_bps=0.0)
+        self.assertLessEqual(sum(f.qty for f in fills_a) + sum(f.qty for f in fills_b), 5.0 + 1e-9)
+
+    def test_a_depth_reduction_long_after_a_trade_is_a_separate_event(self):
+        ex, order = self._setup_order_with_drained_queue()
+        ex.on_trade("bybit", price=100.0, volume=5.0, sign=-1, now=2.0, fee_bps=0.0)
+        later = ex.on_delta("bybit", side="bid", price=100.0, new_size=45.0, now=3.0, tick_size=1.0, fee_bps=0.0)
+        self.assertAlmostEqual(sum(f.qty for f in later), 0.75, places=9)
 
 
 # ── level_was_absent telemetry (P2.1) ────────────────────────────────────────
