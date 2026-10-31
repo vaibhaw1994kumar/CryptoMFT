@@ -184,6 +184,10 @@ class MakerOrder:
     # Latest displayed size of this order's price level in the feed (others' orders only; unlike observed_level_size it
     # does follow the level upward, because volume that joined behind us dilutes the share of a cancel that was ahead).
     level_now: float = 0.0
+    # fill_evidence != "off": time (credit clock) and size of the latest unexplained decrease that moved this order to the
+    # front of the queue without filling it. A real trade at the order's price within evidence_window_ms of front_ts fills it.
+    front_ts: float | None = None
+    front_decrease: float = 0.0
 
     @property
     def is_live(self) -> bool:
@@ -197,6 +201,12 @@ class MakerOrder:
     @property
     def side_str(self) -> str:
         return "buy" if self.side == Side.BID else "sell"
+
+
+# fill_evidence mode groups (see MakerConfig.fill_evidence)
+_TRADE_CONFIRM_MODES = ("trade_confirm", "trade_confirm+fractional", "confirm_delta_snapshot", "confirm_delta")
+_GATED_MODES = ("confirm_delta_snapshot", "confirm_delta")
+_WHOLE_RULE_MODES = ("trade_confirm", "fractional", "trade_confirm+fractional")
 
 
 @dataclass
@@ -232,7 +242,8 @@ class MakerConfig:
     # stale queue estimate). False: legacy, any event received after placement can fill.
     exchange_time_eligibility: bool = True
     # How a depth decrease that no trade explains moves the queue ahead of us. The feed has no order ids, so who cancelled
-    # is unknown. None = not chosen: behaves as "all_ahead", and a backtest warns that it relied on the default.
+    # is unknown. Default "proportional" (chosen 2026-10-30 after the 22-coin fill-evidence study: higher hit rate and lower
+    # loss than "all_ahead" in every liquidity tier). None = not chosen: behaves as the default, and a backtest warns about it.
     #   "all_ahead":     every decrease BELOW the level size we last saw (observed_level_size, a running minimum that never
     #                    rises) is charged in full to the queue ahead of us. Growth after we joined is ignored, so a
     #                    decrease of volume that arrived behind us, or any cancel hidden by such growth, is not seen at
@@ -243,20 +254,67 @@ class MakerConfig:
     #                    once the queue is exhausted.
     #   "power":         as proportional but the share ahead is ahead**n / (ahead**n + behind**n), n = cancel_power_n.
     #                    n = 1 is exactly "proportional"; n > 1 assumes cancels favour the larger side.
-    cancel_model: str | None = None
+    cancel_model: str | None = "proportional"
     cancel_power_n: float = 1.0
+    # Evidence needed before an unexplained decrease may fill us. Without it, once the simulated queue ahead is 0 any later
+    # unexplained depth decrease (delta path) or snapshot shrink fills the order (delta_fill_share / snapshot_fill_share).
+    # Opt-in; "off" is the behaviour described above, unchanged.
+    #   "off":                       as above.
+    #   "trade_confirm":             a decrease that finds no queue ahead (or a level that vanished) does NOT fill us: it moves us
+    #                                to the front and records when. A public trade at our price (or through it, when
+    #                                fill_through_prints is on) arriving within evidence_window_ms of that decrease then fills us,
+    #                                up to the trade's size, even if the trade/depth de-duplication would net it against the
+    #                                decrease (cause "trade_after_front"). Without a trade we stay at the front; a later trade
+    #                                fills us by the ordinary trade rule.
+    #   "fractional":                the fill from such a decrease is capped at evidence_fill_fraction x the decrease.
+    #   "trade_confirm+fractional":  trade_confirm, and the confirming fill is capped at evidence_fill_fraction x the decrease.
+    # A level that vanished moves us to the front with no fill under every mode except "off".
+    #   "confirm_delta_snapshot":    targeted variant: only the fills that rest on a depth decrease that finds no queue ahead
+    #                                (cause delta_share) or on a snapshot shrink (cause snapshot) need a confirming trade, exactly as
+    #                                in trade_confirm (mark the front, fill up to the trade's size within evidence_window_ms, cause
+    #                                trade_after_front). A level that vanished (delta_vanish) is NOT gated and behaves as "off";
+    #                                trades are unchanged.
+    #   "confirm_delta":             as confirm_delta_snapshot, but a snapshot shrink behaves as "off" (only delta_share is gated).
+    fill_evidence: str = "off"
+    evidence_window_ms: float = 100.0
+    evidence_fill_fraction: float = 0.15
+    # When the queue ahead of an order counts as empty. "absolute": queue_ahead <= 1e-12 (the behaviour so far, bit-identical).
+    # "lot": queue_ahead <= queue_empty_lot (one lot of the instrument, set by the caller). "frac_of_order": queue_ahead <=
+    # queue_empty_frac x the order's size. A queue at or below the threshold after a drain (or at placement) is set to 0.
+    # Proportional cancels shrink the queue by a constant share, so it only reaches 1e-12 after hundreds of cancels.
+    # True: when a depth event removes the whole level we rest on (cause delta_vanish), the queue ahead of us is gone with it
+    # (queue_ahead = 0) before the fill is computed. False (default): the proportional share rule leaves a residual queue
+    # (the part of the vanished level that a trade had already explained is not charged to it), which can block the fill.
+    vanish_clears_queue: bool = False
+    queue_empty_threshold: str = "absolute"
+    queue_empty_lot: float = 0.0
+    queue_empty_frac: float = 0.05
 
     CANCEL_MODELS = ("all_ahead", "proportional", "power")
+    FILL_EVIDENCE_MODES = ("off", "trade_confirm", "fractional", "trade_confirm+fractional", "confirm_delta_snapshot", "confirm_delta")
+    QUEUE_EMPTY_MODES = ("absolute", "lot", "frac_of_order")
 
     def __post_init__(self) -> None:
         if self.cancel_model is not None and self.cancel_model not in self.CANCEL_MODELS:
             raise ValueError(f"cancel_model must be one of {self.CANCEL_MODELS} or None, got {self.cancel_model!r}")
         if not (self.cancel_power_n > 0.0):
             raise ValueError(f"cancel_power_n must be > 0, got {self.cancel_power_n!r}")
+        if self.fill_evidence not in self.FILL_EVIDENCE_MODES:
+            raise ValueError(f"fill_evidence must be one of {self.FILL_EVIDENCE_MODES}, got {self.fill_evidence!r}")
+        if not (self.evidence_window_ms >= 0.0):
+            raise ValueError(f"evidence_window_ms must be >= 0, got {self.evidence_window_ms!r}")
+        if not (0.0 < self.evidence_fill_fraction <= 1.0):
+            raise ValueError(f"evidence_fill_fraction must be in (0, 1], got {self.evidence_fill_fraction!r}")
+        if self.queue_empty_threshold not in self.QUEUE_EMPTY_MODES:
+            raise ValueError(f"queue_empty_threshold must be one of {self.QUEUE_EMPTY_MODES}, got {self.queue_empty_threshold!r}")
+        if self.queue_empty_threshold == "lot" and not (self.queue_empty_lot > 0.0):
+            raise ValueError(f"queue_empty_threshold='lot' needs queue_empty_lot > 0, got {self.queue_empty_lot!r}")
+        if self.queue_empty_threshold == "frac_of_order" and not (0.0 < self.queue_empty_frac <= 1.0):
+            raise ValueError(f"queue_empty_frac must be in (0, 1], got {self.queue_empty_frac!r}")
 
     @property
     def effective_cancel_model(self) -> str:
-        return self.cancel_model or "all_ahead"
+        return self.cancel_model or "proportional"
     # Price priority. True: a public print strictly THROUGH our price (a sell below our bid, a buy above our ask) means the
     # level we rest on has been consumed, so the order fills in full, as in the core queue engines. The print's volume is
     # not charged to the shared budget. False (default, legacy): the print only burns queue and fills what is left.
@@ -295,7 +353,8 @@ class MakerExecutor:
             "trade_volume_to_queue_ahead", "trade_volume_to_fills", "pre_arrival_event_drains", "pre_arrival_queue_drained",
             "delta_shrink_events", "delta_shrink_total", "delta_shrink_explained_by_trades", "delta_queue_drained",
             "snapshot_shrink_total", "snapshot_shrink_explained_by_trades", "snapshot_queue_drained",
-            "fills_from_trade", "fills_from_delta", "fills_from_snapshot", "fills_from_through_print")}
+            "fills_from_trade", "fills_from_delta", "fills_from_snapshot", "fills_from_through_print",
+            "evidence_front_marks", "evidence_suppressed_fill_qty", "evidence_confirmed_fill_qty")}
 
     # ── Trade / depth de-duplication ────────────────────────────────
 
@@ -382,6 +441,7 @@ class MakerExecutor:
         )
         self.orders[order.order_id] = order
         self.orders_placed += 1
+        self._settle_queue(order)
         return order
 
     def cancel(self, order_id: int, now: float) -> MakerOrder | None:
@@ -448,17 +508,21 @@ class MakerExecutor:
         ct = self._credit_time(now, event_ts)
         self.diag["trade_events"] += 1
         self.diag["trade_volume_observed"] += volume
+        gross_volume = volume
+        confirm_ids: set[int] = set()
+        if cfg.fill_evidence in _TRADE_CONFIRM_MODES:
+            confirm_ids = self._confirming_orders(venue, price, sign, now, ct, event_ts)
         if cfg.dedupe_trade_depth:
             key = (venue, "bid" if sign < 0 else "ask", round(price, 8))
             credited = self._take("delta", key, ct, volume)
             volume -= credited
             self.diag["trade_volume_credited_to_depth"] += credited
             self._add("trade", key, ct, volume)
-            if volume <= 1e-12:
+            if volume <= 1e-12 and not confirm_ids:
                 return []
         self.diag["trade_volume_net"] += volume
         fills: list[Fill] = []
-        eligible, pre, through = [], [], []
+        eligible, pre, through, confirmed = [], [], [], []
         for order in list(self.orders.values()):
             if order.venue != venue or not order.is_live or now + 1e-12 < order.active_ts:
                 continue
@@ -473,6 +537,8 @@ class MakerExecutor:
                 pre.append(order)
             elif cfg.fill_through_prints and abs(price - order.price) > 1e-9 * max(1.0, abs(price)):
                 through.append(order)
+            elif order.order_id in confirm_ids:
+                confirmed.append(order)
             else:
                 eligible.append(order)
         for order in through:
@@ -487,6 +553,23 @@ class MakerExecutor:
             order.queue_ahead -= drained
             self.diag["pre_arrival_event_drains"] += 1
             self.diag["pre_arrival_queue_drained"] += drained
+        if confirmed:
+            # The trade is the second publication of the execution that produced the decrease: it fills the order up to its
+            # own (gross) size, not reduced by the credit the de-duplication gave the decrease.
+            confirmed.sort(key=lambda o: (o.placed_ts, o.order_id))
+            budget = gross_volume
+            for order in confirmed:
+                cap = cfg.evidence_fill_fraction * order.front_decrease if cfg.fill_evidence == "trade_confirm+fractional" else None
+                f = self._fill_from(order, budget, now, cfg.trade_fill_share, "trade", fee_bps, is_synthetic,
+                                    cause="trade_after_front", qty_cap=cap)
+                order.front_ts = None
+                if f is not None:
+                    fills.append(f)
+                    self.diag["evidence_confirmed_fill_qty"] += f.qty
+                    if cfg.trade_fill_share > 0:
+                        budget -= f.qty / cfg.trade_fill_share
+                    if budget <= 1e-12:
+                        break
         share = cfg.share_trade_volume
         if share:
             eligible.sort(key=lambda o: (-o.price if o.side == Side.BID else o.price, o.placed_ts, o.order_id))
@@ -552,10 +635,11 @@ class MakerExecutor:
                 can_fill = not self._pre_arrival(order, event_ts)
                 if proportional:
                     f = self._consume_proportional(order, shrink, order.level_now, now, cfg.delta_fill_share, "delta", fee_bps, can_fill,
-                                                   power_n=power_n, cause="delta_vanish" if new_size <= 1e-12 else "delta_share")
+                                                   power_n=power_n, cause="delta_vanish" if new_size <= 1e-12 else "delta_share",
+                                                   credit_ts=ct)
                 else:
                     f = self._consume(order, shrink, now, cfg.delta_fill_share, "delta", fee_bps, can_fill=can_fill,
-                                      cause="delta_vanish" if new_size <= 1e-12 else "delta_share")
+                                      cause="delta_vanish" if new_size <= 1e-12 else "delta_share", credit_ts=ct)
                 self.diag["delta_queue_drained"] += queue_before - order.queue_ahead
                 if not can_fill:
                     self.diag["pre_arrival_event_drains"] += 1
@@ -597,7 +681,8 @@ class MakerExecutor:
                 if shrink > 1e-12:
                     queue_before = order.queue_ahead
                     can_fill = not self._pre_arrival(order, event_ts)
-                    f = self._consume(order, shrink, now, cfg.snapshot_fill_share, "snapshot", fee_bps, can_fill=can_fill, cause="snapshot")
+                    f = self._consume(order, shrink, now, cfg.snapshot_fill_share, "snapshot", fee_bps, can_fill=can_fill, cause="snapshot",
+                                      credit_ts=self._credit_time(now, event_ts))
                     self.diag["snapshot_queue_drained"] += queue_before - order.queue_ahead
                     if f is not None:
                         fills.append(f)
@@ -622,7 +707,7 @@ class MakerExecutor:
     def _consume(
         self, order: MakerOrder, volume: float, now: float,
         fill_share: float, source: str, fee_bps: float,
-        is_synthetic: bool = False, can_fill: bool = True, cause: str | None = None,
+        is_synthetic: bool = False, can_fill: bool = True, cause: str | None = None, credit_ts: float | None = None,
     ) -> Fill | None:
         """Drain queue first, then fill our own size from what is left (if the event may fill this order). The whole
         `volume` is charged to the queue ahead of this order (the 'all_ahead' rule when called for a depth decrease)."""
@@ -634,13 +719,16 @@ class MakerExecutor:
             drained = min(order.queue_ahead, available)
             order.queue_ahead -= drained
             available -= drained
+            self._settle_queue(order)
         if not can_fill:
             return None
+        if source != "trade" and self.config.fill_evidence != "off":
+            return self._decrease_with_evidence(order, volume, available, now, fill_share, source, fee_bps, cause, credit_ts)
         return self._fill_from(order, available, now, fill_share, source, fee_bps, is_synthetic, cause=cause)
 
     def _consume_proportional(
         self, order: MakerOrder, shrink: float, prev_level: float, now: float, fill_share: float, source: str, fee_bps: float,
-        can_fill: bool, power_n: float = 1.0, cause: str | None = None,
+        can_fill: bool, power_n: float = 1.0, cause: str | None = None, credit_ts: float | None = None,
     ) -> Fill | None:
         """Unattributed depth decrease, split between the queue ahead of us and the volume behind us: only the share that
         was ahead advances us. With power_n == 1 the share is ahead / level_before ('proportional'); otherwise
@@ -659,18 +747,85 @@ class MakerExecutor:
             frac = (ahead ** power_n) / (ahead ** power_n + behind ** power_n)
         drained = min(order.queue_ahead, shrink * frac)
         order.queue_ahead -= drained
+        self._settle_queue(order)
+        if cause == "delta_vanish" and can_fill and (self.config.vanish_clears_queue or self.config.fill_evidence in _WHOLE_RULE_MODES):
+            order.queue_ahead = 0.0                              # the level is gone: everything that was ahead of us left with it
         if not can_fill or order.queue_ahead > 1e-12:
             return None
+        if self.config.fill_evidence != "off":
+            return self._decrease_with_evidence(order, shrink, shrink - drained, now, fill_share, source, fee_bps, cause, credit_ts)
         return self._fill_from(order, shrink - drained, now, fill_share, source, fee_bps, False, cause=cause)
+
+    def _decrease_with_evidence(
+        self, order: MakerOrder, decrease: float, available: float, now: float, fill_share: float, source: str, fee_bps: float,
+        cause: str | None, credit_ts: float | None,
+    ) -> Fill | None:
+        """fill_evidence != "off": what an unexplained decrease (depth delta or snapshot shrink) does once it has been charged to
+        the queue ahead. `decrease` is its size, `available` what is left of it after the queue ahead (0 when the queue is not
+        yet exhausted). See MakerConfig.fill_evidence."""
+        cfg = self.config
+        if cfg.fill_evidence in _GATED_MODES:
+            gated = cause == "delta_share" or (cause == "snapshot" and cfg.fill_evidence == "confirm_delta_snapshot")
+            if not gated:                                           # vanished level, or a snapshot in confirm_delta: as "off"
+                return self._fill_from(order, available, now, fill_share, source, fee_bps, False, cause=cause)
+            if order.queue_ahead > 1e-12:
+                return None
+            order.front_ts = now if credit_ts is None else credit_ts
+            order.front_decrease = decrease
+            self.diag["evidence_front_marks"] += 1
+            self.diag["evidence_suppressed_fill_qty"] += min(order.remaining, max(available, 0.0) * fill_share)
+            return None
+        vanish = cause == "delta_vanish"
+        if vanish:
+            order.queue_ahead = 0.0
+        if order.queue_ahead > 1e-12:
+            return None
+        if vanish or cfg.fill_evidence in ("trade_confirm", "trade_confirm+fractional"):
+            order.front_ts = now if credit_ts is None else credit_ts
+            order.front_decrease = decrease
+            self.diag["evidence_front_marks"] += 1
+            self.diag["evidence_suppressed_fill_qty"] += min(order.remaining, max(available, 0.0) * fill_share)
+            return None
+        return self._fill_from(order, available, now, fill_share, source, fee_bps, False, cause=cause,
+                               qty_cap=cfg.evidence_fill_fraction * decrease)
+
+    def _settle_queue(self, order: MakerOrder) -> None:
+        """queue_empty_threshold != "absolute": a queue at or below the threshold counts as empty and is set to 0."""
+        mode = self.config.queue_empty_threshold
+        if mode == "absolute" or order.queue_ahead <= 0.0:
+            return
+        thr = self.config.queue_empty_lot if mode == "lot" else self.config.queue_empty_frac * order.size
+        if order.queue_ahead <= max(thr, 1e-12):
+            self.diag["queue_empty_forgiven"] = self.diag.get("queue_empty_forgiven", 0.0) + order.queue_ahead
+            self.diag["queue_empty_events"] = self.diag.get("queue_empty_events", 0.0) + 1.0
+            order.queue_ahead = 0.0
+
+    def _confirming_orders(self, venue: str, price: float, sign: int, now: float, ct: float, event_ts: float | None) -> set[int]:
+        """Orders at the front of the queue whose latest unexplained decrease is within evidence_window_ms before this trade,
+        resting at exactly the trade's price on the side it hits."""
+        window = self.config.evidence_window_ms / 1000.0
+        out: set[int] = set()
+        for order in self.orders.values():
+            if order.front_ts is None or order.venue != venue or not order.is_live or now + 1e-12 < order.active_ts:
+                continue
+            if not ((sign < 0 and order.side == Side.BID) or (sign > 0 and order.side == Side.ASK)):
+                continue
+            if abs(price - order.price) > 1e-9 * max(1.0, abs(price)) or self._pre_arrival(order, event_ts):
+                continue
+            if -1e-12 <= ct - order.front_ts <= window + 1e-12:
+                out.add(order.order_id)
+        return out
 
     def _fill_from(
         self, order: MakerOrder, available: float, now: float, fill_share: float, source: str, fee_bps: float,
-        is_synthetic: bool, cause: str | None = None,
+        is_synthetic: bool, cause: str | None = None, qty_cap: float | None = None,
     ) -> Fill | None:
         if available <= 0 or fill_share <= 0:
             return None
 
         qty = min(order.remaining, available * fill_share)
+        if qty_cap is not None:
+            qty = min(qty, qty_cap)
         if qty <= 1e-12:
             return None
 
