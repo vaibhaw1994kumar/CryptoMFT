@@ -59,11 +59,18 @@ ORDER_STATE_BY_EVENT = {
     ExecutionEventType.REPLACED: OrderState.ACKNOWLEDGED,
     ExecutionEventType.TIMED_OUT: OrderState.TIMED_OUT,
 }
+# Resolution order of an order's reports (new_backtest.order_state_machine is the written specification).
+#   D-04 (2026-11-01): TIMED_OUT is a LOCAL fact (no answer yet) and ranks below every venue report, so a late acknowledgement
+#   clears "unknown" instead of being outranked by it.
+#   D-05: CANCEL_REQUESTED is a local fact that outranks PARTIAL (a fill after the request keeps the order cancel-requested) and is
+#   itself outranked by the venue's terminal reports.
+#   D-06: a REJECTED report after a fill is a protocol violation; the fill is a fact and wins (see ingest_order_update).
 ORDER_STATE_RANK = {
     OrderState.CREATED: 0,
+    OrderState.TIMED_OUT: 0.5,
     OrderState.ACKNOWLEDGED: 1,
     OrderState.PARTIAL: 2,
-    OrderState.TIMED_OUT: 3,
+    OrderState.CANCEL_REQUESTED: 2.5,
     OrderState.REJECTED: 4,
     OrderState.CANCELLED: 5,
     OrderState.FILLED: 6,
@@ -243,6 +250,7 @@ class OMS:
             "new_risk_held_residual_breach": 0,
             "residual_breach_kill_escalations": 0,
             "resting_fill_reports": 0,
+            "ambiguous_dispatch_errors": 0,
         }
         self._books: dict[tuple[str, str], OrderBook] = {}
         self._flatten_book_marker: dict[str, tuple[int, str]] = {}
@@ -321,7 +329,7 @@ class OMS:
                         continue
                     if (
                         order.time_in_force == TimeInForce.GTC.value
-                        and order.state in {OrderState.ACKNOWLEDGED, OrderState.PARTIAL}
+                        and order.state in {OrderState.ACKNOWLEDGED, OrderState.PARTIAL, OrderState.CANCEL_REQUESTED}
                     ):
                         continue
                     self._watch_order(order, recovery_ts_ns, immediate=True)
@@ -453,6 +461,7 @@ class OMS:
         if self.order_owner_guard is not None:
             self.order_owner_guard()
         cancelled = 0
+        cancel_errors = 0
         for plan in self.plans.values():
             self._recompute_plan_economics(plan, now_ns)
             for order in plan.children:
@@ -462,7 +471,7 @@ class OMS:
                     order.reduce_only or self._order_reduces_residual(plan, order)
                 ):
                     continue
-                if order.state in (OrderState.CREATED, OrderState.ACKNOWLEDGED, OrderState.PARTIAL):
+                if order.state in (OrderState.CREATED, OrderState.ACKNOWLEDGED, OrderState.PARTIAL, OrderState.CANCEL_REQUESTED):
                     pending = self.router.cancel_pending_order(
                         order.order_id, now_ns=now_ns, reason=reason
                     )
@@ -501,11 +510,19 @@ class OMS:
                         time_in_force=TimeInForce.GTC,
                         created_ts_ns=now_ns,
                     )
-                    callbacks = self.router.route(request)
+                    try:
+                        callbacks = self.router.route(request)
+                    except Exception as exc:
+                        # One venue failing must not stop the sweep: the other orders still have to be cancelled.
+                        # This order stays as it was (not cancelled) and is re-queried immediately.
+                        self._note_ambiguous_dispatch(plan, order, request.idempotency_key, "CANCEL", exc, now_ns)
+                        cancel_errors += 1
+                        continue
                     self._record_order_action(
                         plan, order, request, "CANCEL", "DISPATCHED", now_ns,
                         target_order_id=order.order_id,
                     )
+                    self.note_cancel_requested(order.order_id, now_ns)          # D-05
                     for callback in callbacks:
                         self._ingest_request_callback(
                             plan, order, request, callback, now_ns
@@ -522,6 +539,7 @@ class OMS:
             venue=venue or "ALL",
             preserve_risk_reducing=preserve_risk_reducing,
             cancelled_orders=cancelled,
+            **({"cancel_errors": cancel_errors} if cancel_errors else {}),
         )
         return cancelled
 
@@ -717,7 +735,7 @@ class OMS:
                     order.limit_price for plan in self.plans.values() for order in plan.children
                     if order.venue == venue and order.instrument_id == instrument_id and order.side == Side.BUY
                     and order.order_role != "PRIMARY"
-                    and order.state in {OrderState.CREATED, OrderState.ACKNOWLEDGED, OrderState.PARTIAL}
+                    and order.state in {OrderState.CREATED, OrderState.ACKNOWLEDGED, OrderState.PARTIAL, OrderState.CANCEL_REQUESTED}
                 ), default=Decimal("0"))
                 fee, fee_asset = self.risk._reserve_fee(venue, instrument_id, 0) if hasattr(self.risk, "_reserve_fee") else (Decimal("0"), "QUOTE")
                 amount = buys * price * (Decimal("1") + (fee if fee_asset == "QUOTE" else Decimal("0")))
@@ -746,7 +764,7 @@ class OMS:
         for plan in self.plans.values():
             for order in plan.children:
                 if order.order_role == "PRIMARY" or order.state not in {
-                    OrderState.CREATED, OrderState.ACKNOWLEDGED, OrderState.PARTIAL,
+                    OrderState.CREATED, OrderState.ACKNOWLEDGED, OrderState.PARTIAL, OrderState.CANCEL_REQUESTED,
                 }:
                     continue
                 remaining = order.quantity - order.filled_quantity
@@ -1171,7 +1189,7 @@ class OMS:
             order for order in plan.children
             if order.order_role == "UNWIND"
             and order.state in {
-                OrderState.CREATED, OrderState.ACKNOWLEDGED, OrderState.PARTIAL
+                OrderState.CREATED, OrderState.ACKNOWLEDGED, OrderState.PARTIAL, OrderState.CANCEL_REQUESTED
             }
         ]
 
@@ -1406,7 +1424,7 @@ class OMS:
             if self._residual_within_bound(plan):
                 return True
             if order.state in {
-                OrderState.CREATED, OrderState.ACKNOWLEDGED, OrderState.PARTIAL
+                OrderState.CREATED, OrderState.ACKNOWLEDGED, OrderState.PARTIAL, OrderState.CANCEL_REQUESTED
             }:
                 return False
         return self._residual_within_bound(plan)
@@ -1560,7 +1578,7 @@ class OMS:
         working = [
             order for order in plan.children
             if order.state in {
-                OrderState.CREATED, OrderState.ACKNOWLEDGED, OrderState.PARTIAL
+                OrderState.CREATED, OrderState.ACKNOWLEDGED, OrderState.PARTIAL, OrderState.CANCEL_REQUESTED
             }
         ]
         if working:
@@ -1568,7 +1586,7 @@ class OMS:
             still_working = tuple(
                 order.order_id for order in plan.children
                 if order.state in {
-                    OrderState.CREATED, OrderState.ACKNOWLEDGED, OrderState.PARTIAL
+                    OrderState.CREATED, OrderState.ACKNOWLEDGED, OrderState.PARTIAL, OrderState.CANCEL_REQUESTED
                 }
             )
             if still_working or self.router.has_pending_parent(plan.parent_id):
@@ -1815,7 +1833,7 @@ class OMS:
             if order.state in TERMINAL_ORDER_STATES:
                 continue
             if order.time_in_force == TimeInForce.GTC.value and order.state in {
-                OrderState.ACKNOWLEDGED, OrderState.PARTIAL,
+                OrderState.ACKNOWLEDGED, OrderState.PARTIAL, OrderState.CANCEL_REQUESTED,
             }:
                 continue
             unknown.append(order.order_id)
@@ -1939,6 +1957,23 @@ class OMS:
             self.ledger.apply_fill(order, ts_ns)
             self._update_exposure_control(ts_ns)
 
+    def _note_ambiguous_dispatch(
+        self, plan: ParentPlan, order: ChildOrder, idempotency_key: str, action: str, exc: BaseException, ts_ns: int,
+    ) -> None:
+        """A submit/cancel call raised: the venue may or may not have acted. Record it and make sure it is re-queried."""
+        self.realism_counters["ambiguous_dispatch_errors"] += 1
+        error = f"{type(exc).__name__}: {exc}"
+        self.ledger.record(
+            "DISPATCH_EXCEPTION_AMBIGUOUS", ts_ns, parent_id=plan.parent_id, order_id=order.order_id,
+            venue=order.venue, action=action, idempotency_key=idempotency_key, error=error,
+            local_state=order.state.value,
+        )
+        self._persist(
+            plan, ts_ns, "DISPATCH_EXCEPTION_AMBIGUOUS", order_id=order.order_id, venue=order.venue,
+            action=action, idempotency_key=idempotency_key, error=error,
+        )
+        self._watch_order(order, ts_ns, immediate=(action == "CANCEL"))
+
     def check_order_deadlines(self, now_ns: int) -> int:
         """Query venues for orders past their report deadline; never resend."""
         policy = self.order_timeout_policy
@@ -1958,7 +1993,7 @@ class OMS:
                 continue
             if order.state in TERMINAL_ORDER_STATES or (
                 order.time_in_force == TimeInForce.GTC.value
-                and order.state in {OrderState.ACKNOWLEDGED, OrderState.PARTIAL}
+                and order.state in {OrderState.ACKNOWLEDGED, OrderState.PARTIAL, OrderState.CANCEL_REQUESTED}
                 and order_id not in self._requery_orders
             ):
                 self._report_deadlines.pop(order_id, None)
@@ -1984,7 +2019,7 @@ class OMS:
                 self._apply_venue_status(plan, order, status, query_ts)
                 if order.state in TERMINAL_ORDER_STATES or (
                     order.time_in_force == TimeInForce.GTC.value
-                    and order.state in {OrderState.ACKNOWLEDGED, OrderState.PARTIAL}
+                    and order.state in {OrderState.ACKNOWLEDGED, OrderState.PARTIAL, OrderState.CANCEL_REQUESTED}
                 ):
                     self.realism_counters["resolved_by_query"] += 1
                     self._report_deadlines.pop(order_id, None)
@@ -2085,6 +2120,36 @@ class OMS:
             SOURCE_RANK[str(row["source"])],
             str(row["update_id"]),
         )
+
+    def _resolve_order_state(self, plan: ParentPlan, order, ts_ns: int) -> None:
+        """order.state from every report seen so far (ORDER_STATE_RANK). D-06: a reject that arrives after a fill cannot undo the
+        fill — the order reads PARTIAL (or FILLED) and the ledger carries REJECT_AFTER_FILL_ALARM for the operator."""
+        winner = max(order.state_updates, key=self._order_update_key)
+        state = OrderState(str(winner["resolved_order_state"]))
+        filled = max((Decimal(str(r["cumulative_filled_quantity"])) for r in order.state_updates), default=Decimal("0"))
+        if state == OrderState.REJECTED and filled > 0:
+            state = OrderState.FILLED if filled >= order.quantity else OrderState.PARTIAL
+            alarmed = self.__dict__.setdefault("_reject_after_fill_alarmed", set())
+            if order.order_id not in alarmed:
+                alarmed.add(order.order_id)
+                self.ledger.record("REJECT_AFTER_FILL_ALARM", ts_ns, parent_id=plan.parent_id, order_id=order.order_id,
+                                   filled_quantity=str(filled), reason=str(winner.get("reason") or ""))
+        order.state = state
+
+    def note_cancel_requested(self, order_id: str, ts_ns: int) -> None:
+        """D-05: record that a cancel was sent for `order_id`. The order stays live (fills are still booked); the state reads
+        CANCEL_REQUESTED until the venue reports CANCELLED / FILLED / REJECTED."""
+        for plan in self.plans.values():
+            for order in plan.children:
+                if order.order_id == order_id:
+                    if order.state in (OrderState.ACKNOWLEDGED, OrderState.PARTIAL, OrderState.CANCEL_REQUESTED, OrderState.CREATED, OrderState.TIMED_OUT):
+                        order.state_updates.append({
+                            "update_id": f"cancel-request:{order_id}:{ts_ns}", "source": OrderUpdateSource.INTERNAL.value,
+                            "resolved_order_state": OrderState.CANCEL_REQUESTED.value, "cumulative_filled_quantity": "0",
+                            "average_price": "0", "fee": "0", "event_ts_ns": ts_ns, "sequence": 0, "reason": "",
+                        })
+                        self._resolve_order_state(plan, order, ts_ns)
+                    return
 
     def _derive_execution_state(self, plan: ParentPlan, ts_ns: int) -> None:
         states = {order.state for order in plan.children}
@@ -2187,8 +2252,8 @@ class OMS:
         row = update.to_dict()
         row["resolved_order_state"] = ORDER_STATE_BY_EVENT[update.state].value
         order.state_updates.append(row)
+        self._resolve_order_state(plan, order, update.observed_ts_ns)
         winner = max(order.state_updates, key=self._order_update_key)
-        order.state = OrderState(str(winner["resolved_order_state"]))
         fill_winner = max(
             order.state_updates,
             key=lambda item: (
@@ -2504,7 +2569,14 @@ class OMS:
                 idempotency_key=stable_id("submit", order.order_id),
                 risk_reducing=risk_reducing,
             )
-            routing = self.route_strategy_order(instruction, books)
+            try:
+                routing = self.route_strategy_order(instruction, books)
+            except Exception as exc:
+                # The adapter raised after the order may already have been handed to the venue, so the order is
+                # neither accepted nor rejected as far as we know. Keep the reservation, never resend, and put the
+                # order under the normal report-deadline recovery (venue query -> time out -> kill switch).
+                self._note_ambiguous_dispatch(plan, order, instruction.idempotency_key, "SUBMIT", exc, dispatch_started_ts)
+                raise
             if risk_reducing:
                 self._record_legging_control_override(
                     plan, order, routing, dispatch_started_ts,

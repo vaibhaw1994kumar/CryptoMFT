@@ -56,6 +56,7 @@ from .config import load_config
 from .fees import Liquidity
 from .latency import LatencyModel, latency_model_from_config
 from .maker_engine import QueueEngine, make_queue_engine
+from .metrics import markout_bps
 from .models import BookState, MarketEvent, TradeEvent
 from .orderbook import OrderBook
 from .sim_clock import SimulationClock, TimerHandle
@@ -505,8 +506,7 @@ class MakerDryRunSimulator:
         if self._draining or stats.last_mid is None:
             stats.markouts_truncated += 1  # horizon ends after the last event
             return
-        move = (stats.last_mid - price) / price * 10_000
-        signed = move if order.side == "BUY" else -move
+        signed = markout_bps(order.side, price, stats.last_mid)
         stats.markout_sum_bps[horizon] = stats.markout_sum_bps.get(horizon, 0.0) + signed
         stats.markout_count[horizon] = stats.markout_count.get(horizon, 0) + 1
 

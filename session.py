@@ -217,6 +217,16 @@ class TradingSession:
         self.router = StrategyDirectedRouter(
             cfg.instruments, adapters=adapters, latency_model=router_latency
         )
+        # Each route carries only what its venue and adapter support (REF05).
+        from .capabilities import configure_route
+        from .execution import VenueRouteStatus
+
+        for venue in cfg.venues:
+            configure_route(
+                self.router.route_status.setdefault(venue, VenueRouteStatus()), venue,
+                cfg.instruments.get(venue, cfg.instrument_id).product_type,
+                testnet=execution_mode == ExecutionMode.VENUE_TESTNET,
+            )
         # Financing engines and their journal come before the OMS: on a restart
         # the OMS re-reserves risk for open plans, and a sell leg financed by a
         # borrow needs the loan (journal) and the borrow line (engine) to exist.

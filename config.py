@@ -15,6 +15,7 @@ from .execution import OrderTimeoutPolicy, ResidualPolicy, UnwindUrgency
 from .fees import FeeSchedule, parse_effective_ns
 from .orderbook import BookSanityPolicy
 from .monitoring import MonitoringThresholds
+from .config_schema import validate_config_keys
 from .credentials import reject_plaintext_credentials
 
 
@@ -129,6 +130,8 @@ def _perpetual_fields(x: dict) -> dict[str, Any]:
 def load_config(path: Path) -> tuple[AppConfig, dict]:
     raw = json.loads(path.read_text(encoding="utf-8"))
     reject_plaintext_credentials(raw)
+    validate_config_keys(raw)
+    _validate_strategy_venues(raw)
     instruments = [
         Instrument(
             instrument_id=x["instrument_id"],
@@ -156,6 +159,11 @@ def load_config(path: Path) -> tuple[AppConfig, dict]:
     from .cross_venue import check_instrument_compatibility
 
     check_instrument_compatibility(instruments, raw["strategy"]["instrument_id"], raw["strategy"]["venues"])
+    from .capabilities import capabilities
+
+    for x in raw["instruments"]:
+        if x["instrument_id"] == raw["strategy"]["instrument_id"] and x["venue"] in raw["strategy"]["venues"]:
+            capabilities(x["venue"], str(x.get("product_type", "SPOT")))   # fails closed if unknown
     inventory = _inventory_policy(raw)
     if inventory.model == InventoryModel.PRE_FUNDED and any(
         i.settlement_asset and i.instrument_id == raw["strategy"]["instrument_id"]
@@ -423,6 +431,16 @@ def _transfer_section(raw: dict) -> dict[str, Any]:
     if len(keys) != len(set(keys)):
         raise ValueError("duplicate transfer route")
     return section
+
+
+def _validate_strategy_venues(raw: dict) -> None:
+    """The cross-venue strategy reads ``venues[0]`` and ``venues[1]``: require two distinct venues."""
+    venues = list(raw["strategy"]["venues"])
+    if len(set(venues)) < 2:
+        raise ValueError(
+            f"strategy.venues must list at least two distinct venues for the "
+            f"cross-venue strategy, got {venues}"
+        )
 
 
 def _margin_section(raw: dict, instruments: list[Instrument]):

@@ -54,6 +54,7 @@ class OrderState(StrEnum):
     REJECTED = "REJECTED"
     TIMED_OUT = "TIMED_OUT"
     CANCELLED = "CANCELLED"
+    CANCEL_REQUESTED = "CANCEL_REQUESTED"     # D-05 (2026-11-01): a cancel is in flight; the order is still live and can fill
 
 
 def d(value: str | int | float | Decimal) -> Decimal:

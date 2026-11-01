@@ -10,6 +10,7 @@ import re
 from typing import Any
 
 from .alerting import AlertOwnership
+from .metrics import plan_total
 
 
 class MonitorHealth(StrEnum):
@@ -129,6 +130,12 @@ class PipelineMonitor:
                 MonitorHealth.DEGRADED,
             ),
         ]
+        if "active_reconnect_storms" in live:
+            # A venue reconnecting repeatedly without a valid book (live_feed RECONNECT_STORM).
+            metrics.append(self._metric(
+                "active_reconnect_storms", int(live["active_reconnect_storms"]), "count", "<=", 0,
+                MonitorHealth.CRITICAL,
+            ))
         if mode != "REPLAY":
             metrics = [m for m in metrics if m.name != "replay_events_per_second"]
         strategy_execution = strategy_execution or {}
@@ -336,9 +343,9 @@ class PipelineMonitor:
                 "max_first_callback_latency_ns": max(callback_latencies) if callback_latencies else 0,
             },
             "pnl": {
-                "gross": str(sum((plan.gross_pnl for plan in plans), Decimal("0"))),
-                "fees": str(sum((plan.fees for plan in plans), Decimal("0"))),
-                "net": str(sum((plan.net_pnl for plan in plans), Decimal("0"))),
+                "gross": str(plan_total(plans, "gross_pnl")),
+                "fees": str(plan_total(plans, "fees")),
+                "net": str(plan_total(plans, "net_pnl")),
             },
             "rate_limits": {
                 **rate_limit_state,
