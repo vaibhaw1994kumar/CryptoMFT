@@ -105,9 +105,12 @@ class CanonicalEventRecorder:
         self.path = path
         self.accepts = accepts
         self._handle = path.open("w", encoding="utf-8")
+        self._ordinal = 0
 
     def on_event(self, event: CanonicalEvent) -> None:
         row = event.to_dict() if isinstance(event, TradeEvent) else asdict(event)
+        self._ordinal += 1
+        row["processing_ordinal"] = self._ordinal   # replay.replay_order reproduces this order
         self._handle.write(json.dumps(row, default=json_default, sort_keys=True) + "\n")
         self._handle.flush()
 

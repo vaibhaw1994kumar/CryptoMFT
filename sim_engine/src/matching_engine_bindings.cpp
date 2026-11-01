@@ -22,6 +22,29 @@ PYBIND11_MODULE(mm_matching_engine, m) {
     m.doc() = "Bybit matching engine simulator — price-time priority, "
               "queue position tracking, and fee engine.";
 
+    // Build identity (set by the top-level CMakeLists.txt; empty for other builds):
+    // crypto_stat_arb.maker_engine.engine_identity compares source_sha256 with the
+    // sources on disk, so a stale binary is reported, not trusted.
+#ifndef MM_BUILD_SOURCE_SHA256
+#define MM_BUILD_SOURCE_SHA256 ""
+#endif
+#ifndef MM_BUILD_COMPILER
+#define MM_BUILD_COMPILER ""
+#endif
+#ifndef MM_BUILD_TYPE
+#define MM_BUILD_TYPE ""
+#endif
+#ifndef MM_BUILD_PYBIND11
+#define MM_BUILD_PYBIND11 ""
+#endif
+    py::dict build_info;
+    build_info["source_sha256"] = MM_BUILD_SOURCE_SHA256;
+    build_info["compiler"] = MM_BUILD_COMPILER;
+    build_info["build_type"] = MM_BUILD_TYPE;
+    build_info["pybind11"] = MM_BUILD_PYBIND11;
+    build_info["cplusplus"] = static_cast<long>(__cplusplus);
+    m.attr("__build_info__") = build_info;
+
     // ── Side enum ──────────────────────────────────────────────────────────
     py::enum_<Side>(m, "Side")
         .value("BID", Side::kBid)
@@ -86,6 +109,7 @@ PYBIND11_MODULE(mm_matching_engine, m) {
         .def_readonly("remaining_size",         &OrderEntry::remaining_size)
         .def_readonly("queue_ahead",            &OrderEntry::queue_ahead)
         .def_readonly("queue_ahead_remaining",  &OrderEntry::queue_ahead_remaining)
+        .def_readonly("clamp_credit",           &OrderEntry::clamp_credit)
         .def_readonly("queue_satisfied",        &OrderEntry::queue_satisfied)
         .def_readonly("active",                 &OrderEntry::active)
         .def("fill_ratio", [](const OrderEntry& e) {
@@ -156,6 +180,10 @@ PYBIND11_MODULE(mm_matching_engine, m) {
              "Top N ask levels as LevelSnapshot list.")
         .def("fee_engine", &MatchingEngine::fee_engine,
              py::return_value_policy::reference_internal)
+        .def("set_queue_position_frac", &MatchingEngine::set_queue_position_frac,
+             py::arg("frac"),
+             "Fraction of the visible level assumed ahead of a new order (0..1).")
+        .def("queue_position_frac", &MatchingEngine::queue_position_frac)
         .def("reset_all", &MatchingEngine::reset_all,
              "Clear all book data, orders, and fee accumulators.");
 }

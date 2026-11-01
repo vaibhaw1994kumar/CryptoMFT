@@ -59,7 +59,7 @@ crypto-stat-arb = "crypto_stat_arb.cli:main"
 
 [project.optional-dependencies]
 # new_backtest.fetch_tardis downloads Tardis data over HTTP; the fill models
-# (fill_label / fill_model_v1, also under crypto_stat_arb.advanced_backtest) fit a
+# (fill_label / fill_model_v1, in the single `new_backtest` package) fit a
 # scikit-learn LogisticRegression
 backtest = ["requests>=2.31", "scikit-learn>=1.5"]
 
@@ -123,6 +123,7 @@ sdist.exclude = [
     "/.nox/**",
     "/.idea/**",
     "/.vscode/**",
+    "**/.vscode/**",
     "/htmlcov/**",
     "/PCOC.MD",
     "**/__pycache__/**",

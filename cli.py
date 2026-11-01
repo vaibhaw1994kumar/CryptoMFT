@@ -125,7 +125,8 @@ async def _run_live_paper(args: argparse.Namespace) -> dict:
     if args.maker_dry_run:
         paper.cfg.strategies.setdefault("maker_simulation", {})["enabled"] = True
         paper.maker_simulator = maker_simulator_from_config(paper.cfg)
-    if args.status_poll_seconds > 0 and args.binance_market == "spot" and args.bybit_market == "spot":
+    # Each instrument is polled on its own product's endpoint (spot or linear perpetual).
+    if args.status_poll_seconds > 0:
         paper.status_poller = InstrumentStatusPoller(
             paper.cfg.instruments,
             {
@@ -360,6 +361,8 @@ def main() -> None:
         help="accept an INCOMPLETE reason (MISSING_PRICE, FEE_ASSET_UNPRICED, FEE_RULE_FALLBACK, FUNDING_DATA, "
              "BORROW_DATA, TRANSFER_DATA, DATA_QUALITY) with a written justification; listed in the result",
     )
+    caps = sub.add_parser("capabilities", help="venue/product/adapter capability matrix (REF05)")
+    caps.add_argument("--venue", action="append", choices=("BINANCE", "BYBIT"))
     tardis = sub.add_parser(
         "compare-tardis",
         help="offline: compare a recorded capture's books against a Tardis incremental_book_L2 CSV",
@@ -575,6 +578,10 @@ def main() -> None:
         print(json.dumps({"venue": args.venue, "records": len(records),
                           "without_mark": sum(1 for r in records if not r["mark_price"]),
                           "output": str(args.output)}, indent=2))
+    elif args.command == "capabilities":
+        from .capabilities import report as capability_report
+
+        print(json.dumps(capability_report(tuple(args.venue) if args.venue else None), indent=2))
     elif args.command == "compare-tardis":
         from .tardis_compare import compare_with_tardis
 
