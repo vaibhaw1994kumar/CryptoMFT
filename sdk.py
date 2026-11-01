@@ -69,6 +69,8 @@ class AdvancedBacktestSpec:
     output_dir: Path | None = None
     warm_start_fill_events: Path | None = None
     progress_every: int = 0
+    # Run even if the data-quality preflight rejects the data; recorded in the result.
+    allow_rejected_data: str | None = None
 
 
 class BacktestAPI:
@@ -117,6 +119,7 @@ class BacktestAPI:
                 if spec.warm_start_fill_events else None
             ),
             progress_every=spec.progress_every,
+            allow_rejected_data=spec.allow_rejected_data,
         )
 
     def run(self, spec: AdvancedBacktestSpec) -> dict[str, Any]:

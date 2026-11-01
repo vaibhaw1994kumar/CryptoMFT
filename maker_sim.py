@@ -55,7 +55,7 @@ from .canonical import CanonicalEventDispatcher
 from .config import load_config
 from .fees import Liquidity
 from .latency import LatencyModel, latency_model_from_config
-from .maker_engine import QueueEngine, make_queue_engine
+from .maker_engine import QueueEngine, engine_identity, make_queue_engine
 from .metrics import markout_bps
 from .models import BookState, MarketEvent, TradeEvent
 from .orderbook import OrderBook
@@ -613,6 +613,8 @@ class MakerDryRunSimulator:
         return {
             "schema_version": MAKER_REPORT_SCHEMA_VERSION,
             "engine": self.engine,
+            # Exactly which binary ran (or why the C++ engine was not used): GAP01.
+            "engine_build": engine_identity(next(iter(self.venues.values())).engine) if self.venues else None,
             "source": "sim_engine mm_matching_engine (crypto_stat_arb copy with queue-accounting fixes)",
             "symbol": self.symbol,
             "instrument_id": self.instrument_id,

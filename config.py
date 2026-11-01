@@ -42,6 +42,9 @@ class AppConfig:
     drain_horizon_ns: int = 10_000_000_000
     performance: dict[str, Any] = field(default_factory=dict)
     execution_mode: str = "INTERNAL_SIMULATION"
+    # oms.rate_limits: scoped venue rate limits (EMS02): enabled, cancel_reserve,
+    # risk_reducing_reserve. Empty = defaults (enabled, 0.2, 0.1).
+    rate_limits: dict[str, Any] = field(default_factory=dict)
     strategies: dict[str, Any] = field(default_factory=dict)
     inventory_policy: InventoryPolicy = field(default_factory=InventoryPolicy)
     # ``funding``: perpetual funding settlement (ECO02, see funding.py).
@@ -386,6 +389,7 @@ def load_config(path: Path) -> tuple[AppConfig, dict]:
         ),
         instruments=instrument_master,
         latency=raw.get("latency"),
+        rate_limits=dict(raw.get("oms", {}).get("rate_limits", {})),
         order_timeout_policy=OrderTimeoutPolicy(
             report_timeout_ns=int(timeout_config.get("report_timeout_ms", 2_000)) * 1_000_000,
             query_interval_ns=int(timeout_config.get("query_interval_ms", 500)) * 1_000_000,

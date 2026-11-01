@@ -110,6 +110,7 @@ SCHEMA: dict[str, Any] = {
     "oms": {
         "timeouts": {"report_timeout_ms": ANY, "query_interval_ms": ANY, "max_queries": ANY,
                      "kill_on_unresolved": ANY},
+        "rate_limits": {"enabled": ANY, "cancel_reserve": ANY, "risk_reducing_reserve": ANY},
         "residual": {"max_residual_base": ANY, "max_residual_age_ms": ANY, "max_one_sided_notional": ANY,
                      "hedge_venue_priority": ANY, "hold_new_risk_on_breach": ANY,
                      "allow_risk_reducing_under_stop": ANY, "max_unwind_attempts": ANY,

@@ -227,6 +227,16 @@ class TradingSession:
                 cfg.instruments.get(venue, cfg.instrument_id).product_type,
                 testnet=execution_mode == ExecutionMode.VENUE_TESTNET,
             )
+        # Scoped venue rate limits with capacity kept for cancels (EMS02).
+        rate_settings = {"enabled": True, **(cfg.rate_limits or {})}
+        if rate_settings["enabled"]:
+            from .capabilities import scoped_rate_limiter
+
+            self.router.scoped_limits = scoped_rate_limiter(
+                {venue: cfg.instruments.get(venue, cfg.instrument_id).product_type for venue in cfg.venues},
+                cancel_reserve=float(rate_settings.get("cancel_reserve", 0.2)),
+                risk_reducing_reserve=float(rate_settings.get("risk_reducing_reserve", 0.1)),
+            )
         # Financing engines and their journal come before the OMS: on a restart
         # the OMS re-reserves risk for open plans, and a sell leg financed by a
         # borrow needs the loan (journal) and the borrow line (engine) to exist.

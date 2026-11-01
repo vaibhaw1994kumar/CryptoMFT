@@ -47,14 +47,22 @@ class PlanState(StrEnum):
 
 
 class OrderState(StrEnum):
-    CREATED = "CREATED"
+    """Child-order lifecycle (OMS02). The OMS resolves it from the facts reported so far
+    (``oms.OMS._resolve_order_state``); ACKNOWLEDGED is the working state."""
+    CREATED = "CREATED"                  # built, not yet sent
+    SENT = "SENT"                        # sent, nothing heard back yet
+    CANCEL_PENDING = "CANCEL_PENDING"    # cancel sent, not confirmed: still live, can still fill
     ACKNOWLEDGED = "ACKNOWLEDGED"
     PARTIAL = "PARTIAL"
     FILLED = "FILLED"
     REJECTED = "REJECTED"
     TIMED_OUT = "TIMED_OUT"
     CANCELLED = "CANCELLED"
-    CANCEL_REQUESTED = "CANCEL_REQUESTED"     # D-05 (2026-11-01): a cancel is in flight; the order is still live and can fill
+
+    @classmethod
+    def _missing_(cls, value):
+        # Ledgers and plan stores written by the 2026-11-01 local design spell CANCEL_PENDING as CANCEL_REQUESTED.
+        return cls.CANCEL_PENDING if value == "CANCEL_REQUESTED" else None
 
 
 def d(value: str | int | float | Decimal) -> Decimal:
