@@ -259,7 +259,8 @@ class TestnetTransportTests(unittest.TestCase):
         )
         plan = oms.execute(opportunity(), books)
         self.assertNotEqual(plan.state, PlanState.CLOSED)
-        self.assertEqual(plan.children[1].state, OrderState.CREATED)
+        # OMS02: the request may have reached the venue (timeout after send): SENT, not CREATED.
+        self.assertEqual(plan.children[1].state, OrderState.SENT)
         oms.advance_time(1_000, books)
         self.assertEqual(plan.children[1].state, OrderState.FILLED)
         self.assertEqual(plan.state, PlanState.CLOSED)

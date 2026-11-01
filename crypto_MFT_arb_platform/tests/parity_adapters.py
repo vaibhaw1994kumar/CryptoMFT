@@ -56,7 +56,7 @@ def run_oms(events) -> Outcome:
     from test_oms import instrument_master, make_book, opportunity, risk
 
     class SilentAdapter:
-        """Accepts every request and says nothing: the order stays CREATED until an update is ingested."""
+        """Accepts every request and says nothing: the order stays SENT until an update is ingested."""
         def handle(self, request, book):
             return ()
 
@@ -77,7 +77,7 @@ def run_oms(events) -> Outcome:
         if e.kind == Kind.SUBMIT:
             continue
         if e.kind == Kind.CANCEL_REQUEST:
-            oms.note_cancel_requested(order.order_id, int(e.ts * 1e9))     # D-05 resolved 2026-11-01
+            oms.note_cancel_requested(order.order_id, int(e.ts * 1e9))     # D-05: OMS02 CANCEL_PENDING
             continue
         if e.kind == Kind.RECONCILE:
             raise NotRepresentable("reconcile is a venue query on the OMS side, not an update")
@@ -91,9 +91,12 @@ def run_oms(events) -> Outcome:
             update_id=f"u{n}", source=source, parent_order_id=plan.parent_id, order_id=order.order_id, venue=order.venue,
             instrument_id=order.instrument_id, state=state, event_ts_ns=int(e.ts * 1e9), observed_ts_ns=int(e.arrive * 1e9) + 1,
             sequence=n, cumulative_filled_quantity=cum, average_price=Decimal("60000")))
-    mapping = {OrderState.CREATED: State.SUBMITTED, OrderState.ACKNOWLEDGED: State.RESTING, OrderState.PARTIAL: State.PARTIALLY_FILLED,
-               OrderState.FILLED: State.FILLED, OrderState.REJECTED: State.REJECTED, OrderState.CANCELLED: State.CANCELLED,
-               OrderState.TIMED_OUT: State.UNKNOWN, OrderState.CANCEL_REQUESTED: State.CANCEL_REQUESTED}
+    # The OMS02 correspondence (crypto_stat_arb.oms, above ALLOWED_ORDER_TRANSITIONS): SENT = SUBMITTED,
+    # CANCEL_PENDING = CANCEL_REQUESTED, TIMED_OUT = UNKNOWN. CREATED is never seen here (the order is sent by execute()).
+    mapping = {OrderState.CREATED: State.SUBMITTED, OrderState.SENT: State.SUBMITTED, OrderState.ACKNOWLEDGED: State.RESTING,
+               OrderState.PARTIAL: State.PARTIALLY_FILLED, OrderState.FILLED: State.FILLED, OrderState.REJECTED: State.REJECTED,
+               OrderState.CANCELLED: State.CANCELLED, OrderState.TIMED_OUT: State.UNKNOWN,
+               OrderState.CANCEL_PENDING: State.CANCEL_REQUESTED}
     rows = [x for x in ledger.events if x["event_type"] == "FILL"]
     return Outcome.of(mapping[order.state], order.filled_quantity / qty, [Decimal(str(x["fill_quantity"])) / qty for x in rows],
                       [x["ts_ns"] / 1e9 for x in rows])

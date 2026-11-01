@@ -1,7 +1,7 @@
 # Advanced backtesting through Strategy SDK 1.1
 
 The supplied event-driven cross-venue backtester is integrated under
-`crypto_stat_arb.advanced_backtest` and exposed through the stable SDK as
+the `new_backtest` package (`src/new_backtest/`, the single engine used by the core) and exposed through the stable SDK as
 `BacktestAPI`. It is an offline-only service: `PAPER` and `TESTNET` contexts
 fail closed if code attempts to invoke it.
 
@@ -104,7 +104,7 @@ Key outputs are `result.json`, `trades.jsonl`, `fill_events.jsonl`, and
 The imported normalizer/downloader is available at:
 
 ```bash
-python -m crypto_stat_arb.advanced_backtest.fetch_tardis --help
+python -m new_backtest.fetch_tardis --help
 ```
 
 Downloading requires the user's own Tardis data access. The API key is a data

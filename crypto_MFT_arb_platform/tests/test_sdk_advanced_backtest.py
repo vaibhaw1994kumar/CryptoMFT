@@ -68,6 +68,7 @@ class AdvancedSDKBacktestTests(unittest.TestCase):
             max_clip_notional=10_000.0,
             block_on_toxic=False,
             output_dir=self.root / output,
+            allow_rejected_data="synthetic test fixture, too small for the quality gate by design",
         )
 
     def test_sdk_runs_attached_latency_depth_and_fill_backtester(self):

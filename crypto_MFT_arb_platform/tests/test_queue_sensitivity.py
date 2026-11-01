@@ -141,6 +141,7 @@ def _base_config(root: Path, mode: str = MAKER_TAKER) -> ArbBacktestConfig:
         ),
         include_deltas=False,
         seed=7,
+        allow_rejected_data="synthetic test fixture, too small for the quality gate by design",
     )
 
 

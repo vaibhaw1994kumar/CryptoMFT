@@ -91,10 +91,52 @@ jobs:
       - uses: actions/checkout@v7
       - name: Build wheels
         uses: pypa/cibuildwheel@v4.1.1
+      # SDK04: a CycloneDX SBOM next to every wheel (scripts/sbom.py, from uv.lock and the
+      # wheel's own native extensions).
+      - name: SBOM per wheel
+        run: python scripts/sbom.py --wheelhouse wheelhouse
       - uses: actions/upload-artifact@v7
         with:
           name: wheels-${{ matrix.os }}
-          path: ./wheelhouse/*.whl
+          path: |
+            ./wheelhouse/*.whl
+            ./wheelhouse/*.cdx.json
+
+  target:
+    # GAP03. The validated target runtime is Linux x86_64 with CPython 3.12: the Docker
+    # image's base, python:3.12-slim-bookworm. This job installs the wheel built above into
+    # that runtime (never the source tree) with the locked dependencies, requires the
+    # compiled matching engine to load and to match the Python mirror bit for bit, and
+    # records the build and ABI. The other wheels are built but not validated this way.
+    name: target runtime (linux x86_64, cpython 3.12)
+    needs: wheels
+    runs-on: ubuntu-latest
+    container: python:3.12-slim-bookworm
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v7
+        with:
+          name: wheels-ubuntu-latest
+          path: wheelhouse
+      - name: Install the wheel with the locked dependencies
+        run: |
+          set -eu
+          python -m pip install --no-cache-dir uv
+          uv export --frozen --no-emit-project --group dev --no-hashes -o /tmp/requirements.txt
+          python -m pip install --no-cache-dir -r /tmp/requirements.txt
+          python -m pip install --no-cache-dir --no-deps wheelhouse/*-cp312-cp312-manylinux*_x86_64*.whl
+      - name: C++ engine tests against the installed build (C++ required)
+        env:
+          REQUIRE_CPP_ENGINE: "1"
+        run: python -m pytest -q -p no:cacheprovider tests/test_cpp_engine_loading.py tests/test_maker_execution_path.py
+      - name: Build and ABI record
+        run: python scripts/build_record.py --wheel wheelhouse/*-cp312-cp312-manylinux*_x86_64*.whl --output build_record.json
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: build-record-linux-x86_64-cp312
+          path: build_record.json
 
   sdist:
     name: sdist
@@ -115,12 +157,16 @@ jobs:
     # the wheels, the sdist and the evidence bundle attached to a release are
     # by construction the ones built from the tagged commit.
     name: github release
-    needs: [tests, acceptance, wheels, sdist]
+    needs: [tests, acceptance, wheels, target, sdist]
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:
       contents: write
+      # SDK04 provenance: signed (Sigstore) build attestations for the release assets.
+      # Granted to this tag-only job alone, not to the workflow.
+      id-token: write
+      attestations: write
     steps:
       - uses: actions/checkout@v7
 
@@ -153,6 +199,9 @@ jobs:
           # sweep any archive that later appears inside the evidence bundle
           # into the release as though it were a distributable.
           find artifacts -path 'artifacts/wheels-*' -name '*.whl' -exec cp {} dist/ \;
+          find artifacts -path 'artifacts/wheels-*' -name '*.cdx.json' -exec cp {} dist/ \;
+          cp artifacts/build-record-linux-x86_64-cp312/build_record.json dist/build_record-linux-x86_64-cp312.json
+          test -n "$(find dist -name '*.cdx.json' -print -quit)"
           find artifacts/sdist -name '*.tar.gz' -exec cp {} dist/ \;
           ls dist
           test -n "$(find dist -name '*.whl' -print -quit)"
@@ -183,6 +232,17 @@ jobs:
             echo "  ghcr.io/${GITHUB_REPOSITORY}:${{ steps.version.outputs.version }}"
             echo '```'
           } >>notes.md
+
+      # Anyone can check where an asset was built:
+      #   gh attestation verify <file> --repo ${{ github.repository }}
+      - name: Attest build provenance of every release asset
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: |
+            dist/*.whl
+            dist/*.tar.gz
+            dist/*.cdx.json
+            dist/build_record-*.json
 
       - name: Create the release
         env:

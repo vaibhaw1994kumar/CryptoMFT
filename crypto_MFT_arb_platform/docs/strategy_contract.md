@@ -170,8 +170,12 @@ maker/taker opportunity must be built explicitly with `maker=True` and `FILL_TRI
   Fault injector: `reject_prob` 0 / 0.1 / 0.3 changes failed-hedge counts and cash (pinned); the stressed
   preset no longer hits a hedge with both the hedge and the by-venue reject probability (`venue_reject_applies_to_hedges`).
   Restart is a MODELLED scenario (`restart_s`, `restart_at_fills`), not the live `RestartCoordinator` path.
-* Order-state parity with the specification: a late acknowledgement clears UNKNOWN (D-04), the OMS has a CANCEL_REQUESTED
-  state (D-05), a reject after a fill keeps the fill and records REJECT_AFTER_FILL_ALARM (D-06). Still open and documented:
+* Order-state parity with the specification, under the OMS02 resolver (`crypto_stat_arb.oms._resolve_order_state`): a late
+  acknowledgement clears UNKNOWN (D-04), a cancel in flight is CANCEL_PENDING, still live and fillable (D-05;
+  `OMS.note_cancel_requested` records it), a reject after a fill keeps the fill, re-queries the venue
+  (REJECT_AFTER_FILL_REQUERIED) and records REJECT_AFTER_FILL_ALARM once per order (D-06). Names against
+  `order_state_machine`: SENT = SUBMITTED, CANCEL_PENDING = CANCEL_REQUESTED, TIMED_OUT = UNKNOWN; stored state
+  "CANCEL_REQUESTED" (the 1 Nov local design) reads as CANCEL_PENDING. Still open and documented:
   D-01 (the simulator cannot reject a resting order after acceptance), D-02 (no acknowledgement state in the simulator),
   D-03 (resolved only under `cancel_time_basis="exchange"`).
 

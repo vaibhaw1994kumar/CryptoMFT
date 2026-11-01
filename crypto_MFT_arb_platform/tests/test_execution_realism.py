@@ -117,14 +117,15 @@ class LatencyExecutionTests(unittest.TestCase):
         oms = OMS(instrument_master(), risk(), Ledger(), router=router)
         plan = oms.execute(opportunity(), current)
         self.assertEqual(plan.state, PlanState.DISPATCHED)
-        self.assertTrue(all(child.state == OrderState.CREATED for child in plan.children))
+        # OMS02: dispatched and travelling, nothing heard back yet.
+        self.assertTrue(all(child.state == OrderState.SENT for child in plan.children))
 
         # The Binance ask is lifted by someone else while our order travels.
         current[("BINANCE", INSTRUMENT)].apply(delta(
             "BINANCE", 2, 5 * MS, [], [["60000.00", "0"], ["60005.00", "1"]],
         ))
         oms.advance_time(12 * MS, current)
-        self.assertTrue(all(child.state == OrderState.CREATED for child in plan.children))
+        self.assertTrue(all(child.state == OrderState.SENT for child in plan.children))
         oms.advance_time(20 * MS, current)
         buy, sell = plan.children[:2]
         self.assertEqual(buy.state, OrderState.REJECTED)

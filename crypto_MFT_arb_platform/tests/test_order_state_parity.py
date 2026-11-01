@@ -29,9 +29,10 @@ DISAGREEMENTS = {
     ("ack_timeout_unresolved", "maker"): ("D-02", "no acknowledgement exists in the simulator, so no acknowledgement timeout and no unknown state"),
     ("late_fill_after_cancel", "maker"): ("D-03", "a fill executed before the cancel took effect but received after it is dropped: the order is removed on receive time"),
 }
-# Resolved 2026-11-01 (WP6): D-04 (TIMED_OUT ranks below venue reports: a late ack clears 'unknown'), D-05 (OMS.note_cancel_requested /
-# OrderState.CANCEL_REQUESTED), D-06 (a reject after a fill keeps the fill; ledger REJECT_AFTER_FILL_ALARM). Their scenarios now
-# have to agree with the specification: a regression here fails outright.
+# Resolved by OMS02 (crypto_stat_arb.oms._resolve_order_state, ported 2026-11-01): D-04 (a timeout that is older than the venue's
+# evidence does not win: a late ack clears 'unknown'), D-05 (OMS.note_cancel_requested -> OrderState.CANCEL_PENDING), D-06 (a reject
+# after a fill keeps the fill and re-queries; ledger REJECT_AFTER_FILL_ALARM once per order). Their scenarios now have to agree with
+# the specification: a regression here fails outright.
 
 
 def _params():

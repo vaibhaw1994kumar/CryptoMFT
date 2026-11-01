@@ -129,7 +129,9 @@ class SlowSnapshotTests(unittest.IsolatedAsyncioTestCase):
                     venues=("BINANCE",), durable=False, reconnect_min_seconds=0.001,
                     reconnect_max_seconds=0.002),
                 websocket_connector=FakeConnector({"BINANCE": sockets}), http_getter=slow_snapshot,
-                clock_ns=StepClock())
+                # A frozen monotonic clock: staleness is not under test, and on a slow runner
+                # real gaps between frames marked the book STALE and back (book_syncs 3, not 1).
+                clock_ns=StepClock(), monotonic_ns=lambda: 0)
 
             async def release_when_drained():
                 while service.stats["BINANCE"].canonical_events < min(buffered, 10_000):
@@ -249,6 +251,48 @@ class SimultaneousRecoveryTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual({v: s.connections for v, s in service.stats.items()}, {"BINANCE": 2, "BYBIT": 2})
             self.assertTrue(decisions[-1][0])                       # trading resumed with both valid
             self.assertTrue(any(not d[0] for d in decisions))       # and was blocked during the drop
+
+
+class BufferedDeltaCostTests(unittest.IsolatedAsyncioTestCase):
+    async def test_buffered_deltas_do_not_rescan_the_buffer(self):
+        """Waiting for a snapshot, each buffered delta must cost O(1): the pending-id map
+        was rebuilt per event (quadratic, ~280 updates/s at 12,000 buffered)."""
+        scans = {"values": 0}
+
+        class CountingPending(dict):
+            def values(self):
+                scans["values"] += 1
+                return super().values()
+
+        released = asyncio.Event()
+
+        async def slow_snapshot(url, timeout):
+            await released.wait()
+            return json.dumps({"lastUpdateId": 100, "bids": [["99", "1"]], "asks": [["102", "1"]]}), 1
+
+        frames = [binance(101 + i, 101 + i) for i in range(300)]
+        with tempfile.TemporaryDirectory() as directory:
+            service = LiveOrderBookService(
+                CONFIG, Path(directory), "cost", LiveFeedSettings(venues=("BINANCE",), durable=False),
+                websocket_connector=FakeConnector({"BINANCE": [FakeWebSocket(frames)]}),
+                http_getter=slow_snapshot, clock_ns=StepClock())
+            book = service.books["BINANCE"]
+            book.pending_deltas = CountingPending()
+            stats = service.stats["BINANCE"]
+
+            async def drive():
+                while stats.canonical_events < 300:
+                    await asyncio.sleep(0)
+                buffered_scans = scans["values"]
+                released.set()
+                while book.sequence != 400:
+                    await asyncio.sleep(0.001)
+                service.request_stop()
+                return buffered_scans
+
+            _, buffered_scans = await asyncio.wait_for(asyncio.gather(service.run(), drive()), timeout=120)
+        self.assertEqual(buffered_scans, 0)                  # no scan while only buffering
+        self.assertEqual((book.state, book.sequence), (BookState.VALID, 400))
 
 
 if __name__ == "__main__":

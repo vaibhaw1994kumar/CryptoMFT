@@ -222,6 +222,12 @@ def run_preflight(
     with ``{"skipped": True, "reason": "..."}``.
     """
     if QualityGate is None:
+        if not report_only:
+            # Blocking mode must not silently pass data it could not check.
+            raise RuntimeError(
+                "Quality preflight could not run (crypto_stat_arb.quality not importable; "
+                "run with PYTHONPATH=src); refusing to replay unchecked data"
+            )
         return {
             "skipped": True,
             "reason": "crypto_stat_arb.quality not importable; run with PYTHONPATH=src",

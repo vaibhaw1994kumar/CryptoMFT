@@ -148,7 +148,8 @@ class LiveFeedTests(unittest.IsolatedAsyncioTestCase):
                 clock_ns=StepClock(),
                 publisher=publisher,
             )
-            manifest = await asyncio.wait_for(service.run(), timeout=2)
+            # Hang guards, not speed limits (windows-latest runs 0.3-0.6 s loop steps).
+            manifest = await asyncio.wait_for(service.run(), timeout=30)
 
             self.assertEqual(manifest["canonical_events"], 4)
             self.assertEqual(manifest["wire_records"], 4)
@@ -238,7 +239,7 @@ class LiveFeedTests(unittest.IsolatedAsyncioTestCase):
                 clock_ns=StepClock(),
                 cancel_callback=cancel_callback,
             )
-            await asyncio.wait_for(service.run(), timeout=2)
+            await asyncio.wait_for(service.run(), timeout=30)       # hang guard, not a speed limit
 
             self.assertEqual(service.stats["BYBIT"].resyncs, 1)
             self.assertEqual(service.stats["BYBIT"].reconnects, 1)

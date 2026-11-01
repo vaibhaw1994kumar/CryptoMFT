@@ -9,6 +9,7 @@ import asyncio
 from dataclasses import replace
 from decimal import Decimal
 import json
+import os
 from pathlib import Path
 import random
 import tempfile
@@ -216,8 +217,10 @@ class QueueEngineTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             PythonQueueEngine(1.5)
 
-    @unittest.skipIf(CPP is None, "compiled mm_matching_engine not importable")
+    @unittest.skipIf(CPP is None and not os.environ.get("REQUIRE_CPP_ENGINE"),
+                     "compiled mm_matching_engine not importable (REQUIRE_CPP_ENGINE=1 makes this a failure)")
     def test_cpp_and_python_engines_are_bit_identical(self):
+        self.assertIsNotNone(CPP, "REQUIRE_CPP_ENGINE is set but mm_matching_engine did not load")
         for frac in (1.0, 0.7, 0.0):
             with self.subTest(frac=frac):
                 self._parity(frac)
