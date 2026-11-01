@@ -2558,7 +2558,7 @@ def _data_quality(feed, cfg: ArbBacktestConfig) -> dict:
         venue: {"decision": report.get("decision"), "health": report.get("health"),
                 "skipped": bool(report.get("skipped")),
                 "active_flag_codes": [flag.get("code") for flag in report.get("active_flags", [])]}
-        for venue, report in sorted(feed.preflight_reports.items())
+        for venue, report in sorted(getattr(feed, "preflight_reports", {}).items())   # a stub feed has none
     }
     rejected = [venue for venue, row in preflight.items() if row["health"] == "CRITICAL"]
     override = _preflight_override(cfg)
