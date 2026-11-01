@@ -59,7 +59,7 @@ class BatchSummary:
     pairs_run: int
     pairs_skipped: int
 
-    total_realized_pnl: float
+    total_realized_pnl: float        # attribution calc (may diverge from ledger; see realized_pnl deprecation)
     total_gross_pnl: float
     total_fees: float
     total_unhedged_loss: float
@@ -77,6 +77,9 @@ class BatchSummary:
 
     per_pair: list[dict] = field(default_factory=list)
     skipped: list[dict] = field(default_factory=list)
+    total_ending_equity: float = 0.0  # authoritative: sum of (total_cash + open_pos_value) per run
+    total_cash_pnl: float = 0.0       # sum of total_cash per run (fees already deducted)
+    total_funding_paid: float = 0.0   # sum of funding settlements charged (opt-in, zero when funding_rate_dir unset)
 
 
 def _run_once(cfg: ArbBacktestConfig) -> ArbBacktestResult:
@@ -105,6 +108,7 @@ def _aggregate_fold_results(fold_dicts: list[dict]) -> dict:
 
     _ADD = (
         "realized_pnl", "gross_pnl", "fees_paid", "unhedged_loss",
+        "ending_equity", "cash_pnl", "funding_paid",
         "traded_notional", "signals_generated", "orders_sent",
         "orders_filled", "orders_missed", "orders_cancelled",
         "signals_completed", "signals_unhedged",
@@ -130,6 +134,33 @@ def _aggregate_fold_results(fold_dicts: list[dict]) -> dict:
                 merged_report[k] = merged_report.get(k, 0) + v
     combined["strategy_report"] = merged_report
     combined["wf_fold_count"] = len(fold_dicts)
+
+    # Aggregate markout_summary: count-weighted across folds so qty_weighted_markout_bps
+    # and adverse_rate are correctly averaged (fills are same-clip so count ≈ qty weight).
+    all_markouts = [d.get("markout_summary") or {} for d in fold_dicts]
+    horizons: set[str] = set()
+    for m in all_markouts:
+        horizons.update(m.keys())
+    if horizons:
+        merged_markout: dict = {}
+        for h in sorted(horizons):
+            counts = [m.get(h, {}).get("count", 0.0) for m in all_markouts]
+            total_count = sum(counts)
+            merged_markout[h] = {
+                "count": total_count,
+                "qty_weighted_markout_bps": (
+                    sum(m.get(h, {}).get("qty_weighted_markout_bps", 0.0) * c
+                        for m, c in zip(all_markouts, counts)) / total_count
+                    if total_count > 0 else 0.0
+                ),
+                "adverse_rate": (
+                    sum(m.get(h, {}).get("adverse_rate", 0.0) * c
+                        for m, c in zip(all_markouts, counts)) / total_count
+                    if total_count > 0 else 0.0
+                ),
+            }
+        combined["markout_summary"] = merged_markout
+
     return combined
 
 
@@ -342,6 +373,7 @@ def _clone(
         markout_horizons_s=base.markout_horizons_s,
         progress_every=base.progress_every,
         agent_flow=agent_flow_override if agent_flow_override is not None else base.agent_flow,
+        funding_rate_dir=base.funding_rate_dir,
     )
 
 
@@ -396,6 +428,7 @@ def _aggregate(outcomes: list[PairOutcome], base: ArbBacktestConfig) -> BatchSum
     skipped = [o for o in outcomes if o.status != "ok"]
 
     tot_pnl = tot_gross = tot_fees = tot_unhedged = tot_notional = 0.0
+    tot_ending_equity = tot_cash_pnl = tot_funding = 0.0
     tot_signals = tot_sent = tot_filled = tot_missed = 0
     captures: list[float] = []
     edges: list[float] = []
@@ -404,9 +437,12 @@ def _aggregate(outcomes: list[PairOutcome], base: ArbBacktestConfig) -> BatchSum
     for o in ok:
         r = o.final or {}
         tot_pnl += r.get("realized_pnl", 0.0)
+        tot_ending_equity += r.get("ending_equity", 0.0)
+        tot_cash_pnl += r.get("cash_pnl", 0.0)
         tot_gross += r.get("gross_pnl", 0.0)
         tot_fees += r.get("fees_paid", 0.0)
         tot_unhedged += r.get("unhedged_loss", 0.0)
+        tot_funding += r.get("funding_paid", 0.0)
         tot_notional += r.get("traded_notional", 0.0)
         tot_signals += int(r.get("signals_generated", 0))
         tot_sent += int(r.get("orders_sent", 0))
@@ -418,9 +454,12 @@ def _aggregate(outcomes: list[PairOutcome], base: ArbBacktestConfig) -> BatchSum
         per_pair.append({
             "pair": o.pair,
             "window": o.detail,
-            "realized_pnl": r.get("realized_pnl", 0.0),
+            "ending_equity": r.get("ending_equity", 0.0),   # authoritative
+            "cash_pnl": r.get("cash_pnl", 0.0),
+            "realized_pnl": r.get("realized_pnl", 0.0),     # kept for back-compat
             "gross_pnl": r.get("gross_pnl", 0.0),
             "fees": r.get("fees_paid", 0.0),
+            "funding_paid": r.get("funding_paid", 0.0),
             "unhedged_loss": r.get("unhedged_loss", 0.0),
             "traded_notional": r.get("traded_notional", 0.0),
             "signals": r.get("signals_generated", 0),
@@ -433,22 +472,24 @@ def _aggregate(outcomes: list[PairOutcome], base: ArbBacktestConfig) -> BatchSum
             "top_reject": _top_reject(r.get("strategy_report", {})),
         })
 
-    per_pair.sort(key=lambda d: d["realized_pnl"], reverse=True)
+    per_pair.sort(key=lambda d: d["ending_equity"], reverse=True)
 
     return BatchSummary(
         mode=base.arb.mode, latency_preset=base.latency_preset,
         start_date=base.start_date, end_date=base.end_date,
         pairs_requested=len(outcomes), pairs_run=len(ok), pairs_skipped=len(skipped),
-        total_realized_pnl=tot_pnl, total_gross_pnl=tot_gross,
+        total_realized_pnl=tot_pnl, total_ending_equity=tot_ending_equity,
+        total_cash_pnl=tot_cash_pnl, total_gross_pnl=tot_gross,
         total_fees=tot_fees, total_unhedged_loss=tot_unhedged,
+        total_funding_paid=tot_funding,
         total_traded_notional=tot_notional,
         total_signals=tot_signals, total_orders_sent=tot_sent,
         total_orders_filled=tot_filled, total_orders_missed=tot_missed,
         fill_ratio=tot_filled / max(1, tot_sent),
         mean_edge_capture=sum(captures) / len(captures) if captures else 0.0,
         mean_realized_net_edge_bps=sum(edges) / len(edges) if edges else 0.0,
-        pnl_per_million_notional=tot_pnl / (tot_notional / 1e6) if tot_notional > 0 else 0.0,
-        profitable_pairs=sum(1 for d in per_pair if d["realized_pnl"] > 0),
+        pnl_per_million_notional=tot_ending_equity / (tot_notional / 1e6) if tot_notional > 0 else 0.0,
+        profitable_pairs=sum(1 for d in per_pair if d["ending_equity"] > 0),
         per_pair=per_pair,
         skipped=[{"pair": o.pair, "status": o.status, "detail": o.detail} for o in skipped],
     )
@@ -468,10 +509,14 @@ def _print_summary(s: BatchSummary) -> None:
           f"{s.start_date}..{s.end_date}")
     print("=" * 78)
     print(f"  pairs run {s.pairs_run}/{s.pairs_requested}   skipped {s.pairs_skipped}")
-    print(f"  realized PnL        {s.total_realized_pnl:>18,.2f}")
-    print(f"    gross edge        {s.total_gross_pnl:>18,.2f}")
-    print(f"    fees              {-s.total_fees:>18,.2f}")
-    print(f"    leg risk          {-s.total_unhedged_loss:>18,.2f}")
+    print(f"  ending equity (auth) {s.total_ending_equity:>17,.2f}")
+    print(f"  cash PnL (ledger)    {s.total_cash_pnl:>17,.2f}")
+    print(f"  realized PnL (attr)  {s.total_realized_pnl:>17,.2f}  [attribution; may diverge from ledger]")
+    print(f"    gross edge         {s.total_gross_pnl:>17,.2f}")
+    print(f"    fees               {-s.total_fees:>17,.2f}")
+    print(f"    leg risk           {-s.total_unhedged_loss:>17,.2f}")
+    if s.total_funding_paid != 0.0:
+        print(f"    funding cost       {-s.total_funding_paid:>17,.2f}")
     print(f"  traded notional     {s.total_traded_notional:>18,.2f}")
     print(f"  PnL per $1M traded  {s.pnl_per_million_notional:>18,.2f}")
     print(f"  signals {s.total_signals:,}   orders {s.total_orders_filled:,}"
@@ -479,9 +524,10 @@ def _print_summary(s: BatchSummary) -> None:
     print(f"  mean edge capture   {s.mean_edge_capture:>18.2f}")
     print(f"  profitable pairs    {s.profitable_pairs}/{s.pairs_run}")
     if s.per_pair:
-        print("\n  top pairs by realized PnL:")
+        print("\n  top pairs by ending equity:")
         for d in s.per_pair[:10]:
-            print(f"    {d['pair']:<10} {d['realized_pnl']:>14,.2f}  "
+            print(f"    {d['pair']:<10} eq={d['ending_equity']:>12,.2f}  "
+                  f"cash={d['cash_pnl']:>10,.2f}  "
                   f"sig={d['signals']:<8,} cap={d['edge_capture_ratio']:>5.2f}  "
                   f"{d['top_reject']}")
     if s.skipped:
@@ -515,6 +561,15 @@ def build_arg_parser() -> argparse.ArgumentParser:
     p.add_argument("--no-toxic-gate", action="store_true")
     p.add_argument("--seed", type=int, default=7)
     p.add_argument("--progress-every", type=int, default=0)
+    p.add_argument(
+        "--funding-rate-dir", default=None,
+        help=(
+            "directory of *.jsonl funding-rate files (FundingSettler). "
+            "Each file must contain one record per line with fields: "
+            "venue, funding_ts_ms or funding_ts_ns, rate, mark_price (optional). "
+            "Use a pair-specific subdirectory to avoid cross-pair contamination."
+        ),
+    )
     g = p.add_mutually_exclusive_group()
     g.add_argument("--two-pass", dest="two_pass", action="store_true", default=None)
     g.add_argument("--single-pass", dest="two_pass", action="store_false")
@@ -572,6 +627,7 @@ def main(argv: Iterable[str] | None = None) -> int:
         start_date=args.start_date, end_date=args.end_date,
         max_events=args.max_events, latency_preset=args.latency_preset,
         bybit_fee_preset=args.bybit_fees, binance_fee_preset=args.binance_fees,
+        funding_rate_dir=args.funding_rate_dir,
         arb=ArbConfig(
             mode=args.mode,
             min_net_edge_bps=args.min_edge_bps,

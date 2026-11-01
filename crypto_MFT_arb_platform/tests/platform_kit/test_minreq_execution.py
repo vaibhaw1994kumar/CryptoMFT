@@ -417,6 +417,81 @@ def test_acceptance_report_records_defects_limitations_and_sign_off(
     assert "2026-09-30" in markdown
 
 
+@pytest.mark.parametrize("system, passes", [("Linux", False), ("Windows", True), ("Darwin", True)])
+def test_performance_limits_are_enforced_on_the_target_platform_only(
+    tmp_path: Path, monkeypatch, system: str, passes: bool
+) -> None:
+    from trading_platform_poc.minreq import acceptance, benchmark
+
+    monkeypatch.setattr(acceptance.platform, "system", lambda: system)
+    slow = benchmark.BenchmarkThresholds(max_per_order_overhead_us=0.0)   # any host breaches this
+    real = benchmark.run_benchmark
+    monkeypatch.setattr(acceptance, "run_benchmark",
+                        lambda *args, **kwargs: real(*args, thresholds=slow, **kwargs))
+    check = acceptance.at_14_performance(tmp_path)
+    assert check.passed is passes
+    assert check.detail["within_limits"] is False                # always measured and reported
+    assert check.detail["failures"] == ["per_order_overhead_us above threshold"]
+    assert check.detail["limits_enforced"] is (system == "Linux")
+
+
+def _report_with(per_order_us: float):
+    from trading_platform_poc.minreq import benchmark
+
+    names = ("ingestion_events_per_second", "normalization_events_per_second",
+             "replay_events_per_second", "simulation_events_per_second",
+             "feature_overhead_us", "simulation_peak_memory_mb")
+    healthy = {"ingestion_events_per_second": 1e6, "normalization_events_per_second": 1e6,
+               "replay_events_per_second": 1e6, "simulation_events_per_second": 1e6,
+               "feature_overhead_us": 1.0, "simulation_peak_memory_mb": 1.0}
+    measurements = [benchmark.Measurement(name, "u", healthy[name]) for name in names]
+    measurements.append(benchmark.Measurement("per_order_overhead_us", "us", per_order_us, {"orders": 7}))
+    report = benchmark.BenchmarkReport(build={}, seed=1, workload={"steps": 1}, measurements=measurements,
+                                       thresholds=benchmark.BenchmarkThresholds(), failures=[])
+    report.failures = benchmark.evaluate_limits(report, report.thresholds)
+    return report
+
+
+def test_a_single_slow_run_does_not_fail_the_median() -> None:
+    from trading_platform_poc.minreq.benchmark import median_report
+
+    # windows-latest / ubuntu-latest spikes: one run at 53 ms among two normal ones.
+    median = median_report([_report_with(9_000.0), _report_with(53_195.0), _report_with(11_000.0)])
+    assert median.value("per_order_overhead_us") == 11_000.0
+    assert median.passed
+    detail = next(m for m in median.measurements if m.name == "per_order_overhead_us").detail
+    assert detail == {"orders": 7, "runs": [9_000.0, 53_195.0, 11_000.0], "aggregate": "median"}
+    assert median.workload["runs"] == 3
+
+
+def test_a_breach_in_most_runs_still_fails() -> None:
+    from trading_platform_poc.minreq.benchmark import median_report
+
+    median = median_report([_report_with(9_000.0), _report_with(36_903.0), _report_with(25_000.0)])
+    assert median.failures == ["per_order_overhead_us above threshold"]
+
+
+def test_the_median_needs_an_odd_number_of_runs() -> None:
+    from trading_platform_poc.minreq.benchmark import median_report
+
+    with pytest.raises(ValueError, match="odd number"):
+        median_report([_report_with(1.0), _report_with(2.0)])
+
+
+def test_at14_judges_the_median_of_three_runs_and_keeps_each(tmp_path: Path, monkeypatch) -> None:
+    from trading_platform_poc.minreq import acceptance
+
+    reports = iter([_report_with(9_000.0), _report_with(53_195.0), _report_with(11_000.0)])
+    monkeypatch.setattr(acceptance, "run_benchmark", lambda *args, **kwargs: next(reports))
+    monkeypatch.setattr(acceptance.platform, "system", lambda: "Linux")
+    check = acceptance.at_14_performance(tmp_path)
+    assert check.passed
+    assert check.detail["aggregate"] == "median of 3 runs"
+    assert check.detail["measurements"]["per_order_overhead_us"] == 11_000.0
+    assert check.detail["run_failures"] == [[], ["per_order_overhead_us above threshold"], []]
+    assert (tmp_path / "at14" / "benchmark.json").exists()
+
+
 def test_paper_mode_checks_carry_the_feed_limitation(tmp_path: Path) -> None:
     report = run_acceptance(tmp_path / "acceptance", only=["AT-12"])
     check = next(item for item in report.checks if item.test_id == "AT-12")
@@ -427,5 +502,5 @@ def test_paper_mode_checks_carry_the_feed_limitation(tmp_path: Path) -> None:
 @pytest.mark.slow
 def test_full_acceptance_suite_passes(tmp_path: Path) -> None:
     report = run_acceptance(tmp_path / "acceptance")
-    failed = [check.test_id for check in report.checks if not check.passed]
-    assert not failed, json.dumps(failed)
+    failed = {check.test_id: check.detail for check in report.checks if not check.passed}
+    assert not failed, json.dumps(failed, default=str)[:4000]

@@ -146,16 +146,19 @@ def test_backtest_writes_the_full_artifact_set(capsys, tmp_path: Path) -> None:
     assert manifest["seed"] == 42
 
 
-def test_paper_mode_uses_the_venue_testnet_execution_mode(
+def test_paper_mode_defaults_to_internal_paper_execution(
     capsys, tmp_path: Path
 ) -> None:
+    # Paper fills are simulated and labelled internal_paper unless venue_testnet is
+    # configured with a real venue adapter (resolve_execution_mode); a simulated fill
+    # is never labelled venue_testnet.
     out = tmp_path / "paper"
     document = _emit(
         capsys, "mr-paper", "--output", str(out), "--run-id", "cli", "--steps", "220"
     )
     assert document["mode"] == "paper"
     manifest = json.loads((out / "run_manifest.json").read_text("utf-8"))
-    assert manifest["config"]["matching"]["mode"] == "venue_testnet"
+    assert manifest["config"]["matching"]["mode"] == "internal_paper"
 
 
 def test_tca_and_reconcile_read_a_finished_run(capsys, tmp_path: Path) -> None:

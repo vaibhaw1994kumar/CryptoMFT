@@ -88,9 +88,19 @@ def _merge_sorted(
     iters: list[Iterator[dict]], key: str,
     dedupe_fields: tuple[str, ...] | None = None,
     stats: dict[str, int] | None = None,
+    multiset: bool = False,
 ) -> Iterator[dict]:
     """K-way merge of already-sorted record iterators on `key`, dropping
     exact duplicates seen within _DEDUPE_WINDOW_S.
+
+    multiset=False (default, legacy): a record whose content key was seen in the window is dropped, wherever it came from.
+    That also drops genuine repeats inside ONE file. Trade records carry no trade id, so a taker that sweeps several resting
+    orders of the same size at the same price in the same millisecond prints identical records. On the Bybit collector files
+    those repeats arrive in the same websocket frame (identical local_ts) at round lot sizes, i.e. they look genuine, and the
+    legacy rule removes about a fifth of the volume one collector recorded.
+
+    multiset=True: only duplicates ACROSS files are dropped. For each content key the merge emits as many records as the
+    busiest single file contained (overlapping collectors each saw the whole event once; one collector's repeats are kept).
 
     Duplicates are real: on 2026-04-16 two Bybit collector instances ran side by
     side for ~11 hours, so every exchange event appears in two files. Merged
@@ -108,6 +118,7 @@ def _merge_sorted(
 
     recent: dict[tuple, float] = {}
     order: deque[tuple] = deque()
+    per_source: dict[tuple, list] = {}      # multiset mode: key -> [records emitted, {source index: records seen}]
 
     while heap:
         ts, i, rec, it = heapq.heappop(heap)
@@ -117,21 +128,39 @@ def _merge_sorted(
 
         if dedupe_fields is not None:
             k = tuple(rec.get(f) for f in dedupe_fields)
-            if k in recent:
-                if stats is not None:
-                    stats["duplicates_dropped"] = stats.get("duplicates_dropped", 0) + 1
-                continue
-            recent[k] = ts
-            order.append(k)
-            cutoff = ts - _DEDUPE_WINDOW_S
-            while order and recent.get(order[0], ts) < cutoff:
-                recent.pop(order.popleft(), None)
+            if multiset:
+                entry = per_source.get(k)
+                if entry is None:
+                    entry = per_source[k] = [0, {}]
+                    recent[k] = ts
+                    order.append(k)
+                    cutoff = ts - _DEDUPE_WINDOW_S
+                    while order and recent.get(order[0], ts) < cutoff:
+                        old = order.popleft()
+                        recent.pop(old, None)
+                        per_source.pop(old, None)
+                seen = entry[1][i] = entry[1].get(i, 0) + 1
+                if seen <= entry[0]:
+                    if stats is not None:
+                        stats["duplicates_dropped"] = stats.get("duplicates_dropped", 0) + 1
+                    continue
+                entry[0] = seen
+            else:
+                if k in recent:
+                    if stats is not None:
+                        stats["duplicates_dropped"] = stats.get("duplicates_dropped", 0) + 1
+                    continue
+                recent[k] = ts
+                order.append(k)
+                cutoff = ts - _DEDUPE_WINDOW_S
+                while order and recent.get(order[0], ts) < cutoff:
+                    recent.pop(order.popleft(), None)
         yield rec
 
 
 def _stream_dir(
     root: Path, stream: str, pair: str, day: str, key: str,
-    stats: dict[str, int] | None = None,
+    stats: dict[str, int] | None = None, multiset: bool = False,
 ) -> Iterator[dict]:
     """All files for one stream/day, merged on `key`.
 
@@ -149,7 +178,7 @@ def _stream_dir(
         return iter(())
     return _merge_sorted(
         [_iter_jsonl_gz(f) for f in files], key,
-        dedupe_fields=_DEDUPE_FIELDS.get(stream), stats=stats,
+        dedupe_fields=_DEDUPE_FIELDS.get(stream), stats=stats, multiset=multiset,
     )
 
 
@@ -193,6 +222,7 @@ def iter_venue_events(
     include_deltas: bool = True,
     include_trades: bool = True,
     stats: dict[str, int] | None = None,
+    trade_dedupe: str = "set",
 ) -> Iterator[RawEvent]:
     """Chronological (exchange_ts) merge of one venue's three streams.
 
@@ -200,12 +230,15 @@ def iter_venue_events(
     open regardless of how long the date range is. `stats`, if given, receives
     loader counters such as duplicates_dropped.
     """
+    if trade_dedupe not in ("set", "multiset"):
+        raise ValueError(f"trade_dedupe must be 'set' or 'multiset', got {trade_dedupe!r}")
     root = venue_root(data_root, venue)
 
     for day in _day_range(start_day, end_day):
         snaps = _stream_dir(root, "book_snapshots", pair, day, "timestamp", stats) if include_snapshots else iter(())
         deltas = _stream_dir(root, "book_events", pair, day, "exchange_ts", stats) if include_deltas else iter(())
-        trades = _stream_dir(root, "trades", pair, day, "exchange_ts", stats) if include_trades else iter(())
+        trades = (_stream_dir(root, "trades", pair, day, "exchange_ts", stats, multiset=(trade_dedupe == "multiset"))
+                  if include_trades else iter(()))
 
         ns = next(snaps, None)
         nd = next(deltas, None)

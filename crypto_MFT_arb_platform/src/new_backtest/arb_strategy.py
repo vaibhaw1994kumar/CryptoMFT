@@ -45,6 +45,7 @@ Two execution modes:
 from __future__ import annotations
 
 import itertools
+import math
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
@@ -52,6 +53,7 @@ from .config import VenueSpec
 from .models import Side
 from .order_book import OrderBook
 from .venue_state import VenueState
+from . import edge as edge_mod
 
 if TYPE_CHECKING:
     from .fill_model_v1 import FillModelV1
@@ -59,6 +61,14 @@ if TYPE_CHECKING:
 
 TAKER_TAKER = "taker_taker"
 MAKER_TAKER = "maker_taker"
+PROFILES = ("legacy_v0", "perp_perp_maker_taker_v1")
+DISPATCH_MODES = ("fill_triggered", "simultaneous")
+
+
+def validate_maker_lifetime(value: float) -> None:
+    """maker_max_age_s is seconds from exchange arrival; 0 disables expiry. Negative or non-finite values are errors, not 'off'."""
+    if not isinstance(value, (int, float)) or isinstance(value, bool) or not math.isfinite(value) or value < 0:
+        raise ValueError(f"ArbConfig.maker_max_age_s must be a finite number >= 0 (0 disables expiry), got {value!r}")
 
 
 @dataclass
@@ -89,13 +99,67 @@ class ArbConfig:
     depth_utilisation: float = 0.50      # take at most this share of visible depth
 
     # Inventory
-    max_position_base: float = 1.0       # |net base across venues|
+    max_position_base: float = 1.0       # |net base across venues|; used as clip-size and as the denominator for the 2x net ceiling
     max_venue_imbalance_base: float = 0.0  # 0 => 2x max_position_base
+    # Opt-in hard ceiling on |net base| across all venues (Task 2b).
+    # None (default) keeps the legacy 2× behaviour (net_room = 2× max_position_base).
+    # Set to max_position_base for a 1× hard ceiling; set to 2× for the legacy equivalent but explicit.
+    max_net_base_hard: float | None = None
+    # Opt-in allowance added to max_net_base_hard (or the legacy 2× ceiling) to give room for a pending fill + pending hedge
+    # that have not yet settled. Does not change the hard ceiling itself; it increases the cap used by _inventory_room.
+    fill_headroom_base: float = 0.0
+    # False (default, legacy): position limits look at filled inventory only. True: they also assume the worst case for
+    # orders that are not in the inventory yet (resting maker remainders, maker legs in flight, hedges in flight),
+    # with no netting between them. With maker_max_live_orders > 1 the legacy check can be breached by orders that
+    # all fill; see PendingExposure.
+    count_pending_exposure: bool = False
+    # Opt-in (Task 2c): when True, orders the strategy has written off (ghost/UNKNOWN) are still counted as potential
+    # exposure until the exchange confirms they are cancelled or filled. Requires count_pending_exposure=True.
+    # Prevents new positions when an UNKNOWN order is unresolved; needed to stop the ghost scenario exceeding max_net_base_hard.
+    count_unknown_exposure: bool = False
+
+    # Opt-in (Task 5): when set to a venue name, all open inventory is marked at that venue's mid rather than each
+    # venue's own mid. Eliminates stale-mid distortion when the two venues' books last updated at different times.
+    # None (default) preserves the legacy per-venue marking. Typical value: the venue with the more reliable feed.
+    mark_inventory_venue: str | None = None
+    # Opt-in (Task 5): when common_mid_staleness_s exceeds this threshold the
+    # common_timestamp_equity is unreliable (one venue's book is too far behind) and
+    # the result falls back to ending_equity with common_mid_staleness_s=inf.
+    # Default 1.0 s is tight enough to flag typical feed-lag spikes; set to inf to
+    # disable the threshold (report staleness but never reject the mark).
+    max_common_staleness_s: float = 1.0
 
     # Maker-taker
     maker_improve_ticks: int = 1         # how far inside the touch we rest
     maker_requote_bps: float = 0.5       # requote if fair moves by this much
     maker_max_live_orders: int = 1
+    maker_max_age_s: float = 0.0         # seconds from exchange arrival until a cancel is requested; 0 = off (rest until filled); negative/NaN raise
+    maker_count_inflight: bool = True    # orders still in flight count toward maker_max_live_orders (False = legacy stacking)
+    # Which passive direction(s) a maker venue may quote. "bid" (default, the behaviour so far): rest a buy, hedge by selling on
+    # the taker venue. "both": also rest a sell (an improved ask) hedged by BUYING on the taker venue; per evaluation the
+    # direction with the higher net edge wins. On a perpetual both directions are equally available.
+    maker_passive_side: str = "bid"
+
+    # ── Strategy profile (docs/strategy_contract.md) ─────────────────────────
+    # "legacy_v0" (default): the edge expressions and gate used by every result before 2026-11-01, kept bit-identical.
+    # "perp_perp_maker_taker_v1": one edge function (edge.py) everywhere — taker/taker edge is depth-weighted (VWAP over the
+    # levels the size consumes, reference = buy venue mid), and the maker/taker gate uses the CONDITIONAL expected edge
+    # (expected hedge price given a fill, hedge slippage, funding/holding, p_fail x loss_fail) instead of the current quote.
+    profile: str = "legacy_v0"
+    # How the hedge is dispatched in MAKER_TAKER: "fill_triggered" (canonical: the hedge is sent when the maker fill is
+    # confirmed, for the filled quantity) or "simultaneous" (the hedge is sent with the maker order; if the maker never fills
+    # the hedge is an orphan position, reported as such). Both profiles default to fill_triggered.
+    dispatch_mode: str = "fill_triggered"
+    # Conditional-edge parameters (perp_perp_maker_taker_v1). Hedge-move: expected move of the hedge venue's executable price
+    # between quote time and maker-fill time, conditional on a fill, in bps of the hedge price, signed so that NEGATIVE is
+    # adverse for the hedge (a lower bid for a sell hedge, a higher ask for a buy hedge). First estimates come from the replay's
+    # own legging_report (hedge_move_bps by side); default 0 = no information yet.
+    expected_hedge_move_bps_bid: float = 0.0     # passive bid -> sell hedge
+    expected_hedge_move_bps_ask: float = 0.0     # passive ask -> buy hedge
+    expected_hedge_slippage_bps: float = 0.0     # hedge VWAP beyond the touch for the clip size
+    funding_holding_bps: float = 0.0             # expected funding / holding cost of the hedged pair until it is closed
+    p_fail: float = 0.07                         # hedge-failure probability (hedge-failure study break-even ~7%)
+    loss_fail_bps: float = 7.8                   # loss per hedge failure in bps of notional (hedge-failure study ~-7.8 bps)
 
     # Pacing
     min_resignal_gap_s: float = 0.0      # throttle repeat fires on one edge
@@ -115,6 +179,9 @@ class ArbConfig:
     # never simultaneously actionable (e.g. Bybit at T vs Binance at T-490ms).
     # 0.0 = disabled.  Default 0.2 s is half the per-venue max_book_age_s.
     max_cross_venue_skew_s: float = 0.2
+
+    def __post_init__(self) -> None:
+        validate_maker_lifetime(self.maker_max_age_s)
 
 
 @dataclass
@@ -144,6 +211,37 @@ class ArbSignal:
     sell_price: float
     depth_limited: bool = False
     inventory_limited: bool = False
+    # Logged on every signal (perp_perp_maker_taker_v1): the edge if the current opposite quote were locked, and the conditional
+    # expected edge the gate used; edge_ref names the reference price of the bps figures.
+    naive_edge_bps: float | None = None
+    conditional_edge_bps: float | None = None
+    edge_ref: str = "buy_ask"
+
+    # MAKER_TAKER: the passive leg is legs[0]; the hedge is a taker on the other venue, on the opposite side. For a passive
+    # bid (the only direction before maker_passive_side) these equal buy_venue / sell_venue / "sell".
+    @property
+    def maker_venue(self) -> str:
+        return self.legs[0].venue if self.legs else self.buy_venue
+
+    @property
+    def hedge_venue(self) -> str:
+        return self.sell_venue if self.maker_venue == self.buy_venue else self.buy_venue
+
+    @property
+    def hedge_side(self) -> str:
+        return "sell" if self.maker_venue == self.buy_venue else "buy"
+
+
+@dataclass
+class PendingExposure:
+    """Base quantity (positive magnitudes) per venue that would still be bought / sold if every order that is not in the
+    InventoryBook yet executed in full: resting maker remainders, maker legs in flight and hedges in flight."""
+    buys: dict[str, float] = field(default_factory=dict)
+    sells: dict[str, float] = field(default_factory=dict)
+
+    def add(self, venue: str, side: str, qty: float) -> None:
+        book = self.buys if side == "buy" else self.sells
+        book[venue] = book.get(venue, 0.0) + qty
 
 
 @dataclass
@@ -189,6 +287,14 @@ class CrossVenueArbStrategy:
         self.pair = pair
         self.venues = venues
         self.config = config or ArbConfig()
+        if self.config.maker_passive_side not in ("bid", "both"):
+            raise ValueError(f"ArbConfig.maker_passive_side must be 'bid' or 'both', got {self.config.maker_passive_side!r}")
+        if self.config.profile not in PROFILES:
+            raise ValueError(f"ArbConfig.profile must be one of {PROFILES}, got {self.config.profile!r}")
+        if self.config.dispatch_mode not in DISPATCH_MODES:
+            raise ValueError(f"ArbConfig.dispatch_mode must be one of {DISPATCH_MODES}, got {self.config.dispatch_mode!r}")
+        if not (0.0 <= self.config.p_fail <= 1.0) or self.config.loss_fail_bps < 0.0:
+            raise ValueError("ArbConfig.p_fail must be in [0, 1] and loss_fail_bps >= 0")
         self.venue_names = tuple(sorted(venues))
         self._ids = itertools.count(1)
         self._last_signal_ts = 0.0
@@ -247,7 +353,9 @@ class CrossVenueArbStrategy:
         limit = touch + slack if side == "ask" else touch - slack
         return book.depth_within(side, limit) * cfg.depth_utilisation
 
-    def _inventory_room(self, buy_venue: str, sell_venue: str, inv: InventoryBook) -> float:
+    def _inventory_room(
+        self, buy_venue: str, sell_venue: str, inv: InventoryBook, pending: "PendingExposure | None" = None,
+    ) -> float:
         """How much we can trade before breaching a position limit.
 
         Buying on A and selling on B leaves the net flat but moves A's balance up
@@ -256,9 +364,23 @@ class CrossVenueArbStrategy:
         """
         cfg = self.config
         cap = cfg.max_venue_imbalance_base or (2.0 * cfg.max_position_base)
-        buy_room = max(0.0, cap - inv.base.get(buy_venue, 0.0))
-        sell_room = max(0.0, cap + inv.base.get(sell_venue, 0.0))
-        net_room = max(0.0, cfg.max_position_base * 2.0 - abs(inv.net_base))
+        # Hard net ceiling: opt-in (max_net_base_hard), default legacy 2× max_position_base.
+        # fill_headroom_base adds allowance on top of the effective net ceiling for pending settle.
+        if cfg.max_net_base_hard is not None:
+            net_ceil = cfg.max_net_base_hard + cfg.fill_headroom_base
+        else:
+            net_ceil = cfg.max_position_base * 2.0 + cfg.fill_headroom_base
+        buy_base, sell_base, net_hi, net_lo = inv.base.get(buy_venue, 0.0), inv.base.get(sell_venue, 0.0), inv.net_base, inv.net_base
+        if pending is not None and cfg.count_pending_exposure:
+            # Worst case per limit: every pending buy lands on the buy venue, every pending sell on the sell venue,
+            # and nothing nets off against anything else.
+            buy_base += pending.buys.get(buy_venue, 0.0)
+            sell_base -= pending.sells.get(sell_venue, 0.0)
+            net_hi += sum(pending.buys.values())
+            net_lo -= sum(pending.sells.values())
+        buy_room = max(0.0, cap - buy_base)
+        sell_room = max(0.0, cap + sell_base)
+        net_room = max(0.0, net_ceil - max(abs(net_hi), abs(net_lo)))
         return min(buy_room, sell_room, net_room)
 
     # ── Evaluation ───────────────────────────────────────────────────────────
@@ -270,6 +392,7 @@ class CrossVenueArbStrategy:
         inventory: InventoryBook,
         now: float,
         live_maker_orders: int = 0,
+        pending: "PendingExposure | None" = None,
     ) -> ArbSignal | None:
         cfg = self.config
         self.evaluations += 1
@@ -296,7 +419,7 @@ class CrossVenueArbStrategy:
                 if buy_venue == sell_venue:
                     continue
                 sig = self._evaluate_direction(
-                    buy_venue, sell_venue, books, states, inventory, now,
+                    buy_venue, sell_venue, books, states, inventory, now, pending,
                 )
                 if sig is not None and (best is None or sig.net_edge_bps > best.net_edge_bps):
                     best = sig
@@ -314,6 +437,7 @@ class CrossVenueArbStrategy:
         states: dict[str, VenueState],
         inventory: InventoryBook,
         now: float,
+        pending: "PendingExposure | None" = None,
     ) -> ArbSignal | None:
         cfg = self.config
         buy_book, sell_book = books[buy_venue], books[sell_venue]
@@ -330,17 +454,36 @@ class CrossVenueArbStrategy:
                 return None
 
         if cfg.mode == MAKER_TAKER:
-            return self._evaluate_maker_taker(
-                buy_venue, sell_venue, books, states, inventory, now,
+            bid = self._evaluate_maker_taker(
+                buy_venue, sell_venue, books, states, inventory, now, pending,
             )
+            if cfg.maker_passive_side != "both":
+                return bid
+            ask = self._evaluate_maker_taker_ask(buy_venue, sell_venue, books, states, inventory, now, pending)
+            if bid is None or (ask is not None and ask.net_edge_bps > bid.net_edge_bps):
+                return ask
+            return bid
 
         buy_px = buy_book.best_ask      # we lift the offer
         sell_px = sell_book.best_bid    # we hit the bid
         if buy_px <= 0 or sell_px <= 0:
             return None
 
-        gross_bps = (sell_px - buy_px) / buy_px * 10_000.0
         fee_bps = buy_fees.taker_bps + sell_fees.taker_bps
+        naive_bps = cond_bps = None
+        edge_ref = "buy_ask"
+        if cfg.profile == "legacy_v0":
+            gross_bps, _ = edge_mod.legacy_taker_taker_edge_bps(buy_px, sell_px, buy_fees.taker_bps, sell_fees.taker_bps)
+        else:
+            # perp_perp_maker_taker_v1: depth-weighted over the levels the clip consumes, reference = buy venue mid.
+            probe = min(self._max_clip(buy_px), self._tradeable_depth(buy_book, "ask", buy_px), self._tradeable_depth(sell_book, "bid", sell_px))
+            er = edge_mod.taker_taker_edge_bps(buy_book, sell_book, max(probe, 1e-12), buy_fees.taker_bps, sell_fees.taker_bps)
+            if er.status != edge_mod.OK:
+                self.rejects["no_depth" if er.status == edge_mod.INSUFFICIENT_DEPTH else "not_ready"] += 1
+                return None
+            gross_bps, edge_ref = er.gross_bps, er.ref_name
+            naive_bps, _ = edge_mod.legacy_taker_taker_edge_bps(buy_px, sell_px, buy_fees.taker_bps, sell_fees.taker_bps)
+            cond_bps = er.net_bps - cfg.safety_buffer_bps
         net_bps = gross_bps - fee_bps - cfg.safety_buffer_bps
         self.best_edge_seen_bps = max(self.best_edge_seen_bps, net_bps)
 
@@ -362,7 +505,7 @@ class CrossVenueArbStrategy:
             self.rejects["no_depth"] += 1
             return None
 
-        inv_cap = self._inventory_room(buy_venue, sell_venue, inventory)
+        inv_cap = self._inventory_room(buy_venue, sell_venue, inventory, pending)
         if inv_cap <= 0:
             self.rejects["inventory"] += 1
             return None
@@ -386,6 +529,7 @@ class CrossVenueArbStrategy:
             mode=TAKER_TAKER, buy_price=buy_px, sell_price=sell_px,
             depth_limited=qty >= depth_cap - 1e-12,
             inventory_limited=qty >= inv_cap - 1e-12,
+            naive_edge_bps=naive_bps, conditional_edge_bps=cond_bps, edge_ref=edge_ref,
             legs=[
                 ArbLeg(buy_venue, "buy", qty, buy_px + slack_buy, True, buy_px, buy_fees.taker_bps),
                 ArbLeg(sell_venue, "sell", qty, sell_px - slack_sell, True, sell_px, sell_fees.taker_bps),
@@ -400,6 +544,7 @@ class CrossVenueArbStrategy:
         states: dict[str, VenueState],
         inventory: InventoryBook,
         now: float,
+        pending: "PendingExposure | None" = None,
     ) -> ArbSignal | None:
         """Rest a passive bid on maker_venue, hedge by selling on taker_venue."""
         cfg = self.config
@@ -420,8 +565,18 @@ class CrossVenueArbStrategy:
             self.rejects["no_edge"] += 1
             return None
 
-        gross_bps = (hedge_px - max_bid) / max_bid * 10_000.0
+        gross_bps, _ = edge_mod.legacy_maker_bid_edge_bps(hedge_px, max_bid, fee_bps)
         net_bps = gross_bps - fee_bps - cfg.safety_buffer_bps
+        naive_bps = cond_bps = None
+        edge_ref = "maker_price"
+        if cfg.profile != "legacy_v0":
+            # perp_perp_maker_taker_v1: the gate uses the conditional expected edge; the naive one is logged beside it.
+            er = edge_mod.maker_taker_expected_edge_bps(
+                max_bid, "bid", taker_book, self._max_clip(max_bid), maker_fees.maker_bps, taker_fees.taker_bps,
+                expected_hedge_move_bps=cfg.expected_hedge_move_bps_bid, expected_hedge_slippage_bps=cfg.expected_hedge_slippage_bps,
+                funding_holding_bps=cfg.funding_holding_bps, p_fail=cfg.p_fail, loss_fail_bps=cfg.loss_fail_bps)
+            naive_bps, cond_bps, edge_ref = er.naive_bps, er.net_bps - cfg.safety_buffer_bps, er.ref_name
+            net_bps = cond_bps
         self.best_edge_seen_bps = max(self.best_edge_seen_bps, net_bps)
         if net_bps < cfg.min_net_edge_bps:
             self.rejects["no_edge"] += 1
@@ -436,7 +591,7 @@ class CrossVenueArbStrategy:
             self.rejects["no_depth"] += 1
             return None
 
-        inv_cap = self._inventory_room(maker_venue, taker_venue, inventory)
+        inv_cap = self._inventory_room(maker_venue, taker_venue, inventory, pending)
         if inv_cap <= 0:
             self.rejects["inventory"] += 1
             return None
@@ -492,6 +647,7 @@ class CrossVenueArbStrategy:
             mode=MAKER_TAKER, buy_price=max_bid, sell_price=hedge_px,
             depth_limited=qty >= hedge_depth - 1e-12,
             inventory_limited=qty >= inv_cap - 1e-12,
+            naive_edge_bps=naive_bps, conditional_edge_bps=cond_bps, edge_ref=edge_ref,
             legs=[
                 # Passive leg only. The hedge is fired on fill, not now — firing
                 # it up front would be a naked short against a maybe-fill.
@@ -499,10 +655,125 @@ class CrossVenueArbStrategy:
             ],
         )
 
+    def _evaluate_maker_taker_ask(
+        self,
+        maker_venue: str,
+        taker_venue: str,
+        books: dict[str, OrderBook],
+        states: dict[str, VenueState],
+        inventory: InventoryBook,
+        now: float,
+        pending: "PendingExposure | None" = None,
+    ) -> ArbSignal | None:
+        """Rest a passive ask on maker_venue, hedge by buying on taker_venue (mirror of _evaluate_maker_taker)."""
+        cfg = self.config
+        maker_book, taker_book = books[maker_venue], books[taker_venue]
+        maker_fees, taker_fees = self.venues[maker_venue].fees, self.venues[taker_venue].fees
+
+        hedge_px = taker_book.best_ask
+        if hedge_px <= 0 or not maker_book.ready:
+            return None
+
+        fee_bps = maker_fees.maker_bps + taker_fees.taker_bps
+        required_bps = fee_bps + cfg.min_net_edge_bps + cfg.safety_buffer_bps
+        # Same convention as the bid: the required edge is measured against the price we PAY (the hedge), so min_ask is the
+        # lowest sell that still clears fees + edge + buffer once we buy the hedge at hedge_px.
+        min_ask = hedge_px / (1.0 - required_bps / 10_000.0)
+
+        touch_bid, touch_ask = maker_book.best_bid, maker_book.best_ask
+        if min_ask >= touch_ask or min_ask <= touch_bid:
+            self.rejects["no_edge"] += 1
+            return None
+
+        gross_bps, _ = edge_mod.legacy_maker_ask_edge_bps(min_ask, hedge_px, fee_bps)
+        net_bps = gross_bps - fee_bps - cfg.safety_buffer_bps
+        naive_bps = cond_bps = None
+        edge_ref = "hedge_price"
+        if cfg.profile != "legacy_v0":
+            er = edge_mod.maker_taker_expected_edge_bps(
+                min_ask, "ask", taker_book, self._max_clip(min_ask), maker_fees.maker_bps, taker_fees.taker_bps,
+                expected_hedge_move_bps=cfg.expected_hedge_move_bps_ask, expected_hedge_slippage_bps=cfg.expected_hedge_slippage_bps,
+                funding_holding_bps=cfg.funding_holding_bps, p_fail=cfg.p_fail, loss_fail_bps=cfg.loss_fail_bps)
+            naive_bps, cond_bps, edge_ref = er.naive_bps, er.net_bps - cfg.safety_buffer_bps, er.ref_name
+            net_bps = cond_bps
+        self.best_edge_seen_bps = max(self.best_edge_seen_bps, net_bps)
+        if net_bps < cfg.min_net_edge_bps:
+            self.rejects["no_edge"] += 1
+            return None
+
+        if taker_book.touch_age_s("ask", now) > cfg.max_touch_age_s:
+            self.rejects["stale_touch"] += 1
+            return None
+
+        hedge_depth = self._tradeable_depth(taker_book, "ask", hedge_px)
+        if hedge_depth <= 0:
+            self.rejects["no_depth"] += 1
+            return None
+
+        inv_cap = self._inventory_room(taker_venue, maker_venue, inventory, pending)   # we buy on the taker venue, sell on the maker venue
+        if inv_cap <= 0:
+            self.rejects["inventory"] += 1
+            return None
+
+        qty = min(hedge_depth, inv_cap, self._max_clip(min_ask))
+        if qty * min_ask < cfg.min_clip_notional:
+            self.rejects["clip_too_small"] += 1
+            return None
+
+        if (cfg.min_fill_prob > 0.0
+                and self.fill_model_v1 is not None
+                and self.fill_model_v1.horizon_s == cfg.fill_gate_horizon_s):
+            ms = states[maker_venue]
+            mb = books[maker_venue]
+            feat = dict(
+                queue_ahead=0.0, local_depth=mb.best_bid_size + mb.best_ask_size, local_depth_baseline=ms.top_depth_baseline,
+                spread_pct=mb.spread_bps / 100.0, short_vol=ms.short_vol, trade_count=ms.trade_rate, trade_sign=ms.trade_sign,
+                regime_bucket=ms.last_regime.bucket.value,
+            )
+            model = self.fill_model_v1
+            if hasattr(model, "predict_ttf"):
+                pred = model.predict_ttf(**feat)
+                p_fill = pred.p_fill
+                if cfg.max_adverse_prob < 1.0 and pred.p_adverse > cfg.max_adverse_prob:
+                    self.rejects["high_adverse_prob"] += 1
+                    return None
+                if cfg.max_ttf_s > 0.0 and pred.e_ttf > cfg.max_ttf_s:
+                    self.rejects["slow_ttf"] += 1
+                    return None
+            else:
+                p_fill = model.predict(**feat)
+            if p_fill < cfg.min_fill_prob:
+                self.rejects["low_fill_prob"] += 1
+                return None
+
+        return ArbSignal(
+            signal_id=next(self._ids), ts=now,
+            buy_venue=taker_venue, sell_venue=maker_venue, qty=qty,
+            gross_edge_bps=gross_bps, fee_bps=fee_bps, net_edge_bps=net_bps,
+            mode=MAKER_TAKER, buy_price=hedge_px, sell_price=min_ask,
+            depth_limited=qty >= hedge_depth - 1e-12,
+            inventory_limited=qty >= inv_cap - 1e-12,
+            naive_edge_bps=naive_bps, conditional_edge_bps=cond_bps, edge_ref=edge_ref,
+            legs=[
+                # Passive leg only; the buy hedge is fired on fill (see _evaluate_maker_taker).
+                ArbLeg(maker_venue, "sell", qty, min_ask, False, min_ask, maker_fees.maker_bps),
+            ],
+        )
+
     def hedge_leg(self, signal: ArbSignal, filled_qty: float, book: OrderBook) -> ArbLeg | None:
-        """Build the aggressive hedge after a passive leg fills."""
+        """Build the aggressive hedge after a passive leg fills: a sell after a passive bid, a buy after a passive ask."""
         if filled_qty <= 0 or not book.ready:
             return None
+        if signal.hedge_side == "buy":
+            px = book.best_ask
+            if px <= 0:
+                return None
+            slack = px * max(self.config.max_walk_bps, 5.0) / 10_000.0
+            return ArbLeg(
+                venue=signal.hedge_venue, side="buy", qty=filled_qty,
+                limit_price=px + slack, is_taker=True, expected_price=signal.buy_price,
+                fee_bps=self.venues[signal.hedge_venue].fees.taker_bps,
+            )
         px = book.best_bid
         if px <= 0:
             return None

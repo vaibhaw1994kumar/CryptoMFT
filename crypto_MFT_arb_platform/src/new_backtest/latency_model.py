@@ -320,6 +320,15 @@ class InFlightOrder:
     expected_price: float = 0.0
     expected_edge_bps: float = 0.0
     tag: str = ""
+    # Hedge-failure injection (hedge_faults.py); all defaults mean an ordinary order.
+    kind: str = "order"        # "order" | "recover" (a strategy-side timer: failure detected / retry due; never reaches an exchange)
+    is_hedge: bool = False
+    role: str = ""             # "" | "unwind"
+    attempt: int = 0
+    fault: str = ""            # "" | "reject" | "partial"
+    partial_fraction: float = 1.0
+    ghost: bool = False        # delivered after the strategy gave up on it
+    origin_id: int = 0         # order_id of the first hedge of a retry/unwind chain (0 = this order is its own origin)
 
 
 class PendingOrderQueue:
@@ -349,6 +358,13 @@ class PendingOrderQueue:
                 self._cancelled.discard(order.order_id)
                 continue
             yield order
+
+    def in_flight(self) -> Iterator[InFlightOrder]:
+        """Orders sent and not yet landed or cancelled (no particular order)."""
+        return (o for _, _, o in self._heap if o.order_id not in self._cancelled)
+
+    def maker_legs_in_flight(self) -> int:
+        return sum(1 for _, _, o in self._heap if not o.is_taker and o.order_id not in self._cancelled)
 
     def cancel(self, order_id: int) -> None:
         self._cancelled.add(order_id)

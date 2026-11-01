@@ -109,9 +109,11 @@ class LiveDerivativeCaptureTests(unittest.TestCase):
                                                           "T": 28_800_000}), channel="markPrice")
             service._process_derivative_frame("BINANCE", "wss://x", "not json", channel="markPrice")
             part = service.recorder._part_dir
-            rows = [json.loads(line) for line in (part / "derivatives.jsonl").open()]
-            trace = [json.loads(line) for line in (part / "trace.jsonl").open()]
+            rows = [json.loads(line) for line in (part / "derivatives.jsonl").read_text().splitlines()]
+            trace = [json.loads(line) for line in (part / "trace.jsonl").read_text().splitlines()]
             service.recorder.close({})
+            service.ohlc_writer.close()
+            service.ltp_writer.close()
         self.assertEqual([t.venue for t in seen], ["BYBIT", "BYBIT", "BINANCE"])
         self.assertEqual(seen[1].funding_rate, Decimal("0.0001"))           # kept from the snapshot
         self.assertEqual([r["mark_price"] for r in rows], ["60000", "60005", "60001"])
@@ -139,6 +141,8 @@ class LiveDerivativeCaptureTests(unittest.TestCase):
             part = service.recorder._part_dir
             quarantined = (part / "quarantine.jsonl").exists() and (part / "quarantine.jsonl").read_text().strip()
             service.recorder.close({})
+            service.ohlc_writer.close()
+            service.ltp_writer.close()
         self.assertFalse(quarantined)
 
 

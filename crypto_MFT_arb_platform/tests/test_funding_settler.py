@@ -220,3 +220,54 @@ class TestFundingSettlerBasic(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+# ── Wiring: _clone forwards funding_rate_dir; _aggregate_fold_results sums it ─
+
+class TestBatchFundingWiring(unittest.TestCase):
+
+    def test_clone_forwards_funding_rate_dir(self):
+        """_clone must copy funding_rate_dir from the base config to every fold config."""
+        from new_backtest.backtester import ArbBacktestConfig
+        from new_backtest.batch_backtest import _clone
+
+        base = ArbBacktestConfig(
+            pair="SOLUSDT", data_root="data", venues=("bybit", "binance"),
+            start_date="2022-01-05", end_date="2022-01-10",
+            funding_rate_dir="/some/funding/dir",
+        )
+        fold = _clone(base, pair="SOLUSDT", start="2022-01-05", end="2022-01-06",
+                      output_dir="/tmp/out", warm_start=None)
+        self.assertEqual(fold.funding_rate_dir, "/some/funding/dir")
+
+    def test_clone_none_funding_rate_dir_stays_none(self):
+        """_clone with no funding_rate_dir must not set one."""
+        from new_backtest.backtester import ArbBacktestConfig
+        from new_backtest.batch_backtest import _clone
+
+        base = ArbBacktestConfig(
+            pair="SOLUSDT", data_root="data", venues=("bybit", "binance"),
+            start_date="2022-01-05", end_date="2022-01-10",
+        )
+        fold = _clone(base, pair="SOLUSDT", start="2022-01-05", end="2022-01-06",
+                      output_dir="/tmp/out", warm_start=None)
+        self.assertIsNone(fold.funding_rate_dir)
+
+    def test_aggregate_fold_results_sums_funding_paid(self):
+        """_aggregate_fold_results must include funding_paid in the additive sum."""
+        from new_backtest.batch_backtest import _aggregate_fold_results
+
+        folds = [
+            {"realized_pnl": 10.0, "funding_paid": 0.05, "signals_completed": 5},
+            {"realized_pnl": 8.0,  "funding_paid": 0.03, "signals_completed": 3},
+        ]
+        combined = _aggregate_fold_results(folds)
+        self.assertAlmostEqual(combined["funding_paid"], 0.08, places=10)
+
+    def test_aggregate_fold_results_zero_when_absent(self):
+        """_aggregate_fold_results must return 0.0 funding_paid when field is missing."""
+        from new_backtest.batch_backtest import _aggregate_fold_results
+
+        folds = [{"realized_pnl": 5.0, "signals_completed": 2}]
+        combined = _aggregate_fold_results(folds)
+        self.assertEqual(combined.get("funding_paid", 0), 0)

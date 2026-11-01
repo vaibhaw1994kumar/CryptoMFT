@@ -34,11 +34,20 @@ from new_backtest.fill_engine import MakerConfig
 DATA_ROOT   = "/Users/vaibhav/Documents/Newproject/data"
 OUTPUT_ROOT = Path("/Users/vaibhav/Documents/Newproject/out/sol_wf_backtest")
 
-# Date window — extend as data becomes available.
-START_DATE = "2022-01-05"
-END_DATE   = "2022-01-10"   # 6 clean common days (Jan 05-10) → 2 WF folds:
-                             #   fold 1: cal=Jan 05-08, test=Jan 09
-                             #   fold 2: cal=Jan 06-09, test=Jan 10
+# Opt-in: funding rate cost.  Set to a directory of *.jsonl files (one per
+# venue, see FundingSettler) to charge perpetual funding to P&L.  None skips
+# funding settlement entirely, preserving the pre-funding baseline.
+_FUNDING_DIR = Path("/Users/vaibhav/Documents/Newproject/out/funding/SOLUSDT")
+FUNDING_DIR: str | None = str(_FUNDING_DIR) if _FUNDING_DIR.exists() else None
+
+# Date window — full January 2022 (bybit_out2 + binance_out on JupyterHub).
+# Sync data first:
+#   rsync -avz --progress datauser@103.16.231.53:/home/jovyan/work/tardis-iobc-client-master/bybit_out2/bybit/ \
+#       /Users/vaibhav/Documents/Newproject/data/bybit/
+#   rsync -avz --progress datauser@103.16.231.53:/home/jovyan/work/tardis-iobc-client-master/binance_out/binance/ \
+#       /Users/vaibhav/Documents/Newproject/data/binance/
+START_DATE = "2022-01-03"
+END_DATE   = "2022-01-31"   # Full Jan 2022 (29 days) → 25 WF folds with window=4d, step=1d.
 
 BASE_CFG = ArbBacktestConfig(
     data_root=DATA_ROOT,
@@ -57,6 +66,7 @@ BASE_CFG = ArbBacktestConfig(
         mode="maker_taker",
         min_net_edge_bps=1.0,
         max_clip_notional=10_000.0,
+        max_position_base=1.0,         # Task 2d: explicit — 1 SOL per clip; written into model_settings.json
         block_on_toxic=True,           # real-time toxic flow block
         # Gates are enabled but only execute when a temporally-valid FillModelV2
         # is loaded.  On the single-day fallback path fill_model_v1=None so these
@@ -70,6 +80,7 @@ BASE_CFG = ArbBacktestConfig(
         maker_max_age_s=15.0,          # cancel maker order after 15s to prevent stale fills
     ),
     output_dir=str(OUTPUT_ROOT / "SOLUSDT"),
+    funding_rate_dir=FUNDING_DIR,
 )
 
 # ── Walk-forward parameters ───────────────────────────────────────────────────

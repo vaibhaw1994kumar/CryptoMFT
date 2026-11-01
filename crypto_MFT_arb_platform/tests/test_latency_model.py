@@ -14,8 +14,8 @@ from dataclasses import dataclass, field
 
 import pytest
 
-from crypto_MFT_arb_platform.src.new_backtest.config import VenueLatencySpec
-from crypto_MFT_arb_platform.src.new_backtest.latency_model import (
+from new_backtest.config import VenueLatencySpec
+from new_backtest.latency_model import (
     HostClockAligner,
     InFlightOrder,
     LatencyBook,

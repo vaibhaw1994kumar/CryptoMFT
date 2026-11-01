@@ -26,8 +26,9 @@ from __future__ import annotations
 
 import argparse
 import json
-from collections import Counter
-from dataclasses import asdict, dataclass, field
+import random
+from collections import Counter, deque
+from dataclasses import asdict, dataclass, field, replace
 from pathlib import Path
 from typing import Iterable
 import warnings
@@ -35,7 +36,7 @@ import warnings
 from . import virtual_clock
 from .arb_strategy import (
     MAKER_TAKER, TAKER_TAKER, ArbConfig, ArbLeg, ArbSignal,
-    CrossVenueArbStrategy, InventoryBook,
+    CrossVenueArbStrategy, InventoryBook, PendingExposure, validate_maker_lifetime,
 )
 from .background_agent_model import AgentFlowConfig, BackgroundAgentModel
 from .config import (
@@ -44,12 +45,20 @@ from .config import (
 )
 from .cross_venue_feed import CrossVenueFeed, check_coverage
 from .event_loader import BOOK, DELTA, TRADE, delta_fields, snapshot_levels, trade_fields
-from .fill_engine import Fill, MakerConfig, MakerExecutor, TakerExecutor
+from .fill_engine import Fill, MakerConfig, MakerExecutor, MakerOrder, TakerExecutor
 from .fill_model import EmpiricalFillModel
+from .circuit_breaker import CircuitBreaker, CircuitBreakerConfig
+from .hedge_faults import DisconnectGen, ExposureTracker, HedgeFaultConfig, Outage
+from .margin_model import MarginModel, MarginModelConfig
 from .latency_model import InFlightOrder, LatencyBook, MarkoutTracker, PendingOrderQueue
 from .models import Side
 from .order_book import OrderBook
+from .order_events import OrderEventLog
+from .postonly import AckLatencyConfig, AckLatencySource, would_cross
 from .venue_state import VenueState, VenueStateConfig
+
+
+CLOCK_OFFSET_WARN_MS = 5.0   # a venue whose receive times average this far before its exchange stamps is flagged
 
 
 @dataclass
@@ -71,6 +80,15 @@ class ArbBacktestConfig:
 
     consume_liquidity: bool = True
     include_deltas: bool = True
+    # How duplicate trade records are removed when several collector files overlap: "set" (legacy: any repeat of a
+    # record within 3 s is dropped, which also drops genuine identical prints inside one file) or "multiset" (only
+    # cross-file duplicates are dropped). Trade records have no id, so neither is exact; see event_loader._merge_sorted.
+    trade_dedupe: str = "set"
+    # True: the maker engine is given the level size left in the book after each depth event. False is a KNOWN DEFECT kept
+    # only to reproduce results published before the fix: it hands the engine the raw `volume` field, which for the hybrid
+    # collector format's 'cancel' events is the removed size, so level removals never drained any queue (top-5 book match
+    # 68.8% vs 91.3% with the fix; see followup_report.html, decision 1, accepted 2026-11-01).
+    delta_uses_book_size: bool = True
     seed: int = 7
 
     agent_flow: AgentFlowConfig = field(default_factory=AgentFlowConfig)
@@ -92,6 +110,44 @@ class ArbBacktestConfig:
     # When set, perpetual funding payments are settled during replay and
     # reported as funding_paid in ArbBacktestResult.  None = not modelled.
     funding_rate_dir: str | None = None
+    # Hedge-leg failure injection (hedge_faults.py). None = off and the replay is exactly as before.
+    hedge_faults: HedgeFaultConfig | None = None
+    # Opt-in margin / liquidation / cross-venue equity-transfer model (margin_model.py). None (default): infinite margin and no
+    # transfers, exactly as before.
+    margin: MarginModelConfig | None = None
+    # End-of-run ledger identity check (docs/strategy_contract.md section 4): "raise" (default) or "warn".
+    equity_bridge: str = "raise"
+    # Track the inventory path (peak / longest net exposure, equity drawdown) after every event; implied by hedge_faults.
+    record_exposure: bool = False
+    # PostOnly acceptance (postonly.py). "off" (default, legacy): every passive order that reaches the exchange rests. "on": at its
+    # arrival the order is checked against the EXCHANGE-time book (the book just before the first event on the venue whose
+    # exchange time is >= the arrival time); a buy at/above the best ask or a sell at/below the best bid is rejected: no fill, no
+    # queue position, no taker conversion, and the strategy hears of it one more latency later.
+    postonly_reject_model: str = "off"
+    # How long after the exchange's decision the strategy learns of a reject. None: one more draw from the ack-latency source
+    # (an assumption: the return leg is not in the real logs); a number: that many seconds, fixed.
+    postonly_notice_s: float | None = None
+    # Send-to-arrival time of passive orders: "preset" (the venue's entry latency, legacy), "empirical" (calibrated from real
+    # orders) or "fixed". Independent of postonly_reject_model, with its own RNG stream.
+    ack_latency: AckLatencyConfig = field(default_factory=AckLatencyConfig)
+    # When a cancel takes effect: "receive" (legacy: at the first replay event whose RECEIVE time is >= the effective time, so a
+    # fill that executed before the cancel landed but was delivered after it is dropped) or "exchange" (at the first event on
+    # the venue whose EXCHANGE time is >= the effective time, so that fill is kept).
+    cancel_time_basis: str = "receive"
+    # Keep every order event (source-labelled) in memory / write order_events.jsonl. The per-(kind, source) counts are always kept.
+    record_order_events: bool = False
+    max_order_events: int = 2_000_000
+    # Defect #6: with several live maker orders allowed, the legacy position check sees filled inventory only, so orders that all
+    # fill can breach the limits. True (default): a backtest that allows more than one live order switches
+    # ArbConfig.count_pending_exposure on. False: keep whatever the ArbConfig says (legacy). ArbConfig's own default, which
+    # other callers of the strategy see, is NOT changed.
+    auto_pending_exposure: bool = True
+    # Task 2d (opt-in): raise ValueError if arb.max_position_base is the ArbConfig default (1.0) rather than explicitly chosen.
+    # Message: "max_position_base not set: choose a size or use per_pair=True (batch_backtest.run_pair)".
+    # Default False preserves old behaviour. Set True in new run scripts to prevent silent default usage.
+    require_explicit_size: bool = False
+    # Task 3 (opt-in): circuit breaker. None = disabled and replay is identical to before.
+    circuit_breaker: CircuitBreakerConfig | None = None
 
 
 @dataclass
@@ -121,9 +177,12 @@ class ArbBacktestResult:
     fees_paid: float
     unhedged_loss: float
     funding_paid: float
+    # DEPRECATED: realized_pnl = gross_pnl - fees - unhedged_loss - funding is an attribution
+    # decomposition that can diverge from the cash ledger (e.g. when unhedged_loss slippage is
+    # measured vs the current mid, not the maker fill price). Use cash_pnl or ending_equity instead.
     realized_pnl: float
     open_position_value: float   # A10: unrealised – base inventory marked at end-of-run mids
-    ending_equity: float         # A10: total_cash + open_position_value (does not assume zero start)
+    ending_equity: float         # A10: total_cash + open_position_value (does not assume zero start); authoritative
     mark_to_market_pnl: float    # legacy alias == ending_equity; kept for back-compat
 
     # Gross-to-gross: what share of the spread visible at fire time did the
@@ -153,6 +212,47 @@ class ArbBacktestResult:
     fill_log_path: str | None = None
     bucket_stats_path: str | None = None
     trades_path: str | None = None
+    # Task 5 — cash-and-inventory ledger fields (default 0.0 for back-compat with callers that construct this directly).
+    # cash_pnl: sum of all fill cash_deltas (fees already deducted in cash_delta); authoritative when net_base == 0.
+    # When net_base == 0: ending_equity == cash_pnl; any difference is an accounting divergence.
+    # When net_base != 0: ending_equity == cash_pnl + open_position_value (the marked residual).
+    cash_pnl: float = 0.0
+    # common_timestamp_equity: inventory marked at the prices each venue published AT OR BEFORE
+    # common_ts = min(last-update-ts across venues).  This is a TRUE common-timestamp mark that
+    # never uses future observations; it differs from ending_equity when venues update at different
+    # times.  Set to ending_equity and common_mid_staleness_s = inf when unavailable (no history
+    # within range, or one venue had no price at all during the run).
+    common_timestamp_equity: float = 0.0
+    common_mid_staleness_s: float = 0.0   # max lag between venues' last-update ts; inf = unavailable
+    # single_venue_diagnostic: per-venue count of events where that venue's book exceeded max_book_age_s.
+    # Non-zero means there were windows where the strategy was running with stale data on that side.
+    # This is purely diagnostic; fills and cash movements that occurred during those windows are intact.
+    single_venue_diagnostic: dict[str, int] = field(default_factory=dict)
+    # single_venue_intervals: count of events where EXACTLY one venue had a usable (non-stale) book.
+    # Distinguishes true single-venue windows from periods where both venues were simultaneously stale.
+    # Non-zero signals that some events arrived with only one side's quote available.
+    single_venue_intervals: int = 0
+    # Maker-order lifetime / cancel accounting (all zero when maker_max_age_s == 0). See _expire_maker_orders.
+    maker_lifetime: dict[str, float] = field(default_factory=dict)
+    # Fill-accounting counters from MakerExecutor.diagnostics(): observed trade/depth quantities vs what was allocated.
+    maker_diagnostics: dict[str, float] = field(default_factory=dict)
+    # The fill-model settings this run used (cancel model and its parameters, snapshot netting, depth-size fix, ...).
+    model_settings: dict = field(default_factory=dict)
+    # Hedge-leg report: failure counters, the inventory path, per-signal cash flows. Empty unless hedge_faults or record_exposure is set.
+    hedge_report: dict = field(default_factory=dict)
+    # Order events and fills counted by kind and source ("historical" | "modelled" | "injected"); see order_events.py.
+    order_event_summary: dict = field(default_factory=dict)
+    # PostOnly model counters (checks, rejects by side, notice delays, fallbacks) and the ack-latency source in use.
+    postonly_report: dict = field(default_factory=dict)
+    # Margin model report (equity per venue, margin ratios, liquidations, transfers). Empty unless ArbBacktestConfig.margin is set.
+    margin_report: dict = field(default_factory=dict)
+    # Legging exposure (maker fill -> hedge fill) per resolved maker signal; see _legging_report.
+    legging_report: dict = field(default_factory=dict)
+    # Ledger identity check (cash from the trade log + funding + transfers vs ledger cash; equity vs cash + marked position).
+    equity_bridge: dict = field(default_factory=dict)
+    # Every fired signal with its naive and conditional edge (perp_perp_maker_taker_v1 logs both; legacy_v0 logs None).
+    signal_log: list = field(default_factory=list)
+    order_events_path: str | None = None
 
 
 @dataclass
@@ -168,6 +268,27 @@ class _SignalTracker:
     missed: int = 0
     hedged_qty: float = 0.0   # cumulative qty for which a hedge leg was dispatched
     maker_resting: bool = False
+    # Legging timestamps (MAKER_TAKER): when the passive leg first/last filled, when the first hedge was sent, when the last hedge
+    # filled. hedge_fill_ts - maker_fill_ts is the legging exposure the strategy contract asks to be measurable.
+    maker_first_fill_ts: float | None = None
+    maker_last_fill_ts: float | None = None
+    hedge_first_sent_ts: float | None = None
+    hedge_last_fill_ts: float | None = None
+    hedge_fill_qty: float = 0.0
+    hedge_px_at_fill: float | None = None    # the hedge venue's executable touch at the first maker fill (vs the quote-time touch in the signal)
+    managed: bool = False     # a hedge failure is being handled by HedgeFaultConfig.response: no instant, latency-free flatten
+
+
+class EquityBridgeError(RuntimeError):
+    """The cash/inventory ledger did not reconcile with the trade log at the end of a run (see _equity_bridge)."""
+
+
+class DefaultModelWarning(UserWarning):
+    """A backtest ran with MakerConfig.cancel_model unset, i.e. on the default 'proportional' without anyone choosing it."""
+
+
+def cfg_delta_book_size(config: "ArbBacktestConfig") -> bool:
+    return config.delta_uses_book_size
 
 
 def _fee_preset_family(preset: str) -> str:
@@ -179,9 +300,27 @@ def _fee_preset_family(preset: str) -> str:
     return "unknown"
 
 
+_ARBCONFIG_DEFAULT_SIZE = ArbConfig().max_position_base   # 1.0; the sentinel for "not explicitly chosen"
+
+
 class CrossVenueArbBacktester:
     def __init__(self, config: ArbBacktestConfig) -> None:
         self.config = config
+        if config.require_explicit_size and config.arb.max_position_base == _ARBCONFIG_DEFAULT_SIZE:
+            raise ValueError(
+                "max_position_base not set: choose a size or use per_pair=True (batch_backtest.run_pair)"
+            )
+        validate_maker_lifetime(config.arb.maker_max_age_s)   # the arb config may have been mutated after construction
+        self.pending_exposure_auto_enabled = False
+        if config.auto_pending_exposure and config.arb.maker_max_live_orders > 1 and not config.arb.count_pending_exposure:
+            config.arb.count_pending_exposure = True
+            self.pending_exposure_auto_enabled = True
+        if config.postonly_reject_model not in ("off", "on"):
+            raise ValueError(f"postonly_reject_model must be 'off' or 'on', got {config.postonly_reject_model!r}")
+        if config.cancel_time_basis not in ("receive", "exchange"):
+            raise ValueError(f"cancel_time_basis must be 'receive' or 'exchange', got {config.cancel_time_basis!r}")
+        if config.postonly_notice_s is not None and not config.postonly_notice_s >= 0.0:
+            raise ValueError("postonly_notice_s must be >= 0 or None")
         bybit_family = _fee_preset_family(config.bybit_fee_preset)
         binance_family = _fee_preset_family(config.binance_fee_preset)
         if bybit_family != "unknown" and binance_family != "unknown" and bybit_family != binance_family:
@@ -190,6 +329,42 @@ class CrossVenueArbBacktester:
                 f"vs binance={config.binance_fee_preset!r} ({binance_family}). "
                 "Use matching product types (both spot or both perp) unless intentional.",
                 stacklevel=2,
+            )
+        if config.arb.mode == "maker_taker" and config.maker.min_queue_ahead <= 0.0:
+            warnings.warn(
+                "MakerConfig.min_queue_ahead is 0 in maker_taker mode: a quote that joins a price level absent from "
+                "the book starts at the front of the queue, so fill rates and edge are optimistic. Set it to a "
+                "typical level depth for the instrument (--min-queue-ahead).",
+                RuntimeWarning, stacklevel=2,
+            )
+        if config.arb.mode == "maker_taker" and config.arb.maker_max_age_s <= 0.0:
+            warnings.warn(
+                "ArbConfig.maker_max_age_s is 0 in maker_taker mode: a resting maker order is only ever removed by a "
+                "fill, so one that stops being marketable keeps its place in the queue, blocks the live-order limit "
+                "and can fill much later at a stale price. The engine has no cancel/replace on price moves "
+                "(maker_requote_bps is not used); set maker_max_age_s as a time-in-force.",
+                RuntimeWarning, stacklevel=2,
+            )
+        if (config.arb.mode == "maker_taker" and config.arb.maker_max_live_orders > 1
+                and not config.arb.count_pending_exposure):
+            warnings.warn(
+                f"maker_max_live_orders={config.arb.maker_max_live_orders} with count_pending_exposure=False: position "
+                "limits look at filled inventory only, so several resting or in-flight orders that all fill can exceed "
+                "max_position_base / the venue imbalance cap. Set ArbConfig.count_pending_exposure=True.",
+                RuntimeWarning, stacklevel=2,
+            )
+        if config.maker.cancel_model is None:
+            warnings.warn(
+                "MakerConfig.cancel_model is None: this run uses the default 'proportional'. Pass a model name explicitly "
+                "('all_ahead', 'proportional' or 'power') to silence this warning.",
+                DefaultModelWarning, stacklevel=2,
+            )
+        if config.arb.mode == "maker_taker" and not config.arb.maker_count_inflight:
+            warnings.warn(
+                "ArbConfig.maker_count_inflight is False in maker_taker mode: orders still in flight are not counted "
+                "toward maker_max_live_orders, so one signal can be repeated until the first order lands (21 identical "
+                "orders in the original audit). Legacy behaviour, kept for comparison only.",
+                RuntimeWarning, stacklevel=2,
             )
         all_specs = make_venues(
             config.latency_preset, config.bybit_fee_preset, config.binance_fee_preset,
@@ -257,12 +432,25 @@ class CrossVenueArbBacktester:
             )
 
         self.agent = BackgroundAgentModel(config.agent_flow)
+        self.margin_model: MarginModel | None = MarginModel(config.margin, tuple(config.venues)) if config.margin is not None else None
         self._last_trade_ts: dict[str, float] = {}
 
         self._order_ids = 0
         self._trackers: dict[int, _SignalTracker] = {}
         self._maker_to_signal: dict[int, int] = {}
+        # Exchange-side cancel has landed but the strategy cannot know yet: slot is released at effective_ts + feed delay.
+        self._cancel_acks: list[float] = []
+        self._cancel_watch: dict[int, "MakerOrder"] = {}   # orders with a cancel requested and not yet resolved
+        self.lifetime: Counter[str] = Counter()
         self._last_touch: dict[str, tuple[float, float]] = {v: (0.0, 0.0) for v in config.venues}
+        # Task 5: track (ts, mid) history per venue for true common-timestamp equity.
+        # maxlen=32 covers staleness gaps of up to ~32 updates on the faster venue.
+        self._last_mid_ts: dict[str, tuple[float, float]] = {v: (0.0, 0.0) for v in config.venues}
+        self._mid_history: dict[str, deque] = {v: deque(maxlen=32) for v in config.venues}
+        # Single-venue diagnostic: count events where one or more required venues had a stale book.
+        self._stale_event_counts: Counter[str] = Counter()
+        # Exactly-one-venue-usable count: incremented when some venues are stale and some are not.
+        self._single_venue_event_count: int = 0
 
         self.events_processed = 0
         self.events_by_venue: Counter[str] = Counter()
@@ -287,13 +475,71 @@ class CrossVenueArbBacktester:
         self.slippage_count = 0
         self.trade_log: list[dict] = []
 
+        # Task 3 (opt-in): circuit breaker. None = disabled; no extra state when off.
+        cb_cfg = config.circuit_breaker
+        self._breaker: CircuitBreaker | None = (
+            CircuitBreaker(cb_cfg, config.venues[0], config.venues[1]) if cb_cfg is not None else None
+        )
+
+        # Hedge-failure injection and hedge accounting. The counters are always kept; the injector only when configured.
+        self.faults: HedgeFaultConfig | None = config.hedge_faults
+        if self.faults is not None:
+            for o in self.faults.outages:
+                if o.venue not in config.venues:
+                    raise ValueError(f"outage on {o.venue!r}, which is not one of the venues {config.venues}")
+        self._fault_rng = random.Random(self.faults.seed) if self.faults is not None else None
+        self._dyn_outages: list[Outage] = []
+        self._now = 0.0
+        self.hedge: Counter[str] = Counter()
+        self.legging_rows: list[dict] = []          # one row per resolved MAKER_TAKER signal with a maker fill (see _legging_report)
+        self.signal_log: list[dict] = []            # every fired signal with its naive and conditional edge (capped like the trade log)
+        self.hedge_events: list[dict] = []
+        self._hedge_open: dict[int, dict] = {}
+        self.exposure: ExposureTracker | None = ExposureTracker() if (config.record_exposure or self.faults is not None) else None
+
+        # Order events (always counted by kind and source; kept only on request), the ack-latency source and the PostOnly model.
+        self.events = OrderEventLog(keep=config.record_order_events, cap=config.max_order_events)
+        self.ack = AckLatencySource(config.ack_latency)
+        self.po: Counter[str] = Counter()
+        # Passive orders that have reached the exchange (by arrival time) and wait for the first venue event whose exchange time
+        # is >= that arrival, to be checked against the book just before it.
+        self._po_wait: dict[str, list[InFlightOrder]] = {v: [] for v in config.venues}
+        # Random phenomena added by the strategy-level fault layer draw from their own streams (see hedge_faults.py).
+        fseed = self.faults.seed if self.faults is not None else 0
+        self._rng_maker = random.Random(fseed + 104_729)
+        self._rng_extra = random.Random(fseed + 1_299_709)
+        self._disc_gens: list[DisconnectGen] = []
+        if self.faults is not None:
+            for i, spec in enumerate(self.faults.disconnects):
+                if spec.venue not in config.venues:
+                    raise ValueError(f"disconnect spec on {spec.venue!r}, which is not one of the venues {config.venues}")
+                self._disc_gens.append(DisconnectGen(spec, random.Random(fseed + 15_485_863 + 7919 * i)))
+        self._maker_unknown_until: dict[int, float] = {}       # maker order id -> when its unknown state is resolved
+        self._mid_hist: dict[str, deque] = {v: deque() for v in config.venues}
+        self._track_mids = bool(self.faults is not None and self.faults.fast_move_reject_prob and self.faults.fast_move_bps)
+
     # ── Event application ────────────────────────────────────────────────────
+
+    def _event_host_ts(self, ev) -> float | None:
+        """When the event executed at the exchange, on the host clock; None when unknown (no exchange time, or the clock
+        aligner has no sample yet). Callers then fall back to receive time."""
+        ex = getattr(ev, "exchange_ts", None)
+        if ex is None or not self.latency.aligner.ready:
+            return None
+        return self.latency.aligner.to_host(ex)
 
     def _apply_event(self, ev) -> None:
         book = self.books[ev.venue]
         state = self.states[ev.venue]
         spec = self.venue_specs[ev.venue]
         now = ev.receive_ts
+        ets = self._event_host_ts(ev)
+
+        # Exchange-time rules run on the book as it stands BEFORE this event, which the exchange handled at time `ets`.
+        if self._po_wait[ev.venue]:
+            self._resolve_postonly(ev.venue, ets, now)
+        if self.config.cancel_time_basis == "exchange" and self._cancel_watch:
+            self._apply_due_cancels(ev.venue, ets, now)
 
         if ev.kind == BOOK:
             bids, asks = snapshot_levels(ev.payload)
@@ -305,7 +551,7 @@ class CrossVenueArbBacktester:
             state.on_book(book, now)
             self.maker.mark_adverse(ev.venue, book, now, self.tick_size[ev.venue])
             for f in self.maker.on_snapshot(
-                ev.venue, book, now, self.tick_size[ev.venue], spec.fees.maker_bps
+                ev.venue, book, now, self.tick_size[ev.venue], spec.fees.maker_bps, event_ts=ets
             ):
                 self._on_fill(f)
 
@@ -315,9 +561,12 @@ class CrossVenueArbBacktester:
                 return
             book.apply_delta(side, price, volume, event_type, now)
             state.on_book(book, now)
+            # The maker engine needs the level's NEW size. `volume` is that only for absolute feeds; in the hybrid
+            # collector format a 'cancel' carries the size that was removed, so ask the book what is left.
+            new_size = book.level_size(side, price) if cfg_delta_book_size(self.config) else volume
             for f in self.maker.on_delta(
-                ev.venue, side, price, volume, now,
-                self.tick_size[ev.venue], spec.fees.maker_bps,
+                ev.venue, side, price, new_size, now,
+                self.tick_size[ev.venue], spec.fees.maker_bps, event_ts=ets,
             ):
                 self._on_fill(f)
 
@@ -338,16 +587,23 @@ class CrossVenueArbBacktester:
                     ):
                         for f in self.maker.on_trade(
                             ev.venue, syn.price, syn.volume, syn.sign,
-                            syn.timestamp, spec.fees.maker_bps, is_synthetic=True,
+                            syn.timestamp, spec.fees.maker_bps, is_synthetic=True, event_ts=syn.timestamp,
                         ):
                             self._on_fill(f)
             self._last_trade_ts[ev.venue] = now
             book.on_trade(price, volume, sign, now)
             state.on_trade(now, price, volume, sign)
             for f in self.maker.on_trade(
-                ev.venue, price, volume, sign, now, spec.fees.maker_bps
+                ev.venue, price, volume, sign, now, spec.fees.maker_bps, event_ts=ets
             ):
                 self._on_fill(f)
+
+        if self._track_mids and book.ready:
+            hist = self._mid_hist[ev.venue]
+            hist.append((now, book.mid))
+            horizon = now - 2.0 * self.faults.fast_move_window_s
+            while len(hist) > 1 and hist[1][0] < horizon:
+                hist.popleft()
 
     def _touch_changed(self, venue: str) -> bool:
         book = self.books[venue]
@@ -359,12 +615,46 @@ class CrossVenueArbBacktester:
             return True
         return False
 
+    def _record_mid_ts(self, venue: str, now: float) -> None:
+        """Track per-venue (ts, mid) for common_timestamp_equity and staleness diagnostics."""
+        book = self.books.get(venue)
+        if book is not None and book.ready:
+            self._last_mid_ts[venue] = (now, book.mid)
+            self._mid_history[venue].append((now, book.mid))
+        # Single-venue diagnostic: accumulate stale-book event counts across all venues.
+        max_age = self.config.arb.max_book_age_s
+        n_stale = 0
+        for v, b in self.books.items():
+            if b.is_stale(now, max_age):
+                self._stale_event_counts[v] += 1
+                n_stale += 1
+        # Count events where EXACTLY some (but not all) venues are stale — true single-venue windows.
+        if 0 < n_stale < len(self.books):
+            self._single_venue_event_count += 1
+
+    def _mid_at_or_before(self, venue: str, target_ts: float) -> tuple[float, float] | None:
+        """Return the most recent (ts, mid) from history where ts <= target_ts, or None."""
+        hist = self._mid_history.get(venue)
+        if not hist:
+            return None
+        for ts, mid in reversed(hist):
+            if ts <= target_ts:
+                return ts, mid
+        return None
+
     # ── Order dispatch ───────────────────────────────────────────────────────
 
-    def _send_leg(self, leg: ArbLeg, signal: ArbSignal, now: float) -> None:
+    def _send_leg(self, leg: ArbLeg, signal: ArbSignal, now: float, *, is_hedge: bool = False, role: str = "",
+                  attempt: int = 0, origin_id: int = 0) -> None:
         self._order_ids += 1
-        self.pending.enqueue(InFlightOrder(
-            release_ts=now + self.latency.entry_delay(leg.venue),
+        flight = self.latency.entry_delay(leg.venue)           # always drawn, so the latency stream is the same with every switch
+        from_ack_source = not leg.is_taker and not role and self.ack.active
+        if from_ack_source:
+            flight = self.ack.sample_s()                       # passive order: send-to-arrival from the calibrated / fixed source (it has its own scale)
+        elif self.faults is not None and self.faults.latency_scale != 1.0:
+            flight *= self.faults.latency_scale
+        order = InFlightOrder(
+            release_ts=now + flight,
             order_id=self._order_ids,
             venue=leg.venue,
             side=leg.side,
@@ -375,19 +665,65 @@ class CrossVenueArbBacktester:
             signal_id=signal.signal_id,
             expected_price=leg.expected_price,
             expected_edge_bps=signal.net_edge_bps,
-        ))
+            is_hedge=is_hedge, role=role, attempt=attempt, origin_id=origin_id or self._order_ids,
+        )
+        if is_hedge:
+            self.hedge["hedges_sent"] += 1
+        self.events.emit(now, "order_sent", leg.venue, source="modelled", order_id=order.order_id, signal_id=signal.signal_id,
+                         chain_id=self._chain_of(order), side=leg.side, qty=leg.qty, price=leg.limit_price, reason=role or ("hedge" if is_hedge else ""))
+        if self.faults is not None and (is_hedge or role):
+            if self._inject_send_faults(order, now):
+                return
+        elif self.faults is not None and not leg.is_taker:
+            if self._inject_maker_send_faults(order, now):
+                return
+        self.pending.enqueue(order)
         self.orders_sent += 1
 
+    @staticmethod
+    def _chain_of(order: InFlightOrder) -> int:
+        """The injected fault an order is a consequence of: retries and unwinds belong to the chain of the hedge that failed."""
+        return order.origin_id if (order.attempt > 0 or order.role == "unwind") and order.origin_id != order.order_id else 0
+
     def _fire(self, signal: ArbSignal, now: float) -> None:
-        self._trackers[signal.signal_id] = _SignalTracker(signal, len(signal.legs))
+        tracker = self._trackers[signal.signal_id] = _SignalTracker(signal, len(signal.legs))
         for leg in signal.legs:
             self._send_leg(leg, signal, now)
+        self.signal_log.append({"signal_id": signal.signal_id, "ts": now, "mode": signal.mode, "buy_venue": signal.buy_venue, "sell_venue": signal.sell_venue,
+                                "qty": signal.qty, "gross_edge_bps": signal.gross_edge_bps, "net_edge_bps": signal.net_edge_bps,
+                                "naive_edge_bps": signal.naive_edge_bps, "conditional_edge_bps": signal.conditional_edge_bps, "edge_ref": signal.edge_ref})
+        if signal.mode == MAKER_TAKER and self.config.arb.dispatch_mode == "simultaneous":
+            # Method B, for comparison only: the full-size hedge goes out with the maker order. If the maker never fills, the
+            # hedge is an orphan position (counted in _maybe_resolve and unwound by the residual policy).
+            hedge = self.strategy.hedge_leg(signal, signal.qty, self.books[signal.hedge_venue])
+            if hedge is not None:
+                tracker.hedged_qty += signal.qty
+                tracker.legs_outstanding += 1
+                tracker.hedge_first_sent_ts = now
+                self.hedge["hedges_sent_before_fill"] += 1
+                self._send_leg(hedge, signal, now, is_hedge=True)
+            else:
+                self.hedge["hedge_leg_unavailable"] += 1
 
     def _execute_arrival(self, order: InFlightOrder, now: float) -> None:
         """An in-flight order reached the exchange. Fill against the live book."""
+        if order.kind == "recover":
+            self._handle_recover(order, now)
+            return
+        if order.ghost:
+            self._execute_ghost(order, now)
+            return
         tracker = self._trackers.get(order.signal_id)
         book = self.books[order.venue]
         spec = self.venue_specs[order.venue]
+
+        if order.role == "unwind":
+            self._execute_unwind(order, tracker, now)
+            return
+
+        if order.is_taker and order.is_hedge and self.faults is not None:
+            self._execute_hedge_with_faults(order, tracker, now)
+            return
 
         if order.is_taker:
             outcome = self.taker.execute(
@@ -398,6 +734,12 @@ class CrossVenueArbBacktester:
             )
             if outcome.filled and outcome.fill is not None:
                 self.orders_filled += 1
+                if order.is_hedge:
+                    self.hedge["hedges_filled"] += 1
+                    self.hedge["hedge_flight_s_sum"] += now - order.sent_ts
+                    if tracker is not None:
+                        tracker.hedge_last_fill_ts = now
+                        tracker.hedge_fill_qty += outcome.fill.qty
                 self._on_fill(outcome.fill, tracker)
             else:
                 self.orders_missed += 1
@@ -410,6 +752,20 @@ class CrossVenueArbBacktester:
             return
 
         # Passive leg joins the book and waits for the market to come to it.
+        if order.fault == "reject":                   # injected exchange reject that has nothing to do with the book (rate limit, error)
+            self._maker_rejected(order, "fault_rejected", order.release_ts, injected=True)
+            return
+        if self.config.postonly_reject_model == "on":
+            # Arrived at the exchange at release_ts; accepted or rejected against the exchange-time book, which is known only
+            # once the feed has delivered the first event stamped at or after that time (see _resolve_postonly).
+            self._po_wait[order.venue].append(order)
+            self.po["arrivals"] += 1
+            return
+        self._place_passive(order, now)
+
+    def _place_passive(self, order: InFlightOrder, now: float) -> None:
+        tracker = self._trackers.get(order.signal_id)
+        book = self.books[order.venue]
         if not book.ready:
             self.orders_missed += 1
             self.miss_reasons["not_ready"] += 1
@@ -426,17 +782,91 @@ class CrossVenueArbBacktester:
             state=state.to_market_state(book, now),
             regime_bucket=state.regime().bucket, now=now, active_ts=now,
             tick_size=self.tick_size[order.venue], signal_id=order.signal_id,
+            arrival_ts=order.release_ts,
         )
         self._maker_to_signal[maker_order.order_id] = order.signal_id
+        self.events.emit(now, "order_resting", order.venue, source="modelled", order_id=order.order_id, signal_id=order.signal_id,
+                         side=order.side, qty=order.qty, price=order.limit_price)
+        if order.fault == "unknown":
+            # The acknowledgement was lost: the order is live at the exchange but the strategy treats it as unknown until a
+            # venue query answers. Fills in that window are reported only then.
+            until = order.release_ts + self.faults.ack_timeout_s + self.faults.unknown_resolve_s
+            self._maker_unknown_until[maker_order.order_id] = until
+            self.hedge["unknown_orders"] += 1
+            self.events.emit(order.release_ts, "order_unknown", order.venue, source="injected", order_id=order.order_id,
+                             signal_id=order.signal_id, reason="ack_lost")
         if tracker is not None:
             tracker.legs_outstanding -= 1
             tracker.maker_resting = True
 
+    # ── PostOnly acceptance (postonly.py) ────────────────────────────────────
+
+    def _notice_s(self, venue: str) -> float:
+        """How long after an exchange-side reject of a passive order the strategy learns of it."""
+        if self.config.postonly_notice_s is not None:
+            return self.config.postonly_notice_s
+        if self.ack.active:
+            return self.ack.sample_s()
+        return self.venue_specs[venue].latency.feed_ms / 1000.0
+
+    def _maker_rejected(self, order: InFlightOrder, reason: str, decision_ts: float, *, injected: bool) -> None:
+        """A passive order was refused: no fill, no queue position, no conversion. The slot stays occupied until the notice."""
+        notice_at = decision_ts + self._notice_s(order.venue)
+        self._order_ids += 1
+        self.pending.enqueue(InFlightOrder(
+            release_ts=notice_at, order_id=self._order_ids, venue=order.venue, side=order.side, qty=order.qty,
+            limit_price=order.limit_price, is_taker=False, sent_ts=order.sent_ts, signal_id=order.signal_id, kind="recover",
+            tag="maker_fail:" + reason, origin_id=order.order_id))
+        self.events.emit(decision_ts, "order_rejected", order.venue, source="injected" if injected else "modelled", order_id=order.order_id,
+                         signal_id=order.signal_id, side=order.side, qty=order.qty, price=order.limit_price, reason=reason)
+        if injected:
+            self.hedge["maker_orders_rejected_injected"] += 1
+
+    def _resolve_postonly(self, venue: str, ets: float | None, now: float) -> None:
+        """Check the waiting passive orders of `venue` against the book as it is BEFORE the event now being applied.
+
+        The event's host-aligned exchange time `ets` says how far the exchange has got. Within one venue the feed is in exchange
+        order, so every update stamped before an order's arrival has been applied and none stamped after: the book is exactly
+        what the matching engine held when the order arrived. Without an exchange time the receive time is used instead
+        (counted), which is the book the strategy sees.
+        """
+        t_cmp = ets if ets is not None else now
+        book = self.books[venue]
+        keep: list[InFlightOrder] = []
+        for o in self._po_wait[venue]:
+            if t_cmp < o.release_ts:
+                keep.append(o)
+                continue
+            tracker = self._trackers.get(o.signal_id)
+            self.po["checks"] += 1
+            if ets is None:
+                self.po["checks_receive_time_fallback"] += 1
+            self.po["wait_s_sum"] += max(0.0, t_cmp - o.release_ts)
+            if not book.ready:
+                self.orders_missed += 1
+                self.miss_reasons["not_ready"] += 1
+                if tracker is not None:
+                    tracker.legs_outstanding -= 1
+                    self._maybe_resolve(o.signal_id, now)
+                continue
+            if would_cross(o.side, o.limit_price, book.best_bid, book.best_ask):
+                self.po["rejects"] += 1
+                self.po["rejects_" + o.side] += 1
+                self._maker_rejected(o, "postonly_reject", o.release_ts, injected=False)
+            else:
+                self.po["accepted"] += 1
+                self._place_passive(o, now)
+        self._po_wait[venue] = keep
+
     # ── Fill handling ────────────────────────────────────────────────────────
 
-    def _on_fill(self, fill: Fill, tracker: _SignalTracker | None = None) -> None:
+    def _on_fill(self, fill: Fill, tracker: _SignalTracker | None = None, chain: int = 0) -> None:
         if tracker is None:
             tracker = self._trackers.get(fill.signal_id)
+        # Every fill the backtester produces is derived from market data and assumptions: "modelled". `chain` names the injected
+        # fault that made the strategy send this order (a retry, an unwind, a ghost), so such fills can be summed separately.
+        self.events.emit(fill.ts, "fill", fill.venue, source="modelled", order_id=fill.order_id, signal_id=fill.signal_id, chain_id=chain,
+                         side=fill.side, qty=fill.qty, price=fill.price, reason="synthetic_flow" if fill.is_synthetic else ("taker" if fill.is_taker else "maker"))
 
         self.inventory.apply(fill.venue, fill.signed_qty, fill.cash_delta)
         self.fees_paid += fill.fee
@@ -460,11 +890,35 @@ class CrossVenueArbBacktester:
             # earlier would leave a naked position against an uncertain fill.
             sig = tracker.signal
             if sig.mode == MAKER_TAKER and not fill.is_taker:
-                hedge = self.strategy.hedge_leg(sig, fill.qty, self.books[sig.sell_venue])
-                if hedge is not None:
+                if tracker.maker_first_fill_ts is None:
+                    tracker.maker_first_fill_ts = fill.ts
+                    hb = self.books[sig.hedge_venue]
+                    tracker.hedge_px_at_fill = (hb.best_bid if sig.hedge_side == "sell" else hb.best_ask) if hb.ready else None
+                tracker.maker_last_fill_ts = fill.ts
+                simultaneous = self.config.arb.dispatch_mode == "simultaneous"
+                if simultaneous:
+                    hedge, send_ts = None, fill.ts                 # Method B: the full-size hedge already went out with the maker order
+                else:
+                    hedge = self.strategy.hedge_leg(sig, fill.qty, self.books[sig.hedge_venue])
+                    send_ts = self._maker_fill_faults(sig, fill) if self.faults is not None else fill.ts
+                if simultaneous:
+                    pass
+                elif hedge is not None:
                     tracker.hedged_qty += fill.qty
                     tracker.legs_outstanding += 1
-                    self._send_leg(hedge, sig, fill.ts)
+                    if tracker.hedge_first_sent_ts is None:
+                        tracker.hedge_first_sent_ts = send_ts
+                    self._send_leg(hedge, sig, send_ts, is_hedge=True)
+                else:
+                    # No hedge could be built (hedge venue book not ready / no bid). The original code then leaves the
+                    # signal unresolved until the end of data, with the maker fill sitting naked in the inventory.
+                    self.hedge["hedge_leg_unavailable"] += 1
+                    self.hedge["hedge_leg_unavailable_qty"] += fill.qty
+                    if self.faults is not None and self.faults.response != "legacy":
+                        tracker.hedged_qty += fill.qty
+                        tracker.legs_outstanding += 1
+                        probe = self._probe_order(sig, fill.qty, send_ts, is_hedge=True)
+                        self._hedge_failed(probe, send_ts + self.faults.local_reject_s, "hedge_unavailable")
                 # Maker order fully consumed: order was removed from self.maker.orders
                 # in _consume(). Resolve immediately instead of waiting for cancel_all.
                 if fill.order_id not in self.maker.orders:
@@ -477,6 +931,7 @@ class CrossVenueArbBacktester:
                 "taker": fill.is_taker, "signal_id": fill.signal_id,
                 "slippage_bps": fill.slippage_bps,
                 "synthetic": fill.is_synthetic,
+                "source": "modelled", "chain_id": chain,
             })
 
     def _maybe_resolve(self, signal_id: int, now: float) -> None:
@@ -489,6 +944,35 @@ class CrossVenueArbBacktester:
 
         self._trackers.pop(signal_id, None)
         self.signals_completed += 1
+        sig_ = tracker.signal
+        if sig_.mode == MAKER_TAKER and self.config.arb.dispatch_mode == "simultaneous":
+            maker_filled = tracker.buy_qty if sig_.hedge_side == "sell" else tracker.sell_qty
+            orphan = max(0.0, tracker.hedge_fill_qty - maker_filled)
+            if orphan > 1e-12:
+                self.hedge["orphan_hedges"] += 1
+                self.hedge["orphan_qty"] += orphan
+        if tracker.maker_first_fill_ts is not None:
+            px_quote = sig_.sell_price if sig_.hedge_side == "sell" else sig_.buy_price
+            px_fill = tracker.hedge_px_at_fill
+            move = None
+            if px_fill is not None and px_quote > 0:
+                move = (px_fill - px_quote) / px_quote * 10_000.0 if sig_.hedge_side == "sell" else (px_quote - px_fill) / px_quote * 10_000.0
+            if sig_.hedge_side == "sell":
+                hedge_vwap = tracker.sell_notional / tracker.sell_qty if tracker.sell_qty > 0 else None
+            else:
+                hedge_vwap = tracker.buy_notional / tracker.buy_qty if tracker.buy_qty > 0 else None
+            exec_move = None
+            if hedge_vwap is not None and px_quote > 0:
+                exec_move = (hedge_vwap - px_quote) / px_quote * 10_000.0 if sig_.hedge_side == "sell" else (px_quote - hedge_vwap) / px_quote * 10_000.0
+            self.legging_rows.append({
+                "side": "bid" if sig_.hedge_side == "sell" else "ask", "hedge_px_at_quote": px_quote, "hedge_px_at_fill": px_fill, "hedge_move_bps": move,
+                # quote-time touch -> executed hedge VWAP: the move the conditional edge must expect (touch move + flight + slippage). NEGATIVE = adverse.
+                "hedge_fill_vwap": hedge_vwap, "hedge_exec_move_bps": exec_move,
+                "signal_id": signal_id, "maker_first_fill_ts": tracker.maker_first_fill_ts, "maker_last_fill_ts": tracker.maker_last_fill_ts,
+                "hedge_first_sent_ts": tracker.hedge_first_sent_ts, "hedge_last_fill_ts": tracker.hedge_last_fill_ts,
+                "maker_qty": tracker.buy_qty if tracker.signal.hedge_side == "sell" else tracker.sell_qty, "hedge_fill_qty": tracker.hedge_fill_qty,
+                "legging_s": (tracker.hedge_last_fill_ts - tracker.maker_first_fill_ts) if tracker.hedge_last_fill_ts is not None else None,
+            })
 
         matched = min(tracker.buy_qty, tracker.sell_qty)
         imbalance = tracker.buy_qty - tracker.sell_qty
@@ -507,7 +991,12 @@ class CrossVenueArbBacktester:
 
         if abs(imbalance) > 1e-9:
             self.signals_unhedged += 1
-            self._unwind(tracker, imbalance, now)
+            if tracker.managed:
+                # The fault response policy decided to carry (or could not finish unwinding) this inventory: no instant flatten.
+                self.hedge["residual_signals"] += 1
+                self.hedge["residual_qty"] += abs(imbalance)
+            else:
+                self._unwind(tracker, imbalance, now)
         elif matched > 0:
             self.signals_fully_hedged += 1
         else:
@@ -527,10 +1016,15 @@ class CrossVenueArbBacktester:
         # imbalance = buy_qty - sell_qty; positive → long on buy_venue → sell there
         venue = sig.buy_venue if imbalance > 0 else sig.sell_venue
         book = self.books[venue]
+        qty = abs(imbalance)
+        # This flatten is instant and latency-free: it trades at the touch of the moment the strategy learns of the miss.
+        self.hedge["instant_unwinds"] += 1
+        self.hedge["instant_unwind_qty"] += qty
         if not book.ready:
+            self.hedge["instant_unwind_skipped_book_not_ready"] += 1
+            self.hedge["instant_unwind_not_done_qty"] += qty
             return
         side = "sell" if imbalance > 0 else "buy"
-        qty = abs(imbalance)
         ref = book.mid
 
         outcome = self.taker.execute(
@@ -544,8 +1038,597 @@ class CrossVenueArbBacktester:
             f = outcome.fill
             self.unhedged_loss += abs(f.price - ref) * f.qty  # fee goes to fees_paid via _on_fill
             self._on_fill(f)
+            if f.qty < qty - 1e-9:
+                self.hedge["instant_unwind_partial"] += 1
+                self.hedge["instant_unwind_not_done_qty"] += qty - f.qty
+        else:
+            self.hedge["instant_unwind_missed"] += 1
+            self.hedge["instant_unwind_not_done_qty"] += qty
+
+
+    # ── Hedge-failure injection (hedge_faults.py) ────────────────────────────
+
+    def _outages_at(self, venue: str, ts: float):
+        for o in self.faults.outages:
+            if o.venue == venue and o.covers(ts):
+                yield o
+        for o in self._dyn_outages:
+            if o.venue == venue and o.covers(ts):
+                yield o
+        for g in self._disc_gens:
+            if g.spec.venue == venue:
+                w = g.active(ts)
+                if w is not None:
+                    yield w
+
+    def _active_outage(self, venue: str, ts: float) -> Outage | None:
+        """The outage on `venue` covering `ts` that lasts longest (None if the venue is reachable)."""
+        best = None
+        for o in self._outages_at(venue, ts):
+            if best is None or o.end_ts > best.end_ts:
+                best = o
+        return best
+
+    def _feed_dark(self, ts: float) -> bool:
+        """True while any venue is in a 'full' outage: the strategy has no market data it can trust and does not evaluate."""
+        return any(o.kind == "full" for v in self.config.venues for o in self._outages_at(v, ts))
+
+    def _ack_s(self, venue: str) -> float:
+        """How long after an exchange-side rejection or miss the strategy learns of it (the legacy response knows at once)."""
+        if self.faults.response == "legacy":
+            return 0.0
+        return self.venue_specs[venue].latency.feed_ms / 1000.0
+
+    def _probe_order(self, sig: ArbSignal, qty: float, ts: float, *, is_hedge: bool, attempt: int = 0, origin_id: int = 0) -> InFlightOrder:
+        """A hedge that could not even be built, represented as an order that is never queued (so a failure can be recorded for it)."""
+        self._order_ids += 1
+        return InFlightOrder(release_ts=ts, order_id=self._order_ids, venue=sig.hedge_venue, side=sig.hedge_side, qty=qty, limit_price=0.0,
+                             is_taker=True, sent_ts=ts, signal_id=sig.signal_id,
+                             expected_price=sig.sell_price if sig.hedge_side == "sell" else sig.buy_price, is_hedge=is_hedge,
+                             attempt=attempt, origin_id=origin_id or self._order_ids)
+
+    def _maker_fill_faults(self, sig: ArbSignal, fill: Fill) -> float:
+        """Faults tied to the maker fill. Returns when the strategy can act on it (its execution report may be held up)."""
+        f = self.faults
+        ts = fill.ts
+        until = self._maker_unknown_until.get(fill.order_id)
+        if until is not None and ts < until:
+            self.hedge["fill_reports_deferred_unknown"] += 1
+            self.hedge["fill_report_delay_s_sum"] += until - ts
+            ts = until                                    # the acknowledgement was lost: the first the strategy hears is the reconciliation
+        out = self._active_outage(fill.venue, ts)
+        if out is not None:
+            ts = out.end_ts                               # execution reports ride on the order-entry session: they arrive at reconnect
+            self.hedge["fill_reports_deferred"] += 1
+            self.hedge["fill_report_delay_s_sum"] += ts - fill.ts
+        if f.outage_on_fill_s > 0 and self._active_outage(sig.hedge_venue, ts) is None:
+            self._dyn_outages = [o for o in self._dyn_outages if o.end_ts > self._now - 3600.0]
+            self._dyn_outages.append(Outage(sig.hedge_venue, ts, ts + f.outage_on_fill_s, f.outage_on_fill_kind))
+            self.hedge["outages_triggered_by_fills"] += 1
+        return ts
+
+    def _inject_send_faults(self, order: InFlightOrder, now: float) -> bool:
+        """Apply the configured faults to a hedge / unwind order at send time. True = diverted, do not enqueue it normally.
+
+        The three random draws are always taken for a hedge, so changing one probability never shifts the others' draws.
+        """
+        f = self.faults
+        out = self._active_outage(order.venue, now)
+        if out is not None:
+            self.hedge["sends_into_outage"] += 1
+            self.events.emit(now, "send_into_outage", order.venue, source="injected", order_id=order.order_id, signal_id=order.signal_id,
+                             chain_id=self._chain_of(order), side=order.side, qty=order.qty, reason=f.outage_policy)
+            flight = order.release_ts - now
+            if f.outage_policy == "reject":
+                self._hedge_failed(order, now + f.local_reject_s, "fault_outage_reject")
+                return True
+            if f.outage_policy == "queue":
+                order.release_ts = max(order.release_ts, out.end_ts + flight)
+                self.hedge["queued_through_outage"] += 1
+                self.hedge["queue_wait_s_sum"] += order.release_ts - now - flight
+                return False
+            self.orders_sent += 1
+            self._hedge_failed(order, now + f.ack_timeout_s, "fault_outage_" + f.outage_policy)
+            if f.outage_policy == "ghost":
+                self.pending.enqueue(replace(order, release_ts=out.end_ts + flight, ghost=True))
+            else:
+                self.hedge["blackholed_orders"] += 1
+            return True
+        if order.is_hedge:
+            r = self._fault_rng
+            u_delay, u_reject, u_partial = r.random(), r.random(), r.random()
+            if f.delay_prob and f.extra_delay_s and u_delay < f.delay_prob:
+                order.release_ts += f.extra_delay_s
+                self.hedge["hedges_delayed"] += 1
+                self.events.emit(now, "hedge_delayed", order.venue, source="injected", order_id=order.order_id, signal_id=order.signal_id,
+                                 chain_id=self._chain_of(order), qty=order.qty, reason=f"+{f.extra_delay_s:g}s")
+            if u_reject < f.reject_prob:
+                order.fault = "reject"
+            elif u_partial < f.partial_prob:
+                order.fault = "partial"
+                order.partial_fraction = f.partial_fraction
+            # Phenomena of the strategy-level fault layer: own stream, three draws per hedge, always taken.
+            x = self._rng_extra
+            u_unknown, u_fast, u_venue = x.random(), x.random(), x.random()
+            if not order.fault:
+                p_venue = dict(f.reject_prob_by_venue).get(order.venue, 0.0)
+                fast = False
+                if f.fast_move_reject_prob and f.fast_move_bps:
+                    hist = self._mid_hist[order.venue]
+                    if len(hist) >= 2:
+                        edge = now - f.fast_move_window_s
+                        ref = next((m for t, m in hist if t >= edge), hist[0][1])
+                        fast = ref > 0 and abs(hist[-1][1] - ref) / ref * 1e4 >= f.fast_move_bps
+                if u_venue < p_venue:
+                    order.fault = "reject"
+                    self.hedge["hedges_rejected_by_venue_prob"] += 1
+                elif fast and u_fast < f.fast_move_reject_prob:
+                    order.fault = "reject"
+                    self.hedge["fast_move_hedge_rejects"] += 1
+                elif u_unknown < f.ack_unknown_prob:
+                    order.fault = "unknown"
+                if fast:
+                    self.hedge["hedges_sent_in_fast_move"] += 1
+        return False
+
+    def _inject_maker_send_faults(self, order: InFlightOrder, now: float) -> bool:
+        """Faults on a passive order at send time. True = diverted (it never reaches the exchange).
+
+        A passive order sent while its venue's gateway is down fails like any order sent into an outage: "reject" is known at once,
+        "blackhole" and "ghost" are lost and noticed after ack_timeout_s (a passive ghost is not modelled: it is treated as a
+        blackhole), "queue" is delivered at reconnect. Two draws per passive order are always taken, from their own stream.
+        """
+        f = self.faults
+        u_reject, u_unknown = self._rng_maker.random(), self._rng_maker.random()
+        out = self._active_outage(order.venue, now)
+        if out is not None:
+            self.hedge["maker_sends_into_outage"] += 1
+            self.events.emit(now, "send_into_outage", order.venue, source="injected", order_id=order.order_id, signal_id=order.signal_id,
+                             side=order.side, qty=order.qty, price=order.limit_price, reason=f.outage_policy)
+            if f.outage_policy == "queue":
+                order.release_ts = max(order.release_ts, out.end_ts + (order.release_ts - now))
+                self.hedge["maker_queued_through_outage"] += 1
+                return False
+            self.orders_sent += 1
+            delay = f.local_reject_s if f.outage_policy == "reject" else f.ack_timeout_s
+            self._order_ids += 1
+            self.pending.enqueue(InFlightOrder(
+                release_ts=now + delay, order_id=self._order_ids, venue=order.venue, side=order.side, qty=order.qty,
+                limit_price=order.limit_price, is_taker=False, sent_ts=now, signal_id=order.signal_id, kind="recover",
+                tag="maker_fail:fault_outage_" + f.outage_policy, origin_id=order.order_id))
+            return True
+        if u_reject < dict(f.reject_prob_by_venue).get(order.venue, 0.0):
+            order.fault = "reject"
+        elif u_unknown < f.ack_unknown_prob:
+            order.fault = "unknown"
+        return False
+
+    def _enqueue_timer(self, order: InFlightOrder, release_ts: float, tag: str, attempt: int) -> None:
+        self._order_ids += 1
+        self.pending.enqueue(InFlightOrder(
+            release_ts=release_ts, order_id=self._order_ids, venue=order.venue, side=order.side, qty=order.qty,
+            limit_price=order.limit_price, is_taker=True, sent_ts=order.sent_ts, signal_id=order.signal_id, kind="recover", tag=tag,
+            is_hedge=order.is_hedge, role=order.role, attempt=attempt, origin_id=order.origin_id or order.order_id))
+
+    def _hedge_failed(self, order: InFlightOrder, detect_ts: float, reason: str) -> None:
+        """The hedge (or an unwind / retry) did not do its job. The strategy reacts at `detect_ts`, not before."""
+        origin = order.origin_id or order.order_id
+        ev = self._hedge_open.get(origin)
+        if ev is None:
+            ev = {"origin_id": origin, "signal_id": order.signal_id, "hedge_venue": order.venue if order.is_hedge else "", "qty": order.qty,
+                  "t_sent": order.sent_ts, "first_reason": reason, "t_first_detect": detect_ts, "reasons": [], "outcome": None,
+                  "t_resolved": None, "unwound_qty": 0.0, "ghost_qty": 0.0}
+            self._hedge_open[origin] = ev                       # kept after the chain ends: a late ghost fill still finds its record
+            if len(self.hedge_events) < 100_000:
+                self.hedge_events.append(ev)
+        ev["reasons"].append(reason)
+        self.events.emit(detect_ts, "hedge_failed", order.venue, source="injected" if reason.startswith("fault_") else "modelled",
+                         order_id=order.order_id, signal_id=order.signal_id, chain_id=origin, side=order.side, qty=order.qty, reason=reason)
+        self.hedge["failed_" + reason] += 1
+        self.hedge["failed_qty"] += order.qty
+        if self._breaker is not None:
+            net_abs = abs(self.inventory.net_base) if hasattr(self, "inventory") else 0.0
+            self._breaker.on_hedge_result(detect_ts, failed=True, net_abs=net_abs,
+                                          pending_hedges=len(self.pending.in_flight()))
+        tracker = self._trackers.get(order.signal_id)
+        if tracker is not None and self.faults.response != "legacy":
+            tracker.managed = True
+        self._enqueue_timer(order, detect_ts, "failed:" + reason, order.attempt)
+
+    def _finish_leg(self, order: InFlightOrder, tracker: _SignalTracker | None, now: float, outcome: str) -> None:
+        ev = self._hedge_open.get(order.origin_id or order.order_id)
+        if ev is not None and ev["outcome"] is None:
+            ev["outcome"] = outcome
+            ev["t_resolved"] = max(now, order.release_ts)
+        if tracker is not None:
+            tracker.legs_outstanding -= 1
+            self._maybe_resolve(order.signal_id, now)
+
+    def _handle_recover(self, order: InFlightOrder, now: float) -> None:
+        """A strategy-side timer fired: a failure became known, or a retry is due."""
+        f = self.faults
+        tracker = self._trackers.get(order.signal_id)
+        t0 = order.release_ts                                   # logical time of the timer; `now` is the next market event
+        if order.tag.startswith("maker_fail:"):
+            reason = order.tag.split(":", 1)[1]
+            self.orders_missed += 1
+            self.miss_reasons[reason] += 1
+            self.po["notices"] += 1
+            self.po["notice_delay_s_sum"] += now - order.release_ts
+            if tracker is not None:
+                tracker.legs_outstanding -= 1
+                self._maybe_resolve(order.signal_id, now)
+            return
+        if order.tag == "unknown_resolved":
+            self.hedge["unknown_resolved"] += 1
+            self._finish_leg(order, tracker, now, "hedged_after_unknown")
+            return
+        if order.tag == "retry_send":
+            self._resend(order, tracker, t0)
+            return
+        reason = order.tag.split(":", 1)[1]
+        self.orders_missed += 1
+        self.miss_reasons[reason] += 1
+        if tracker is None:                                     # the signal was already closed out
+            self.hedge["failures_after_signal_closed"] += 1
+            return
+        if f.response == "legacy":
+            tracker.missed += 1
+            self._finish_leg(order, tracker, now, "legacy_instant_flatten")
+            return
+        retryable = order.role == "unwind" or (order.is_hedge and f.response in ("retry", "retry_unwind"))
+        if retryable and order.attempt < f.max_retries:
+            self._enqueue_timer(order, t0 + f.retry_backoff_s, "retry_send", order.attempt + 1)
+            return
+        if order.is_hedge and f.response in ("unwind", "retry_unwind"):
+            self._send_unwind(order, tracker, t0)
+            return
+        self.hedge["carried_events"] += 1
+        self.hedge["carried_qty"] += order.qty
+        if self._breaker is not None and order.role == "unwind":
+            self._breaker.on_failed_unwind(now, abs(self.inventory.net_base), len(self.pending.in_flight()))
+        self._finish_leg(order, tracker, now, "unwind_failed_carried" if order.role == "unwind" else "carried")
+
+    def _resend(self, order: InFlightOrder, tracker: _SignalTracker | None, t0: float) -> None:
+        if tracker is None:
+            return
+        sig = tracker.signal
+        if order.role == "unwind":
+            self._send_unwind(order, tracker, t0, attempt=order.attempt)
+            return
+        hedge = self.strategy.hedge_leg(sig, order.qty, self.books[sig.hedge_venue])
+        if hedge is None:
+            self.hedge["hedge_leg_unavailable"] += 1
+            self._hedge_failed(self._probe_order(sig, order.qty, t0, is_hedge=True, attempt=order.attempt, origin_id=order.origin_id),
+                               t0 + self.faults.local_reject_s, "hedge_unavailable")
+            return
+        self.hedge["retries_sent"] += 1
+        self._send_leg(hedge, sig, t0, is_hedge=True, attempt=order.attempt, origin_id=order.origin_id)
+
+    def _send_unwind(self, failed: InFlightOrder, tracker: _SignalTracker, t0: float, attempt: int = 0) -> None:
+        """Trade the unhedged maker fill back on the maker venue as a real order (sell back a filled bid, buy back a filled ask):
+        entry latency, executes against the book of its arrival."""
+        sig = tracker.signal
+        venue = sig.maker_venue
+        side = "sell" if sig.hedge_side == "sell" else "buy"
+        book = self.books[venue]
+        leg = ArbLeg(venue=venue, side=side, qty=failed.qty, limit_price=0.0 if side == "sell" else float("inf"), is_taker=True,
+                     expected_price=book.mid if book.ready else (sig.buy_price if side == "sell" else sig.sell_price),
+                     fee_bps=self.venue_specs[venue].fees.taker_bps)
+        self.hedge["unwinds_sent"] += 1
+        self._send_leg(leg, sig, t0, role="unwind", attempt=attempt, origin_id=failed.origin_id)
+
+    def _execute_unwind(self, order: InFlightOrder, tracker: _SignalTracker | None, now: float) -> None:
+        book = self.books[order.venue]
+        ref = book.mid if book.ready else 0.0
+        out = self.taker.execute(
+            book=book, side=order.side, qty=order.qty, limit_price=order.limit_price,
+            fee_bps=self.venue_specs[order.venue].fees.taker_bps, now=now, expected_price=ref, signal_id=order.signal_id)
+        done = 0.0
+        if out.filled and out.fill is not None:
+            self.orders_filled += 1
+            done = out.fill.qty
+            if ref > 0:
+                self.unhedged_loss += abs(out.fill.price - ref) * done
+            self._on_fill(out.fill, tracker, chain=order.origin_id or order.order_id)
+            self.hedge["unwind_filled_qty"] += done
+        ev = self._hedge_open.get(order.origin_id or order.order_id)
+        if ev is not None:
+            ev["unwound_qty"] += done
+        remainder = order.qty - done
+        if remainder > 1e-9:
+            self._hedge_failed(replace(order, qty=remainder), order.release_ts + self._ack_s(order.venue),
+                               "unwind_partial" if done > 0 else "unwind_" + out.reason)
+            return
+        self._finish_leg(order, tracker, now, "unwound")
+
+    def _execute_ghost(self, order: InFlightOrder, now: float) -> None:
+        """A hedge the strategy had written off is delivered at reconnect and fills if the book allows: an over-hedge."""
+        book = self.books[order.venue]
+        out = self.taker.execute(
+            book=book, side=order.side, qty=order.qty, limit_price=order.limit_price,
+            fee_bps=self.venue_specs[order.venue].fees.taker_bps, now=now, expected_price=order.expected_price,
+            signal_id=order.signal_id)
+        if out.filled and out.fill is not None:
+            self.orders_filled += 1
+            self.hedge["ghost_fills"] += 1
+            self.hedge["ghost_fill_qty"] += out.fill.qty
+            ev = self._hedge_open.get(order.origin_id or order.order_id)
+            if ev is not None:
+                ev["ghost_qty"] += out.fill.qty
+            self._on_fill(out.fill, chain=order.origin_id or order.order_id)
+        else:
+            self.hedge["ghost_misses"] += 1
+
+    def _execute_hedge_with_faults(self, order: InFlightOrder, tracker: _SignalTracker | None, now: float) -> None:
+        """A hedge (or retry) reaching the exchange while injection is configured."""
+        origin = order.origin_id or order.order_id
+        if order.fault == "reject":
+            self._hedge_failed(order, order.release_ts + self._ack_s(order.venue), "fault_rejected")
+            return
+        qty = order.qty * order.partial_fraction if order.fault == "partial" else order.qty
+        outcome = self.taker.execute(
+            book=self.books[order.venue], side=order.side, qty=qty, limit_price=order.limit_price,
+            fee_bps=self.venue_specs[order.venue].fees.taker_bps, now=now, expected_price=order.expected_price,
+            signal_id=order.signal_id)
+        done = 0.0
+        if outcome.filled and outcome.fill is not None:
+            self.orders_filled += 1
+            done = outcome.fill.qty
+            self.hedge["hedges_filled"] += 1
+            self.hedge["hedge_flight_s_sum"] += now - order.sent_ts
+            self._on_fill(outcome.fill, tracker, chain=self._chain_of(order))
+            if self._breaker is not None and done >= order.qty - 1e-9:
+                self._breaker.on_hedge_result(now, failed=False, net_abs=abs(self.inventory.net_base),
+                                              pending_hedges=len(self.pending.in_flight()))
+        remainder = order.qty - done
+        learn = order.release_ts + self._ack_s(order.venue)
+        if order.fault == "unknown":
+            # The acknowledgement was lost: the strategy does not know what happened until it queries the venue. It does not
+            # retry in the meantime (that is what would double-hedge); the order has executed or not at the exchange regardless.
+            learn = order.release_ts + self.faults.ack_timeout_s + self.faults.unknown_resolve_s
+            self.hedge["unknown_orders"] += 1
+            if self._breaker is not None:
+                self._breaker.on_unknown_order(order.order_id, order.release_ts, order.venue)
+            self.events.emit(order.release_ts, "order_unknown", order.venue, source="injected", order_id=order.order_id,
+                             signal_id=order.signal_id, chain_id=self._chain_of(order), qty=order.qty, reason="ack_lost")
+            if remainder <= 1e-9:
+                self._enqueue_timer(order, learn, "unknown_resolved", order.attempt)
+                return
+        if remainder > 1e-9:
+            reason = "fault_partial" if order.fault == "partial" else (outcome.reason if not outcome.filled else "partial_depth")
+            self._hedge_failed(replace(order, qty=remainder), learn, reason)
+            return
+        ev = self._hedge_open.get(origin)
+        if ev is not None and ev["outcome"] is None:
+            ev["outcome"] = "hedged_on_retry"
+            ev["t_resolved"] = max(now, order.release_ts)
+        if tracker is not None:
+            tracker.legs_outstanding -= 1
+            self._maybe_resolve(order.signal_id, now)
+
+    def _ref_mid(self) -> float:
+        """Mid of the book that was updated most recently: the one price both venues' inventory can be valued at without
+        counting a stale book's age as profit or loss."""
+        best = max(self.books.values(), key=lambda b: b.last_update_ts)
+        return best.mid
+
+    def _hedge_report(self, end_ts: float) -> dict:
+        """Counters, the inventory path and one row per signal (cash flows from the trade log, residual marked at the final mids)."""
+        if self.faults is None and self.exposure is None:
+            return {}
+        truncated = len(self.trade_log) >= self.config.max_trade_log
+        ref = self._ref_mid()
+        per: dict[int, dict] = {}
+        for r in self.trade_log:
+            row = per.setdefault(r["signal_id"], {"signal_id": r["signal_id"], "first_ts": r["ts"], "last_ts": r["ts"], "cash": 0.0,
+                                                  "fees": 0.0, "pos": {}, "n_fills": 0, "buy_qty": 0.0, "sell_qty": 0.0, "buy_notional": 0.0})
+            sgn = 1.0 if r["side"] == "buy" else -1.0
+            row["cash"] -= sgn * r["qty"] * r["price"]
+            row["fees"] += r["fee"]
+            row["pos"][r["venue"]] = row["pos"].get(r["venue"], 0.0) + sgn * r["qty"]
+            if sgn > 0:
+                row["buy_qty"] += r["qty"]
+                row["buy_notional"] += r["qty"] * r["price"]
+            else:
+                row["sell_qty"] += r["qty"]
+            row["first_ts"] = min(row["first_ts"], r["ts"])
+            row["last_ts"] = max(row["last_ts"], r["ts"])
+            row["n_fills"] += 1
+        signals = []
+        for row in per.values():
+            resid = sum(row["pos"].values())
+            signals.append({"signal_id": row["signal_id"], "first_ts": row["first_ts"], "last_ts": row["last_ts"], "n_fills": row["n_fills"],
+                            "buy_qty": row["buy_qty"], "sell_qty": row["sell_qty"], "buy_notional": row["buy_notional"],
+                            "cash_after_fees": row["cash"] - row["fees"], "residual_net_base": resid,
+                            "pnl_marked": row["cash"] - row["fees"] + resid * ref, "positions": row["pos"]})
+        return {
+            "counters": {k: float(v) for k, v in sorted(self.hedge.items())},
+            "faults": self.faults.as_dict() if self.faults is not None else None,
+            "exposure": self.exposure.report(end_ts) if self.exposure is not None else {},
+            "events": self.hedge_events, "signals": signals, "trade_log_truncated": truncated,
+            "unresolved_chains_at_data_end": sum(1 for e in self.hedge_events if e["outcome"] is None),
+            "max_position_base": self.config.arb.max_position_base, "reference_mid_at_end": ref,
+            "circuit_breaker": self._breaker.summary() if self._breaker is not None else None,
+        }
 
     # ── Main loop ────────────────────────────────────────────────────────────
+
+    def _expire_maker_orders(self, now: float) -> None:
+        """Time-in-force for resting maker orders (ArbConfig.maker_max_age_s, seconds; 0 disables).
+
+        Semantics (all times are replay receive time):
+          * The lifetime clock starts when the order is placed at the exchange (`placed_ts`, the first replay event at or
+            after its release_ts). An order still in flight therefore cannot expire; it is counted toward the live-order
+            limit until it lands.
+          * At `placed_ts + ttl` the strategy requests a cancel. The cancel takes effect after one sampled cancel latency,
+            drawn once and stored on the order, so scanning again can neither move the deadline nor cancel twice.
+          * Between the request and the effective time the order is 'cancel_pending': still resting, still fillable, and
+            still counted as live. Fills in that window are kept.
+          * Tie rule: expiry is processed before the market event it coincides with, so an event stamped exactly at the
+            effective time does not fill the order.
+          * The slot is released to the strategy one feed delay after the cancel lands, not at the instant it lands.
+        """
+        ttl = self.config.arb.maker_max_age_s
+        # A cancel that lost the race to a full fill: the order left the book on its own, the cancel finds nothing.
+        for oid, gone in list(self._cancel_watch.items()):
+            if oid not in self.maker.orders:
+                del self._cancel_watch[oid]
+                self.lifetime["cancels_lost_to_fill"] += 1
+                during = gone.filled_qty - gone.filled_at_cancel_request
+                if during > 1e-12:
+                    self.lifetime["fills_while_cancel_pending"] += 1
+                    self.lifetime["qty_filled_while_cancel_pending"] += during
+        for order in list(self.maker.orders.values()):
+            if order.cancel_requested_ts is None:
+                requested = order.placed_ts + ttl
+                if now < requested:
+                    continue
+                order.cancel_requested_ts = requested
+                delay = self.latency.cancel_delay(order.venue)                 # always drawn
+                base = requested
+                if self.faults is not None:
+                    delay *= self.faults.latency_scale
+                    out = self._active_outage(order.venue, requested)
+                    if out is not None:
+                        # The cancel cannot reach the venue until the gateway is back; the order keeps resting and can fill.
+                        base = out.end_ts
+                        self.hedge["cancels_delayed_by_outage"] += 1
+                        self.hedge["cancel_outage_delay_s_sum"] += out.end_ts - requested
+                        self.events.emit(requested, "cancel_delayed_by_outage", order.venue, source="injected", order_id=order.order_id,
+                                         signal_id=self._maker_to_signal.get(order.order_id, 0))
+                order.cancel_effective_ts = base + delay
+                order.cancel_reason = "expired"
+                order.filled_at_cancel_request = order.filled_qty
+                self._cancel_watch[order.order_id] = order
+                self.lifetime["expiries_triggered"] += 1
+                self.events.emit(requested, "cancel_requested", order.venue, source="modelled", order_id=order.order_id,
+                                 signal_id=self._maker_to_signal.get(order.order_id, 0), side=order.side_str, qty=order.remaining, price=order.price)
+            if now < order.cancel_effective_ts:
+                continue
+            if self.config.cancel_time_basis == "exchange":
+                continue                                  # applied by _apply_due_cancels when the venue's feed reaches that exchange time
+            self._apply_cancel(order, now)
+
+    def _apply_due_cancels(self, venue: str, ets: float | None, now: float) -> None:
+        """cancel_time_basis == "exchange": cancels take effect before the first venue event stamped at or after their effective time."""
+        t_cmp = ets if ets is not None else now
+        for order in list(self.maker.orders.values()):
+            if (order.venue == venue and order.cancel_requested_ts is not None and order.cancel_effective_ts is not None
+                    and t_cmp >= order.cancel_effective_ts):
+                self._apply_cancel(order, now)
+
+    def _apply_cancel(self, order: MakerOrder, now: float) -> None:
+        effective = max(order.cancel_effective_ts, order.placed_ts)
+        cancelled = self.maker.cancel(order.order_id, effective)
+        if cancelled is None:
+            return
+        self._cancel_watch.pop(cancelled.order_id, None)
+        self.lifetime["cancels_applied"] += 1
+        self.lifetime["age_at_cancel_sum_s"] += effective - cancelled.placed_ts
+        self.lifetime["cancel_pending_time_sum_s"] += effective - cancelled.cancel_requested_ts
+        if cancelled.filled_qty > 1e-12:
+            self.lifetime["expired_after_partial_fill"] += 1
+        during = cancelled.filled_qty - cancelled.filled_at_cancel_request
+        if during > 1e-12:
+            self.lifetime["fills_while_cancel_pending"] += 1
+            self.lifetime["qty_filled_while_cancel_pending"] += during
+        self._cancel_acks.append(effective + self.venue_specs[cancelled.venue].latency.feed_ms / 1000.0)
+        sid = self._maker_to_signal.get(cancelled.order_id, -1)
+        self.events.emit(effective, "cancel_applied", cancelled.venue, source="modelled", order_id=cancelled.order_id, signal_id=sid if sid > 0 else 0,
+                         side=cancelled.side_str, qty=cancelled.remaining, price=cancelled.price)
+        tracker = self._trackers.get(sid)
+        if tracker is not None:
+            tracker.maker_resting = False
+        self._maybe_resolve(sid, now)
+
+    def _pending_exposure(self) -> PendingExposure:
+        """Worst-case base not in the inventory yet: resting maker remainders plus every order still in flight.
+
+        When count_unknown_exposure=True (Task 2c opt-in), ghost/UNKNOWN orders are also counted: they are
+        orders the strategy has given up on but which the exchange may still execute.
+        """
+        pend = PendingExposure()
+        count_unknown = self.config.arb.count_unknown_exposure
+        for o in self.maker.orders.values():
+            pend.add(o.venue, o.side_str, o.remaining)
+        for o in self.pending.in_flight():
+            if o.kind != "order":
+                continue
+            if o.ghost and not count_unknown:
+                continue   # strategy has written this off; exclude unless count_unknown_exposure
+            pend.add(o.venue, o.side, o.qty)
+        for waiting in self._po_wait.values():    # arrived at the exchange, PostOnly check not yet resolved: still the strategy's exposure
+            for o in waiting:
+                pend.add(o.venue, o.side, o.qty)
+        return pend
+
+    def _live_maker_orders(self, now: float) -> int:
+        """Maker orders the strategy must treat as possibly executable: resting (incl. cancel-pending), in flight,
+        and cancelled at the exchange but not yet acknowledged to the strategy."""
+        n = len(self.maker.orders)
+        if self.config.arb.maker_count_inflight:
+            n += self.pending.maker_legs_in_flight()
+            n += sum(len(w) for w in self._po_wait.values())
+        if self._cancel_acks:
+            self._cancel_acks = [t for t in self._cancel_acks if t > now]
+            n += len(self._cancel_acks)
+        return n
+
+    def _advance_to(self, now: float) -> None:
+        """Bring order state up to `now`, before the market event stamped `now` is applied.
+
+        Order: in-flight orders land, then expiries/cancels take effect, then the caller applies the event. An order
+        sent at t-latency therefore cannot see the book update arriving right now, and a cancel effective at or before
+        `now` wins a tie against that event.
+        """
+        self._now = now
+        for order in self.pending.release(now):
+            self._execute_arrival(order, now)
+        if self.config.arb.maker_max_age_s > 0:
+            self._expire_maker_orders(now)
+
+    def _close_out(self, now: float) -> None:
+        """End of data. Orders still in flight land on the last book, resting orders are closed.
+
+        Neither is a real outcome: the data simply stopped. They are counted separately (`maker_landed_after_data_end`,
+        `taker_landed_after_data_end`, `resting_at_data_end`, `cancel_pending_at_data_end`) and never as an applied
+        cancel. The closes only censor the fill-model observations; they add no fills.
+        """
+        for venue, waiting in self._po_wait.items():
+            for o in waiting:                        # the feed ended before the exchange-time check could run: neither accepted nor rejected
+                self.po["unresolved_at_data_end"] += 1
+                t = self._trackers.get(o.signal_id)
+                if t is not None:
+                    t.legs_outstanding -= 1
+            waiting.clear()
+        self.lifetime["resting_at_data_end"] = len(self.maker.orders)
+        self.lifetime["cancel_pending_at_data_end"] = sum(
+            1 for o in self.maker.orders.values() if o.cancel_requested_ts is not None)
+        for order in self.pending.drain():
+            if order.kind == "recover":
+                self.hedge["recovery_timers_pending_at_data_end"] += 1       # the strategy's reaction was still to come
+                continue
+            if order.ghost:
+                self.hedge["ghost_orders_pending_at_data_end"] += 1
+                continue
+            self.lifetime["taker_landed_after_data_end" if order.is_taker else "maker_landed_after_data_end"] += 1
+            self._execute_arrival(order, now)
+        for mo in self.maker.orders.values():
+            if mo.cancel_requested_ts is None:
+                mo.cancel_reason = "end_of_data"
+        for mo in self.maker.cancel_all(now):
+            sid = self._maker_to_signal.get(mo.order_id, -1)
+            t = self._trackers.get(sid)
+            if t is not None:
+                t.maker_resting = False
+            self._maybe_resolve(sid, now)
+        for sid in list(self._trackers):
+            self._trackers[sid].legs_outstanding = 0
+            self._trackers[sid].maker_resting = False
+            self._maybe_resolve(sid, now)
+        self._cancel_watch.clear()
+        self._cancel_acks.clear()
 
     def run(self) -> ArbBacktestResult:
         cfg = self.config
@@ -562,6 +1645,7 @@ class CrossVenueArbBacktester:
             trust_local_ts={v: s.trust_local_ts for v, s in self.venue_specs.items()},
             include_deltas=cfg.include_deltas,
             quality_preflight=True,
+            trade_dedupe=cfg.trade_dedupe,
         )
 
         now = 0.0
@@ -575,25 +1659,49 @@ class CrossVenueArbBacktester:
                 self.events_by_venue[ev.venue] += 1
                 self.events_by_kind[ev.kind] += 1
 
-                # In-flight orders land before the current event is applied: an order
-                # sent at t-latency cannot see the book update arriving right now.
-                for order in self.pending.release(now):
-                    self._execute_arrival(order, now)
-
+                self._advance_to(now)
                 self._apply_event(ev)
+                self._record_mid_ts(ev.venue, now)
 
                 if self.settler is not None:
                     self.settler.settle(now, self.inventory, self.books)
+                if self.margin_model is not None:
+                    self._margin_step(now)
+                if self.exposure is not None:
+                    self.exposure.update(now, self.inventory.base, self.inventory.total_cash,
+                                         {v: b.mid for v, b in self.books.items()}, self._ref_mid())
 
                 # Trades can move the touch too, via trade-tape repair.
                 if self._touch_changed(ev.venue):
                     self.markouts.resolve(now, {v: b.mid for v, b in self.books.items()})
-                    signal = self.strategy.evaluate(
-                    self.books, self.states, self.inventory, now,
-                    live_maker_orders=len(self.maker.orders),
-                )
+                    blocked_before = self.strategy.rejects["maker_limit"]
+                    if self.faults is not None and self._feed_dark(now):
+                        self.hedge["evaluations_skipped_feed_dark"] += 1
+                        signal = None
+                    elif self._breaker is not None and not self._breaker.allow_signal(now, abs(self.inventory.net_base)):
+                        self.hedge["signals_blocked_by_circuit_breaker"] = \
+                            self.hedge.get("signals_blocked_by_circuit_breaker", 0) + 1
+                        signal = None
+                    else:
+                        signal = self.strategy.evaluate(
+                            self.books, self.states, self.inventory, now,
+                            live_maker_orders=self._live_maker_orders(now),
+                            pending=self._pending_exposure() if cfg.arb.count_pending_exposure else None,
+                        )
+                    if self._breaker is not None:
+                        self._breaker.on_net_update(now, abs(self.inventory.net_base), len(self.pending.in_flight()))
+                        self._breaker.check_unknown_orders(now, abs(self.inventory.net_base), len(self.pending.in_flight()))
+                    if (self.strategy.rejects["maker_limit"] > blocked_before
+                            and (self._cancel_acks or any(o.cancel_requested_ts is not None for o in self.maker.orders.values()))):
+                        self.lifetime["quotes_blocked_by_unresolved_cancel"] += 1
                     if signal is not None:
-                        self._fire(signal, now)
+                        if (self.faults is not None and self.faults.entry_guard
+                                and any(self._active_outage(v, now) is not None for v in (signal.buy_venue, signal.sell_venue))):
+                            self.hedge["signals_blocked_by_entry_guard"] += 1
+                        elif self.margin_model is not None and not self.margin_model.allows(signal, self.inventory, self.books):
+                            self.hedge["signals_blocked_by_margin"] += 1          # the venue could not post initial margin for the clip
+                        else:
+                            self._fire(signal, now)
 
                 if cfg.progress_every and self.events_processed % cfg.progress_every == 0:
                     print(
@@ -604,19 +1712,10 @@ class CrossVenueArbBacktester:
                         flush=True,
                     )
 
-            # Drain: everything in flight lands, resting orders are cancelled.
-            for order in self.pending.drain():
-                self._execute_arrival(order, now)
-            for mo in self.maker.cancel_all(now):
-                sid = self._maker_to_signal.get(mo.order_id, -1)
-                t = self._trackers.get(sid)
-                if t is not None:
-                    t.maker_resting = False
-                self._maybe_resolve(sid, now)
-            for sid in list(self._trackers):
-                self._trackers[sid].legs_outstanding = 0
-                self._trackers[sid].maker_resting = False
-                self._maybe_resolve(sid, now)
+            self._close_out(now)
+            if self.exposure is not None:
+                self.exposure.update(now, self.inventory.base, self.inventory.total_cash,
+                                     {v: b.mid for v, b in self.books.items()}, self._ref_mid())
 
             self.markouts.resolve(now, {v: b.mid for v, b in self.books.items()}, finalize=True)
             return self._build_result(feed, coverage, virtual_clock.real_time() - wall_start)
@@ -625,14 +1724,134 @@ class CrossVenueArbBacktester:
 
     # ── Result ───────────────────────────────────────────────────────────────
 
+    def _equity_bridge(self, open_pos_value: float, ending_equity: float) -> dict:
+        """Ledger identity, checked at the end of every run (docs/strategy_contract.md section 4):
+             cash rebuilt from the trade log (fills, fees) + funding + transfers == ledger cash
+             ending_equity == ledger cash + open position marked at the common timestamp.
+        Tolerance 1e-6 USDT, scaled by 1e-9 x traded notional for float accumulation. Skipped (and flagged) when the trade log was
+        truncated by max_trade_log. Raises EquityBridgeError unless ArbBacktestConfig.equity_bridge == "warn"."""
+        truncated = len(self.trade_log) >= self.config.max_trade_log
+        funding = -(self.settler.funding_paid if self.settler else 0.0)
+        # Transfers move equity between the margin model's venue accounts; the ledger cash (InventoryBook) never sees them, so
+        # they are reported here but are not part of the cash identity.
+        transfers = sum(self.margin_model.transfer_cash.values()) if self.margin_model is not None else 0.0
+        rebuilt = sum((-r["qty"] * r["price"] if r["side"] == "buy" else r["qty"] * r["price"]) - r["fee"] for r in self.trade_log) + funding
+        tol = max(1e-6, 1e-9 * self.traded_notional)
+        gap_cash = rebuilt - self.inventory.total_cash
+        gap_equity = ending_equity - (self.inventory.total_cash + open_pos_value)
+        doc = {"checked": not truncated, "tolerance_usdt": tol, "ledger_cash": self.inventory.total_cash, "cash_from_trade_log": rebuilt,
+               "funding": funding, "transfers": transfers, "open_position_value": open_pos_value, "ending_equity": ending_equity,
+               "cash_gap": gap_cash, "equity_gap": gap_equity, "ok": truncated or (abs(gap_cash) <= tol and abs(gap_equity) <= tol)}
+        if not doc["ok"]:
+            msg = f"equity bridge failed: cash gap {gap_cash:.9f}, equity gap {gap_equity:.9f}, tolerance {tol:.3e}"
+            if self.config.equity_bridge == "warn":
+                warnings.warn(msg, RuntimeWarning, stacklevel=2)
+            else:
+                raise EquityBridgeError(msg)
+        return doc
+
+    def _legging_report(self) -> dict:
+        """Legging exposure per resolved maker signal: maker fill -> hedge fill, from the recorded timestamps."""
+        rows = self.legging_rows
+        vals = sorted(r["legging_s"] for r in rows if r["legging_s"] is not None)
+        q = lambda p: vals[min(len(vals) - 1, int(p * len(vals)))] if vals else None
+        def dist(xs):
+            xs = sorted(xs)
+            qq = lambda p: xs[min(len(xs) - 1, int(p * len(xs)))] if xs else None
+            return {"n": len(xs), "mean": (sum(xs) / len(xs)) if xs else None, "p10": qq(0.1), "p50": qq(0.5), "p90": qq(0.9), "max": xs[-1] if xs else None}
+        moves = {side: dist([r["hedge_move_bps"] for r in rows if r["side"] == side and r["hedge_move_bps"] is not None]) for side in ("bid", "ask")}
+        exec_moves = {side: dist([r["hedge_exec_move_bps"] for r in rows if r["side"] == side and r["hedge_exec_move_bps"] is not None]) for side in ("bid", "ask")}
+        return {"signals_with_maker_fill": len(rows), "hedged_signals": len(vals),
+                "unhedged_after_maker_fill": sum(1 for r in rows if r["legging_s"] is None),
+                "legging_s": {"n": len(vals), "mean": (sum(vals) / len(vals)) if vals else None, "p50": q(0.5), "p90": q(0.9), "max": vals[-1] if vals else None},
+                # Hedge venue move between quote time and first maker fill, conditional on a fill, by passive side. NEGATIVE = adverse.
+                # This is the empirical input to ArbConfig.expected_hedge_move_bps_{bid,ask}.
+                "hedge_move_bps": moves,
+                # Quote-time touch -> executed hedge VWAP (touch move + flight + slippage), by passive side. NEGATIVE = adverse.
+                # This is the empirical estimate of E[hedge price | fill] - quote: the input to ArbConfig.expected_hedge_move_bps_{bid,ask}.
+                "hedge_exec_move_bps": exec_moves,
+                "rows": rows[:5000]}
+
+    # ── Margin / liquidation / transfers (margin_model.py) ───────────────────
+
+    def _margin_step(self, now: float) -> None:
+        """Run the margin model; execute any liquidation (and the matching flatten) it orders against the live books. Liquidations
+        trade at market through the same taker path as an unwind; their fee is charged to cash and reported on its own line."""
+        for venue, side, qty, fee_bps in self.margin_model.step(now, self.inventory, self.books):
+            book = self.books[venue]
+            if qty <= 0 or not book.ready:
+                continue
+            flatten = fee_bps < 0
+            # The liquidation fee rides on the fill itself (taker fee + liquidation fee), so cash, fees_paid and the trade log
+            # agree; the model reports the liquidation part separately.
+            out = self.taker.execute(book=book, side=side, qty=qty, limit_price=float("inf") if side == "buy" else 0.0,
+                                     fee_bps=self.venue_specs[venue].fees.taker_bps + (0.0 if flatten else fee_bps), now=now,
+                                     expected_price=book.mid, signal_id=0)
+            if out.filled and out.fill is not None:
+                f = out.fill
+                self.orders_filled += 1
+                self._on_fill(f)
+                self.margin_model.record_liquidation(venue, f.qty, 0.0 if flatten else f.notional * fee_bps / 10_000.0, flatten)
+
     def _build_result(self, feed: CrossVenueFeed, coverage, wall_s: float) -> ArbBacktestResult:
         cfg = self.config
+        if self.margin_model is not None:
+            self.margin_model.finish(getattr(self, "_now", 0.0) or 0.0)
         mids = {v: b.mid for v, b in self.books.items()}
+
+        # Opt-in single-venue marking (Task 5): override per-venue mids with one venue's price.
+        mark_venue = cfg.arb.mark_inventory_venue
+        if mark_venue is not None and mark_venue in mids:
+            ref_mid = mids[mark_venue]
+            mids = {v: ref_mid for v in cfg.venues}
+
         open_pos_value = sum(
             self.inventory.base.get(v, 0.0) * mids.get(v, 0.0) for v in cfg.venues
         )
         ending_equity = self.inventory.total_cash + open_pos_value
         mtm = ending_equity  # legacy alias
+        self.equity_bridge = self._equity_bridge(open_pos_value, ending_equity)
+
+        # Task 5 — cash_pnl: direct ledger reading (fees already deducted in cash_delta).
+        cash_pnl = self.inventory.total_cash
+
+        # Task 5 — common_timestamp_equity: true common-timestamp valuation.
+        # common_ts = min of each venue's last-update ts = the most recent moment when ALL venues
+        # had already published at least one mid.  For venues that updated AFTER common_ts we use
+        # their mid AT OR BEFORE common_ts (from _mid_history), not their latest mid.  This avoids
+        # using future price observations and gives a single consistent valuation timestamp.
+        # Falls back to ending_equity when any venue has no history or no entry at/before common_ts.
+        live_snapshots = {v: info for v, info in self._last_mid_ts.items() if info[0] > 0.0}
+        if len(live_snapshots) == len(cfg.venues):
+            common_ts = min(info[0] for info in live_snapshots.values())
+            common_staleness = max(info[0] for info in live_snapshots.values()) - common_ts
+            common_mids: dict[str, float] = {}
+            for v in cfg.venues:
+                entry = self._mid_at_or_before(v, common_ts)
+                if entry is not None:
+                    common_mids[v] = entry[1]
+            if len(common_mids) == len(cfg.venues):
+                if mark_venue is not None and mark_venue in common_mids:
+                    ref_mid_common = common_mids[mark_venue]
+                    common_mids = {v: ref_mid_common for v in cfg.venues}
+                common_open_pos = sum(
+                    self.inventory.base.get(v, 0.0) * common_mids.get(v, 0.0) for v in cfg.venues
+                )
+                common_timestamp_equity = self.inventory.total_cash + common_open_pos
+                # Reject the mark when the venues' last updates are too far apart — the
+                # common_ts mid from the lagging venue is too stale to trust.
+                max_staleness = cfg.arb.max_common_staleness_s
+                if common_staleness > max_staleness:
+                    common_timestamp_equity = ending_equity
+                    common_staleness = float("inf")   # "rejected: staleness exceeds threshold"
+            else:
+                # History too shallow to reach common_ts for at least one venue.
+                common_timestamp_equity = ending_equity
+                common_staleness = float("inf")   # signals "unavailable"
+        else:
+            # At least one venue had no price at all during the run.
+            common_timestamp_equity = ending_equity
+            common_staleness = float("inf")
 
         n = max(1, self.edge_samples)
         mean_exp = self.expected_gross_sum / n
@@ -641,10 +1860,21 @@ class CrossVenueArbBacktester:
         capture = (mean_real / mean_exp) if abs(mean_exp) > 1e-12 else 0.0
         mean_slip = self.slippage_sum / self.slippage_count if self.slippage_count else 0.0
 
-        fill_log_path = bucket_stats_path = trades_path = None
+        feed_report = feed.report()
+        for venue, rep in feed_report.items():
+            lat = None if venue.startswith("_") else rep.get("mean_feed_latency_vs_host_ms")
+            if lat is not None and lat < -CLOCK_OFFSET_WARN_MS:
+                warnings.warn(
+                    f"{venue}: recorded receive times average {-lat:.1f} ms BEFORE the exchange timestamps after "
+                    "host-clock correction. The collector clock for this venue is probably offset; the replay then "
+                    "shows this venue's updates early and results can be look-ahead biased.",
+                    RuntimeWarning, stacklevel=2)
+
+        fill_log_path = bucket_stats_path = trades_path = order_events_path = None
         if cfg.output_dir:
             out = Path(cfg.output_dir)
             out.mkdir(parents=True, exist_ok=True)
+            (out / "model_settings.json").write_text(json.dumps(self.model_settings(), indent=1, sort_keys=True), encoding="utf-8")
             fill_log_path = str(out / "fill_events.jsonl")
             bucket_stats_path = str(out / "fill_bucket_stats.json")
             trades_path = str(out / "trades.jsonl")
@@ -653,6 +1883,11 @@ class CrossVenueArbBacktester:
             with open(trades_path, "w", encoding="utf-8") as fh:
                 for row in self.trade_log:
                     fh.write(json.dumps(row, sort_keys=True) + "\n")
+            if cfg.record_order_events:
+                order_events_path = str(out / "order_events.jsonl")
+                with open(order_events_path, "w", encoding="utf-8") as fh:
+                    for row in self.events.as_rows():
+                        fh.write(json.dumps(row, sort_keys=True) + "\n")
 
         return ArbBacktestResult(
             pair=cfg.pair, venues=list(cfg.venues),
@@ -679,6 +1914,11 @@ class CrossVenueArbBacktester:
             open_position_value=open_pos_value,
             ending_equity=ending_equity,
             mark_to_market_pnl=mtm,
+            cash_pnl=cash_pnl,
+            common_timestamp_equity=common_timestamp_equity,
+            common_mid_staleness_s=common_staleness,
+            single_venue_diagnostic=dict(self._stale_event_counts),
+            single_venue_intervals=self._single_venue_event_count,
             mean_expected_gross_edge_bps=mean_exp,
             mean_realized_gross_edge_bps=mean_real,
             edge_capture_ratio=capture,
@@ -690,7 +1930,7 @@ class CrossVenueArbBacktester:
             net_base_position=self.inventory.net_base,
             traded_notional=self.traded_notional,
             strategy_report=self.strategy.report(),
-            feed_report=feed.report(),
+            feed_report=feed_report,
             latency_report=self.latency.report(),
             book_stats={v: b.stats() for v, b in self.books.items()},
             maker_stats=self.maker.stats(),
@@ -700,7 +1940,70 @@ class CrossVenueArbBacktester:
             fill_log_path=fill_log_path,
             bucket_stats_path=bucket_stats_path,
             trades_path=trades_path,
+            maker_lifetime=self._lifetime_report(),
+            maker_diagnostics=self.maker.diagnostics(),
+            model_settings=self.model_settings(),
+            hedge_report=self._hedge_report(self.exposure.last_ts if self.exposure is not None and self.exposure.last_ts else 0.0),
+            order_event_summary=self.events.summary(),
+            postonly_report=self._postonly_report(),
+            margin_report=self.margin_model.report(self.inventory, self.books) if self.margin_model is not None else {},
+            legging_report=self._legging_report(),
+            equity_bridge=self.equity_bridge,
+            signal_log=self.signal_log[:self.config.max_trade_log],
+            order_events_path=order_events_path,
         )
+
+    def _postonly_report(self) -> dict:
+        c = self.po
+        n = max(1, c["checks"])
+        return {
+            "model": self.config.postonly_reject_model, "ack_latency": self.ack.describe(),
+            "notice": {"fixed_s": self.config.postonly_notice_s,
+                       "source": "fixed" if self.config.postonly_notice_s is not None else ("ack_latency_source" if self.ack.active else "venue_feed_latency_preset")},
+            "counters": {k: float(v) for k, v in sorted(c.items())},
+            "reject_rate_of_checked": c["rejects"] / n if c["checks"] else None,
+            "mean_wait_for_exchange_time_s": c["wait_s_sum"] / n if c["checks"] else None,
+            "mean_notice_delay_s": c["notice_delay_s_sum"] / max(1, c["notices"]) if c["notices"] else None,
+        }
+
+    def model_settings(self) -> dict:
+        m = self.config.maker
+        return {
+            "postonly_reject_model": self.config.postonly_reject_model, "cancel_time_basis": self.config.cancel_time_basis,
+            "funding_rate_dir": self.config.funding_rate_dir,
+            "funding_records_loaded": self.settler.loaded_records if self.settler is not None else 0,
+            "count_pending_exposure": self.config.arb.count_pending_exposure, "pending_exposure_auto_enabled": self.pending_exposure_auto_enabled,
+            "count_unknown_exposure": self.config.arb.count_unknown_exposure,
+            "max_position_base": self.config.arb.max_position_base,
+            "max_net_base_hard": self.config.arb.max_net_base_hard,
+            "fill_headroom_base": self.config.arb.fill_headroom_base,
+            "ack_latency_source": self.config.ack_latency.source, "fault_preset": getattr(self.faults, "label", "") if self.faults else "",
+            **self._model_settings_core(m),
+        }
+
+    def _model_settings_core(self, m) -> dict:
+        return {
+            "cancel_model": m.effective_cancel_model, "cancel_model_explicit": m.cancel_model is not None,
+            "cancel_power_n": m.cancel_power_n, "delta_fill_share": m.delta_fill_share, "trade_fill_share": m.trade_fill_share,
+            "snapshot_fill_share": m.snapshot_fill_share, "snapshot_netting": m.snapshot_trade_explain,
+            "depth_size_fix": self.config.delta_uses_book_size, "dedupe_trade_depth": m.dedupe_trade_depth,
+            "dedupe_time_basis": m.dedupe_time_basis, "dedupe_window_s": m.dedupe_window_s,
+            "exchange_time_eligibility": m.exchange_time_eligibility, "fill_through_prints": m.fill_through_prints,
+            "queue_stress_multiplier": m.queue_stress_multiplier, "min_queue_ahead": m.min_queue_ahead,
+            "trade_dedupe": self.config.trade_dedupe,
+        }
+
+    def _lifetime_report(self) -> dict[str, float]:
+        lt = self.lifetime
+        cancels = max(1, lt["cancels_applied"])
+        keys = ("expiries_triggered", "cancels_applied", "cancels_lost_to_fill", "expired_after_partial_fill",
+                "fills_while_cancel_pending", "qty_filled_while_cancel_pending", "quotes_blocked_by_unresolved_cancel",
+                "resting_at_data_end", "cancel_pending_at_data_end", "maker_landed_after_data_end",
+                "taker_landed_after_data_end")
+        out = {k: float(lt[k]) for k in keys}
+        out["mean_age_at_cancel_s"] = lt["age_at_cancel_sum_s"] / cancels
+        out["mean_cancel_pending_s"] = lt["cancel_pending_time_sum_s"] / cancels
+        return out
 
 
 def _infer_tick(bids, asks) -> float:
@@ -751,6 +2054,8 @@ def build_arg_parser() -> argparse.ArgumentParser:
     p.add_argument("--output-dir")
     p.add_argument("--warm-start", dest="warm_start_fill_events")
     p.add_argument("--progress-every", type=int, default=0)
+    p.add_argument("--funding-rate-dir", default=None,
+                   help="directory of *.jsonl funding-rate files (opt-in, see FundingSettler)")
     return p
 
 
@@ -777,6 +2082,7 @@ def config_from_args(args) -> ArbBacktestConfig:
         output_dir=args.output_dir,
         warm_start_fill_events=args.warm_start_fill_events,
         progress_every=args.progress_every,
+        funding_rate_dir=args.funding_rate_dir,
     )
 
 
