@@ -31,16 +31,19 @@ def count_day(data_root: str, pair: str, day: str, size: float = 1.0, min_net_ed
     venues = ("bybit", "binance")
     fees = {"bybit": FEE_PRESETS[bybit_fee].taker_bps, "binance": FEE_PRESETS[binance_fee].taker_bps}
     books = {v: OrderBook(v, pair) for v in venues}          # same book class and default (hybrid) delta semantics as the backtester
-    streams = []
-    for v in venues:
+    # Each venue's loader yields in exchange-time order; merge the two lazily so a day never sits in memory (a materialised,
+    # sorted list of a day's events cost ~500 MB on an 8 GB machine).
+    import heapq
+
+    def tagged(i: int, v: str):                 # a function binds (i, v) per stream; a nested genexp would late-bind to the last venue
         for ev in iter_venue_events(data_root, v, pair, day, day):
-            streams.append((ev.exchange_ts, v, ev))
-    streams.sort(key=lambda x: x[0])
+            yield (ev.exchange_ts, i, v, ev)
+    streams = heapq.merge(*(tagged(i, v) for i, v in enumerate(venues)), key=lambda x: (x[0], x[1]))
     stats = Counter()
     in_opp = {d: False for d in ((venues[0], venues[1]), (venues[1], venues[0]))}
     best = {d: float("-inf") for d in in_opp}
     edges = []
-    for ts, v, ev in streams:
+    for ts, _i, v, ev in streams:
         b = books[v]
         if ev.kind == BOOK:
             bids, asks = snapshot_levels(ev.payload)

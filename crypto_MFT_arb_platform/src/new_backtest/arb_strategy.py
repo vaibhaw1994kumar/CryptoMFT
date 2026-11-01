@@ -105,14 +105,22 @@ class ArbConfig:
     # None (default) keeps the legacy 2× behaviour (net_room = 2× max_position_base).
     # Set to max_position_base for a 1× hard ceiling; set to 2× for the legacy equivalent but explicit.
     max_net_base_hard: float | None = None
-    # Opt-in allowance added to max_net_base_hard (or the legacy 2× ceiling) to give room for a pending fill + pending hedge
-    # that have not yet settled. Does not change the hard ceiling itself; it increases the cap used by _inventory_room.
+    # Opt-in allowance added to max_net_base_hard (or the net_ceiling_multiple ceiling) to give room for a pending fill + pending
+    # hedge that have not yet settled. It is a SEPARATE parameter from the ceiling, but what it buys is room: the cap used by
+    # _inventory_room (net, and per venue unless max_venue_imbalance_base is set) is ceiling + headroom, so the effective sizing
+    # limit is e.g. 1.25 x max_position_base for ceiling 1.0 and headroom 0.25 x max_position_base. Headroom 0 = the bare ceiling.
     fill_headroom_base: float = 0.0
     # False (default, legacy): position limits look at filled inventory only. True: they also assume the worst case for
     # orders that are not in the inventory yet (resting maker remainders, maker legs in flight, hedges in flight),
     # with no netting between them. With maker_max_live_orders > 1 the legacy check can be breached by orders that
     # all fill; see PendingExposure.
     count_pending_exposure: bool = False
+    # WP6 — reachable-exposure limits. net_ceiling_multiple: the hard net ceiling is this x max_position_base when max_net_base_hard
+    # is None (legacy 2.0; the perp profile asks for 1.0 — DECISION_PENDING: 1x vs fill headroom). Gross limits (None = off): the
+    # worst-case long / short base summed over venues, pending orders included when count_pending_exposure is on.
+    net_ceiling_multiple: float = 2.0
+    max_gross_long_base: float | None = None
+    max_gross_short_base: float | None = None
     # Opt-in (Task 2c): when True, orders the strategy has written off (ghost/UNKNOWN) are still counted as potential
     # exposure until the exchange confirms they are cancelled or filled. Requires count_pending_exposure=True.
     # Prevents new positions when an UNKNOWN order is unresolved; needed to stop the ghost scenario exceeding max_net_base_hard.
@@ -138,7 +146,7 @@ class ArbConfig:
     # Which passive direction(s) a maker venue may quote. "bid" (default, the behaviour so far): rest a buy, hedge by selling on
     # the taker venue. "both": also rest a sell (an improved ask) hedged by BUYING on the taker venue; per evaluation the
     # direction with the higher net edge wins. On a perpetual both directions are equally available.
-    maker_passive_side: str = "bid"
+    maker_passive_side: str = "bid"      # "bid" (legacy: passive buy only) | "ask" (passive sell only) | "both" (better net edge wins)
 
     # ── Strategy profile (docs/strategy_contract.md) ─────────────────────────
     # "legacy_v0" (default): the edge expressions and gate used by every result before 2026-11-01, kept bit-identical.
@@ -158,7 +166,11 @@ class ArbConfig:
     expected_hedge_move_bps_ask: float = 0.0     # passive ask -> buy hedge
     expected_hedge_slippage_bps: float = 0.0     # hedge VWAP beyond the touch for the clip size
     funding_holding_bps: float = 0.0             # expected funding / holding cost of the hedged pair until it is closed
-    p_fail: float = 0.07                         # hedge-failure probability (hedge-failure study break-even ~7%)
+    # PLACEHOLDER — NOT MEASURED. p_fail = 0.07 is the hedge-failure study's break-even figure, an assumed value. A replay with no
+    # injected failures cannot measure a production hedge-failure rate: the zero failures seen in the Jan-2022 replays are only the
+    # simulator's own depth misses and say nothing about rejects, outages or disconnects. Sensitivity (0.02 / 0.05 / 0.07 / 0.10)
+    # is in perp_mechanics_report.html; calibrate from live or testnet order data before relying on any value.
+    p_fail: float = 0.07                         # hedge-failure probability — PLACEHOLDER
     loss_fail_bps: float = 7.8                   # loss per hedge failure in bps of notional (hedge-failure study ~-7.8 bps)
 
     # Pacing
@@ -169,6 +181,10 @@ class ArbConfig:
     # fill probability.  fill_gate_horizon_s selects which trained horizon to use.
     min_fill_prob: float = 0.0           # 0 = gate disabled
     fill_gate_horizon_s: int = 15
+    # WP8: the fill gate's queue feature. Legacy 0.0 = "queue_ahead=0" (the order is scored as if it were at the front, which
+    # over-estimates the fill probability and gates too little). > 0: the PRE-PLACEMENT expected queue = the displayed size at the
+    # quote price when the level exists, else this floor (the same proxy the fill engine uses for an absent level).
+    fill_gate_queue_floor: float = 0.0
     # Stage 4: adverse-selection gate (FillModelV2 only; 1.0 = disabled)
     max_adverse_prob: float = 1.0
     # TTF gate: skip if E[TTF] > max_ttf_s.  Reduces inventory lock-up in slow
@@ -287,8 +303,8 @@ class CrossVenueArbStrategy:
         self.pair = pair
         self.venues = venues
         self.config = config or ArbConfig()
-        if self.config.maker_passive_side not in ("bid", "both"):
-            raise ValueError(f"ArbConfig.maker_passive_side must be 'bid' or 'both', got {self.config.maker_passive_side!r}")
+        if self.config.maker_passive_side not in ("bid", "ask", "both"):
+            raise ValueError(f"ArbConfig.maker_passive_side must be 'bid', 'ask' or 'both', got {self.config.maker_passive_side!r}")
         if self.config.profile not in PROFILES:
             raise ValueError(f"ArbConfig.profile must be one of {PROFILES}, got {self.config.profile!r}")
         if self.config.dispatch_mode not in DISPATCH_MODES:
@@ -363,13 +379,13 @@ class CrossVenueArbStrategy:
         cannot sell base we do not hold on that venue) and the aggregate net.
         """
         cfg = self.config
-        cap = cfg.max_venue_imbalance_base or (2.0 * cfg.max_position_base)
-        # Hard net ceiling: opt-in (max_net_base_hard), default legacy 2× max_position_base.
+        cap = cfg.max_venue_imbalance_base or (cfg.net_ceiling_multiple * cfg.max_position_base + cfg.fill_headroom_base)
+        # Hard net ceiling: opt-in (max_net_base_hard), default legacy net_ceiling_multiple (2) × max_position_base.
         # fill_headroom_base adds allowance on top of the effective net ceiling for pending settle.
         if cfg.max_net_base_hard is not None:
             net_ceil = cfg.max_net_base_hard + cfg.fill_headroom_base
         else:
-            net_ceil = cfg.max_position_base * 2.0 + cfg.fill_headroom_base
+            net_ceil = cfg.max_position_base * cfg.net_ceiling_multiple + cfg.fill_headroom_base
         buy_base, sell_base, net_hi, net_lo = inv.base.get(buy_venue, 0.0), inv.base.get(sell_venue, 0.0), inv.net_base, inv.net_base
         if pending is not None and cfg.count_pending_exposure:
             # Worst case per limit: every pending buy lands on the buy venue, every pending sell on the sell venue,
@@ -381,7 +397,19 @@ class CrossVenueArbStrategy:
         buy_room = max(0.0, cap - buy_base)
         sell_room = max(0.0, cap + sell_base)
         net_room = max(0.0, net_ceil - max(abs(net_hi), abs(net_lo)))
-        return min(buy_room, sell_room, net_room)
+        room = min(buy_room, sell_room, net_room)
+        # WP6 gross limits: worst case over venues, longs and shorts separately (a clip adds to both: +qty long, +qty short).
+        if cfg.max_gross_long_base is not None or cfg.max_gross_short_base is not None:
+            longs = sum(max(0.0, b) for b in inv.base.values())
+            shorts = sum(max(0.0, -b) for b in inv.base.values())
+            if pending is not None and cfg.count_pending_exposure:
+                longs += sum(pending.buys.values())
+                shorts += sum(pending.sells.values())
+            if cfg.max_gross_long_base is not None:
+                room = min(room, max(0.0, cfg.max_gross_long_base - longs))
+            if cfg.max_gross_short_base is not None:
+                room = min(room, max(0.0, cfg.max_gross_short_base - shorts))
+        return room
 
     # ── Evaluation ───────────────────────────────────────────────────────────
 
@@ -454,6 +482,8 @@ class CrossVenueArbStrategy:
                 return None
 
         if cfg.mode == MAKER_TAKER:
+            if cfg.maker_passive_side == "ask":                       # passive sell on the maker venue only, hedge buys
+                return self._evaluate_maker_taker_ask(buy_venue, sell_venue, books, states, inventory, now, pending)
             bid = self._evaluate_maker_taker(
                 buy_venue, sell_venue, books, states, inventory, now, pending,
             )
@@ -536,6 +566,13 @@ class CrossVenueArbStrategy:
             ],
         )
 
+    def _gate_queue(self, book: OrderBook, side: str, price: float) -> float:
+        """WP8: pre-placement expected queue for the fill gate (0.0 = legacy front-of-queue assumption)."""
+        if self.config.fill_gate_queue_floor <= 0.0:
+            return 0.0
+        shown = book.level_size(side, price)
+        return shown if shown > 0.0 else self.config.fill_gate_queue_floor
+
     def _evaluate_maker_taker(
         self,
         maker_venue: str,
@@ -558,6 +595,13 @@ class CrossVenueArbStrategy:
         fee_bps = maker_fees.maker_bps + taker_fees.taker_bps
         required_bps = fee_bps + cfg.min_net_edge_bps + cfg.safety_buffer_bps
         max_bid = hedge_px * (1.0 - required_bps / 10_000.0)
+        if cfg.profile != "legacy_v0":
+            # perp_perp_maker_taker_v1: the quote is built from the EXPECTED hedge price (touch now moved by the conditional
+            # hedge-move estimate) less fees, edge, buffer, expected slippage, funding/holding and p_fail x loss_fail. The
+            # conditional edge therefore decides where we rest, not just whether a quote built on the naive edge passes.
+            extra_bps = cfg.expected_hedge_slippage_bps + cfg.funding_holding_bps + cfg.p_fail * cfg.loss_fail_bps
+            expected_hedge = hedge_px * (1.0 + cfg.expected_hedge_move_bps_bid / 10_000.0)
+            max_bid = expected_hedge * (1.0 - (required_bps + extra_bps) / 10_000.0)
 
         # Must be a real improvement on the maker venue's book, and never cross it.
         touch_bid, touch_ask = maker_book.best_bid, maker_book.best_ask
@@ -614,7 +658,7 @@ class CrossVenueArbStrategy:
             mb = books[maker_venue]
             top_depth = mb.best_bid_size + mb.best_ask_size
             feat = dict(
-                queue_ahead=0.0,
+                queue_ahead=self._gate_queue(mb, "bid", max_bid),
                 local_depth=top_depth,
                 local_depth_baseline=ms.top_depth_baseline,
                 spread_pct=mb.spread_bps / 100.0,
@@ -679,6 +723,10 @@ class CrossVenueArbStrategy:
         # Same convention as the bid: the required edge is measured against the price we PAY (the hedge), so min_ask is the
         # lowest sell that still clears fees + edge + buffer once we buy the hedge at hedge_px.
         min_ask = hedge_px / (1.0 - required_bps / 10_000.0)
+        if cfg.profile != "legacy_v0":
+            extra_bps = cfg.expected_hedge_slippage_bps + cfg.funding_holding_bps + cfg.p_fail * cfg.loss_fail_bps
+            expected_hedge = hedge_px * (1.0 - cfg.expected_hedge_move_bps_ask / 10_000.0)
+            min_ask = expected_hedge / (1.0 - (required_bps + extra_bps) / 10_000.0)
 
         touch_bid, touch_ask = maker_book.best_bid, maker_book.best_ask
         if min_ask >= touch_ask or min_ask <= touch_bid:
@@ -726,7 +774,7 @@ class CrossVenueArbStrategy:
             ms = states[maker_venue]
             mb = books[maker_venue]
             feat = dict(
-                queue_ahead=0.0, local_depth=mb.best_bid_size + mb.best_ask_size, local_depth_baseline=ms.top_depth_baseline,
+                queue_ahead=self._gate_queue(mb, "ask", min_ask), local_depth=mb.best_bid_size + mb.best_ask_size, local_depth_baseline=ms.top_depth_baseline,
                 spread_pct=mb.spread_bps / 100.0, short_vol=ms.short_vol, trade_count=ms.trade_rate, trade_sign=ms.trade_sign,
                 regime_bucket=ms.last_regime.bucket.value,
             )

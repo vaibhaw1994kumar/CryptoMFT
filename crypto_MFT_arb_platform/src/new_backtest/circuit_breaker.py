@@ -49,6 +49,10 @@ class CircuitBreakerConfig:
     failure_rate_window_s: float | None = None     # length of the rolling window
     failure_rate_thresh: float | None = None        # trip if failures/total > this
 
+    # Trigger 2b (r12): failure rate over the LAST N hedge chains (a count window, not seconds). Takes precedence over the seconds
+    # window when set. Needs a full window of N outcomes before it can fire (a 1-of-3 start-of-day failure is not a rate).
+    failure_rate_window_n: int | None = None
+
     # Trigger 3: any failed unwind (all attempts exhausted)
     trip_on_failed_unwind: bool = False
 
@@ -77,6 +81,8 @@ class CircuitBreakerConfig:
                 raise ValueError("failure_rate_thresh must be in (0, 1]")
         if self.failure_rate_window_s is not None and self.failure_rate_window_s <= 0:
             raise ValueError("failure_rate_window_s must be > 0")
+        if self.failure_rate_window_n is not None and self.failure_rate_window_n < 2:
+            raise ValueError("failure_rate_window_n must be >= 2")
         if self.net_exposure_s is not None and self.net_exposure_s <= 0:
             raise ValueError("net_exposure_s must be > 0")
         if self.unknown_order_s is not None and self.unknown_order_s <= 0:
@@ -165,6 +171,8 @@ class CircuitBreaker:
         self._tripped = False
         self._consecutive_failures = 0
         self._hedge_window: Deque[_HedgeEvent] = deque()
+        self._hedge_last_n: Deque[bool] = deque(maxlen=config.failure_rate_window_n or 1)
+        self.manual_resets = 0                       # r12: the breaker is only ever cleared by an explicit reset() call
         self._unknown_orders: dict[int, _UnknownOrder] = {}
         self._net_nonzero_since: float | None = None
         self.trips: list[BreakerTrip] = []
@@ -189,6 +197,8 @@ class CircuitBreaker:
             self._consecutive_failures += 1
         else:
             self._consecutive_failures = 0
+        if cfg.failure_rate_window_n is not None:
+            self._hedge_last_n.append(failed)
         if cfg.failure_rate_window_s is not None:
             self._hedge_window.append(_HedgeEvent(ts, failed))
             cutoff = ts - cfg.failure_rate_window_s
@@ -260,6 +270,9 @@ class CircuitBreaker:
         return False
 
     def reset(self) -> None:
+        """Manual reset only (r12): nothing in the simulator or the strategy calls this; an operator does."""
+        self.manual_resets += 1
+        self._hedge_last_n.clear()
         self._tripped = False
         self._consecutive_failures = 0
         self._hedge_window.clear()
@@ -275,7 +288,13 @@ class CircuitBreaker:
         if (cfg.consecutive_failures is not None
                 and self._consecutive_failures >= cfg.consecutive_failures):
             return f"consecutive_failures: {self._consecutive_failures} >= {cfg.consecutive_failures}"
-        if (cfg.failure_rate_thresh is not None and cfg.failure_rate_window_s is not None
+        if (cfg.failure_rate_thresh is not None and cfg.failure_rate_window_n is not None
+                and len(self._hedge_last_n) >= cfg.failure_rate_window_n):
+            n = len(self._hedge_last_n)
+            failed = sum(1 for x in self._hedge_last_n if x)
+            if failed / n > cfg.failure_rate_thresh:
+                return f"failure_rate: {failed}/{n} = {failed / n:.2%} > {cfg.failure_rate_thresh:.2%} in the last {n} hedges"
+        elif (cfg.failure_rate_thresh is not None and cfg.failure_rate_window_s is not None
                 and len(self._hedge_window) >= 3):
             n = len(self._hedge_window)
             failed = sum(1 for e in self._hedge_window if e.failed)
@@ -297,6 +316,7 @@ class CircuitBreaker:
         return {
             "tripped": self._tripped,
             "trip_count": len(self.trips),
+            "manual_reset_only": True, "manual_resets": self.manual_resets,
             "consecutive_failures_current": self._consecutive_failures,
             "unknown_orders_current": len(self._unknown_orders),
             "trips": [

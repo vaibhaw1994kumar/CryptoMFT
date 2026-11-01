@@ -544,9 +544,11 @@ class TestCommonTimestampStalenessThreshold:
         cfg = ArbConfig(max_common_staleness_s=float("inf"))
         assert math.isinf(cfg.max_common_staleness_s)
 
-    def test_staleness_threshold_rejects_mark(self):
-        # Tight 0.0s threshold: any staleness > 0 → falls back to ending_equity.
-        # Use a tiny max_events so the run is instantaneous.
+    @pytest.mark.skipif(not pathlib.Path('/Users/vaibhav/Documents/Newproject/data/bybit').is_dir(), reason="needs the Jan-2022 SOL files (absent on the VM)")
+    def test_staleness_threshold_flags_a_lagging_venue_but_never_falls_back(self):
+        # R11 (2026-11-01): the threshold no longer REJECTS the common-timestamp mark (the old fallback to each venue's own last
+        # mid was the stale-mark inflation on SOL 2022-01-05). A lagging venue is flagged and the common-timestamp valuation stays
+        # the headline. Tight 0.0s threshold: any spread between the venues' last updates sets the flag. Tiny max_events: instant.
         bt = CrossVenueArbBacktester(ArbBacktestConfig(
             pair='SOLUSDT',
             data_root='/Users/vaibhav/Documents/Newproject/data',
@@ -558,12 +560,12 @@ class TestCommonTimestampStalenessThreshold:
         ))
         r = bt.run()
         import math
-        # With a 0s threshold, any non-zero staleness triggers fallback → staleness=inf.
-        # Either the mark was valid (staleness==0.0) or it was rejected (staleness==inf).
-        assert r.common_mid_staleness_s == 0.0 or math.isinf(r.common_mid_staleness_s)
-        # common_timestamp_equity must equal ending_equity when the mark was rejected.
-        if math.isinf(r.common_mid_staleness_s):
-            assert r.common_timestamp_equity == r.ending_equity
+        assert r.valuation["available"]
+        assert not math.isinf(r.common_mid_staleness_s)
+        assert r.common_mid_staleness_s == r.valuation["venue_last_update_spread_s"]
+        assert r.valuation["lagging_venue_flag"] == (r.common_mid_staleness_s > 0.0)
+        assert r.ending_equity == r.common_timestamp_equity                       # the headline IS the common-timestamp figure
+        assert r.equity_bridge["ok"]
 
 
 class TestSingleVenueIntervals:

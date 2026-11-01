@@ -28,10 +28,10 @@ DISAGREEMENTS = {
     ("ack_timeout_then_ack", "maker"): ("D-02", "no acknowledgement exists in the simulator, so no acknowledgement timeout and no unknown state"),
     ("ack_timeout_unresolved", "maker"): ("D-02", "no acknowledgement exists in the simulator, so no acknowledgement timeout and no unknown state"),
     ("late_fill_after_cancel", "maker"): ("D-03", "a fill executed before the cancel took effect but received after it is dropped: the order is removed on receive time"),
-    ("ack_timeout_then_ack", "oms"): ("D-04", "OMS keeps TIMED_OUT (rank 3) over a later ACKNOWLEDGED (rank 1): a late ack does not clear 'unknown'"),
-    ("cancel_pending_at_end", "oms"): ("D-05", "OMS has no cancel-requested state: an order with a cancel in flight still reads ACKNOWLEDGED"),
-    ("reject_after_partial_fill", "oms"): ("D-06", "OMS lets REJECTED (rank 4) outrank PARTIAL (rank 2): a reject after a fill leaves the order REJECTED with fills attached"),
 }
+# Resolved 2026-11-01 (WP6): D-04 (TIMED_OUT ranks below venue reports: a late ack clears 'unknown'), D-05 (OMS.note_cancel_requested /
+# OrderState.CANCEL_REQUESTED), D-06 (a reject after a fill keeps the fill; ledger REJECT_AFTER_FILL_ALARM). Their scenarios now
+# have to agree with the specification: a regression here fails outright.
 
 
 def _params():

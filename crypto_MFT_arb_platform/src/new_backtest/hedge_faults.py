@@ -161,6 +161,24 @@ class HedgeFaultConfig:
     fast_move_bps: float = 0.0                                 # a fast move: |mid change| >= this many bps ...
     fast_move_window_s: float = 1.0                            # ... within this many seconds
     label: str = ""                                            # preset name, carried into reports
+    # WP6. venue_reject_applies_to_hedges: legacy True = reject_prob_by_venue also hits hedges ON TOP of reject_prob (a hedge can be
+    # rejected twice); False = by-venue rejects are for passive orders only (the stressed preset uses this: hedges carry reject_prob
+    # once). unwind_band_bps: an unwind is a limit order at mid x (1 -/+ band) instead of a market order (0 = market, legacy).
+    # unknown_query_*: the venue status query that resolves an UNKNOWN order has its own failure probability and a bounded number
+    # of attempts; exhaustion raises a persistent ALARM.
+    venue_reject_applies_to_hedges: bool = True
+    unwind_band_bps: float = 0.0
+    unknown_query_fail_prob: float = 0.0
+    unknown_query_max_attempts: int = 3
+    # r12. unwind_max_attempts: TOTAL unwind sends per failed hedge chain (None = max_retries + 1, the legacy pairing); exhaustion
+    # raises the persistent ALARM. Hedge retries keep using max_retries.
+    unwind_max_attempts: int | None = None
+    # r12 MODELLED restart (not the live RestartCoordinator path): at the maker fill numbers listed (1-based, per run) the strategy
+    # process dies right after the fill and is back restart_s later. Both venues are dark for the strategy for that time (feed and
+    # gateway: no evaluation, no sends), the fill's execution report and the hedge are only handled at restart end (reconcile, then
+    # hedge), resting orders keep their exchange-side life, and the circuit breaker's state persists across the restart.
+    restart_s: float = 0.0
+    restart_at_fills: tuple[int, ...] = ()
 
     def __post_init__(self) -> None:
         for name in ("reject_prob", "delay_prob", "partial_prob"):
@@ -178,6 +196,12 @@ class HedgeFaultConfig:
             raise ValueError(f"outage_on_fill_kind must be one of {OUTAGE_KINDS}")
         if self.max_retries < 0:
             raise ValueError("max_retries must be >= 0")
+        if self.unwind_band_bps < 0.0 or not (0.0 <= self.unknown_query_fail_prob <= 1.0) or self.unknown_query_max_attempts < 1:
+            raise ValueError("unwind_band_bps >= 0, unknown_query_fail_prob in [0, 1], unknown_query_max_attempts >= 1")
+        if self.unwind_max_attempts is not None and self.unwind_max_attempts < 1:
+            raise ValueError("unwind_max_attempts must be >= 1 or None")
+        if self.restart_s < 0.0 or any(n < 1 for n in self.restart_at_fills):
+            raise ValueError("restart_s >= 0 and restart_at_fills are 1-based fill numbers")
         for name in ("ack_unknown_prob", "fast_move_reject_prob"):
             if not 0.0 <= getattr(self, name) <= 1.0:
                 raise ValueError(f"{name} must be in [0, 1]")
@@ -191,7 +215,8 @@ class HedgeFaultConfig:
     def injects(self) -> bool:
         return bool(self.reject_prob or (self.delay_prob and self.extra_delay_s) or self.partial_prob
                     or self.outages or self.outage_on_fill_s or any(p for _, p in self.reject_prob_by_venue) or self.disconnects
-                    or self.ack_unknown_prob or (self.fast_move_reject_prob and self.fast_move_bps) or self.latency_scale != 1.0)
+                    or self.ack_unknown_prob or (self.fast_move_reject_prob and self.fast_move_bps) or self.latency_scale != 1.0
+                    or (self.restart_s and self.restart_at_fills))
 
     def as_dict(self) -> dict:
         return {
@@ -200,7 +225,8 @@ class HedgeFaultConfig:
             "outage_on_fill_s": self.outage_on_fill_s, "outage_on_fill_kind": self.outage_on_fill_kind,
             "outage_policy": self.outage_policy, "ack_timeout_s": self.ack_timeout_s, "local_reject_s": self.local_reject_s,
             "response": self.response, "max_retries": self.max_retries, "retry_backoff_s": self.retry_backoff_s,
-            "entry_guard": self.entry_guard,
+            "entry_guard": self.entry_guard, "unwind_max_attempts": self.unwind_max_attempts, "unwind_band_bps": self.unwind_band_bps,
+            "restart_s": self.restart_s, "restart_at_fills": list(self.restart_at_fills),
             "reject_prob_by_venue": dict(self.reject_prob_by_venue), "latency_scale": self.latency_scale,
             "disconnects": [{"venue": d.venue, "rate_per_day": d.rate_per_day, "guaranteed_per_day": d.guaranteed_per_day,
                              "durations_s": list(d.durations_s), "median_s": d.median_s, "sigma": d.sigma, "kind": d.kind} for d in self.disconnects],

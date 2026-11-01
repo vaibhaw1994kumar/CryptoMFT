@@ -82,6 +82,24 @@ _DEDUPE_FIELDS: dict[str, tuple[str, ...]] = {
     "trades": ("exchange_ts", "price", "volume", "side"),
 }
 _DEDUPE_WINDOW_S = 3.0
+# WP4: native identity when the record carries one. A trade id (Binance `t`/trade_id, aggTrade `a`/agg_id, Bybit `i`/trade_id)
+# identifies the event exactly, so two collectors' copies de-duplicate by id and genuine same-content repeats are kept. Records
+# without an id (the Jan-2022 Tardis-shaped files) fall back to the content key above. Native fields stay in the payload.
+_TRADE_ID_FIELDS = ("trade_id", "agg_id", "t", "a", "i", "id")
+
+
+def _dedupe_key(stream: str, rec: dict, stats: dict[str, int] | None = None) -> tuple | None:
+    fields = _DEDUPE_FIELDS.get(stream)
+    if fields is None:
+        return None
+    if stream == "trades":
+        for f in _TRADE_ID_FIELDS:
+            v = rec.get(f)
+            if v not in (None, ""):
+                if stats is not None:
+                    stats["trades_keyed_by_id"] = stats.get("trades_keyed_by_id", 0) + 1
+                return ("id", f, str(v))
+    return tuple(rec.get(f) for f in fields)
 
 
 def _merge_sorted(
@@ -89,6 +107,7 @@ def _merge_sorted(
     dedupe_fields: tuple[str, ...] | None = None,
     stats: dict[str, int] | None = None,
     multiset: bool = False,
+    stream: str | None = None,
 ) -> Iterator[dict]:
     """K-way merge of already-sorted record iterators on `key`, dropping
     exact duplicates seen within _DEDUPE_WINDOW_S.
@@ -127,7 +146,7 @@ def _merge_sorted(
             heapq.heappush(heap, (float(nxt.get(key, 0.0) or 0.0), i, nxt, it))
 
         if dedupe_fields is not None:
-            k = tuple(rec.get(f) for f in dedupe_fields)
+            k = _dedupe_key(stream, rec, stats) if stream is not None else tuple(rec.get(f) for f in dedupe_fields)
             if multiset:
                 entry = per_source.get(k)
                 if entry is None:
@@ -178,7 +197,7 @@ def _stream_dir(
         return iter(())
     return _merge_sorted(
         [_iter_jsonl_gz(f) for f in files], key,
-        dedupe_fields=_DEDUPE_FIELDS.get(stream), stats=stats, multiset=multiset,
+        dedupe_fields=_DEDUPE_FIELDS.get(stream), stats=stats, multiset=multiset, stream=stream,
     )
 
 

@@ -50,6 +50,8 @@ from .fill_model import EmpiricalFillModel
 from .circuit_breaker import CircuitBreaker, CircuitBreakerConfig
 from .hedge_faults import DisconnectGen, ExposureTracker, HedgeFaultConfig, Outage
 from .margin_model import MarginModel, MarginModelConfig
+from .timing import FixedOffsetAligner, Timelines, TimingConfig, feed_state
+from .valuation import MidHistory, common_timestamp_valuation
 from .latency_model import InFlightOrder, LatencyBook, MarkoutTracker, PendingOrderQueue
 from .models import Side
 from .order_book import OrderBook
@@ -117,6 +119,27 @@ class ArbBacktestConfig:
     margin: MarginModelConfig | None = None
     # End-of-run ledger identity check (docs/strategy_contract.md section 4): "raise" (default) or "warn".
     equity_bridge: str = "raise"
+    # R11 — how the open position in ending_equity is marked. "common_timestamp" (default): every venue at the last time ALL
+    # venues had data (valuation.py). "last_mark" (LEGACY_COMPAT): each venue at its own last mid — the pre-2026-11-01 figure,
+    # which overstates a hedged pair when one feed stops early; the bridge then fails on such days (SOL 2022-01-05) unless
+    # equity_bridge == "warn".
+    valuation: str = "common_timestamp"
+    # WP4 — book states. True: no signal while any venue's book status (valid | stale | invalid | recovering, order_book.status) is
+    # not "valid", and a taker arrival on a non-valid book misses with reason "book_not_valid"; sequence ids in the feed (Binance
+    # U/u/pu, Bybit seq) drive invalid/recovering. False (default, legacy): only the age-based staleness gate applies.
+    enforce_book_state: bool = False
+    # WP7 — product rules and release identity. product: "perp" | "spot" | "spot_perp" (venues[0] spot, venues[1] perp) | None
+    # (legacy: inferred per venue from the fee preset family, mismatches only warn). product_fee_consistency: with a product set,
+    # a fee preset of the wrong family is a startup ERROR. spot_requires_inventory: a spot sell needs base held on that venue
+    # (REJECTED otherwise) unless borrow_enabled. release_identity: stamped by profiles.apply_profile, copied into every result.
+    product: str | None = None
+    product_fee_consistency: bool = False
+    spot_requires_inventory: bool = False
+    borrow_enabled: bool = False
+    release_identity: dict | None = None
+    # WP3 timing model (timing.py): separate sampled timelines per venue, measured host offset, timer wheel, equal-time policy,
+    # dead-feed gate. None (default, legacy_v0): the single latency preset and the median clock aligner, exactly as before.
+    timing: TimingConfig | None = None
     # Track the inventory path (peak / longest net exposure, equity drawdown) after every event; implied by hedge_faults.
     record_exposure: bool = False
     # PostOnly acceptance (postonly.py). "off" (default, legacy): every passive order that reaches the exchange rests. "on": at its
@@ -180,7 +203,7 @@ class ArbBacktestResult:
     # DEPRECATED: realized_pnl = gross_pnl - fees - unhedged_loss - funding is an attribution
     # decomposition that can diverge from the cash ledger (e.g. when unhedged_loss slippage is
     # measured vs the current mid, not the maker fill price). Use cash_pnl or ending_equity instead.
-    realized_pnl: float
+    realized_pnl: float          # DEPRECATED alias of attribution_pnl (kept for callers); see attribution_pnl below
     open_position_value: float   # A10: unrealised – base inventory marked at end-of-run mids
     ending_equity: float         # A10: total_cash + open_position_value (does not assume zero start); authoritative
     mark_to_market_pnl: float    # legacy alias == ending_equity; kept for back-compat
@@ -224,6 +247,24 @@ class ArbBacktestResult:
     # within range, or one venue had no price at all during the run).
     common_timestamp_equity: float = 0.0
     common_mid_staleness_s: float = 0.0   # max lag between venues' last-update ts; inf = unavailable
+    # R11: the pre-2026-11-01 figure (each venue at its own last mid) kept as a diagnostic; valuation = the common-timestamp
+    # marks actually used (common_ts, per-venue mark and its age, lagging-venue flag, stale_mark_inflation = last_mark - common).
+    last_mark_equity: float = 0.0
+    valuation: dict = field(default_factory=dict)
+    # WP5: the attribution decomposition gross - fees - unhedged - funding, under its proper name. Headline P&L is the ledger
+    # (cash_pnl / ending_equity at the common timestamp); this is a diagnostic. realized_pnl is the deprecated alias.
+    attribution_pnl: float = 0.0
+    # Funding settlements as applied: venue, time, position, mark (and its source), rate, payment (funding_settler.report()).
+    funding_report: dict = field(default_factory=dict)
+    # WP6: persistent alarms raised during the run (unwind exhausted / UNKNOWN unresolved); the last one still set at the end.
+    alarms: list = field(default_factory=list)
+    alarm_active: dict | None = None
+    # WP7: what produced this result (profiles.release_identity) and the product per venue; spot results are mechanics only.
+    release_identity: dict | None = None
+    product_by_venue: dict = field(default_factory=dict)
+    strategy_validation_label: str = ""
+    # WP7b spot_perp: the hedged pair's value at the common-timestamp marks (perp mark - spot mark) x spot base.
+    basis_component: float | None = None
     # single_venue_diagnostic: per-venue count of events where that venue's book exceeded max_book_age_s.
     # Non-zero means there were windows where the strategy was running with stale data on that side.
     # This is purely diagnostic; fills and cash movements that occurred during those windows are intact.
@@ -248,6 +289,8 @@ class ArbBacktestResult:
     margin_report: dict = field(default_factory=dict)
     # Legging exposure (maker fill -> hedge fill) per resolved maker signal; see _legging_report.
     legging_report: dict = field(default_factory=dict)
+    # WP3 timing report (timelines and their draw counts, clock, timer and feed-state counters). Empty unless timing is set.
+    timing_report: dict = field(default_factory=dict)
     # Ledger identity check (cash from the trade log + funding + transfers vs ledger cash; equity vs cash + marked position).
     equity_bridge: dict = field(default_factory=dict)
     # Every fired signal with its naive and conditional edge (perp_perp_maker_taker_v1 logs both; legacy_v0 logs None).
@@ -323,7 +366,25 @@ class CrossVenueArbBacktester:
             raise ValueError("postonly_notice_s must be >= 0 or None")
         bybit_family = _fee_preset_family(config.bybit_fee_preset)
         binance_family = _fee_preset_family(config.binance_fee_preset)
-        if bybit_family != "unknown" and binance_family != "unknown" and bybit_family != binance_family:
+        # WP7: product per venue (from the fee preset family, or the declared product), checked at startup when asked to be.
+        self.product_by_venue: dict[str, str] = {}
+        for i, v in enumerate(config.venues):
+            fam = _fee_preset_family(config.bybit_fee_preset if v == BYBIT else config.binance_fee_preset if v == BINANCE else "")
+            self.product_by_venue[v] = fam
+        if config.product is not None:
+            if config.product not in ("perp", "spot", "spot_perp"):
+                raise ValueError("product must be 'perp', 'spot' or 'spot_perp'")
+            want = {v: ("spot" if config.product == "spot" or (config.product == "spot_perp" and i == 0) else "perp") for i, v in enumerate(config.venues)}
+            for v, fam in self.product_by_venue.items():
+                if fam != "unknown" and fam != want[v]:
+                    msg = f"product {config.product}: venue {v} fee preset is {fam} but the product says {want[v]}"
+                    if config.product_fee_consistency:
+                        raise ValueError(msg)
+                    warnings.warn(msg, stacklevel=2)
+                self.product_by_venue[v] = want[v]
+        elif config.product_fee_consistency and bybit_family != "unknown" and binance_family != "unknown" and bybit_family != binance_family:
+            raise ValueError(f"fee preset family mismatch: bybit={config.bybit_fee_preset!r} ({bybit_family}) vs binance={config.binance_fee_preset!r} ({binance_family})")
+        if bybit_family != "unknown" and binance_family != "unknown" and bybit_family != binance_family and config.product is None:
             warnings.warn(
                 f"Fee preset family mismatch: bybit={config.bybit_fee_preset!r} ({bybit_family}) "
                 f"vs binance={config.binance_fee_preset!r} ({binance_family}). "
@@ -374,6 +435,36 @@ class CrossVenueArbBacktester:
         self.latency = LatencyBook(
             {v: s.latency for v, s in self.venue_specs.items()}, seed=config.seed,
         )
+        self.timing_cfg: TimingConfig | None = config.timing
+        self.timelines: Timelines | None = None
+        self.timing_stats: Counter[str] = Counter()
+        self._feed_state: dict[str, str] = {}
+        self._current_ets: float | None = None
+        self._fill_kind: str | None = None          # WP5: "liquidation" | "flatten" while the margin model's fills are booked
+        self._maker_fill_count = 0                  # r12: maker fills seen by the fault layer (restart_at_fills counts these)
+        self._breaker_poll_ts = -1e18               # r12: throttle for the connectivity poll
+        self._trip_cancelled = False                # r12: resting orders already cancelled for the current trip
+        # WP6: a persistent ALARM (unwind attempts exhausted with exposure retained, or an UNKNOWN order never resolved) blocks new
+        # risk until reset_alarm() — a manual action, never automatic.
+        self.alarm: dict | None = None
+        self.alarms: list[dict] = []
+        self._funding_predicted = 0.0               # WP5: Σ signal notional x funding_holding_bps at fire time (predicted financing)
+        self._market_first = config.timing is not None and config.timing.equal_time_policy == "market_first"
+        # WP3 venue-truth books: per venue, the book as the EXCHANGE saw it at an arrival's exchange time, built from events the
+        # feed has delivered or will deliver within the look-ahead window (receive order == exchange order within a venue, counted
+        # when not). Taker arrivals execute against it; the strategy only ever reads self.books (receive time).
+        self._truth_on = config.timing is not None and config.timing.truth_books
+        self.truth_books: dict[str, OrderBook] = {}
+        self._ahead: dict[str, deque] = {v: deque() for v in config.venues}
+        self._ahead_mode = False
+        if config.timing is not None:
+            missing = [v for v in config.venues if v not in config.timing.venues]
+            if missing:
+                raise ValueError(f"timing: no timelines for venue(s) {missing}")
+            self.timelines = Timelines(config.timing)
+            self._install_timing()
+            if self._truth_on:
+                self.truth_books = {v: OrderBook(v, config.pair, self.venue_specs[v].delta_semantics) for v in config.venues}
         self.books: dict[str, OrderBook] = {
             v: OrderBook(v, config.pair, self.venue_specs[v].delta_semantics)
             for v in config.venues
@@ -422,17 +513,21 @@ class CrossVenueArbBacktester:
         self.inventory.ensure(config.venues)
 
         self.settler: "FundingSettler | None" = None
-        if config.funding_rate_dir:
+        # WP7b: spot never pays funding — the settler only knows the perp venues (a spot-only run has no settler at all).
+        funding_venues = tuple(v for v in config.venues if self.product_by_venue.get(v) != "spot")
+        if config.funding_rate_dir and funding_venues:
             from .funding_settler import FundingSettler  # noqa: PLC0415
             self.settler = FundingSettler(
                 config.funding_rate_dir,
-                tuple(config.venues),
+                funding_venues,
                 start_date=config.start_date,
                 end_date=config.end_date,
             )
 
         self.agent = BackgroundAgentModel(config.agent_flow)
-        self.margin_model: MarginModel | None = MarginModel(config.margin, tuple(config.venues)) if config.margin is not None else None
+        # WP7b: only perp venues carry a margin account (a spot wallet holds inventory, not margin).
+        self.margin_model: MarginModel | None = (MarginModel(config.margin, tuple(v for v in config.venues if self.product_by_venue.get(v) != "spot"))
+                                                 if config.margin is not None else None)
         self._last_trade_ts: dict[str, float] = {}
 
         self._order_ids = 0
@@ -446,7 +541,9 @@ class CrossVenueArbBacktester:
         # Task 5: track (ts, mid) history per venue for true common-timestamp equity.
         # maxlen=32 covers staleness gaps of up to ~32 updates on the faster venue.
         self._last_mid_ts: dict[str, tuple[float, float]] = {v: (0.0, 0.0) for v in config.venues}
-        self._mid_history: dict[str, deque] = {v: deque(maxlen=32) for v in config.venues}
+        if config.valuation not in ("common_timestamp", "last_mark"):
+            raise ValueError('ArbBacktestConfig.valuation must be "common_timestamp" or "last_mark"')
+        self._mid_history: dict[str, MidHistory] = {v: MidHistory() for v in config.venues}
         # Single-venue diagnostic: count events where one or more required venues had a stale book.
         self._stale_event_counts: Counter[str] = Counter()
         # Exactly-one-venue-usable count: incremented when some venues are stale and some are not.
@@ -534,6 +631,9 @@ class CrossVenueArbBacktester:
         spec = self.venue_specs[ev.venue]
         now = ev.receive_ts
         ets = self._event_host_ts(ev)
+        self._current_ets = ets
+        if self._truth_on:
+            self._truth_sync_event(ev)
 
         # Exchange-time rules run on the book as it stands BEFORE this event, which the exchange handled at time `ets`.
         if self._po_wait[ev.venue]:
@@ -548,6 +648,7 @@ class CrossVenueArbBacktester:
             if self.tick_size[ev.venue] <= 0:
                 self.tick_size[ev.venue] = _infer_tick(bids, asks)
             book.apply_snapshot(bids, asks, now)
+            self._record_mark(ev.venue, now)
             state.on_book(book, now)
             self.maker.mark_adverse(ev.venue, book, now, self.tick_size[ev.venue])
             for f in self.maker.on_snapshot(
@@ -559,7 +660,9 @@ class CrossVenueArbBacktester:
             side, price, volume, event_type = delta_fields(ev.payload)
             if price <= 0:
                 return
+            self._feed_sequence(book, ev.payload, now)
             book.apply_delta(side, price, volume, event_type, now)
+            self._record_mark(ev.venue, now)
             state.on_book(book, now)
             # The maker engine needs the level's NEW size. `volume` is that only for absolute feeds; in the hybrid
             # collector format a 'cancel' carries the size that was removed, so ask the book what is left.
@@ -620,7 +723,6 @@ class CrossVenueArbBacktester:
         book = self.books.get(venue)
         if book is not None and book.ready:
             self._last_mid_ts[venue] = (now, book.mid)
-            self._mid_history[venue].append((now, book.mid))
         # Single-venue diagnostic: accumulate stale-book event counts across all venues.
         max_age = self.config.arb.max_book_age_s
         n_stale = 0
@@ -632,15 +734,47 @@ class CrossVenueArbBacktester:
         if 0 < n_stale < len(self.books):
             self._single_venue_event_count += 1
 
-    def _mid_at_or_before(self, venue: str, target_ts: float) -> tuple[float, float] | None:
-        """Return the most recent (ts, mid) from history where ts <= target_ts, or None."""
-        hist = self._mid_history.get(venue)
-        if not hist:
-            return None
-        for ts, mid in reversed(hist):
-            if ts <= target_ts:
-                return ts, mid
-        return None
+    def _record_mark(self, venue: str, now: float) -> None:
+        """R11: (ts, mid) marks for the common-timestamp valuation, recorded on every book-changing event (also when the
+        backtester is driven by hand), pruned to the other venues' last update."""
+        book = self.books[venue]
+        if not book.ready:
+            return
+        self._mid_history[venue].record(now, book.mid)
+        floor = min((h.latest[0] for h in self._mid_history.values() if h.latest is not None), default=None)
+        if floor is not None:
+            for h in self._mid_history.values():
+                h.prune(floor)
+
+    @staticmethod
+    def _feed_sequence(book: OrderBook, p: dict, now: float) -> None:
+        """WP4: hand update ids to the book when the record carries them (Binance U/u/pu or first/last_update_id, Bybit seq)."""
+        last = p.get("u", p.get("last_update_id", p.get("seq")))
+        if last is None:
+            return
+        first = p.get("U", p.get("first_update_id"))
+        prev = p.get("pu", p.get("prev_update_id"))
+        try:
+            book.apply_sequence(int(first) if first is not None else None, int(last), int(prev) if prev is not None else None, now)
+        except (TypeError, ValueError):
+            return
+
+    def _book_state_blocks(self, now: float) -> bool:
+        """WP4 (enforce_book_state): entry is blocked while any book is not valid; counted by status."""
+        blocked = False
+        for v, b in self.books.items():
+            st = b.status(now, self.config.arb.max_book_age_s)
+            if st != "valid":
+                self.hedge[f"signals_blocked_by_book_{st}_{v}"] = self.hedge.get(f"signals_blocked_by_book_{st}_{v}", 0) + 1
+                blocked = True
+        if blocked:
+            self.hedge["signals_blocked_by_book_state"] = self.hedge.get("signals_blocked_by_book_state", 0) + 1
+        return blocked
+
+    def _common_valuation(self) -> dict:
+        return common_timestamp_valuation(self._mid_history, self.inventory.base, self.inventory.total_cash, self.config.venues,
+                                          max_staleness_s=self.config.arb.max_common_staleness_s,
+                                          mark_venue=self.config.arb.mark_inventory_venue)
 
     # ── Order dispatch ───────────────────────────────────────────────────────
 
@@ -648,7 +782,9 @@ class CrossVenueArbBacktester:
                   attempt: int = 0, origin_id: int = 0) -> None:
         self._order_ids += 1
         flight = self.latency.entry_delay(leg.venue)           # always drawn, so the latency stream is the same with every switch
-        from_ack_source = not leg.is_taker and not role and self.ack.active
+        if self.timelines is not None:
+            flight = self.timelines.sample_s(leg.venue, "entry")   # WP3: one entry timeline for taker and passive legs; no ack-source draw
+        from_ack_source = not leg.is_taker and not role and self.ack.active and self.timelines is None
         if from_ack_source:
             flight = self.ack.sample_s()                       # passive order: send-to-arrival from the calibrated / fixed source (it has its own scale)
         elif self.faults is not None and self.faults.latency_scale != 1.0:
@@ -685,13 +821,30 @@ class CrossVenueArbBacktester:
         """The injected fault an order is a consequence of: retries and unwinds belong to the chain of the hedge that failed."""
         return order.origin_id if (order.attempt > 0 or order.role == "unwind") and order.origin_id != order.order_id else 0
 
+    def _spot_inventory_blocks(self, signal: ArbSignal) -> bool:
+        """WP7b: a spot sell needs the base on that venue (the venue would reject an implicit short) unless borrowing is enabled."""
+        if not self.config.spot_requires_inventory or self.config.borrow_enabled:
+            return False
+        sells = [(leg.venue, leg.qty) for leg in signal.legs if leg.side == "sell"]
+        if signal.mode == MAKER_TAKER and signal.hedge_side == "sell":
+            sells.append((signal.hedge_venue, signal.qty))
+        for venue, qty in sells:
+            if self.product_by_venue.get(venue) == "spot" and self.inventory.base.get(venue, 0.0) + 1e-12 < qty:
+                self.hedge["signals_blocked_spot_inventory"] += 1
+                return True
+        return False
+
     def _fire(self, signal: ArbSignal, now: float) -> None:
+        if self._spot_inventory_blocks(signal):
+            return
         tracker = self._trackers[signal.signal_id] = _SignalTracker(signal, len(signal.legs))
         for leg in signal.legs:
             self._send_leg(leg, signal, now)
+        self._funding_predicted += signal.qty * max(signal.buy_price, 0.0) * self.config.arb.funding_holding_bps / 10_000.0
         self.signal_log.append({"signal_id": signal.signal_id, "ts": now, "mode": signal.mode, "buy_venue": signal.buy_venue, "sell_venue": signal.sell_venue,
                                 "qty": signal.qty, "gross_edge_bps": signal.gross_edge_bps, "net_edge_bps": signal.net_edge_bps,
-                                "naive_edge_bps": signal.naive_edge_bps, "conditional_edge_bps": signal.conditional_edge_bps, "edge_ref": signal.edge_ref})
+                                "naive_edge_bps": signal.naive_edge_bps, "conditional_edge_bps": signal.conditional_edge_bps, "edge_ref": signal.edge_ref,
+                                "maker_side": (("bid" if signal.legs[0].side == "buy" else "ask") if signal.mode == MAKER_TAKER and signal.legs else None)})
         if signal.mode == MAKER_TAKER and self.config.arb.dispatch_mode == "simultaneous":
             # Method B, for comparison only: the full-size hedge goes out with the maker order. If the maker never fills, the
             # hedge is an orphan position (counted in _maybe_resolve and unwound by the residual policy).
@@ -726,8 +879,16 @@ class CrossVenueArbBacktester:
             return
 
         if order.is_taker:
+            if self.config.enforce_book_state and book.status(now, self.config.arb.max_book_age_s) != "valid":
+                self.orders_missed += 1
+                self.miss_reasons["book_not_valid"] += 1
+                if tracker is not None:
+                    tracker.missed += 1
+                    tracker.legs_outstanding -= 1
+                    self._maybe_resolve(order.signal_id, now)
+                return
             outcome = self.taker.execute(
-                book=book, side=order.side, qty=order.qty,
+                book=self._arrival_book(order), side=order.side, qty=order.qty,
                 limit_price=order.limit_price, fee_bps=spec.fees.taker_bps,
                 now=now, expected_price=order.expected_price,
                 signal_id=order.signal_id,
@@ -756,12 +917,37 @@ class CrossVenueArbBacktester:
             self._maker_rejected(order, "fault_rejected", order.release_ts, injected=True)
             return
         if self.config.postonly_reject_model == "on":
+            if self._truth_on and self._truth_complete_at(order):
+                # WP3: the venue-truth book already holds every event up to the arrival's exchange time (the look-ahead window
+                # reaches past it), so the post-only check runs AT arrival against the book the matching engine held.
+                tb = self.truth_books[order.venue]
+                self.po["arrivals"] += 1
+                self.po["checks"] += 1
+                self.po["checks_truth_at_arrival"] += 1
+                if would_cross(order.side, order.limit_price, tb.best_bid, tb.best_ask):
+                    self.po["rejects"] += 1
+                    self.po["rejects_" + order.side] += 1
+                    self._maker_rejected(order, "postonly_reject", order.release_ts, injected=False)
+                else:
+                    self.po["accepted"] += 1
+                    self._place_passive(order, now)
+                return
             # Arrived at the exchange at release_ts; accepted or rejected against the exchange-time book, which is known only
             # once the feed has delivered the first event stamped at or after that time (see _resolve_postonly).
             self._po_wait[order.venue].append(order)
             self.po["arrivals"] += 1
             return
         self._place_passive(order, now)
+
+    def _truth_complete_at(self, order: InFlightOrder) -> bool:
+        """True when the truth book of the order's venue is known to be complete at the arrival's exchange time: the catch-up
+        has run and an event stamped after that time is already held (so nothing stamped before it is still to come)."""
+        aligner = self.latency.aligner
+        x = aligner.to_exchange(order.release_ts) if aligner.ready else order.release_ts
+        self._truth_catch_up(order.venue, x, order.release_ts)
+        q = self._ahead[order.venue]
+        tb = self.truth_books[order.venue]
+        return tb.ready and bool(q) and (getattr(q[0], "exchange_ts", None) or 0.0) > x
 
     def _place_passive(self, order: InFlightOrder, now: float) -> None:
         tracker = self._trackers.get(order.signal_id)
@@ -785,6 +971,8 @@ class CrossVenueArbBacktester:
             arrival_ts=order.release_ts,
         )
         self._maker_to_signal[maker_order.order_id] = order.signal_id
+        if self._breaker is not None and self._breaker.is_tripped():
+            self._request_cancel(maker_order, now, "breaker_trip")      # r12: it landed after the trip: cancel it straight away
         self.events.emit(now, "order_resting", order.venue, source="modelled", order_id=order.order_id, signal_id=order.signal_id,
                          side=order.side, qty=order.qty, price=order.limit_price)
         if order.fault == "unknown":
@@ -805,6 +993,8 @@ class CrossVenueArbBacktester:
         """How long after an exchange-side reject of a passive order the strategy learns of it."""
         if self.config.postonly_notice_s is not None:
             return self.config.postonly_notice_s
+        if self.timelines is not None:
+            return self.timelines.sample_s(venue, "ack_report")   # WP3: the report timeline, never a second arrival draw
         if self.ack.active:
             return self.ack.sample_s()
         return self.venue_specs[venue].latency.feed_ms / 1000.0
@@ -869,6 +1059,9 @@ class CrossVenueArbBacktester:
                          side=fill.side, qty=fill.qty, price=fill.price, reason="synthetic_flow" if fill.is_synthetic else ("taker" if fill.is_taker else "maker"))
 
         self.inventory.apply(fill.venue, fill.signed_qty, fill.cash_delta)
+
+        if self.margin_model is not None:
+            self.margin_model.note_fill(fill.venue, fill.qty if fill.side == "buy" else -fill.qty, fill.price, self.inventory)
         self.fees_paid += fill.fee
         self.traded_notional += fill.notional
         self.markouts.record_fill(fill.ts, fill.venue, fill.side, fill.price, fill.qty)
@@ -901,6 +1094,11 @@ class CrossVenueArbBacktester:
                 else:
                     hedge = self.strategy.hedge_leg(sig, fill.qty, self.books[sig.hedge_venue])
                     send_ts = self._maker_fill_faults(sig, fill) if self.faults is not None else fill.ts
+                    if self.timelines is not None:
+                        # WP3: the strategy learns of the fill one private fill-report latency after the venue matched it
+                        # (the event's exchange time on the host clock), never before the public event that revealed it.
+                        base = self._current_ets if self._current_ets is not None else fill.ts
+                        send_ts = max(send_ts, base + self.timelines.sample_s(fill.venue, "fill_report"))
                 if simultaneous:
                     pass
                 elif hedge is not None:
@@ -925,9 +1123,12 @@ class CrossVenueArbBacktester:
                     tracker.maker_resting = False
 
         if len(self.trade_log) < self.config.max_trade_log:
+            notional = fill.qty * fill.price
             self.trade_log.append({
                 "ts": fill.ts, "venue": fill.venue, "side": fill.side,
                 "qty": fill.qty, "price": fill.price, "fee": fill.fee,
+                "fee_bps": (fill.fee / notional * 10_000.0) if notional > 0 else 0.0,
+                "kind": self._fill_kind or ("taker" if fill.is_taker else "maker"),
                 "taker": fill.is_taker, "signal_id": fill.signal_id,
                 "slippage_bps": fill.slippage_bps,
                 "synthetic": fill.is_synthetic,
@@ -1069,6 +1270,182 @@ class CrossVenueArbBacktester:
                 best = o
         return best
 
+    def _install_timing(self) -> None:
+        """WP3: the measured-offset clock replaces the median aligner and the feed timeline replaces the preset feed sampler."""
+        if self.timelines is None:
+            return
+        aligner = FixedOffsetAligner(self.timing_cfg.clock)
+        self.latency.aligner = aligner
+        for v, vl in self.latency.venues.items():
+            vl.aligner = aligner
+            vl.feed = self.timelines.sampler(v, "feed")
+
+    def _breaker_poll(self, now: float) -> None:
+        """r12: drive the breaker's gateway-down trigger. A venue whose order gateway is reachable produces a heartbeat; one inside
+        an outage (gateway or full) does not, so after heartbeat_timeout_s without one the monitor reports it down. Polled at most
+        every 0.25 s of event time; the trip is stamped at the poll, i.e. up to 0.25 s + one event after the timeout."""
+        b = self._breaker
+        if b is None or now - self._breaker_poll_ts < 0.25:
+            return
+        first = self._breaker_poll_ts < -1e17
+        self._breaker_poll_ts = now
+        for v, mon in b.connectivity.items():
+            if first or self.faults is None or self._active_outage(v, now) is None:     # the first poll seeds every venue as alive
+                mon.record_heartbeat(now)
+        b.on_gateway_status(now, abs(self.inventory.net_base), self.pending.in_flight_count())
+
+    def reset_breaker(self) -> None:
+        """Manual reset (an operator action). Nothing else in the simulator clears a tripped breaker."""
+        if self._breaker is not None:
+            self._breaker.reset()
+            self._trip_cancelled = False
+
+    def _next_deadline(self) -> float | None:
+        """Earliest timer strictly after the engine's current time: in-flight arrivals and recovery/UNKNOWN timers, maker
+        lifetimes (request, then the effective cancel on the receive basis), funding settlements."""
+        cands = [self.pending.peek_release_ts()]
+        if self.settler is not None:
+            cands.append(self.settler.next_ts())
+        ttl = self.config.arb.maker_max_age_s
+        if ttl > 0:
+            for o in self.maker.orders.values():
+                if o.cancel_requested_ts is None:
+                    cands.append(o.placed_ts + ttl)
+                elif self.config.cancel_time_basis != "exchange" and o.cancel_effective_ts is not None:
+                    cands.append(o.cancel_effective_ts)
+        cands = [c for c in cands if c is not None and c > self._now]
+        return min(cands) if cands else None
+
+    def _fire_timers_before(self, now: float) -> None:
+        """WP3 timer wheel: fire every deadline strictly before the next market event at its own time (not at the event's).
+        Deadlines equal to the event time are handled by _advance_to(now) under the equal-time policy."""
+        guard = 0
+        while True:
+            d = self._next_deadline()
+            if d is None or d >= now:
+                return
+            guard += 1
+            if guard > 1_000_000:
+                raise RuntimeError("timer wheel did not converge")
+            self._advance_to(d, from_timer=True)
+            if self.settler is not None:
+                self.settler.settle(d, self.inventory, self.books)
+            self.timing_stats["timers_fired_between_events"] += 1
+
+    # ── WP3 venue-truth books ────────────────────────────────────────────────
+    def _lookahead_s(self) -> float:
+        return max(t.feed.max_ms for t in self.timing_cfg.venues.values()) / 1000.0
+
+    def _with_lookahead(self, feed):
+        """Yield the feed in receive order while holding a window of later events per venue (self._ahead), so an arrival at
+        exchange time x can see venue events that the exchange had already processed but the collector had not yet delivered."""
+        self._ahead_mode = True
+        window = self._lookahead_s()
+        buf: deque = deque()
+        it = iter(feed)
+        for ev in it:
+            buf.append(ev)
+            self._ahead[ev.venue].append(ev)
+            while buf and buf[-1].receive_ts - buf[0].receive_ts >= window:
+                yield buf.popleft()
+        while buf:
+            yield buf.popleft()
+
+    def _truth_ingest(self, ev) -> None:
+        """Test hook: hand the truth layer an event the feed will deliver later (what _with_lookahead does from the feed)."""
+        self._ahead_mode = True
+        self._ahead[ev.venue].append(ev)
+
+    def _truth_apply(self, ev, tb: OrderBook) -> None:
+        if ev.kind == BOOK:
+            bids, asks = snapshot_levels(ev.payload)
+            if bids and asks:
+                tb.apply_snapshot(bids, asks, getattr(ev, "exchange_ts", None) or ev.receive_ts)
+        elif ev.kind == DELTA:
+            side, price, volume, event_type = delta_fields(ev.payload)
+            if price > 0:
+                tb.apply_delta(side, price, volume, event_type, getattr(ev, "exchange_ts", None) or ev.receive_ts)
+
+    def _truth_catch_up(self, venue: str, x_exchange: float | None, ref_host_ts: float | None = None) -> None:
+        """Apply to the venue-truth book every held event of `venue` stamped at or before exchange time x. ref_host_ts: the host
+        time of whatever is being evaluated (an arrival's release time); events received after it are counted as applied
+        before receipt — the look-ahead the truth layer exists for."""
+        if not self._truth_on:
+            return
+        q = self._ahead[venue]
+        tb = self.truth_books[venue]
+        while q:
+            ev = q[0]
+            ets = getattr(ev, "exchange_ts", None)
+            if x_exchange is not None and ets is not None and ets > x_exchange:
+                break
+            q.popleft()
+            if ets is not None and ets < tb.last_update_ts:
+                self.timing_stats["truth_events_out_of_exchange_order"] += 1
+            self._truth_apply(ev, tb)
+            if ref_host_ts is not None and ev.receive_ts > ref_host_ts:
+                self.timing_stats["truth_events_applied_before_receipt"] += 1
+
+    def _truth_sync_event(self, ev) -> None:
+        """Called for every event the strategy view applies: the truth book must be at least as far along."""
+        if not self._truth_on:
+            return
+        if self._ahead_mode:
+            self._truth_catch_up(ev.venue, getattr(ev, "exchange_ts", None), ev.receive_ts)
+            q = self._ahead[ev.venue]
+            if q and q[0] is ev:                       # exchange_ts missing or out of order: apply it now anyway
+                q.popleft()
+                self._truth_apply(ev, self.truth_books[ev.venue])
+        else:
+            self._truth_apply(ev, self.truth_books[ev.venue])
+
+    def _arrival_book(self, order: InFlightOrder) -> OrderBook:
+        """The book a taker arrival executes against: the venue-truth book at the arrival's exchange time under WP3, else the
+        strategy view."""
+        if not self._truth_on:
+            return self.books[order.venue]
+        aligner = self.latency.aligner
+        x = aligner.to_exchange(order.release_ts) if aligner.ready else order.release_ts
+        self._truth_catch_up(order.venue, x, order.release_ts)
+        tb = self.truth_books[order.venue]
+        view = self.books[order.venue]
+        if not tb.ready:
+            self.timing_stats["truth_book_not_ready_at_arrival"] += 1
+            return view
+        self.timing_stats["truth_arrivals"] += 1
+        if view.ready and view.mid > 0:
+            d = abs(tb.mid - view.mid) / view.mid * 1e4
+            self.timing_stats["truth_vs_view_mid_bps_sum"] += d
+            if d > self.timing_stats.get("truth_vs_view_mid_bps_max", 0.0):
+                self.timing_stats["truth_vs_view_mid_bps_max"] = d
+        return tb
+
+    def _dead_feed_blocks(self, now: float) -> bool:
+        """WP3 dead-feed gate on ABSOLUTE age per venue: a dead venue, or every venue stale at once, blocks entry."""
+        cfg = self.timing_cfg
+        max_age = cfg.max_book_age_s if cfg.max_book_age_s is not None else self.config.arb.max_book_age_s
+        states = {v: feed_state(self.books[v].age_s(now), max_age, cfg.dead_feed_s) for v in self.config.venues}
+        for v, st in states.items():
+            if st != self._feed_state.get(v):
+                self.timing_stats[f"feed_{st}_transitions_{v}"] += 1
+                self._feed_state[v] = st
+        if any(st == "dead" for st in states.values()):
+            self.timing_stats["signals_blocked_by_dead_feed"] += 1
+            return True
+        if all(st != "valid" for st in states.values()):
+            self.timing_stats["entry_blocked_both_stale"] += 1
+            return True
+        return False
+
+    def _timing_report(self) -> dict:
+        if self.timelines is None:
+            return {}
+        stats = dict(self.timing_stats)
+        if stats.get("truth_arrivals"):
+            stats["truth_vs_view_mid_bps_mean"] = stats.pop("truth_vs_view_mid_bps_sum", 0.0) / stats["truth_arrivals"]
+        return {"config": self.timing_cfg.describe(), "timelines": self.timelines.report(), "clock": self.latency.aligner.report(),
+                "stats": stats, "feed_state_final": dict(self._feed_state), "truth_books": self._truth_on}
+
     def _feed_dark(self, ts: float) -> bool:
         """True while any venue is in a 'full' outage: the strategy has no market data it can trust and does not evaluate."""
         return any(o.kind == "full" for v in self.config.venues for o in self._outages_at(v, ts))
@@ -1077,6 +1454,8 @@ class CrossVenueArbBacktester:
         """How long after an exchange-side rejection or miss the strategy learns of it (the legacy response knows at once)."""
         if self.faults.response == "legacy":
             return 0.0
+        if self.timelines is not None:
+            return self.timelines.sample_s(venue, "ack_report")
         return self.venue_specs[venue].latency.feed_ms / 1000.0
 
     def _probe_order(self, sig: ArbSignal, qty: float, ts: float, *, is_hedge: bool, attempt: int = 0, origin_id: int = 0) -> InFlightOrder:
@@ -1101,6 +1480,17 @@ class CrossVenueArbBacktester:
             ts = out.end_ts                               # execution reports ride on the order-entry session: they arrive at reconnect
             self.hedge["fill_reports_deferred"] += 1
             self.hedge["fill_report_delay_s_sum"] += ts - fill.ts
+        self._maker_fill_count += 1
+        if f.restart_s > 0 and self._maker_fill_count in f.restart_at_fills:
+            # MODELLED restart: the process dies right after this fill; both venues are dark for the strategy until it is back,
+            # then it reconciles (learns of the fill) and hedges. Breaker state persists (modelled assumption).
+            end = ts + f.restart_s
+            for v in self.config.venues:
+                self._dyn_outages.append(Outage(v, ts, end, "full"))
+            self.hedge["restarts"] += 1
+            self.hedge["restart_downtime_s"] += f.restart_s
+            self.events.emit(ts, "restart", fill.venue, source="modelled", signal_id=fill.signal_id, reason=f"down {f.restart_s:g}s")
+            ts = end
         if f.outage_on_fill_s > 0 and self._active_outage(sig.hedge_venue, ts) is None:
             self._dyn_outages = [o for o in self._dyn_outages if o.end_ts > self._now - 3600.0]
             self._dyn_outages.append(Outage(sig.hedge_venue, ts, ts + f.outage_on_fill_s, f.outage_on_fill_kind))
@@ -1151,7 +1541,7 @@ class CrossVenueArbBacktester:
             x = self._rng_extra
             u_unknown, u_fast, u_venue = x.random(), x.random(), x.random()
             if not order.fault:
-                p_venue = dict(f.reject_prob_by_venue).get(order.venue, 0.0)
+                p_venue = dict(f.reject_prob_by_venue).get(order.venue, 0.0) if f.venue_reject_applies_to_hedges else 0.0
                 fast = False
                 if f.fast_move_reject_prob and f.fast_move_bps:
                     hist = self._mid_hist[order.venue]
@@ -1214,6 +1604,7 @@ class CrossVenueArbBacktester:
         """The hedge (or an unwind / retry) did not do its job. The strategy reacts at `detect_ts`, not before."""
         origin = order.origin_id or order.order_id
         ev = self._hedge_open.get(origin)
+        first_failure_of_chain = ev is None
         if ev is None:
             ev = {"origin_id": origin, "signal_id": order.signal_id, "hedge_venue": order.venue if order.is_hedge else "", "qty": order.qty,
                   "t_sent": order.sent_ts, "first_reason": reason, "t_first_detect": detect_ts, "reasons": [], "outcome": None,
@@ -1226,10 +1617,12 @@ class CrossVenueArbBacktester:
                          order_id=order.order_id, signal_id=order.signal_id, chain_id=origin, side=order.side, qty=order.qty, reason=reason)
         self.hedge["failed_" + reason] += 1
         self.hedge["failed_qty"] += order.qty
-        if self._breaker is not None:
+        if self._breaker is not None and first_failure_of_chain and order.role != "unwind":
+            # r12 counting rule: one hedge FAILURE per hedge chain (its first failed attempt), not one per retry or per unwind
+            # attempt; a failed unwind is the separate trip_on_failed_unwind trigger.
             net_abs = abs(self.inventory.net_base) if hasattr(self, "inventory") else 0.0
             self._breaker.on_hedge_result(detect_ts, failed=True, net_abs=net_abs,
-                                          pending_hedges=len(self.pending.in_flight()))
+                                          pending_hedges=self.pending.in_flight_count())
         tracker = self._trackers.get(order.signal_id)
         if tracker is not None and self.faults.response != "legacy":
             tracker.managed = True
@@ -1260,6 +1653,17 @@ class CrossVenueArbBacktester:
                 self._maybe_resolve(order.signal_id, now)
             return
         if order.tag == "unknown_resolved":
+            if self._breaker is not None:
+                self._breaker.on_order_resolved(order.origin_id or order.order_id)     # r12: a resolved UNKNOWN no longer ages toward a trip
+            # WP6: the status query itself can fail; bounded attempts, then ALARM (the reservation stays, nothing is replaced blind).
+            if f.unknown_query_fail_prob and self._rng_extra.random() < f.unknown_query_fail_prob:
+                self.hedge["unknown_query_failed"] += 1
+                if order.attempt + 1 < f.unknown_query_max_attempts:
+                    self._enqueue_timer(order, t0 + f.unknown_resolve_s, "unknown_resolved", order.attempt + 1)
+                    return
+                self._raise_alarm(now, "unknown_unresolved", order)
+                self._finish_leg(order, tracker, now, "unknown_unresolved_alarm")
+                return
             self.hedge["unknown_resolved"] += 1
             self._finish_leg(order, tracker, now, "hedged_after_unknown")
             return
@@ -1277,7 +1681,8 @@ class CrossVenueArbBacktester:
             self._finish_leg(order, tracker, now, "legacy_instant_flatten")
             return
         retryable = order.role == "unwind" or (order.is_hedge and f.response in ("retry", "retry_unwind"))
-        if retryable and order.attempt < f.max_retries:
+        limit = (f.unwind_max_attempts - 1) if (order.role == "unwind" and f.unwind_max_attempts is not None) else f.max_retries
+        if retryable and order.attempt < limit:
             self._enqueue_timer(order, t0 + f.retry_backoff_s, "retry_send", order.attempt + 1)
             return
         if order.is_hedge and f.response in ("unwind", "retry_unwind"):
@@ -1286,8 +1691,25 @@ class CrossVenueArbBacktester:
         self.hedge["carried_events"] += 1
         self.hedge["carried_qty"] += order.qty
         if self._breaker is not None and order.role == "unwind":
-            self._breaker.on_failed_unwind(now, abs(self.inventory.net_base), len(self.pending.in_flight()))
+            self._breaker.on_failed_unwind(now, abs(self.inventory.net_base), self.pending.in_flight_count())
+        if order.role == "unwind":
+            self._raise_alarm(now, "unwind_exhausted", order)
         self._finish_leg(order, tracker, now, "unwind_failed_carried" if order.role == "unwind" else "carried")
+
+    def _raise_alarm(self, now: float, reason: str, order: InFlightOrder) -> None:
+        doc = {"ts": now, "reason": reason, "venue": order.venue, "qty": order.qty, "signal_id": order.signal_id,
+               "net_base": self.inventory.net_base, "base": dict(self.inventory.base)}
+        self.alarms.append(doc)
+        if self.alarm is None:
+            self.alarm = doc
+        self.hedge["alarms_raised"] += 1
+        self.events.emit(now, "alarm", order.venue, source="modelled", order_id=order.order_id, signal_id=order.signal_id, qty=order.qty, reason=reason)
+
+    def reset_alarm(self, now: float | None = None) -> None:
+        """Manual reset (an operator action): clears the block; the alarm history stays in `alarms`."""
+        if self.alarm is not None:
+            self.hedge["alarms_reset"] += 1
+        self.alarm = None
 
     def _resend(self, order: InFlightOrder, tracker: _SignalTracker | None, t0: float) -> None:
         if tracker is None:
@@ -1309,10 +1731,21 @@ class CrossVenueArbBacktester:
         """Trade the unhedged maker fill back on the maker venue as a real order (sell back a filled bid, buy back a filled ask):
         entry latency, executes against the book of its arrival."""
         sig = tracker.signal
+        if self._breaker is not None and not self._breaker.allow_unwind():
+            # r12: a tripped breaker lets only tripped_unwind_retries unwind sends through; the rest is an ALARM, not a silent skip
+            self.hedge["unwinds_denied_by_breaker"] += 1
+            self._raise_alarm(t0, "unwind_budget_exhausted", failed)
+            self._finish_leg(failed, tracker, t0, "unwind_denied_by_breaker")
+            return
         venue = sig.maker_venue
         side = "sell" if sig.hedge_side == "sell" else "buy"
         book = self.books[venue]
-        leg = ArbLeg(venue=venue, side=side, qty=failed.qty, limit_price=0.0 if side == "sell" else float("inf"), is_taker=True,
+        band = (self.faults.unwind_band_bps if self.faults is not None else 0.0) / 10_000.0
+        if band > 0.0 and book.ready:
+            limit = book.mid * (1.0 - band) if side == "sell" else book.mid * (1.0 + band)     # WP6: price-banded unwind
+        else:
+            limit = 0.0 if side == "sell" else float("inf")
+        leg = ArbLeg(venue=venue, side=side, qty=failed.qty, limit_price=limit, is_taker=True,
                      expected_price=book.mid if book.ready else (sig.buy_price if side == "sell" else sig.sell_price),
                      fee_bps=self.venue_specs[venue].fees.taker_bps)
         self.hedge["unwinds_sent"] += 1
@@ -1378,9 +1811,11 @@ class CrossVenueArbBacktester:
             self.hedge["hedges_filled"] += 1
             self.hedge["hedge_flight_s_sum"] += now - order.sent_ts
             self._on_fill(outcome.fill, tracker, chain=self._chain_of(order))
-            if self._breaker is not None and done >= order.qty - 1e-9:
+            if (self._breaker is not None and done >= order.qty - 1e-9 and order.attempt == 0
+                    and self._hedge_open.get(order.origin_id or order.order_id) is None):
+                # r12: only a clean first-attempt hedge counts as a success (resets the consecutive-failure run)
                 self._breaker.on_hedge_result(now, failed=False, net_abs=abs(self.inventory.net_base),
-                                              pending_hedges=len(self.pending.in_flight()))
+                                              pending_hedges=self.pending.in_flight_count())
         remainder = order.qty - done
         learn = order.release_ts + self._ack_s(order.venue)
         if order.fault == "unknown":
@@ -1389,7 +1824,8 @@ class CrossVenueArbBacktester:
             learn = order.release_ts + self.faults.ack_timeout_s + self.faults.unknown_resolve_s
             self.hedge["unknown_orders"] += 1
             if self._breaker is not None:
-                self._breaker.on_unknown_order(order.order_id, order.release_ts, order.venue)
+                # r12: the order is UNKNOWN for the strategy from the moment its ack timeout expires, not from arrival
+                self._breaker.on_unknown_order(order.origin_id or order.order_id, order.release_ts + self.faults.ack_timeout_s, order.venue)
             self.events.emit(order.release_ts, "order_unknown", order.venue, source="injected", order_id=order.order_id,
                              signal_id=order.signal_id, chain_id=self._chain_of(order), qty=order.qty, reason="ack_lost")
             if remainder <= 1e-9:
@@ -1454,7 +1890,7 @@ class CrossVenueArbBacktester:
 
     # ── Main loop ────────────────────────────────────────────────────────────
 
-    def _expire_maker_orders(self, now: float) -> None:
+    def _expire_maker_orders(self, now: float, *, from_timer: bool = False) -> None:
         """Time-in-force for resting maker orders (ArbConfig.maker_max_age_s, seconds; 0 disables).
 
         Semantics (all times are replay receive time):
@@ -1481,41 +1917,70 @@ class CrossVenueArbBacktester:
                     self.lifetime["qty_filled_while_cancel_pending"] += during
         for order in list(self.maker.orders.values()):
             if order.cancel_requested_ts is None:
+                if ttl <= 0:
+                    continue                                  # no lifetime: only an explicit cancel request (breaker trip) is ever pending
                 requested = order.placed_ts + ttl
                 if now < requested:
                     continue
-                order.cancel_requested_ts = requested
-                delay = self.latency.cancel_delay(order.venue)                 # always drawn
-                base = requested
-                if self.faults is not None:
-                    delay *= self.faults.latency_scale
-                    out = self._active_outage(order.venue, requested)
-                    if out is not None:
-                        # The cancel cannot reach the venue until the gateway is back; the order keeps resting and can fill.
-                        base = out.end_ts
-                        self.hedge["cancels_delayed_by_outage"] += 1
-                        self.hedge["cancel_outage_delay_s_sum"] += out.end_ts - requested
-                        self.events.emit(requested, "cancel_delayed_by_outage", order.venue, source="injected", order_id=order.order_id,
-                                         signal_id=self._maker_to_signal.get(order.order_id, 0))
-                order.cancel_effective_ts = base + delay
-                order.cancel_reason = "expired"
-                order.filled_at_cancel_request = order.filled_qty
-                self._cancel_watch[order.order_id] = order
-                self.lifetime["expiries_triggered"] += 1
-                self.events.emit(requested, "cancel_requested", order.venue, source="modelled", order_id=order.order_id,
-                                 signal_id=self._maker_to_signal.get(order.order_id, 0), side=order.side_str, qty=order.remaining, price=order.price)
-            if now < order.cancel_effective_ts:
-                continue
+                self._request_cancel(order, requested, "expired")
+            if now < order.cancel_effective_ts or (self._market_first and not from_timer and now == order.cancel_effective_ts):
+                continue                                  # market_first: an event stamped exactly at the effective time is applied first
             if self.config.cancel_time_basis == "exchange":
                 continue                                  # applied by _apply_due_cancels when the venue's feed reaches that exchange time
             self._apply_cancel(order, now)
+
+    def _request_cancel(self, order: MakerOrder, requested: float, reason: str) -> None:
+        """The strategy asks the venue to cancel `order` at `requested`: one sampled cancel latency (later if the gateway is down),
+        the order stays resting and fillable until then. reason: "expired" (time in force) or "breaker_trip"."""
+        order.cancel_requested_ts = requested
+        delay = self.latency.cancel_delay(order.venue)                 # always drawn
+        if self.timelines is not None:
+            delay = self.timelines.sample_s(order.venue, "cancel")    # WP3: the cancel timeline
+        base = requested
+        if self.faults is not None:
+            delay *= self.faults.latency_scale
+            out = self._active_outage(order.venue, requested)
+            if out is not None:
+                # The cancel cannot reach the venue until the gateway is back; the order keeps resting and can fill.
+                base = out.end_ts
+                self.hedge["cancels_delayed_by_outage"] += 1
+                self.hedge["cancel_outage_delay_s_sum"] += out.end_ts - requested
+                self.events.emit(requested, "cancel_delayed_by_outage", order.venue, source="injected", order_id=order.order_id,
+                                 signal_id=self._maker_to_signal.get(order.order_id, 0))
+        order.cancel_effective_ts = base + delay
+        order.cancel_reason = reason
+        order.filled_at_cancel_request = order.filled_qty
+        self._cancel_watch[order.order_id] = order
+        self.lifetime["expiries_triggered" if reason == "expired" else "breaker_cancels_requested"] += 1
+        self.events.emit(requested, "cancel_requested", order.venue, source="modelled", order_id=order.order_id,
+                         signal_id=self._maker_to_signal.get(order.order_id, 0), side=order.side_str, qty=order.remaining, price=order.price,
+                         **({} if reason == "expired" else {"reason": reason}))
+
+    def _breaker_trip_check(self, now: float) -> None:
+        """r12: a tripped breaker cancels every resting maker order (each with its own cancel latency; fills in that window are kept and
+        hedged as usual). Runs once per trip; a manual reset re-arms it. Orders that land AFTER the trip are cancelled at placement."""
+        b = self._breaker
+        if b is None:
+            return
+        if b.is_tripped():
+            if not self._trip_cancelled:
+                self._trip_cancelled = True
+                n = 0
+                for order in list(self.maker.orders.values()):
+                    if order.cancel_requested_ts is None:
+                        self._request_cancel(order, now, "breaker_trip")
+                        n += 1
+                self.hedge["breaker_trips_handled"] += 1
+                self.hedge["resting_orders_cancel_requested_on_trip"] += n
+        elif self._trip_cancelled:
+            self._trip_cancelled = False
 
     def _apply_due_cancels(self, venue: str, ets: float | None, now: float) -> None:
         """cancel_time_basis == "exchange": cancels take effect before the first venue event stamped at or after their effective time."""
         t_cmp = ets if ets is not None else now
         for order in list(self.maker.orders.values()):
             if (order.venue == venue and order.cancel_requested_ts is not None and order.cancel_effective_ts is not None
-                    and t_cmp >= order.cancel_effective_ts):
+                    and (t_cmp > order.cancel_effective_ts or (t_cmp == order.cancel_effective_ts and not self._market_first))):
                 self._apply_cancel(order, now)
 
     def _apply_cancel(self, order: MakerOrder, now: float) -> None:
@@ -1533,7 +1998,8 @@ class CrossVenueArbBacktester:
         if during > 1e-12:
             self.lifetime["fills_while_cancel_pending"] += 1
             self.lifetime["qty_filled_while_cancel_pending"] += during
-        self._cancel_acks.append(effective + self.venue_specs[cancelled.venue].latency.feed_ms / 1000.0)
+        self._cancel_acks.append(effective + (self.timelines.sample_s(cancelled.venue, "cancel_report") if self.timelines is not None
+                                              else self.venue_specs[cancelled.venue].latency.feed_ms / 1000.0))
         sid = self._maker_to_signal.get(cancelled.order_id, -1)
         self.events.emit(effective, "cancel_applied", cancelled.venue, source="modelled", order_id=cancelled.order_id, signal_id=sid if sid > 0 else 0,
                          side=cancelled.side_str, qty=cancelled.remaining, price=cancelled.price)
@@ -1575,8 +2041,9 @@ class CrossVenueArbBacktester:
             n += len(self._cancel_acks)
         return n
 
-    def _advance_to(self, now: float) -> None:
-        """Bring order state up to `now`, before the market event stamped `now` is applied.
+    def _advance_to(self, now: float, *, from_timer: bool = False) -> None:
+        """Bring order state up to `now`, before the market event stamped `now` is applied (from_timer: the WP3 timer wheel is
+        firing a deadline at its own time — there is no market event at `now`, so the equal-time policy does not apply).
 
         Order: in-flight orders land, then expiries/cancels take effect, then the caller applies the event. An order
         sent at t-latency therefore cannot see the book update arriving right now, and a cancel effective at or before
@@ -1585,8 +2052,8 @@ class CrossVenueArbBacktester:
         self._now = now
         for order in self.pending.release(now):
             self._execute_arrival(order, now)
-        if self.config.arb.maker_max_age_s > 0:
-            self._expire_maker_orders(now)
+        if self.config.arb.maker_max_age_s > 0 or self._cancel_watch:
+            self._expire_maker_orders(now, from_timer=from_timer)
 
     def _close_out(self, now: float) -> None:
         """End of data. Orders still in flight land on the last book, resting orders are closed.
@@ -1650,7 +2117,7 @@ class CrossVenueArbBacktester:
 
         now = 0.0
         try:
-            for ev in feed:
+            for ev in (self._with_lookahead(feed) if self._truth_on else feed):
                 if cfg.max_events is not None and self.events_processed >= cfg.max_events:
                     break
                 now = ev.receive_ts
@@ -1659,9 +2126,14 @@ class CrossVenueArbBacktester:
                 self.events_by_venue[ev.venue] += 1
                 self.events_by_kind[ev.kind] += 1
 
+                if self.timelines is not None and self.timing_cfg.timer_wheel:
+                    self._fire_timers_before(now)
                 self._advance_to(now)
                 self._apply_event(ev)
                 self._record_mid_ts(ev.venue, now)
+                if self._breaker is not None:
+                    self._breaker_poll(now)
+                    self._breaker_trip_check(now)
 
                 if self.settler is not None:
                     self.settler.settle(now, self.inventory, self.books)
@@ -1678,6 +2150,13 @@ class CrossVenueArbBacktester:
                     if self.faults is not None and self._feed_dark(now):
                         self.hedge["evaluations_skipped_feed_dark"] += 1
                         signal = None
+                    elif self.timing_cfg is not None and self._dead_feed_blocks(now):
+                        signal = None
+                    elif cfg.enforce_book_state and self._book_state_blocks(now):
+                        signal = None
+                    elif self.alarm is not None:
+                        self.hedge["signals_blocked_by_alarm"] += 1
+                        signal = None
                     elif self._breaker is not None and not self._breaker.allow_signal(now, abs(self.inventory.net_base)):
                         self.hedge["signals_blocked_by_circuit_breaker"] = \
                             self.hedge.get("signals_blocked_by_circuit_breaker", 0) + 1
@@ -1689,8 +2168,8 @@ class CrossVenueArbBacktester:
                             pending=self._pending_exposure() if cfg.arb.count_pending_exposure else None,
                         )
                     if self._breaker is not None:
-                        self._breaker.on_net_update(now, abs(self.inventory.net_base), len(self.pending.in_flight()))
-                        self._breaker.check_unknown_orders(now, abs(self.inventory.net_base), len(self.pending.in_flight()))
+                        self._breaker.on_net_update(now, abs(self.inventory.net_base), self.pending.in_flight_count())
+                        self._breaker.check_unknown_orders(now, abs(self.inventory.net_base), self.pending.in_flight_count())
                     if (self.strategy.rejects["maker_limit"] > blocked_before
                             and (self._cancel_acks or any(o.cancel_requested_ts is not None for o in self.maker.orders.values()))):
                         self.lifetime["quotes_blocked_by_unresolved_cancel"] += 1
@@ -1698,7 +2177,7 @@ class CrossVenueArbBacktester:
                         if (self.faults is not None and self.faults.entry_guard
                                 and any(self._active_outage(v, now) is not None for v in (signal.buy_venue, signal.sell_venue))):
                             self.hedge["signals_blocked_by_entry_guard"] += 1
-                        elif self.margin_model is not None and not self.margin_model.allows(signal, self.inventory, self.books):
+                        elif self.margin_model is not None and not self.margin_model.allows(signal, self.inventory, self.books, self._reserved_notional()):
                             self.hedge["signals_blocked_by_margin"] += 1          # the venue could not post initial margin for the clip
                         else:
                             self._fire(signal, now)
@@ -1724,12 +2203,16 @@ class CrossVenueArbBacktester:
 
     # ── Result ───────────────────────────────────────────────────────────────
 
-    def _equity_bridge(self, open_pos_value: float, ending_equity: float) -> dict:
+    def _equity_bridge(self, open_pos_value: float, ending_equity: float, valuation: dict | None = None) -> dict:
         """Ledger identity, checked at the end of every run (docs/strategy_contract.md section 4):
              cash rebuilt from the trade log (fills, fees) + funding + transfers == ledger cash
-             ending_equity == ledger cash + open position marked at the common timestamp.
+             ending_equity == ledger cash + open position marked at the COMMON timestamp (valuation.py: every venue at the last
+             time all venues had data). The common-timestamp value is computed here, independently of the figure under test, so
+             an ending_equity built from each venue's own last mid (the pre-R11 figure) fails on any day where one feed stopped
+             early (SOL 2022-01-05: +$17.16 on a flat pair).
         Tolerance 1e-6 USDT, scaled by 1e-9 x traded notional for float accumulation. Skipped (and flagged) when the trade log was
         truncated by max_trade_log. Raises EquityBridgeError unless ArbBacktestConfig.equity_bridge == "warn"."""
+        val = valuation if valuation is not None else self._common_valuation()
         truncated = len(self.trade_log) >= self.config.max_trade_log
         funding = -(self.settler.funding_paid if self.settler else 0.0)
         # Transfers move equity between the margin model's venue accounts; the ledger cash (InventoryBook) never sees them, so
@@ -1738,12 +2221,56 @@ class CrossVenueArbBacktester:
         rebuilt = sum((-r["qty"] * r["price"] if r["side"] == "buy" else r["qty"] * r["price"]) - r["fee"] for r in self.trade_log) + funding
         tol = max(1e-6, 1e-9 * self.traded_notional)
         gap_cash = rebuilt - self.inventory.total_cash
-        gap_equity = ending_equity - (self.inventory.total_cash + open_pos_value)
+        # WP5 — fee reconciliation: every fill's fee must equal the venue's schedule (maker / taker bps, plus the declared liquidation
+        # fee on a liquidation) x its notional. Synthetic (BackgroundAgentModel) fills follow the maker schedule like any other.
+        fee_mismatches: list[dict] = []
+        for r in self.trade_log:
+            fees = self.venue_specs[r["venue"]].fees
+            bps = fees.taker_bps if r["taker"] else fees.maker_bps
+            if r.get("kind") == "liquidation" and self.margin_model is not None:
+                bps += self.margin_model.cfg.venues[r["venue"]].liquidation_fee_bps
+            expected = r["qty"] * r["price"] * bps / 10_000.0
+            if abs(expected - r["fee"]) > 1e-9 * max(1.0, r["qty"] * r["price"]):
+                if len(fee_mismatches) < 20:
+                    fee_mismatches.append({"ts": r["ts"], "venue": r["venue"], "kind": r.get("kind"), "fee": r["fee"], "expected": expected})
+                else:
+                    fee_mismatches[-1]["more"] = fee_mismatches[-1].get("more", 0) + 1
+        # WP5 — per-venue identities (cash and base), tolerance 1e-9 scaled by the venue's traded notional
+        per_venue: dict[str, dict] = {}
+        funding_by_venue = self.settler.report()["by_venue"] if self.settler else {}
+        for v in self.config.venues:
+            rows = [r for r in self.trade_log if r["venue"] == v]
+            cash_v = sum((-r["qty"] * r["price"] if r["side"] == "buy" else r["qty"] * r["price"]) - r["fee"] for r in rows) - funding_by_venue.get(v, 0.0)
+            base_v = sum(r["qty"] if r["side"] == "buy" else -r["qty"] for r in rows)
+            notional_v = sum(r["qty"] * r["price"] for r in rows)
+            tol_v = 1e-9 * max(1.0, notional_v)
+            per_venue[v] = {"ledger_cash": self.inventory.cash.get(v, 0.0), "cash_from_trade_log": cash_v, "funding": -funding_by_venue.get(v, 0.0),
+                            "cash_gap": cash_v - self.inventory.cash.get(v, 0.0), "ledger_base": self.inventory.base.get(v, 0.0),
+                            "base_from_trade_log": base_v, "base_gap": base_v - self.inventory.base.get(v, 0.0), "tolerance": tol_v,
+                            "ok": truncated or (abs(cash_v - self.inventory.cash.get(v, 0.0)) <= tol_v and abs(base_v - self.inventory.base.get(v, 0.0)) <= 1e-9)}
+        if val.get("available"):
+            common_open = val["open_position_value"]
+            valuation_basis = "common_timestamp"
+        else:
+            # No common timestamp exists (a venue never priced, or the history cannot reach common_ts): the identity can only be
+            # checked against the marks handed in, and the result is flagged.
+            common_open = open_pos_value
+            valuation_basis = f"unavailable:{val.get('reason')}"
+        gap_equity = ending_equity - (self.inventory.total_cash + common_open)
+        gap_marks = open_pos_value - common_open                      # the figure under test vs the common-timestamp marks
         doc = {"checked": not truncated, "tolerance_usdt": tol, "ledger_cash": self.inventory.total_cash, "cash_from_trade_log": rebuilt,
                "funding": funding, "transfers": transfers, "open_position_value": open_pos_value, "ending_equity": ending_equity,
-               "cash_gap": gap_cash, "equity_gap": gap_equity, "ok": truncated or (abs(gap_cash) <= tol and abs(gap_equity) <= tol)}
+               "common_timestamp_open_position_value": common_open, "valuation_basis": valuation_basis,
+               "common_ts": val.get("common_ts"), "marks": val.get("marks"), "mark_gap_s": val.get("mark_gap_s"),
+               "venue_last_update_spread_s": val.get("venue_last_update_spread_s"), "lagging_venue_flag": val.get("lagging_venue_flag"),
+               "cash_gap": gap_cash, "equity_gap": gap_equity, "mark_gap": gap_marks,
+               "fee_mismatches": fee_mismatches, "per_venue": per_venue,
+               "funding_predicted_at_signal": self._funding_predicted, "funding_realised": -funding,
+               "ok": truncated or (abs(gap_cash) <= tol and abs(gap_equity) <= tol and not fee_mismatches and all(x["ok"] for x in per_venue.values()))}
         if not doc["ok"]:
-            msg = f"equity bridge failed: cash gap {gap_cash:.9f}, equity gap {gap_equity:.9f}, tolerance {tol:.3e}"
+            msg = (f"equity bridge failed: cash gap {gap_cash:.9f}, equity gap {gap_equity:.9f} (open position under test {open_pos_value:.6f} "
+                   f"vs {common_open:.6f} at the common timestamp {val.get('common_ts')}), tolerance {tol:.3e}; "
+                   f"fee mismatches {len(fee_mismatches)}; per-venue failures {[v for v, x in per_venue.items() if not x['ok']]}")
             if self.config.equity_bridge == "warn":
                 warnings.warn(msg, RuntimeWarning, stacklevel=2)
             else:
@@ -1774,6 +2301,13 @@ class CrossVenueArbBacktester:
 
     # ── Margin / liquidation / transfers (margin_model.py) ───────────────────
 
+    def _reserved_notional(self) -> dict[str, float]:
+        """WP5: notional of resting maker orders per venue (their initial margin is reserved at the venue)."""
+        out: dict[str, float] = {}
+        for o in self.maker.orders.values():
+            out[o.venue] = out.get(o.venue, 0.0) + o.remaining * o.price
+        return out
+
     def _margin_step(self, now: float) -> None:
         """Run the margin model; execute any liquidation (and the matching flatten) it orders against the live books. Liquidations
         trade at market through the same taker path as an unwind; their fee is charged to cash and reported on its own line."""
@@ -1790,7 +2324,11 @@ class CrossVenueArbBacktester:
             if out.filled and out.fill is not None:
                 f = out.fill
                 self.orders_filled += 1
-                self._on_fill(f)
+                self._fill_kind = "flatten" if flatten else "liquidation"
+                try:
+                    self._on_fill(f)
+                finally:
+                    self._fill_kind = None
                 self.margin_model.record_liquidation(venue, f.qty, 0.0 if flatten else f.notional * fee_bps / 10_000.0, flatten)
 
     def _build_result(self, feed: CrossVenueFeed, coverage, wall_s: float) -> ArbBacktestResult:
@@ -1805,53 +2343,34 @@ class CrossVenueArbBacktester:
             ref_mid = mids[mark_venue]
             mids = {v: ref_mid for v in cfg.venues}
 
-        open_pos_value = sum(
-            self.inventory.base.get(v, 0.0) * mids.get(v, 0.0) for v in cfg.venues
-        )
-        ending_equity = self.inventory.total_cash + open_pos_value
+        # R11 — two valuations of the same open position. last_mark: each venue at its own last mid (the pre-2026-11-01 figure;
+        # overstated whenever one feed stops before the other). common_timestamp: every venue at the last time ALL venues had
+        # data (valuation.py). The headline ending_equity uses cfg.valuation; the bridge always checks against the common one.
+        last_mark_open = sum(self.inventory.base.get(v, 0.0) * mids.get(v, 0.0) for v in cfg.venues)
+        last_mark_equity = self.inventory.total_cash + last_mark_open
+        val = self._common_valuation()
+        if val.get("available"):
+            common_timestamp_equity = val["equity"]
+            common_staleness = val["venue_last_update_spread_s"]
+        else:
+            common_timestamp_equity = last_mark_equity
+            common_staleness = float("inf")
+            warnings.warn(f"common-timestamp valuation unavailable ({val.get('reason')}); ending_equity falls back to each venue's "
+                          "last mark and is flagged", RuntimeWarning, stacklevel=2)
+        if cfg.valuation == "common_timestamp" and val.get("available"):
+            open_pos_value = val["open_position_value"]
+            ending_equity = common_timestamp_equity
+        else:
+            open_pos_value = last_mark_open
+            ending_equity = last_mark_equity
+        val = dict(val, headline=cfg.valuation, last_mark_equity=last_mark_equity, last_mark_open_position_value=last_mark_open,
+                   last_marks=dict(mids), stale_mark_inflation=last_mark_equity - common_timestamp_equity)
         mtm = ending_equity  # legacy alias
-        self.equity_bridge = self._equity_bridge(open_pos_value, ending_equity)
+        self.equity_bridge = self._equity_bridge(open_pos_value, ending_equity, val)
+        self.valuation_doc = val
 
         # Task 5 — cash_pnl: direct ledger reading (fees already deducted in cash_delta).
         cash_pnl = self.inventory.total_cash
-
-        # Task 5 — common_timestamp_equity: true common-timestamp valuation.
-        # common_ts = min of each venue's last-update ts = the most recent moment when ALL venues
-        # had already published at least one mid.  For venues that updated AFTER common_ts we use
-        # their mid AT OR BEFORE common_ts (from _mid_history), not their latest mid.  This avoids
-        # using future price observations and gives a single consistent valuation timestamp.
-        # Falls back to ending_equity when any venue has no history or no entry at/before common_ts.
-        live_snapshots = {v: info for v, info in self._last_mid_ts.items() if info[0] > 0.0}
-        if len(live_snapshots) == len(cfg.venues):
-            common_ts = min(info[0] for info in live_snapshots.values())
-            common_staleness = max(info[0] for info in live_snapshots.values()) - common_ts
-            common_mids: dict[str, float] = {}
-            for v in cfg.venues:
-                entry = self._mid_at_or_before(v, common_ts)
-                if entry is not None:
-                    common_mids[v] = entry[1]
-            if len(common_mids) == len(cfg.venues):
-                if mark_venue is not None and mark_venue in common_mids:
-                    ref_mid_common = common_mids[mark_venue]
-                    common_mids = {v: ref_mid_common for v in cfg.venues}
-                common_open_pos = sum(
-                    self.inventory.base.get(v, 0.0) * common_mids.get(v, 0.0) for v in cfg.venues
-                )
-                common_timestamp_equity = self.inventory.total_cash + common_open_pos
-                # Reject the mark when the venues' last updates are too far apart — the
-                # common_ts mid from the lagging venue is too stale to trust.
-                max_staleness = cfg.arb.max_common_staleness_s
-                if common_staleness > max_staleness:
-                    common_timestamp_equity = ending_equity
-                    common_staleness = float("inf")   # "rejected: staleness exceeds threshold"
-            else:
-                # History too shallow to reach common_ts for at least one venue.
-                common_timestamp_equity = ending_equity
-                common_staleness = float("inf")   # signals "unavailable"
-        else:
-            # At least one venue had no price at all during the run.
-            common_timestamp_equity = ending_equity
-            common_staleness = float("inf")
 
         n = max(1, self.edge_samples)
         mean_exp = self.expected_gross_sum / n
@@ -1917,6 +2436,17 @@ class CrossVenueArbBacktester:
             cash_pnl=cash_pnl,
             common_timestamp_equity=common_timestamp_equity,
             common_mid_staleness_s=common_staleness,
+            last_mark_equity=last_mark_equity,
+            valuation=self.valuation_doc,
+            attribution_pnl=(self.gross_pnl - self.fees_paid - self.unhedged_loss - (self.settler.funding_paid if self.settler else 0.0)),
+            funding_report=self.settler.report() if self.settler else {},
+            alarms=list(self.alarms),
+            alarm_active=self.alarm,
+            release_identity=cfg.release_identity,
+            product_by_venue=dict(self.product_by_venue),
+            strategy_validation_label=("UNVALIDATED STRATEGY - mechanics only" if any(p == "spot" for p in self.product_by_venue.values()) else ""),
+            basis_component=((val.get("cross_venue_basis_at_common_ts") or 0.0) * -self.inventory.base.get(cfg.venues[0], 0.0)
+                             if cfg.product == "spot_perp" and val.get("available") else None),
             single_venue_diagnostic=dict(self._stale_event_counts),
             single_venue_intervals=self._single_venue_event_count,
             mean_expected_gross_edge_bps=mean_exp,
@@ -1948,6 +2478,7 @@ class CrossVenueArbBacktester:
             postonly_report=self._postonly_report(),
             margin_report=self.margin_model.report(self.inventory, self.books) if self.margin_model is not None else {},
             legging_report=self._legging_report(),
+            timing_report=self._timing_report(),
             equity_bridge=self.equity_bridge,
             signal_log=self.signal_log[:self.config.max_trade_log],
             order_events_path=order_events_path,

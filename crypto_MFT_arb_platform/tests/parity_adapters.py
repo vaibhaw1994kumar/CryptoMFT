@@ -77,7 +77,8 @@ def run_oms(events) -> Outcome:
         if e.kind == Kind.SUBMIT:
             continue
         if e.kind == Kind.CANCEL_REQUEST:
-            continue                                  # the OMS has no update for a cancel request and no state for it
+            oms.note_cancel_requested(order.order_id, int(e.ts * 1e9))     # D-05 resolved 2026-11-01
+            continue
         if e.kind == Kind.RECONCILE:
             raise NotRepresentable("reconcile is a venue query on the OMS side, not an update")
         if e.kind == Kind.FILL:
@@ -92,7 +93,7 @@ def run_oms(events) -> Outcome:
             sequence=n, cumulative_filled_quantity=cum, average_price=Decimal("60000")))
     mapping = {OrderState.CREATED: State.SUBMITTED, OrderState.ACKNOWLEDGED: State.RESTING, OrderState.PARTIAL: State.PARTIALLY_FILLED,
                OrderState.FILLED: State.FILLED, OrderState.REJECTED: State.REJECTED, OrderState.CANCELLED: State.CANCELLED,
-               OrderState.TIMED_OUT: State.UNKNOWN}
+               OrderState.TIMED_OUT: State.UNKNOWN, OrderState.CANCEL_REQUESTED: State.CANCEL_REQUESTED}
     rows = [x for x in ledger.events if x["event_type"] == "FILL"]
     return Outcome.of(mapping[order.state], order.filled_quantity / qty, [Decimal(str(x["fill_quantity"])) / qty for x in rows],
                       [x["ts_ns"] / 1e9 for x in rows])

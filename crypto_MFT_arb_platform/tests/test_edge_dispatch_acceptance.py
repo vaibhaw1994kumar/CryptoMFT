@@ -292,6 +292,22 @@ class ConditionalEdgeTests(unittest.TestCase):
         self.assertAlmostEqual(full.net_bps, adverse.gross_bps - 4.5 - 0.7 - 0.2 - 0.07 * 7.8, places=9)
         self.assertAlmostEqual(full.components["failure_cost_bps"], 0.546, places=12)
 
+    def test_bid_sign_flip_is_detected(self):
+        """Kills the 2026-11-01 surviving mutation gross = (q - expected): resting BELOW the hedge bid must be a positive edge and
+        resting ABOVE it a negative one, with the quote as the buy leg and the expected hedge price as the sell leg."""
+        hb = self._hedge_book()                                                               # hedge bid 100.00
+        below = edge.maker_taker_expected_edge_bps(99.90, "bid", hb, 1.0, 0.0, 0.0)
+        above = edge.maker_taker_expected_edge_bps(100.10, "bid", hb, 1.0, 0.0, 0.0)
+        self.assertAlmostEqual(below.gross_bps, 0.10 / 99.90 * 10_000.0, places=9)
+        self.assertAlmostEqual(above.gross_bps, -0.10 / 100.10 * 10_000.0, places=9)
+        self.assertGreater(below.gross_bps, 0.0)
+        self.assertLess(above.gross_bps, 0.0)
+        self.assertEqual((below.buy_vwap, below.sell_vwap), (99.90, 100.00))
+        self.assertLess(edge.maker_taker_expected_edge_bps(99.90, "bid", hb, 1.0, 0.0, 0.0, expected_hedge_move_bps=-5.0).gross_bps,
+                        below.gross_bps)                                                      # an adverse move can only lower it
+        ask_below = edge.maker_taker_expected_edge_bps(100.05, "ask", hb, 1.0, 0.0, 0.0)      # resting below the hedge ask 100.10
+        self.assertLess(ask_below.gross_bps, 0.0)
+
     def test_ask_side_sign(self):
         hb = self._hedge_book()
         q = 100.16                                                                            # our passive ask; the hedge BUYS at 100.10
@@ -315,5 +331,9 @@ class ConditionalEdgeTests(unittest.TestCase):
         self.assertAlmostEqual(sig.conditional_edge_bps, naive - 4.5 - 0.5, places=9)         # no move, no failure cost: same as the old net
         self.assertEqual(sig.edge_ref, "buy_price")
         h2, sig2 = mk(p_fail=0.07, loss_fail_bps=7.8, expected_hedge_move_bps_bid=-2.0)
-        self.assertIsNone(sig2)                                                               # 1.0 - 0.546 - ~2 bps < min_net_edge: refused
-        self.assertEqual(h2.bt.strategy.rejects["no_edge"], 2)
+        self.assertIsNotNone(sig2)                                                            # the quote moves instead: deeper bid, still fires
+        q2 = 100.0 * (1.0 - 2.0 / 10_000.0) * (1.0 - (6.0 + 0.07 * 7.8) / 10_000.0)            # expected hedge 99.98, less fees+edge+buffer+failure cost
+        self.assertAlmostEqual(sig2.legs[0].limit_price, q2, places=9)
+        self.assertLess(sig2.legs[0].limit_price, sig.legs[0].limit_price)                    # deeper than the naive quote
+        self.assertGreaterEqual(sig2.conditional_edge_bps, 1.0)                               # the gate is met on the conditional edge
+        self.assertGreater(sig2.naive_edge_bps, sig2.conditional_edge_bps + 2.0)              # and the naive edge overstates it by move + failure cost

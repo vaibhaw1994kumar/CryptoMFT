@@ -73,6 +73,8 @@ class OrderBook:
         "_bids", "_asks", "_bid_heap", "_ask_heap",
         "_bid_sorted", "_ask_sorted", "_max_levels",
         "_bid_conf", "_ask_conf",
+        # WP4 book state
+        "state", "seq_last", "gaps", "seq_duplicates", "captured_depth_bid", "captured_depth_ask", "recovering_since",
     )
 
     def __init__(
@@ -104,6 +106,15 @@ class OrderBook:
         self.levels_trimmed = 0
         self.trade_repairs = 0
         self.trades_applied = 0
+        # WP4 explicit state: "invalid" until the first snapshot, "valid" after it, "recovering" after a sequence gap until the
+        # next snapshot. Staleness is a function of age (status()). `ready` keeps its legacy meaning (both sides non-empty).
+        self.state: str = "invalid"
+        self.seq_last: int | None = None
+        self.gaps = 0
+        self.seq_duplicates = 0
+        self.captured_depth_bid = 0
+        self.captured_depth_ask = 0
+        self.recovering_since: float | None = None
 
     # ── Internal index maintenance ───────────────────────────────────────────
 
@@ -221,6 +232,37 @@ class OrderBook:
     def is_stale(self, now: float, max_age_s: float) -> bool:
         return not self.ready or self.age_s(now) > max_age_s
 
+    def status(self, now: float, max_age_s: float) -> str:
+        """WP4: valid | stale | invalid | recovering. Pricing and fills may use the book only when valid."""
+        if self.state in ("invalid", "recovering"):
+            return self.state
+        if not self.ready:
+            return "invalid"
+        if self.age_s(now) > max_age_s:
+            return "stale"
+        return "valid"
+
+    def apply_sequence(self, first_id: int | None, last_id: int, prev_last_id: int | None = None, ts: float = 0.0) -> bool:
+        """WP4 continuity check for feeds that carry update ids (Binance U/u/pu, Bybit seq). Returns False and enters
+        "recovering" on a gap (the next snapshot resyncs); a repeated/older id is counted and ignored. Feeds without ids never
+        call this, so Jan-2022 Tardis-shaped data is unaffected."""
+        if self.seq_last is None:
+            self.seq_last = last_id
+            return True
+        if last_id <= self.seq_last:
+            self.seq_duplicates += 1
+            return True
+        gap = (prev_last_id is not None and prev_last_id != self.seq_last) or \
+              (prev_last_id is None and first_id is not None and first_id > self.seq_last + 1)
+        self.seq_last = last_id
+        if gap:
+            self.gaps += 1
+            if self.state != "recovering":
+                self.recovering_since = ts
+            self.state = "recovering"
+            return False
+        return True
+
     def touch_age_s(self, side: str, now: float) -> float:
         """Seconds since this side's *current* best level was last confirmed
         to exist by a snapshot, a delta at that price, or a trade at that price."""
@@ -269,6 +311,10 @@ class OrderBook:
         self.last_update_ts = ts
         self.last_snapshot_ts = ts
         self.snapshots += 1
+        self.state = "valid"
+        self.recovering_since = None
+        self.captured_depth_bid = len(self._bids)
+        self.captured_depth_ask = len(self._asks)
         if self.is_crossed():
             self.crossed_events += 1
             self._uncross(None)
@@ -544,6 +590,12 @@ class OrderBook:
             "levels_trimmed": float(self.levels_trimmed),
             "bid_levels": float(len(self._bids)),
             "ask_levels": float(len(self._asks)),
+            # WP4 state
+            "state": self.state,
+            "sequence_gaps": float(self.gaps),
+            "sequence_duplicates": float(self.seq_duplicates),
+            "captured_depth_bid": float(self.captured_depth_bid),
+            "captured_depth_ask": float(self.captured_depth_ask),
         }
 
     def __repr__(self) -> str:

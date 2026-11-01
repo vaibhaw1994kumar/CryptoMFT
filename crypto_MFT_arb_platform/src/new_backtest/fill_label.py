@@ -99,7 +99,8 @@ def extract_labels(
     List of label records, one per (event, horizon) pair.  Records where the
     order was cancelled before the horizon (``is_censored=True``) are included
     so that ``compute_ipcw_weights`` can estimate the censoring distribution G(t)
-    and produce unbiased per-record weights for logistic-regression training.
+    and produce per-record weights for logistic-regression training that are CONSISTENT under the censoring assumption stated
+    in ``compute_ipcw_weights`` (not "unbiased": cancels in this data are decisions taken on the same book the fill depends on).
     """
     records: list[FillLabelRecord] = []
     path = Path(log_path)
@@ -231,8 +232,13 @@ def compute_ipcw_weights(
 ) -> list[float]:
     """IPCW weights for logistic regression at fixed horizon *horizon_s*.
 
-    Weights correct for the bias introduced when censored observations (orders
-    cancelled before the horizon without filling) are excluded from training.
+    Weights correct for the selection introduced when censored observations (orders cancelled before the horizon without
+    filling) are excluded from training. STATISTICAL ASSUMPTION (WP8): the estimator is consistent only if censoring (the
+    cancel) is independent of the fill time given the covariates — non-informative censoring. A market maker cancels when
+    the book moves against the order, i.e. exactly when a fill became unlikely, so censoring is plausibly INFORMATIVE here and
+    the weighted fill probabilities are then biased upward. Run ``informative_censoring_check`` and report its result next to
+    any fitted model. Related wording: the restricted mean survival time reported elsewhere is E[min(T, H)] (time to fill
+    truncated at the horizon), and an adverse-selection probability is CONDITIONAL on a fill unless stated otherwise.
 
     Returns a weight per record in the *same order* as the input list:
       - is_censored=True  → 0.0  (excluded; only used to build G_hat)
@@ -441,3 +447,21 @@ class WalkForwardCalibrator:
                 fold_id += 1
 
             cal_start += step_s
+
+
+def informative_censoring_check(records: "list[FillLabelRecord]", horizon_s: int) -> dict:
+    """WP8: is censoring informative? Compares the cancel (censoring) rate of orders the market moved THROUGH within the horizon
+    (price_moved_through) with the rate of orders it did not. Under non-informative censoring the two rates agree; a large gap
+    means cancels track adverse moves and the IPCW weights do not remove the selection. Returns the two rates, the gap and a
+    flag (gap > 0.10 absolute, with at least 30 records on each side)."""
+    h = [r for r in records if r.horizon_s == horizon_s]
+    moved = [r for r in h if r.price_moved_through]
+    stayed = [r for r in h if not r.price_moved_through]
+    def rate(xs):
+        return (sum(1 for r in xs if r.is_censored) / len(xs)) if xs else None
+    rm, rs = rate(moved), rate(stayed)
+    gap = (rm - rs) if (rm is not None and rs is not None) else None
+    return {"horizon_s": horizon_s, "n": len(h), "n_moved_through": len(moved), "n_not_moved": len(stayed),
+            "censor_rate_moved_through": rm, "censor_rate_not_moved": rs, "gap": gap,
+            "informative_flag": bool(gap is not None and abs(gap) > 0.10 and len(moved) >= 30 and len(stayed) >= 30),
+            "assumption": "IPCW is consistent only under non-informative censoring (cancel independent of fill time given covariates)"}

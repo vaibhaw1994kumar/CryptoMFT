@@ -86,6 +86,7 @@ def build(name: str, *, seed: int, calibration_path: str | Path) -> dict:
     p = s["reject_prob_x"] * c["reject_prob_upper_95"]
     faults = HedgeFaultConfig(
         seed=seed, label=name, **POLICY, reject_prob=p, reject_prob_by_venue=((BYBIT, p), (BINANCE, p)), latency_scale=s["latency_x"],
+        venue_reject_applies_to_hedges=False,       # WP6: hedges carry reject_prob once; the by-venue rate is for passive orders
         fast_move_reject_prob=s["fast_move_reject_prob"], fast_move_bps=s["fast_move_bps"], fast_move_window_s=s["fast_move_window_s"],
         ack_unknown_prob=s["ack_unknown_prob"], unknown_resolve_s=s["unknown_resolve_s"],
         disconnects=tuple(DisconnectSpec(v, rate_per_day=s["disconnect_rate_per_day"], guaranteed_per_day=s["disconnect_guaranteed_per_day"],

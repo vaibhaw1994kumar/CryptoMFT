@@ -63,8 +63,21 @@ class FundingSettler:
         *,
         start_date: str | None = None,
         end_date: str | None = None,
+        contract_multiplier: float = 1.0,
+        settlement_currency: str = "USDT",
     ) -> None:
+        # WP5: linear perps only — payment = position x multiplier x mark x rate in the settlement currency (the quote). An
+        # inverse / coin-margined contract would settle in base and is refused rather than silently mis-booked.
+        if not (contract_multiplier > 0.0):
+            raise ValueError("contract_multiplier must be > 0")
+        if settlement_currency.upper() not in ("USDT", "USDC", "USD", "QUOTE"):
+            raise ValueError(f"settlement_currency {settlement_currency!r}: only quote-settled (linear) contracts are modelled")
+        self.contract_multiplier = contract_multiplier
+        self.settlement_currency = settlement_currency
         self.funding_paid: float = 0.0
+        # Every settlement as applied (also when the position is zero), for the funding report: venue, time, position, mark and
+        # where it came from ("record" = mark price in the funding file, "book_mid" = fallback, "none" = no price), rate, payment.
+        self.settlements: list[dict] = []
 
         venue_lower = {v.lower(): v for v in venues}
         self._ticks: dict[str, list[_Tick]] = {v: [] for v in venues}
@@ -125,6 +138,24 @@ class FundingSettler:
         """Total number of settlement records loaded across all venues."""
         return self._loaded
 
+    def next_ts(self) -> float | None:
+        """Earliest unsettled settlement time across venues, or None. For the timer wheel."""
+        nxt = None
+        for venue, ticks in self._ticks.items():
+            ptr = self._ptrs[venue]
+            if ptr < len(ticks) and (nxt is None or ticks[ptr].ts_s < nxt):
+                nxt = ticks[ptr].ts_s
+        return nxt
+
+    def report(self) -> dict:
+        by_venue: dict[str, float] = {}
+        for r in self.settlements:
+            by_venue[r["venue"]] = by_venue.get(r["venue"], 0.0) + r["payment"]
+        return {"funding_paid": self.funding_paid, "by_venue": by_venue, "loaded_records": self._loaded,
+                "contract_multiplier": self.contract_multiplier, "settlement_currency": self.settlement_currency,
+                "mark_sources": {k: sum(1 for r in self.settlements if r["mark_source"] == k) for k in ("record", "book_mid", "none")},
+                "settlements": list(self.settlements)}
+
     def settle(
         self,
         now_s: float,
@@ -144,14 +175,18 @@ class FundingSettler:
             while ptr < len(ticks) and ticks[ptr].ts_s <= now_s:
                 tick = ticks[ptr]
                 position = inventory.base.get(venue, 0.0)
-                if position != 0.0:
-                    mark = tick.mark_price
-                    if mark is None:
-                        book = books.get(venue)
-                        mark = book.mid if (book is not None and book.mid > 0) else 0.0
-                    if mark > 0.0:
-                        payment = position * mark * tick.rate
-                        inventory.apply(venue, 0.0, -payment)
-                        self.funding_paid += payment
+                mark = tick.mark_price
+                source = "record"
+                if mark is None:
+                    book = books.get(venue)
+                    mark = book.mid if (book is not None and book.mid > 0) else 0.0
+                    source = "book_mid" if mark > 0.0 else "none"
+                payment = 0.0
+                if position != 0.0 and mark > 0.0:
+                    payment = position * self.contract_multiplier * mark * tick.rate
+                    inventory.apply(venue, 0.0, -payment)
+                    self.funding_paid += payment
+                self.settlements.append({"venue": venue, "ts": tick.ts_s, "position_base": position, "mark": mark,
+                                         "mark_source": source, "rate": tick.rate, "payment": payment})
                 ptr += 1
             self._ptrs[venue] = ptr

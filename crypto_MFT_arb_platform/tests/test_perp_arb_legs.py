@@ -108,7 +108,22 @@ class PassiveAskTests(unittest.TestCase):
 
     def test_invalid_passive_side_is_refused(self):
         with self.assertRaises(ValueError):
-            Harness(maker_passive_side="ask")
+            Harness(maker_passive_side="down")
+
+    def test_ask_only_rests_a_sell_and_never_a_bid(self):
+        h = Harness(maker_passive_side="ask")
+        h.book(1.0, BYBIT, bids=((99.90, 5.0), (99.0, 5.0)), asks=((100.15, 5.0), (101.0, 5.0)))
+        h.book(1.0, BINANCE, bids=((100.00, 5.0), (99.0, 5.0)), asks=((100.10, 5.0), (101.0, 5.0)))
+        sig = h.bt.strategy.evaluate(h.bt.books, h.bt.states, h.bt.inventory, 1.0)
+        if sig is not None:
+            self.assertEqual([leg.side for leg in sig.legs], ["sell"])
+            self.assertEqual(sig.hedge_side, "buy")
+        both = Harness(maker_passive_side="both")
+        both.book(1.0, BYBIT, bids=((99.90, 5.0), (99.0, 5.0)), asks=((100.15, 5.0), (101.0, 5.0)))
+        both.book(1.0, BINANCE, bids=((100.00, 5.0), (99.0, 5.0)), asks=((100.10, 5.0), (101.0, 5.0)))
+        sig_both = both.bt.strategy.evaluate(both.bt.books, both.bt.states, both.bt.inventory, 1.0)
+        self.assertIsNotNone(sig_both)                                        # these books carry a bid-side edge; ask-only must not take it as a bid
+        self.assertEqual([leg.side for leg in sig_both.legs], ["buy"])
 
     def test_passive_ask_fills_on_a_buy_trade_and_the_hedge_buys_on_the_other_venue(self):
         h = Harness(maker_passive_side="both")

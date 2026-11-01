@@ -160,6 +160,9 @@ class MakerOrder:
 
     observed_level_size: float = 0.0
     level_was_absent: bool = False     # True when _level_size() returned 0.0 at placement
+    # WP4: the level was absent AND outside the captured depth, so the queue ahead is UNKNOWN and was drawn from
+    # MakerConfig.unknown_queue_* (a flag on the order and in the diagnostics), not observed.
+    queue_unknown: bool = False
     filled_qty: float = 0.0
     first_fill_ts: float | None = None
     first_fill_is_synthetic: bool = False  # True when the very first fill came from synthetic flow
@@ -225,6 +228,20 @@ class MakerConfig:
     # is max(level_size * queue_stress_multiplier, min_queue_ahead).  It is a
     # floor for absent levels only, not a blanket override of the multiplier.
     min_queue_ahead: float = 0.0
+    # WP4 — what an ABSENT level means. "legacy" (default): min_queue_ahead is the floor on every absent level (above).
+    # "depth_aware": an absent level INSIDE the captured depth (between the touch and the deepest captured level, or inside the
+    # spread) is a genuinely empty level -> queue 0; an absent level OUTSIDE the captured depth is UNKNOWN -> the queue is set
+    # from unknown_queue_dist ("floor": unknown_queue_floor; "lognormal": a draw with median unknown_queue_median and
+    # log-std unknown_queue_sigma, seeded) and the order is flagged queue_unknown.
+    unknown_queue_model: str = "legacy"
+    unknown_queue_dist: str = "floor"
+    unknown_queue_floor: float = 0.0
+    unknown_queue_median: float = 0.0
+    unknown_queue_sigma: float = 0.0
+    unknown_queue_seed: int = 7
+    # WP4 — level-creator rule (opt-in). An order that CREATED its level (level_was_absent) has nobody ahead of it, so a depth
+    # decrease at that price cannot be "the queue ahead leaving": it may only fill by public trades. False (default): legacy.
+    level_creator_trade_only: bool = False
     # One public trade can fill our resting orders only once in total: the volume is shared in
     # price-then-time priority instead of being handed in full to every order (False = legacy).
     share_trade_volume: bool = True
@@ -291,6 +308,8 @@ class MakerConfig:
     queue_empty_frac: float = 0.05
 
     CANCEL_MODELS = ("all_ahead", "proportional", "power")
+    UNKNOWN_QUEUE_MODELS = ("legacy", "depth_aware")
+    UNKNOWN_QUEUE_DISTS = ("floor", "lognormal")
     FILL_EVIDENCE_MODES = ("off", "trade_confirm", "fractional", "trade_confirm+fractional", "confirm_delta_snapshot", "confirm_delta")
     QUEUE_EMPTY_MODES = ("absolute", "lot", "frac_of_order")
 
@@ -305,6 +324,12 @@ class MakerConfig:
             raise ValueError(f"evidence_window_ms must be >= 0, got {self.evidence_window_ms!r}")
         if not (0.0 < self.evidence_fill_fraction <= 1.0):
             raise ValueError(f"evidence_fill_fraction must be in (0, 1], got {self.evidence_fill_fraction!r}")
+        if self.unknown_queue_model not in self.UNKNOWN_QUEUE_MODELS:
+            raise ValueError(f"unknown_queue_model must be one of {self.UNKNOWN_QUEUE_MODELS}, got {self.unknown_queue_model!r}")
+        if self.unknown_queue_dist not in self.UNKNOWN_QUEUE_DISTS:
+            raise ValueError(f"unknown_queue_dist must be one of {self.UNKNOWN_QUEUE_DISTS}, got {self.unknown_queue_dist!r}")
+        if self.unknown_queue_floor < 0.0 or self.unknown_queue_median < 0.0 or self.unknown_queue_sigma < 0.0:
+            raise ValueError("unknown_queue_floor / median / sigma must be >= 0")
         if self.queue_empty_threshold not in self.QUEUE_EMPTY_MODES:
             raise ValueError(f"queue_empty_threshold must be one of {self.QUEUE_EMPTY_MODES}, got {self.queue_empty_threshold!r}")
         if self.queue_empty_threshold == "lot" and not (self.queue_empty_lot > 0.0):
@@ -339,6 +364,7 @@ class MakerExecutor:
     ) -> None:
         self.fill_model = fill_model
         self.config = config or MakerConfig()
+        self._unknown_rng = None
         self._ids = itertools.count(1)
         self.orders: dict[int, MakerOrder] = {}
         self.orders_placed = 0
@@ -415,19 +441,29 @@ class MakerExecutor:
 
         level_was_absent = level_size == 0.0
         initial_q = level_size * max(0.0, self.config.queue_stress_multiplier)
-        # Apply min_queue_ahead as a floor only when the price level is absent
-        # from the book (level_size == 0).  On a genuine empty level, queue = 0
-        # is correct for FIFO.  When the level is absent due to data granularity
-        # or a stale book, min_queue_ahead provides a conservative proxy depth.
-        if level_was_absent and self.config.min_queue_ahead > 0.0:
-            initial_q = self.config.min_queue_ahead
+        queue_unknown = False
+        if level_was_absent:
+            if self.config.unknown_queue_model == "legacy":
+                # Apply min_queue_ahead as a floor only when the price level is absent
+                # from the book (level_size == 0).  On a genuine empty level, queue = 0
+                # is correct for FIFO.  When the level is absent due to data granularity
+                # or a stale book, min_queue_ahead provides a conservative proxy depth.
+                if self.config.min_queue_ahead > 0.0:
+                    initial_q = self.config.min_queue_ahead
+            elif self._inside_captured_depth(book, side, price):
+                self.diag["absent_level_inside_depth"] = self.diag.get("absent_level_inside_depth", 0) + 1          # legitimately empty: queue 0
+            else:
+                queue_unknown = True
+                initial_q = self._unknown_queue_draw()
+                self.diag["absent_level_outside_depth_unknown"] = self.diag.get("absent_level_outside_depth_unknown", 0) + 1
+                self.diag["unknown_queue_assigned_total"] = self.diag.get("unknown_queue_assigned_total", 0) + initial_q
         order = MakerOrder(
             order_id=next(self._ids), venue=venue, pair=pair, symbol=symbol,
             side=side, price=price, size=size, remaining=size,
             queue_ahead=initial_q, initial_queue_ahead=initial_q,
             placed_ts=now, active_ts=active_ts, signal_id=signal_id,
             arrival_ts=active_ts if arrival_ts is None else arrival_ts,
-            level_was_absent=level_was_absent,
+            level_was_absent=level_was_absent, queue_unknown=queue_unknown,
             relative_to_touch_ticks=rel_ticks,
             local_depth=state.top_depth,
             local_depth_baseline=state.top_depth_baseline,
@@ -443,6 +479,25 @@ class MakerExecutor:
         self.orders_placed += 1
         self._settle_queue(order)
         return order
+
+    @staticmethod
+    def _inside_captured_depth(book: OrderBook, side: Side, price: float) -> bool:
+        """An absent price is covered by the capture when it lies at or above the deepest captured bid (for a bid) / at or
+        below the deepest captured ask (for an ask): anything the capture would have shown there is genuinely not there."""
+        lv = book.levels("bid" if side == Side.BID else "ask", 10_000)
+        if not lv:
+            return False
+        deepest = lv[-1][0]
+        return price >= deepest - 1e-12 if side == Side.BID else price <= deepest + 1e-12
+
+    def _unknown_queue_draw(self) -> float:
+        cfg = self.config
+        if cfg.unknown_queue_dist == "floor" or cfg.unknown_queue_median <= 0.0:
+            return cfg.unknown_queue_floor
+        if self._unknown_rng is None:
+            import random
+            self._unknown_rng = random.Random(cfg.unknown_queue_seed)
+        return max(cfg.unknown_queue_floor, cfg.unknown_queue_median * math.exp(cfg.unknown_queue_sigma * self._unknown_rng.gauss(0.0, 1.0)))
 
     def cancel(self, order_id: int, now: float) -> MakerOrder | None:
         order = self.orders.pop(order_id, None)
@@ -633,6 +688,9 @@ class MakerExecutor:
             if shrink > 1e-12:
                 queue_before = order.queue_ahead
                 can_fill = not self._pre_arrival(order, event_ts)
+                if can_fill and cfg.level_creator_trade_only and order.level_was_absent:
+                    can_fill = False                                  # WP4: the level's creator fills by trades only
+                    self.diag["level_creator_depth_fills_blocked"] = self.diag.get("level_creator_depth_fills_blocked", 0) + 1
                 if proportional:
                     f = self._consume_proportional(order, shrink, order.level_now, now, cfg.delta_fill_share, "delta", fee_bps, can_fill,
                                                    power_n=power_n, cause="delta_vanish" if new_size <= 1e-12 else "delta_share",
@@ -681,6 +739,9 @@ class MakerExecutor:
                 if shrink > 1e-12:
                     queue_before = order.queue_ahead
                     can_fill = not self._pre_arrival(order, event_ts)
+                    if can_fill and cfg.level_creator_trade_only and order.level_was_absent:
+                        can_fill = False
+                        self.diag["level_creator_depth_fills_blocked"] = self.diag.get("level_creator_depth_fills_blocked", 0) + 1
                     f = self._consume(order, shrink, now, cfg.snapshot_fill_share, "snapshot", fee_bps, can_fill=can_fill, cause="snapshot",
                                       credit_ts=self._credit_time(now, event_ts))
                     self.diag["snapshot_queue_drained"] += queue_before - order.queue_ahead

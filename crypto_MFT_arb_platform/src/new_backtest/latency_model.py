@@ -359,9 +359,21 @@ class PendingOrderQueue:
                 continue
             yield order
 
+    def peek_release_ts(self) -> float | None:
+        """Earliest release time still in flight (cancelled entries skipped), or None. For the timer wheel."""
+        while self._heap and self._heap[0][2].order_id in self._cancelled:
+            _, _, order = heapq.heappop(self._heap)
+            self._live -= 1
+            self._cancelled.discard(order.order_id)
+        return self._heap[0][0] if self._heap else None
+
     def in_flight(self) -> Iterator[InFlightOrder]:
         """Orders sent and not yet landed or cancelled (no particular order)."""
         return (o for _, _, o in self._heap if o.order_id not in self._cancelled)
+
+    def in_flight_count(self) -> int:
+        """Number of orders still in flight (in_flight() is a generator; the breaker needs the count)."""
+        return sum(1 for _ in self.in_flight())
 
     def maker_legs_in_flight(self) -> int:
         return sum(1 for _, _, o in self._heap if not o.is_taker and o.order_id not in self._cancelled)
