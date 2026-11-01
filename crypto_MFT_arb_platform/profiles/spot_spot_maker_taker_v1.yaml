@@ -1,0 +1,64 @@
+# spot_spot_maker_taker_v1 — passive leg on one SPOT venue, taker hedge on the other spot venue. Mechanics only: spot never pays
+# funding, a spot sell needs base held on that venue (REJECT unless borrow is enabled), fee presets must be spot presets.
+# Results are labelled "UNVALIDATED STRATEGY - mechanics only".
+name: spot_spot_maker_taker_v1
+description: spot-spot maker/taker arb; mechanics only, unvalidated strategy
+product: spot
+product_fee_consistency: true
+latency_preset: colocated_both
+fee_presets:
+  bybit: bybit_spot_mm
+  binance: binance_spot_vip0
+valuation: common_timestamp
+equity_bridge: raise
+enforce_book_state: true
+trade_dedupe: set
+delta_uses_book_size: true
+cancel_time_basis: exchange
+postonly_reject_model: "on"
+spot_requires_inventory: true            # MANDATORY for spot: a sell needs base on that venue
+borrow_enabled: false                    # opt-in: when true, spot sells may borrow (crypto_stat_arb.borrow policy in the live engine)
+arb:
+  profile: perp_perp_maker_taker_v1      # the v1 edge expressions; product rules come from the venue product, not from the edge
+  mode: maker_taker
+  dispatch_mode: fill_triggered
+  maker_passive_side: bid
+  min_net_edge_bps: 1.0
+  maker_max_age_s: 15.0
+  count_pending_exposure: true
+  count_unknown_exposure: true
+  net_ceiling_multiple: 1.0
+maker:
+  min_queue_ahead: 25.0
+  unknown_queue_model: depth_aware
+  unknown_queue_floor: 25.0
+  cancel_model: proportional
+  vanish_clears_queue: true
+  fill_evidence: confirm_delta
+  evidence_window_ms: 20.0
+  share_trade_volume: true
+  dedupe_trade_depth: true
+  exchange_time_eligibility: true
+timing:
+  from_latency_preset: colocated_both
+  equal_time_policy: market_first
+  dead_feed_s: 5.0
+  truth_books: true
+breaker:                                 # MANDATORY — DECISION_PENDING_CALIBRATION: starting values given by the owner 2026-11-01
+  consecutive_failures: 3                # 3 consecutive hedge FAILURES (one per hedge chain: a rejected hedge and its retries count once)
+  failure_rate_window_n: 20              # failures in the last 20 hedge chains ...
+  failure_rate_thresh: 0.05              # ... above 5% (i.e. 2 or more of 20; needs a full window of 20)
+  trip_on_failed_unwind: true            # any unwind whose attempts are exhausted
+  net_exposure_s: 5.0                    # |net| != 0 continuously for more than 5 s
+  unknown_order_s: 2.0                   # an order UNKNOWN (ack timeout expired, unresolved) for more than 2 s
+  trip_on_gateway_down: true             # a venue's gateway silent for heartbeat_timeout_s
+  heartbeat_timeout_s: 10.0              # ASSUMED (not specified by the owner): the engine default
+  tripped_unwind_retries: 10             # unwind sends still allowed while tripped (engine default)
+# Reset is MANUAL ONLY: nothing in the simulator or the strategy clears a tripped breaker (bt.reset_breaker() is an operator action).
+hedge_faults:
+  response: retry_unwind
+  max_retries: 2
+  unwind_band_bps: 15.0
+  unwind_max_attempts: 3
+  retry_backoff_s: 0.25
+  entry_guard: true

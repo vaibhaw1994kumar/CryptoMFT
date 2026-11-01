@@ -1,0 +1,61 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://papertowninsights.org/schemas/restart-resilience-1.0.0.json",
+  "title": "Paper pipeline restart resilience state",
+  "type": "object",
+  "required": ["schema_version", "session", "connectors", "checkpoints"],
+  "properties": {
+    "schema_version": {"const": "1.0.0"},
+    "session": {
+      "type": "object",
+      "required": [
+        "session_id", "owner_id", "fencing_token", "heartbeat_ts_ns",
+        "lease_expires_ts_ns", "state", "reconciliation_required",
+        "updated_ts_ns"
+      ],
+      "properties": {
+        "session_id": {"type": "string", "minLength": 1},
+        "owner_id": {"type": "string", "minLength": 1},
+        "fencing_token": {"type": "integer", "minimum": 1},
+        "heartbeat_ts_ns": {"type": "integer", "minimum": 0},
+        "lease_expires_ts_ns": {"type": "integer", "minimum": 0},
+        "state": {"enum": ["RECONNECTING", "RECONCILING", "READY", "SUSPENDED"]},
+        "reconciliation_required": {"type": "integer", "enum": [0, 1]},
+        "last_reconciliation_id": {"type": ["string", "null"]},
+        "updated_ts_ns": {"type": "integer", "minimum": 0}
+      },
+      "additionalProperties": false
+    },
+    "connectors": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["venue", "state", "reconnect_attempts", "updated_ts_ns"],
+        "properties": {
+          "venue": {"type": "string", "minLength": 1},
+          "state": {"enum": ["DISCONNECTED", "CONNECTED"]},
+          "reconnect_attempts": {"type": "integer", "minimum": 0},
+          "next_reconnect_ts_ns": {"type": ["integer", "null"], "minimum": 0},
+          "last_error": {"type": ["string", "null"]},
+          "updated_ts_ns": {"type": "integer", "minimum": 0}
+        },
+        "additionalProperties": false
+      }
+    },
+    "checkpoints": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["stream_id", "sequence", "raw_ref", "updated_ts_ns"],
+        "properties": {
+          "stream_id": {"type": "string", "minLength": 1},
+          "sequence": {"type": "integer", "minimum": 0},
+          "raw_ref": {"type": "string", "minLength": 1},
+          "updated_ts_ns": {"type": "integer", "minimum": 0}
+        },
+        "additionalProperties": false
+      }
+    }
+  },
+  "additionalProperties": false
+}

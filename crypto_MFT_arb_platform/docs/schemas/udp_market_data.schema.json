@@ -1,0 +1,21 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://papertowninsights.org/schemas/udp-market-data-1.0.0.json",
+  "title": "UDP market-data envelope",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "message_type",
+    "publisher_sequence",
+    "published_ts_ns",
+    "payload"
+  ],
+  "properties": {
+    "schema_version": {"const": "1.0.0"},
+    "message_type": {"enum": ["ORDERBOOK", "OHLC_1M", "TRADE", "LTP_OHLC_1M"]},
+    "publisher_sequence": {"type": "integer", "minimum": 1},
+    "published_ts_ns": {"type": "integer", "minimum": 0},
+    "payload": {"type": "object"}
+  }
+}

@@ -1,0 +1,126 @@
+{
+ "schema": "spot_book_identity_check/v1",
+ "window_s": 0.25,
+ "days": [
+  "2026-04-19",
+  "2026-04-25"
+ ],
+ "overall": {
+  "executions": 13247,
+  "matched": 6930,
+  "control_matched": 6
+ },
+ "by_symbol": {
+  "AAVEUSDT": {
+   "executions": 437,
+   "matched": 258,
+   "control_matched": 0
+  },
+  "ADAUSDT": {
+   "executions": 388,
+   "matched": 204,
+   "control_matched": 0
+  },
+  "APTUSDT": {
+   "executions": 416,
+   "matched": 212,
+   "control_matched": 0
+  },
+  "ARBUSDT": {
+   "executions": 323,
+   "matched": 136,
+   "control_matched": 0
+  },
+  "ATOMUSDT": {
+   "executions": 349,
+   "matched": 175,
+   "control_matched": 0
+  },
+  "AVAXUSDT": {
+   "executions": 370,
+   "matched": 189,
+   "control_matched": 0
+  },
+  "BNBUSDT": {
+   "executions": 565,
+   "matched": 370,
+   "control_matched": 0
+  },
+  "BTCUSDT": {
+   "executions": 214,
+   "matched": 100,
+   "control_matched": 0
+  },
+  "DOGEUSDT": {
+   "executions": 359,
+   "matched": 266,
+   "control_matched": 0
+  },
+  "DOTUSDT": {
+   "executions": 197,
+   "matched": 98,
+   "control_matched": 0
+  },
+  "ENAUSDT": {
+   "executions": 524,
+   "matched": 343,
+   "control_matched": 0
+  },
+  "ETHUSDT": {
+   "executions": 326,
+   "matched": 136,
+   "control_matched": 0
+  },
+  "FILUSDT": {
+   "executions": 646,
+   "matched": 260,
+   "control_matched": 0
+  },
+  "INJUSDT": {
+   "executions": 390,
+   "matched": 224,
+   "control_matched": 0
+  },
+  "LTCUSDT": {
+   "executions": 1381,
+   "matched": 668,
+   "control_matched": 0
+  },
+  "MNTUSDT": {
+   "executions": 419,
+   "matched": 248,
+   "control_matched": 2
+  },
+  "NEARUSDT": {
+   "executions": 315,
+   "matched": 199,
+   "control_matched": 2
+  },
+  "OPUSDT": {
+   "executions": 723,
+   "matched": 317,
+   "control_matched": 0
+  },
+  "SOLUSDT": {
+   "executions": 1783,
+   "matched": 911,
+   "control_matched": 2
+  },
+  "SUIUSDT": {
+   "executions": 1922,
+   "matched": 975,
+   "control_matched": 0
+  },
+  "UNIUSDT": {
+   "executions": 307,
+   "matched": 216,
+   "control_matched": 0
+  },
+  "XRPUSDT": {
+   "executions": 893,
+   "matched": 425,
+   "control_matched": 0
+  }
+ },
+ "reading": "matched >> control means the recorded market is the one the orders traded in; unmatched executions fall where the collector has gaps (see postonly_false_reject_check.json, stale_book)"
+}

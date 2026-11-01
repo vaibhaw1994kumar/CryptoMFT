@@ -1,0 +1,9 @@
+{
+  "schema_version": "1.0.0",
+  "strategy_id": "cross_venue_btc_v1",
+  "version": "1.0.0",
+  "quantity": "0.010",
+  "entry_bps": "8",
+  "min_net_edge_bps": "2",
+  "max_book_age_ms": 1000
+}

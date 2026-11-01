@@ -1,0 +1,10 @@
+{
+  "schema_version": "1.0.0",
+  "feature_set": "cross_venue_top_of_book",
+  "version": "1.0.0",
+  "features": [
+    {"name": "mid", "formula": "(best_bid + best_ask) / 2", "clock": "receive_ts_ns"},
+    {"name": "spread_bps", "formula": "(best_ask - best_bid) / mid * 10000", "clock": "receive_ts_ns"},
+    {"name": "expected_net_edge_bps", "formula": "gross_edge_bps - buy_taker_fee_bps - sell_taker_fee_bps", "clock": "receive_ts_ns"}
+  ]
+}

@@ -1,0 +1,26 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://papertowninsights.org/schemas/residual-policy-1.0.0.json",
+  "title": "OMS residual and unwind policy",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "max_residual_base", "max_residual_age_ms", "hedge_venue_priority",
+    "unwind_urgency", "unwind_price_slippage_bps",
+    "allow_risk_reducing_under_stop", "max_unwind_attempts",
+    "max_one_sided_notional"
+  ],
+  "properties": {
+    "max_residual_base": {"type": "string", "pattern": "^[0-9]+(?:\\.[0-9]+)?$"},
+    "max_residual_age_ms": {"type": "integer", "minimum": 0},
+    "hedge_venue_priority": {
+      "type": "array", "uniqueItems": true,
+      "items": {"type": "string", "minLength": 1}
+    },
+    "unwind_urgency": {"enum": ["PASSIVE", "NORMAL", "AGGRESSIVE"]},
+    "unwind_price_slippage_bps": {"type": "string", "pattern": "^[0-9]+(?:\\.[0-9]+)?$"},
+    "allow_risk_reducing_under_stop": {"type": "boolean"},
+    "max_unwind_attempts": {"type": "integer", "minimum": 0}
+    ,"max_one_sided_notional": {"type": "string", "pattern": "^[0-9]+(?:\\.[0-9]+)?$"}
+  }
+}

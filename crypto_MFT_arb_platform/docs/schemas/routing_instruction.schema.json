@@ -1,0 +1,41 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://papertowninsights.org/schemas/routing-instruction-1.0.0.json",
+  "title": "Strategy routing instruction",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "strategy_id", "eligible_venues", "instrument_id", "side", "order_type",
+    "price", "quantity", "route_priority", "maker_taker_intent",
+    "time_in_force", "post_only", "reduce_only", "parent_opportunity_id",
+    "parent_order_id", "order_id", "created_ts_ns", "route_override",
+    "idempotency_key", "risk_reducing"
+  ],
+  "properties": {
+    "strategy_id": {"type": "string", "minLength": 1},
+    "eligible_venues": {
+      "type": "array", "minItems": 1, "uniqueItems": true,
+      "items": {"type": "string", "minLength": 1}
+    },
+    "instrument_id": {"type": "string", "minLength": 1},
+    "side": {"enum": ["BUY", "SELL"]},
+    "order_type": {"enum": ["LIMIT", "MARKET"]},
+    "price": {"type": ["string", "null"]},
+    "quantity": {"type": "string"},
+    "route_priority": {
+      "type": "array", "uniqueItems": true,
+      "items": {"type": "string", "minLength": 1}
+    },
+    "maker_taker_intent": {"enum": ["MAKER", "TAKER", "ANY"]},
+    "time_in_force": {"enum": ["GTC", "IOC", "FOK"]},
+    "post_only": {"type": "boolean"},
+    "reduce_only": {"type": "boolean"},
+    "parent_opportunity_id": {"type": "string", "minLength": 1},
+    "parent_order_id": {"type": "string"},
+    "order_id": {"type": "string", "minLength": 1},
+    "created_ts_ns": {"type": "integer", "minimum": 0},
+    "route_override": {"type": ["string", "null"]},
+    "idempotency_key": {"type": "string"},
+    "risk_reducing": {"type": "boolean"}
+  }
+}

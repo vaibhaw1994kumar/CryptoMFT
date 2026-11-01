@@ -1,0 +1,28 @@
+{
+ "schema": "fast_move_thresholds/v1",
+ "venue": "binance",
+ "pair": "SOLUSDT",
+ "unit": "bps of mid over 1 s",
+ "days": {
+  "2022-01-05": {
+   "seconds": 61282,
+   "pairs": 59760,
+   "truncated_files": 0,
+   "p50": 0.29,
+   "p90": 1.77,
+   "p99": 3.57,
+   "p99.9": 5.94,
+   "max": 24.93
+  },
+  "2022-01-13": {
+   "seconds": 60690,
+   "pairs": 59427,
+   "truncated_files": 0,
+   "p50": 0.33,
+   "p90": 2.62,
+   "p99": 5.73,
+   "p99.9": 10.02,
+   "max": 28.95
+  }
+ }
+}

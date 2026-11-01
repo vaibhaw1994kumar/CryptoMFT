@@ -1,0 +1,7230 @@
+{
+ "meta": {
+  "generated_utc": "2026-10-29T04:02:32+00:00",
+  "content_sha256": "572850645497828f132b385999112192cbb4fa323c107d76235bab3f74868a2e",
+  "content_sha256_covers": "every key except meta"
+ },
+ "schema": "lifecycle_calibration_bybit/v1",
+ "source": {
+  "zip_name": "bybit_30d.zip",
+  "zip_sha256": "931f8a401bd8edec4d4e9a3caba8405b5e5ab06fac88aae8870e0484d084b5f5",
+  "zip_members": 111,
+  "venue": "bybit",
+  "market": "spot",
+  "account_notes": "own order flow of the market-making bot (orderLinkId prefix 'mm')"
+ },
+ "script": {
+  "path": "scripts/lifecycle_calibration_bybit.py",
+  "sha256": "b4e12c3ad4a376209dfed529d00f9379c0d3e6fbfb4429af344caf7bc443998b"
+ },
+ "min_sample_sizes": {
+  "percentiles": {
+   "p50": 30,
+   "p90": 30,
+   "p99": 100
+  },
+  "coin_hour_cell": 30
+ },
+ "structure": {
+  "orders_total_spot": 29572,
+  "orders_excluded_linear": {
+   "exec_linear": 168,
+   "order_linear": 72
+  },
+  "linear_note": "perpetual (linear) records are a few hundred rows and are not analysed here",
+  "records_are": "one final-state snapshot per order; duplicate orderIds: 0",
+  "created_range_utc": [
+   "2026-04-08T16:54:24.538000+00:00",
+   "2026-05-02T14:46:25.581000+00:00"
+  ],
+  "status_by_day_utc": {
+   "2026-04-08": {
+    "Filled": 86,
+    "PartiallyFilledCanceled": 1
+   },
+   "2026-04-10": {
+    "Filled": 299
+   },
+   "2026-04-11": {
+    "Filled": 37
+   },
+   "2026-04-19": {
+    "Filled": 587
+   },
+   "2026-04-20": {
+    "Filled": 2635,
+    "PartiallyFilledCanceled": 3
+   },
+   "2026-04-21": {
+    "Filled": 1242
+   },
+   "2026-04-22": {
+    "Filled": 1600,
+    "PartiallyFilledCanceled": 2
+   },
+   "2026-04-23": {
+    "Filled": 1473,
+    "PartiallyFilledCanceled": 1
+   },
+   "2026-04-24": {
+    "Filled": 3566,
+    "PartiallyFilledCanceled": 2
+   },
+   "2026-04-25": {
+    "Filled": 1990,
+    "PartiallyFilledCanceled": 6
+   },
+   "2026-04-26": {
+    "Filled": 1429,
+    "PartiallyFilledCanceled": 1
+   },
+   "2026-04-27": {
+    "Filled": 733,
+    "PartiallyFilledCanceled": 1
+   },
+   "2026-04-28": {
+    "Filled": 806,
+    "PartiallyFilledCanceled": 2
+   },
+   "2026-04-29": {
+    "Filled": 1474,
+    "PartiallyFilledCanceled": 2
+   },
+   "2026-04-30": {
+    "Filled": 2200,
+    "Cancelled": 9,
+    "PartiallyFilledCanceled": 2
+   },
+   "2026-05-01": {
+    "Cancelled": 2637,
+    "Rejected": 405,
+    "Filled": 351
+   },
+   "2026-05-02": {
+    "Filled": 519,
+    "Cancelled": 5280,
+    "Rejected": 191
+   }
+  },
+  "first_cancel_created_utc": "2026-04-08T17:21:30.213000+00:00",
+  "first_pure_cancel_created_utc": "2026-04-30T23:55:15.105000+00:00",
+  "first_reject_created_utc": "2026-05-01T00:00:06.470000+00:00",
+  "unfilled_window": {
+   "start_utc": "2026-05-01T00:00:00+00:00",
+   "end_utc": "2026-05-02T14:46:25.581000+00:00",
+   "why": "Cancelled / Rejected orders are absent from the export before this point (only orders that filled survive), so cancel and reject rates are measured here and nowhere else. The real PostOnly reject rate on 2026-04-19..25 is therefore UNKNOWN, not zero.",
+   "orders_in_window": 9383,
+   "postonly_orders_in_window": 9341
+  },
+  "orderLinkId_forms": {
+   "mm+9digits": 14621,
+   "numeric_19_no_stamp": 292,
+   "other_prefix_no_stamp": 25,
+   "mm+9digits+4digits": 14634
+  },
+  "fields_not_in_the_export": {
+   "ack_time": "no acknowledgement timestamp exists; see ack_latency_proxy for what is derivable",
+   "cancel_sent_time": "no cancel request timestamp exists, so cancel latency cannot be measured",
+   "intermediate_updates": "only the final state per order is stored (no New -> PartiallyFilled history)",
+   "receive_side_timestamps": "no client receive times; the exchange -> client leg is unmeasured",
+   "disconnect_markers": "no connection events; disconnects can only be suspected from activity gaps"
+  }
+ },
+ "ack_latency_proxy": {
+  "definition": "createdTime minus the client send stamp embedded in orderLinkId, milliseconds. One-way client-stamp -> exchange-created PLUS an unknown client/exchange clock offset. This is the quantity a backtest needs for 'order arrives at the matching engine'. It is NOT an ack round trip and says nothing about the exchange -> client leg.",
+  "validation_of_the_stamp_reading": {
+   "negative_gaps": 0,
+   "n_parsed": 29115,
+   "note": "if the stamp were not a client send time, gaps would scatter around zero including negatives",
+   "id_forms_compared_on_days_where_both_occur": {
+    "2026-04-26": {
+     "mm+9digits": {
+      "n": 1160,
+      "min": 12.0,
+      "max": 131.0,
+      "mean": 26.488,
+      "p50": 22.0,
+      "p90": 45.0,
+      "p99": 75.0,
+      "unit": "ms"
+     },
+     "mm+9digits+4digits": {
+      "n": 104,
+      "min": 12.0,
+      "max": 86.0,
+      "mean": 25.856,
+      "p50": 22.0,
+      "p90": 38.0,
+      "p99": 72.97,
+      "unit": "ms"
+     }
+    }
+   },
+   "id_forms_note": "the two forms are compared within the same day only, because latency differs by day"
+  },
+  "orders_postonly_total": 29266,
+  "orders_parsed": 29115,
+  "orders_excluded": {
+   "no_stamp_in_link_id": 151
+  },
+  "overall_postonly": {
+   "n": 29115,
+   "min": 12.0,
+   "max": 11712.0,
+   "mean": 48.575,
+   "p50": 33.0,
+   "p90": 83.0,
+   "p99": 207.86,
+   "unit": "ms"
+  },
+  "by_period": {
+   "before_2026-04-19": {
+    "n": 405,
+    "min": 12.0,
+    "max": 48.0,
+    "mean": 17.988,
+    "p50": 17.0,
+    "p90": 23.0,
+    "p99": 35.0,
+    "unit": "ms"
+   },
+   "2026-04-19..2026-04-25": {
+    "n": 12916,
+    "min": 12.0,
+    "max": 11712.0,
+    "mean": 48.814,
+    "p50": 29.0,
+    "p90": 72.0,
+    "p99": 206.0,
+    "unit": "ms"
+   },
+   "2026-04-26..2026-05-02": {
+    "n": 15794,
+    "min": 12.0,
+    "max": 557.0,
+    "mean": 49.164,
+    "p50": 38.0,
+    "p90": 93.0,
+    "p99": 209.07,
+    "unit": "ms"
+   },
+   "unfilled_window": {
+    "n": 9341,
+    "min": 12.0,
+    "max": 557.0,
+    "mean": 59.305,
+    "p50": 48.0,
+    "p90": 114.0,
+    "p99": 239.6,
+    "unit": "ms"
+   },
+   "all": {
+    "n": 29115,
+    "min": 12.0,
+    "max": 11712.0,
+    "mean": 48.575,
+    "p50": 33.0,
+    "p90": 83.0,
+    "p99": 207.86,
+    "unit": "ms"
+   }
+  },
+  "by_day_utc": {
+   "2026-04-08": {
+    "n": 81,
+    "min": 14.0,
+    "max": 29.0,
+    "mean": 17.864,
+    "p50": 17.0,
+    "p90": 21.0,
+    "p99": null,
+    "suppressed": [
+     "p99"
+    ],
+    "suppressed_reason": "fewer than {'p50': 30, 'p90': 30, 'p99': 100} samples required per percentile",
+    "unit": "ms"
+   },
+   "2026-04-10": {
+    "n": 288,
+    "min": 12.0,
+    "max": 48.0,
+    "mean": 18.024,
+    "p50": 17.0,
+    "p90": 23.0,
+    "p99": 40.13,
+    "unit": "ms"
+   },
+   "2026-04-11": {
+    "n": 36,
+    "min": 13.0,
+    "max": 35.0,
+    "mean": 17.972,
+    "p50": 17.0,
+    "p90": 22.5,
+    "p99": null,
+    "suppressed": [
+     "p99"
+    ],
+    "suppressed_reason": "fewer than {'p50': 30, 'p90': 30, 'p99': 100} samples required per percentile",
+    "unit": "ms"
+   },
+   "2026-04-19": {
+    "n": 563,
+    "min": 13.0,
+    "max": 357.0,
+    "mean": 42.204,
+    "p50": 26.0,
+    "p90": 82.0,
+    "p99": 288.34,
+    "unit": "ms"
+   },
+   "2026-04-20": {
+    "n": 2515,
+    "min": 12.0,
+    "max": 260.0,
+    "mean": 34.458,
+    "p50": 26.0,
+    "p90": 65.0,
+    "p99": 127.86,
+    "unit": "ms"
+   },
+   "2026-04-21": {
+    "n": 1242,
+    "min": 12.0,
+    "max": 7849.0,
+    "mean": 53.324,
+    "p50": 24.0,
+    "p90": 61.9,
+    "p99": 515.26,
+    "unit": "ms"
+   },
+   "2026-04-22": {
+    "n": 1602,
+    "min": 13.0,
+    "max": 11712.0,
+    "mean": 108.509,
+    "p50": 40.0,
+    "p90": 87.0,
+    "p99": 2280.7,
+    "unit": "ms"
+   },
+   "2026-04-23": {
+    "n": 1451,
+    "min": 12.0,
+    "max": 1471.0,
+    "mean": 35.81,
+    "p50": 23.0,
+    "p90": 60.0,
+    "p99": 259.5,
+    "unit": "ms"
+   },
+   "2026-04-24": {
+    "n": 3547,
+    "min": 12.0,
+    "max": 2280.0,
+    "mean": 35.916,
+    "p50": 27.0,
+    "p90": 64.0,
+    "p99": 120.54,
+    "unit": "ms"
+   },
+   "2026-04-25": {
+    "n": 1996,
+    "min": 12.0,
+    "max": 989.0,
+    "mean": 50.421,
+    "p50": 41.0,
+    "p90": 85.0,
+    "p99": 154.4,
+    "unit": "ms"
+   },
+   "2026-04-26": {
+    "n": 1264,
+    "min": 12.0,
+    "max": 131.0,
+    "mean": 26.436,
+    "p50": 22.0,
+    "p90": 45.0,
+    "p99": 75.0,
+    "unit": "ms"
+   },
+   "2026-04-27": {
+    "n": 733,
+    "min": 12.0,
+    "max": 125.0,
+    "mean": 28.67,
+    "p50": 23.0,
+    "p90": 49.0,
+    "p99": 90.68,
+    "unit": "ms"
+   },
+   "2026-04-28": {
+    "n": 798,
+    "min": 12.0,
+    "max": 273.0,
+    "mean": 30.891,
+    "p50": 24.0,
+    "p90": 54.0,
+    "p99": 100.12,
+    "unit": "ms"
+   },
+   "2026-04-29": {
+    "n": 1450,
+    "min": 12.0,
+    "max": 242.0,
+    "mean": 34.344,
+    "p50": 28.0,
+    "p90": 61.0,
+    "p99": 99.02,
+    "unit": "ms"
+   },
+   "2026-04-30": {
+    "n": 2208,
+    "min": 12.0,
+    "max": 231.0,
+    "mean": 42.408,
+    "p50": 37.0,
+    "p90": 73.0,
+    "p99": 135.93,
+    "unit": "ms"
+   },
+   "2026-05-01": {
+    "n": 3378,
+    "min": 13.0,
+    "max": 557.0,
+    "mean": 86.424,
+    "p50": 73.0,
+    "p90": 151.0,
+    "p99": 306.46,
+    "unit": "ms"
+   },
+   "2026-05-02": {
+    "n": 5963,
+    "min": 12.0,
+    "max": 517.0,
+    "mean": 43.943,
+    "p50": 35.0,
+    "p90": 82.0,
+    "p99": 175.0,
+    "unit": "ms"
+   }
+  },
+  "non_stationarity_note": "the proxy's median moves from 17 ms to 73 ms across days (it contains the client/exchange clock offset, so a drifting offset and a real latency change cannot be told apart). A single pooled distribution hides this; stressed presets should cover the worst day.",
+  "by_status_in_unfilled_window": {
+   "Filled": {
+    "n": 828,
+    "min": 12.0,
+    "max": 383.0,
+    "mean": 57.405,
+    "p50": 47.0,
+    "p90": 105.3,
+    "p99": 215.46,
+    "unit": "ms"
+   },
+   "Cancelled": {
+    "n": 7917,
+    "min": 12.0,
+    "max": 557.0,
+    "mean": 58.05,
+    "p50": 47.0,
+    "p90": 111.0,
+    "p99": 240.0,
+    "unit": "ms"
+   },
+   "Rejected": {
+    "n": 596,
+    "min": 13.0,
+    "max": 392.0,
+    "mean": 78.621,
+    "p50": 68.0,
+    "p90": 141.5,
+    "p99": 260.95,
+    "unit": "ms"
+   }
+  },
+  "by_status_note": "status groups differ mostly because of WHEN they occurred (05-01 holds 405 of 596 rejects and is the slowest day), not because rejects take longer",
+  "by_coin": {
+   "AAVEUSDT": {
+    "n": 729,
+    "min": 12.0,
+    "max": 382.0,
+    "mean": 32.838,
+    "p50": 22.0,
+    "p90": 62.0,
+    "p99": 169.0,
+    "unit": "ms"
+   },
+   "ADAUSDT": {
+    "n": 1259,
+    "min": 12.0,
+    "max": 601.0,
+    "mean": 49.501,
+    "p50": 40.0,
+    "p90": 91.0,
+    "p99": 240.26,
+    "unit": "ms"
+   },
+   "APTUSDT": {
+    "n": 1026,
+    "min": 12.0,
+    "max": 4959.0,
+    "mean": 65.949,
+    "p50": 45.0,
+    "p90": 117.5,
+    "p99": 320.0,
+    "unit": "ms"
+   },
+   "ARBUSDT": {
+    "n": 517,
+    "min": 12.0,
+    "max": 430.0,
+    "mean": 43.126,
+    "p50": 31.0,
+    "p90": 82.4,
+    "p99": 157.84,
+    "unit": "ms"
+   },
+   "ATOMUSDT": {
+    "n": 944,
+    "min": 13.0,
+    "max": 1098.0,
+    "mean": 47.427,
+    "p50": 35.0,
+    "p90": 85.0,
+    "p99": 228.71,
+    "unit": "ms"
+   },
+   "AVAXUSDT": {
+    "n": 1375,
+    "min": 12.0,
+    "max": 7849.0,
+    "mean": 63.936,
+    "p50": 47.0,
+    "p90": 113.0,
+    "p99": 205.52,
+    "unit": "ms"
+   },
+   "BNBUSDT": {
+    "n": 649,
+    "min": 13.0,
+    "max": 2702.0,
+    "mean": 46.664,
+    "p50": 28.0,
+    "p90": 70.0,
+    "p99": 491.64,
+    "unit": "ms"
+   },
+   "BTCUSDT": {
+    "n": 531,
+    "min": 12.0,
+    "max": 517.0,
+    "mean": 50.431,
+    "p50": 35.0,
+    "p90": 98.0,
+    "p99": 229.7,
+    "unit": "ms"
+   },
+   "DOGEUSDT": {
+    "n": 1964,
+    "min": 12.0,
+    "max": 4130.0,
+    "mean": 61.037,
+    "p50": 47.0,
+    "p90": 113.0,
+    "p99": 237.11,
+    "unit": "ms"
+   },
+   "DOTUSDT": {
+    "n": 348,
+    "min": 12.0,
+    "max": 381.0,
+    "mean": 40.966,
+    "p50": 27.0,
+    "p90": 75.6,
+    "p99": 235.18,
+    "unit": "ms"
+   },
+   "ENAUSDT": {
+    "n": 1000,
+    "min": 12.0,
+    "max": 421.0,
+    "mean": 40.915,
+    "p50": 30.0,
+    "p90": 80.0,
+    "p99": 159.02,
+    "unit": "ms"
+   },
+   "ETHUSDT": {
+    "n": 1655,
+    "min": 12.0,
+    "max": 259.0,
+    "mean": 46.369,
+    "p50": 36.0,
+    "p90": 92.0,
+    "p99": 185.0,
+    "unit": "ms"
+   },
+   "FILUSDT": {
+    "n": 1480,
+    "min": 12.0,
+    "max": 2152.0,
+    "mean": 44.753,
+    "p50": 33.5,
+    "p90": 82.0,
+    "p99": 168.68,
+    "unit": "ms"
+   },
+   "INJUSDT": {
+    "n": 1465,
+    "min": 12.0,
+    "max": 989.0,
+    "mean": 43.257,
+    "p50": 30.0,
+    "p90": 71.6,
+    "p99": 239.32,
+    "unit": "ms"
+   },
+   "LTCUSDT": {
+    "n": 2797,
+    "min": 12.0,
+    "max": 3257.0,
+    "mean": 39.736,
+    "p50": 30.0,
+    "p90": 69.4,
+    "p99": 153.2,
+    "unit": "ms"
+   },
+   "MNTUSDT": {
+    "n": 752,
+    "min": 12.0,
+    "max": 6229.0,
+    "mean": 46.456,
+    "p50": 29.0,
+    "p90": 68.0,
+    "p99": 195.74,
+    "unit": "ms"
+   },
+   "NEARUSDT": {
+    "n": 575,
+    "min": 12.0,
+    "max": 5556.0,
+    "mean": 63.014,
+    "p50": 28.0,
+    "p90": 70.0,
+    "p99": 228.12,
+    "unit": "ms"
+   },
+   "OPUSDT": {
+    "n": 1578,
+    "min": 12.0,
+    "max": 232.0,
+    "mean": 39.565,
+    "p50": 31.0,
+    "p90": 72.0,
+    "p99": 162.0,
+    "unit": "ms"
+   },
+   "SOLUSDT": {
+    "n": 3303,
+    "min": 12.0,
+    "max": 11712.0,
+    "mean": 50.031,
+    "p50": 31.0,
+    "p90": 74.0,
+    "p99": 161.98,
+    "unit": "ms"
+   },
+   "SUIUSDT": {
+    "n": 3148,
+    "min": 12.0,
+    "max": 4307.0,
+    "mean": 47.379,
+    "p50": 32.0,
+    "p90": 76.0,
+    "p99": 195.12,
+    "unit": "ms"
+   },
+   "UNIUSDT": {
+    "n": 443,
+    "min": 12.0,
+    "max": 10979.0,
+    "mean": 86.108,
+    "p50": 34.0,
+    "p90": 81.8,
+    "p99": 317.9,
+    "unit": "ms"
+   },
+   "XRPUSDT": {
+    "n": 1577,
+    "min": 12.0,
+    "max": 603.0,
+    "mean": 44.134,
+    "p50": 32.0,
+    "p90": 82.0,
+    "p99": 201.0,
+    "unit": "ms"
+   }
+  },
+  "by_hour_utc": {
+   "00": {
+    "n": 1594,
+    "min": 12.0,
+    "max": 416.0,
+    "mean": 63.265,
+    "p50": 51.0,
+    "p90": 121.7,
+    "p99": 301.14,
+    "unit": "ms"
+   },
+   "01": {
+    "n": 2198,
+    "min": 13.0,
+    "max": 557.0,
+    "mean": 77.863,
+    "p50": 67.0,
+    "p90": 139.0,
+    "p99": 287.03,
+    "unit": "ms"
+   },
+   "02": {
+    "n": 1460,
+    "min": 13.0,
+    "max": 384.0,
+    "mean": 63.219,
+    "p50": 55.0,
+    "p90": 115.0,
+    "p99": 230.05,
+    "unit": "ms"
+   },
+   "03": {
+    "n": 403,
+    "min": 13.0,
+    "max": 6229.0,
+    "mean": 55.273,
+    "p50": 34.0,
+    "p90": 74.0,
+    "p99": 141.96,
+    "unit": "ms"
+   },
+   "04": {
+    "n": 303,
+    "min": 14.0,
+    "max": 197.0,
+    "mean": 45.98,
+    "p50": 41.0,
+    "p90": 79.8,
+    "p99": 117.84,
+    "unit": "ms"
+   },
+   "05": {
+    "n": 2538,
+    "min": 12.0,
+    "max": 517.0,
+    "mean": 59.033,
+    "p50": 50.0,
+    "p90": 111.3,
+    "p99": 228.0,
+    "unit": "ms"
+   },
+   "06": {
+    "n": 1106,
+    "min": 13.0,
+    "max": 271.0,
+    "mean": 35.598,
+    "p50": 28.0,
+    "p90": 66.5,
+    "p99": 104.95,
+    "unit": "ms"
+   },
+   "07": {
+    "n": 1286,
+    "min": 12.0,
+    "max": 154.0,
+    "mean": 36.295,
+    "p50": 29.0,
+    "p90": 66.0,
+    "p99": 108.0,
+    "unit": "ms"
+   },
+   "08": {
+    "n": 479,
+    "min": 13.0,
+    "max": 168.0,
+    "mean": 39.658,
+    "p50": 33.0,
+    "p90": 71.2,
+    "p99": 143.0,
+    "unit": "ms"
+   },
+   "09": {
+    "n": 733,
+    "min": 12.0,
+    "max": 2874.0,
+    "mean": 42.347,
+    "p50": 27.0,
+    "p90": 66.0,
+    "p99": 126.76,
+    "unit": "ms"
+   },
+   "10": {
+    "n": 1204,
+    "min": 12.0,
+    "max": 349.0,
+    "mean": 36.253,
+    "p50": 27.0,
+    "p90": 65.0,
+    "p99": 138.97,
+    "unit": "ms"
+   },
+   "11": {
+    "n": 1044,
+    "min": 12.0,
+    "max": 7849.0,
+    "mean": 41.996,
+    "p50": 25.0,
+    "p90": 66.0,
+    "p99": 164.85,
+    "unit": "ms"
+   },
+   "12": {
+    "n": 690,
+    "min": 13.0,
+    "max": 7052.0,
+    "mean": 70.249,
+    "p50": 32.0,
+    "p90": 76.0,
+    "p99": 388.12,
+    "unit": "ms"
+   },
+   "13": {
+    "n": 1388,
+    "min": 12.0,
+    "max": 4130.0,
+    "mean": 45.92,
+    "p50": 32.0,
+    "p90": 71.0,
+    "p99": 214.38,
+    "unit": "ms"
+   },
+   "14": {
+    "n": 2066,
+    "min": 12.0,
+    "max": 11712.0,
+    "mean": 68.096,
+    "p50": 33.0,
+    "p90": 70.0,
+    "p99": 428.6,
+    "unit": "ms"
+   },
+   "15": {
+    "n": 1305,
+    "min": 12.0,
+    "max": 791.0,
+    "mean": 39.357,
+    "p50": 30.0,
+    "p90": 68.0,
+    "p99": 118.96,
+    "unit": "ms"
+   },
+   "16": {
+    "n": 1079,
+    "min": 12.0,
+    "max": 4959.0,
+    "mean": 37.324,
+    "p50": 25.0,
+    "p90": 57.2,
+    "p99": 108.22,
+    "unit": "ms"
+   },
+   "17": {
+    "n": 1223,
+    "min": 12.0,
+    "max": 2345.0,
+    "mean": 36.253,
+    "p50": 23.0,
+    "p90": 55.0,
+    "p99": 121.78,
+    "unit": "ms"
+   },
+   "18": {
+    "n": 1586,
+    "min": 12.0,
+    "max": 2702.0,
+    "mean": 36.059,
+    "p50": 25.0,
+    "p90": 62.0,
+    "p99": 131.0,
+    "unit": "ms"
+   },
+   "19": {
+    "n": 1473,
+    "min": 12.0,
+    "max": 2702.0,
+    "mean": 39.774,
+    "p50": 26.0,
+    "p90": 68.0,
+    "p99": 184.28,
+    "unit": "ms"
+   },
+   "20": {
+    "n": 1001,
+    "min": 12.0,
+    "max": 412.0,
+    "mean": 32.977,
+    "p50": 23.0,
+    "p90": 59.0,
+    "p99": 164.0,
+    "unit": "ms"
+   },
+   "21": {
+    "n": 1113,
+    "min": 12.0,
+    "max": 376.0,
+    "mean": 29.273,
+    "p50": 22.0,
+    "p90": 51.0,
+    "p99": 103.88,
+    "unit": "ms"
+   },
+   "22": {
+    "n": 1114,
+    "min": 12.0,
+    "max": 626.0,
+    "mean": 34.602,
+    "p50": 26.5,
+    "p90": 62.0,
+    "p99": 138.44,
+    "unit": "ms"
+   },
+   "23": {
+    "n": 729,
+    "min": 12.0,
+    "max": 822.0,
+    "mean": 43.309,
+    "p50": 31.0,
+    "p90": 74.0,
+    "p99": 193.64,
+    "unit": "ms"
+   }
+  },
+  "by_coin_hour_utc": {
+   "AAVEUSDT|00": {
+    "n": 1
+   },
+   "AAVEUSDT|01": {
+    "n": 27
+   },
+   "AAVEUSDT|02": {
+    "n": 17
+   },
+   "AAVEUSDT|03": {
+    "n": 2
+   },
+   "AAVEUSDT|08": {
+    "n": 16
+   },
+   "AAVEUSDT|09": {
+    "n": 30,
+    "min": 16.0,
+    "max": 83.0,
+    "mean": 35.1,
+    "p50": 28.0,
+    "p90": 66.2,
+    "p99": null,
+    "suppressed": [
+     "p99"
+    ],
+    "suppressed_reason": "fewer than {'p50': 30, 'p90': 30, 'p99': 100} samples required per percentile",
+    "unit": "ms"
+   },
+   "AAVEUSDT|10": {
+    "n": 40,
+    "min": 12.0,
+    "max": 126.0,
+    "mean": 38.375,
+    "p50": 21.5,
+    "p90": 93.2,
+    "p99": null,
+    "suppressed": [
+     "p99"
+    ],
+    "suppressed_reason": "fewer than {'p50': 30, 'p90': 30, 'p99': 100} samples required per percentile",
+    "unit": "ms"
+   },
+   "AAVEUSDT|11": {
+    "n": 74,
+    "min": 12.0,
+    "max": 176.0,
+    "mean": 25.932,
+    "p50": 20.0,
+    "p90": 37.7,
+    "p99": null,
+    "suppressed": [
+     "p99"
+    ],
+    "suppressed_reason": "fewer than {'p50': 30, 'p90': 30, 'p99': 100} samples required per percentile",
+    "unit": "ms"
+   },
+   "AAVEUSDT|12": {
+    "n": 38,
+    "min": 13.0,
+    "max": 100.0,
+    "mean": 32.079,
+    "p50": 25.0,
+    "p90": 54.9,
+    "p99": null,
+    "suppressed": [
+     "p99"
+    ],
+    "suppressed_reason": "fewer than {'p50': 30, 'p90': 30, 'p99': 100} samples required per percentile",
+    "unit": "ms"
+   },
+   "AAVEUSDT|13": {
+    "n": 38,
+    "min": 12.0,
+    "max": 299.0,
+    "mean": 40.289,
+    "p50": 23.5,
+    "p90": 63.3,
+    "p99": null,
+    "suppressed": [
+     "p99"
+    ],
+    "suppressed_reason": "fewer than {'p50': 30, 'p90': 30, 'p99': 100} samples required per percentile",
+    "unit": "ms"
+   },
+   "AAVEUSDT|14": {
+    "n": 40,
+    "min": 14.0,
+    "max": 120.0,
+    "mean": 33.45,
+    "p50": 25.5,
+    "p90": 65.2,
+    "p99": null,
+    "suppressed": [
+     "p99"
+    ],
+    "suppressed_reason": "fewer than {'p50': 30, 'p90': 30, 'p99': 100} samples required per percentile",
+    "unit": "ms"
+   },
+   "AAVEUSDT|15": {
+    "n": 51,
+    "min": 13.0,
+    "max": 112.0,
+    "mean": 30.922,
+    "p50": 24.0,
+    "p90": 52.0,
+    "p99": null,
+    "suppressed": [
+     "p99"
+    ],
+    "suppressed_reason": "fewer than {'p50': 30, 'p90': 30, 'p99': 100} samples required per percentile",
+    "unit": "ms"
+   },
+   "AAVEUSDT|16": {
+    "n": 36,
+    "min": 12.0,
+    "max": 83.0,
+    "mean": 33.667,
+    "p50": 27.5,
+    "p90": 60.0,
+    "p99": null,
+    "suppressed": [
+     "p99"
+    ],
+    "suppressed_reason": "fewer than {'p50': 30, 'p90': 30, 'p99': 100} samples required per percentile",
+    "unit": "ms"
+   },
+   "AAVEUSDT|17": {
+    "n": 26
+   },
+   "AAVEUSDT|18": {
+    "n": 31,
+    "min": 14.0,
+    "max": 62.0,
+    "mean": 23.0,
+    "p50": 18.0,
+    "p90": 40.0,
+    "p99": null,
+    "suppressed": [
+     "p99"
+    ],
+    "suppressed_reason": "fewer than {'p50': 30, 'p90': 30, 'p99': 100} samples required per percentile",
+    "unit": "ms"
+   },
+   "AAVEUSDT|19": {
+    "n": 81,
+    "min": 12.0,
+    "max": 334.0,
+    "mean": 31.704,
+    "p50": 19.0,
+    "p90": 54.0,
+    "p99": null,
+    "suppressed": [
+     "p99"
+    ],
+    "suppressed_reason": "fewer than {'p50': 30, 'p90': 30, 'p99': 100} samples required per percentile",
+    "unit": "ms"
+   },
+   "AAVEUSDT|20": {
+    "n": 81,
+    "min": 12.0,
+    "max": 88.0,
+    "mean": 25.37,
+    "p50": 19.0,
+    "p90": 51.0,
+    "p99": null,
+    "suppressed": [
+     "p99"
+    ],
+    "suppressed_reason": "fewer than {'p50': 30, 'p90': 30, 'p99': 100} samples required per percentile",
+    "unit": "ms"
+   },
+   "AAVEUSDT|21": {
+    "n": 66,
+    "min": 14.0,
+    "max": 74.0,
+    "mean": 25.621,
+    "p50": 21.0,
+    "p90": 41.0,
+    "p99": null,
+    "suppressed": [
+     "p99"
+    ],
+    "suppressed_reason": "fewer than {'p50': 30, 'p90': 30, 'p99': 100} samples required per percentile",
+    "unit": "ms"
+   },
+   "AAVEUSDT|22": {
+    "n": 25
+   },
+   "AAVEUSDT|23": {
+    "n": 9
+   },
+   "ADAUSDT|00": {
+    "n": 25
+   },
+   "ADAUSDT|01": {
+    "n": 38,
+    "min": 16.0,
+    "max": 505.0,
+    "mean": 70.921,
+    "p50": 57.5,
+    "p90": 106.7,
+    "p99": null,
+    "suppressed": [
+     "p99"
+    ],
+    "suppressed_reason": "fewer than {'p50': 30, 'p90': 30, 'p99': 100} samples required per percentile",
+    "unit": "ms"
+   },
+   "ADAUSDT|02": {
+    "n": 42,
+    "min": 19.0,
+    "max": 142.0,
+    "mean": 50.0,
+    "p50": 36.5,
+    "p90": 94.0,
+    "p99": null,
+    "suppressed": [
+     "p99"
+    ],
+    "suppressed_reason": "fewer than {'p50': 30, 'p90': 30, 'p99': 100} samples required per percentile",
+    "unit": "ms"
+   },
+   "ADAUSDT|03": {
+    "n": 13
+   },
+   "ADAUSDT|04": {
+    "n": 1
+   },
+   "ADAUSDT|05": {
+    "n": 672,
+    "min": 12.0,
+    "max": 398.0,
+    "mean": 56.481,
+    "p50": 47.0,
+    "p90": 105.9,
+    "p99": 250.9,
+    "unit": "ms"
+   },
+   "ADAUSDT|06": {
+    "n": 29
+   },
+   "ADAUSDT|07": {
+    "n": 2
+   },
+   "ADAUSDT|08": {
+    "n": 19
+   },
+   "ADAUSDT|09": {
+    "n": 23
+   },
+   "ADAUSDT|10": {
+    "n": 34,
+    "min": 13.0,
+    "max": 102.0,
+    "mean": 36.794,
+    "p50": 34.0,
+    "p90": 66.2,
+    "p99": null,
+    "suppressed": [
+     "p99"
+    ],
+    "suppressed_reason": "fewer than {'p50': 30, 'p90': 30, 'p99': 100} samples required per percentile",
+    "unit": "ms"
+   },
+   "ADAUSDT|11": {
+    "n": 18
+   },
+   "ADAUSDT|13": {
+    "n": 31,
+    "min": 13.0,
+    "max": 192.0,
+    "mean": 36.613,
+    "p50": 24.0,
+    "p90": 56.0,
+    "p99": null,
+    "suppressed": [
+     "p99"
+    ],
+    "suppressed_reason": "fewer than {'p50': 30, 'p90': 30, 'p99': 100} samples required per percentile",
+    "unit": "ms"
+   },
+   "ADAUSDT|14": {
+    "n": 34,
+    "min": 14.0,
+    "max": 82.0,
+    "mean": 34.941,
+    "p50": 26.5,
+    "p90": 63.7,
+    "p99": null,
+    "suppressed": [
+     "p99"
+    ],
+    "suppressed_reason": "fewer than {'p50': 30, 'p90': 30, 'p99': 100} samples required per percentile",
+    "unit": "ms"
+   },
+   "ADAUSDT|15": {
+    "n": 23
+   },
+   "ADAUSDT|16": {
+    "n": 29
+   },
+   "ADAUSDT|17": {
+    "n": 33,
+    "min": 15.0,
+    "max": 168.0,
+    "mean": 50.424,
+    "p50": 41.0,
+    "p90": 87.4,
+    "p99": null,
+    "suppressed": [
+     "p99"
+    ],
+    "suppressed_reason": "fewer than {'p50': 30, 'p90': 30, 'p99': 100} samples required per percentile",
+    "unit": "ms"
+   },
+   "ADAUSDT|18": {
+    "n": 41,
+    "min": 16.0,
+    "max": 113.0,
+    "mean": 42.098,
+    "p50": 32.0,
+    "p90": 81.0,
+    "p99": null,
+    "suppressed": [
+     "p99"
+    ],
+    "suppressed_reason": "fewer than {'p50': 30, 'p90': 30, 'p99': 100} samples required per percentile",
+    "unit": "ms"
+   },
+   "ADAUSDT|19": {
+    "n": 56,
+    "min": 13.0,
+    "max": 318.0,
+    "mean": 40.643,
+    "p50": 29.5,
+    "p90": 67.5,
+    "p99": null,
+    "suppressed": [
+     "p99"
+    ],
+    "suppressed_reason": "fewer than {'p50': 30, 'p90': 30, 'p99': 100} samples required per percentile",
+    "unit": "ms"
+   },
+   "ADAUSDT|20": {
+    "n": 19
+   },
+   "ADAUSDT|21": {
+    "n": 23
+   },
+   "ADAUSDT|22": {
+    "n": 32,
+    "min": 15.0,
+    "max": 242.0,
+    "mean": 46.75,
+    "p50": 32.0,
+    "p90": 94.5,
+    "p99": null,
+    "suppressed": [
+     "p99"
+    ],
+    "suppressed_reason": "fewer than {'p50': 30, 'p90': 30, 'p99': 100} samples required per percentile",
+    "unit": "ms"
+   },
+   "ADAUSDT|23": {
+    "n": 22
+   },
+   "APTUSDT|00": {
+    "n": 110,
+    "min": 16.0,
+    "max": 408.0,
+    "mean": 108.809,
+    "p50": 72.0,
+    "p90": 257.5,
+    "p99": 348.82,
+    "unit": "ms"
+   },
+   "APTUSDT|01": {
+    "n": 116,
+    "min": 15.0,
+    "max": 393.0,
+    "mean": 82.207,
+    "p50": 68.0,
+    "p90": 149.5,
+    "p99": 314.45,
+    "unit": "ms"
+   },
+   "APTUSDT|02": {
+    "n": 252,
+    "min": 17.0,
+    "max": 384.0,
+    "mean": 79.48,
+    "p50": 67.0,
+    "p90": 129.0,
+    "p99": 271.5,
+    "unit": "ms"
+   },
+   "APTUSDT|03": {
+    "n": 20
+   },
+   "APTUSDT|04": {
+    "n": 16
+   },
+   "APTUSDT|05": {
+    "n": 9
+   },
+   "APTUSDT|06": {
+    "n": 9
+   },
+   "APTUSDT|07": {
+    "n": 10
+   },
+   "APTUSDT|08": {
+    "n": 19
+   },
+   "APTUSDT|09": {
+    "n": 21
+   },
+   "APTUSDT|10": {
+    "n": 21
+   },
+   "APTUSDT|11": {
+    "n": 27
+   },
+   "APTUSDT|12": {
+    "n": 14
+   },
+   "APTUSDT|13": {
+    "n": 31,
+    "min": 15.0,
+    "max": 269.0,
+    "mean": 46.839,
+    "p50": 31.0,
+    "p90": 52.0,
+    "p99": null,
+    "suppressed": [
+     "p99"
+    ],
+    "suppressed_reason": "fewer than {'p50': 30, 'p90': 30, 'p99': 100} samples required per percentile",
+    "unit": "ms"
+   },
+   "APTUSDT|14": {
+    "n": 37,
+    "min": 15.0,
+    "max": 90.0,
+    "mean": 37.73,
+    "p50": 29.0,
+    "p90": 61.4,
+    "p99": null,
+    "suppressed": [
+     "p99"
+    ],
+    "suppressed_reason": "fewer than {'p50': 30, 'p90': 30, 'p99': 100} samples required per percentile",
+    "unit": "ms"
+   },
+   "APTUSDT|15": {
+    "n": 40,
+    "min": 15.0,
+    "max": 610.0,
+    "mean": 63.475,
+    "p50": 40.5,
+    "p90": 96.2,
+    "p99": null,
+    "suppressed": [
+     "p99"
+    ],
+    "suppressed_reason": "fewer than {'p50': 30, 'p90': 30, 'p99': 100} samples required per percentile",
+    "unit": "ms"
+   },
+   "APTUSDT|16": {
+    "n": 37,
+    "min": 14.0,
+    "max": 4959.0,
+    "mean": 178.405,
+    "p50": 32.0,
+    "p90": 87.2,
+    "p99": null,
+    "suppressed": [
+     "p99"
+    ],
+    "suppressed_reason": "fewer than {'p50': 30, 'p90': 30, 'p99': 100} samples required per percentile",
+    "unit": "ms"
+   },
+   "APTUSDT|17": {
+    "n": 48,
+    "min": 13.0,
+    "max": 79.0,
+    "mean": 26.354,
+    "p50": 19.0,
+    "p90": 48.6,
+    "p99": null,
+    "suppressed": [
+     "p99"
+    ],
+    "suppressed_reason": "fewer than {'p50': 30, 'p90': 30, 'p99': 100} samples required per percentile",
+    "unit": "ms"
+   },
+   "APTUSDT|18": {
+    "n": 48,
+    "min": 14.0,
+    "max": 104.0,
+    "mean": 28.625,
+    "p50": 21.0,
+    "p90": 50.3,
+    "p99": null,
+    "suppressed": [
+     "p99"
+    ],
+    "suppressed_reason": "fewer than {'p50': 30, 'p90': 30, 'p99': 100} samples required per percentile",
+    "unit": "ms"
+   },
+   "APTUSDT|19": {
+    "n": 36,
+    "min": 12.0,
+    "max": 141.0,
+    "mean": 32.75,
+    "p50": 25.5,
+    "p90": 57.0,
+    "p99": null,
+    "suppressed": [
+     "p99"
+    ],
+    "suppressed_reason": "fewer than {'p50': 30, 'p90': 30, 'p99': 100} samples required per percentile",
+    "unit": "ms"
+   },
+   "APTUSDT|20": {
+    "n": 18
+   },
+   "APTUSDT|21": {
+    "n": 28
+   },
+   "APTUSDT|22": {
+    "n": 38,
+    "min": 13.0,
+    "max": 75.0,
+    "mean": 31.5,
+    "p50": 24.5,
+    "p90": 52.6,
+    "p99": null,
+    "suppressed": [
+     "p99"
+    ],
+    "suppressed_reason": "fewer than {'p50': 30, 'p90': 30, 'p99': 100} samples required per percentile",
+    "unit": "ms"
+   },
+   "APTUSDT|23": {
+    "n": 21
+   },
+   "ARBUSDT|00": {
+    "n": 15
+   },
+   "ARBUSDT|01": {
+    "n": 51,
+    "min": 15.0,
+    "max": 204.0,
+    "mean": 59.863,
+    "p50": 55.0,
+    "p90": 98.0,
+    "p99": null,
+    "suppressed": [
+     "p99"
+    ],
+    "suppressed_reason": "fewer than {'p50': 30, 'p90': 30, 'p99': 100} samples required per percentile",
+    "unit": "ms"
+   },
+   "ARBUSDT|02": {
+    "n": 78,
+    "min": 15.0,
+    "max": 158.0,
+    "mean": 65.231,
+    "p50": 63.5,
+    "p90": 111.1,
+    "p99": null,
+    "suppressed": [
+     "p99"
+    ],
+    "suppressed_reason": "fewer than {'p50': 30, 'p90': 30, 'p99': 100} samples required per percentile",
+    "unit": "ms"
+   },
+   "ARBUSDT|03": {
+    "n": 10
+   },
+   "ARBUSDT|04": {
+    "n": 2
+   },
+   "ARBUSDT|05": {
+    "n": 7
+   },
+   "ARBUSDT|06": {
+    "n": 1
+   },
+   "ARBUSDT|08": {
+    "n": 11
+   },
+   "ARBUSDT|09": {
+    "n": 23
+   },
+   "ARBUSDT|10": {
+    "n": 20
+   },
+   "ARBUSDT|11": {
+    "n": 17
+   },
+   "ARBUSDT|12": {
+    "n": 12
+   },
+   "ARBUSDT|13": {
+    "n": 39,
+    "min": 13.0,
+    "max": 127.0,
+    "mean": 35.026,
+    "p50": 27.0,
+    "p90": 71.8,
+    "p99": null,
+    "suppressed": [
+     "p99"
+    ],
+    "suppressed_reason": "fewer than {'p50': 30, 'p90': 30, 'p99': 100} samples required per percentile",
+    "unit": "ms"
+   },
+   "ARBUSDT|14": {
+    "n": 23
+   },
+   "ARBUSDT|15": {
+    "n": 22
+   },
+   "ARBUSDT|16": {
+    "n": 34,
+    "min": 13.0,
+    "max": 102.0,
+    "mean": 27.118,
+    "p50": 20.0,
+    "p90": 56.2,
+    "p99": null,
+    "suppressed": [
+     "p99"
+    ],
+    "suppressed_reason": "fewer than {'p50': 30, 'p90': 30, 'p99': 100} samples required per percentile",
+    "unit": "ms"
+   },
+   "ARBUSDT|17": {
+    "n": 31,
+    "min": 13.0,
+    "max": 430.0,
+    "mean": 41.452,
+    "p50": 22.0,
+    "p90": 53.0,
+    "p99": null,
+    "suppressed": [
+     "p99"
+    ],
+    "suppressed_reason": "fewer than {'p50': 30, 'p90': 30, 'p99': 100} samples required per percentile",
+    "unit": "ms"
+   },
+   "ARBUSDT|18": {
+    "n": 33,
+    "min": 13.0,
+    "max": 109.0,
+    "mean": 37.485,
+    "p50": 38.0,
+    "p90": 65.8,
+    "p99": null,
+    "suppressed": [
+     "p99"
+    ],
+    "suppressed_reason": "fewer than {'p50': 30, 'p90': 30, 'p99': 100} samples required per percentile",
+    "unit": "ms"
+   },
+   "ARBUSDT|19": {
+    "n": 24
+   },
+   "ARBUSDT|20": {
+    "n": 9
+   },
+   "ARBUSDT|21": {
+    "n": 22
+   },
+   "ARBUSDT|22": {
+    "n": 19
+   },
+   "ARBUSDT|23": {
+    "n": 14
+   },
+   "ATOMUSDT|00": {
+    "n": 183,
+    "min": 13.0,
+    "max": 402.0,
+    "mean": 74.399,
+    "p50": 64.0,
+    "p90": 129.8,
+    "p99": 240.44,
+    "unit": "ms"
+   },
+   "ATOMUSDT|01": {
+    "n": 20
+   },
+   "ATOMUSDT|02": {
+    "n": 9
+   },
+   "ATOMUSDT|03": {
+    "n": 4
+   },
+   "ATOMUSDT|04": {
+    "n": 1
+   },
+   "ATOMUSDT|05": {
+    "n": 74,
+    "min": 15.0,
+    "max": 206.0,
+    "mean": 67.203,
+    "p50": 62.0,
+    "p90": 123.4,
+    "p99": null,
+    "suppressed": [
+     "p99"
+    ],
+    "suppressed_reason": "fewer than {'p50': 30, 'p90': 30, 'p99': 100} samples required per percentile",
+    "unit": "ms"
+   },
+   "ATOMUSDT|07": {
+    "n": 152,
+    "min": 13.0,
+    "max": 140.0,
+    "mean": 37.901,
+    "p50": 30.0,
+    "p90": 67.6,
+    "p99": 95.25,
+    "unit": "ms"
+   },
+   "ATOMUSDT|08": {
+    "n": 11
+   },
+   "ATOMUSDT|09": {
+    "n": 21
+   },
+   "ATOMUSDT|10": {
+    "n": 23
+   },
+   "ATOMUSDT|11": {
+    "n": 36,
+    "min": 13.0,
+    "max": 73.0,
+    "mean": 24.5,
+    "p50": 18.0,
+    "p90": 39.0,
+    "p99": null,
+    "suppressed": [
+     "p99"
+    ],
+    "suppressed_reason": "fewer than {'p50': 30, 'p90': 30, 'p99': 100} samples required per percentile",
+    "unit": "ms"
+   },
+   "ATOMUSDT|12": {
+    "n": 18
+   },
+   "ATOMUSDT|13": {
+    "n": 15
+   },
+   "ATOMUSDT|14": {
+    "n": 49,
+    "min": 14.0,
+    "max": 134.0,
+    "mean": 34.898,
+    "p50": 29.0,
+    "p90": 61.4,
+    "p99": null,
+    "suppressed": [
+     "p99"
+    ],
+    "suppressed_reason": "fewer than {'p50': 30, 'p90': 30, 'p99': 100} samples required per percentile",
+    "unit": "ms"
+   },
+   "ATOMUSDT|15": {
+    "n": 40,
+    "min": 14.0,
+    "max": 110.0,
+    "mean": 30.225,
+    "p50": 25.0,
+    "p90": 46.1,
+    "p99": null,
+    "suppressed": [
+     "p99"
+    ],
+    "suppressed_reason": "fewer than {'p50': 30, 'p90': 30, 'p99': 100} samples required per percentile",
+    "unit": "ms"
+   },
+   "ATOMUSDT|16": {
+    "n": 31,
+    "min": 13.0,
+    "max": 109.0,
+    "mean": 29.419,
+    "p50": 23.0,
+    "p90": 44.0,
+    "p99": null,
+    "suppressed": [
+     "p99"
+    ],
+    "suppressed_reason": "fewer than {'p50': 30, 'p90': 30, 'p99': 100} samples required per percentile",
+    "unit": "ms"
+   },
+   "ATOMUSDT|17": {
+    "n": 38,
+    "min": 13.0,
+    "max": 1098.0,
+    "mean": 56.263,
+    "p50": 23.0,
+    "p90": 51.3,
+    "p99": null,
+    "suppressed": [
+     "p99"
+    ],
+    "suppressed_reason": "fewer than {'p50': 30, 'p90': 30, 'p99': 100} samples required per percentile",
+    "unit": "ms"
+   },
+   "ATOMUSDT|18": {
+    "n": 50,
+    "min": 13.0,
+    "max": 162.0,
+    "mean": 44.7,
+    "p50": 41.5,
+    "p90": 73.9,
+    "p99": null,
+    "suppressed": [
+     "p99"
+    ],
+    "suppressed_reason": "fewer than {'p50': 30, 'p90': 30, 'p99': 100} samples required per percentile",
+    "unit": "ms"
+   },
+   "ATOMUSDT|19": {
+    "n": 54,
+    "min": 14.0,
+    "max": 272.0,
+    "mean": 43.611,
+    "p50": 30.5,
+    "p90": 66.8,
+    "p99": null,
+    "suppressed": [
+     "p99"
+    ],
+    "suppressed_reason": "fewer than {'p50': 30, 'p90': 30, 'p99': 100} samples required per percentile",
+    "unit": "ms"
+   },
+   "ATOMUSDT|20": {
+    "n": 43,
+    "min": 14.0,
+    "max": 412.0,
+    "mean": 36.442,
+    "p50": 22.0,
+    "p90": 49.0,
+    "p99": null,
+    "suppressed": [
+     "p99"
+    ],
+    "suppressed_reason": "fewer than {'p50': 30, 'p90': 30, 'p99': 100} samples required per percentile",
+    "unit": "ms"
+   },
+   "ATOMUSDT|21": {
+    "n": 24
+   },
+   "ATOMUSDT|22": {
+    "n": 20
+   },
+   "ATOMUSDT|23": {
+    "n": 28
+   },
+   "AVAXUSDT|00": {
+    "n": 82,
+    "min": 13.0,
+    "max": 223.0,
+    "mean": 68.537,
+    "p50": 63.0,
+    "p90": 123.4,
+    "p99": null,
+    "suppressed": [
+     "p99"
+    ],
+    "suppressed_reason": "fewer than {'p50': 30, 'p90': 30, 'p99': 100} samples required per percentile",
+    "unit": "ms"
+   },
+   "AVAXUSDT|01": {
+    "n": 106,
+    "min": 15.0,
+    "max": 557.0,
+    "mean": 82.896,
+    "p50": 76.5,
+    "p90": 142.0,
+    "p99": 257.05,
+    "unit": "ms"
+   },
+   "AVAXUSDT|02": {
+    "n": 45,
+    "min": 15.0,
+    "max": 196.0,
+    "mean": 79.467,
+    "p50": 73.0,
+    "p90": 134.0,
+    "p99": null,
+    "suppressed": [
+     "p99"
+    ],
+    "suppressed_reason": "fewer than {'p50': 30, 'p90': 30, 'p99': 100} samples required per percentile",
+    "unit": "ms"
+   },
+   "AVAXUSDT|03": {
+    "n": 13
+   },
+   "AVAXUSDT|04": {
+    "n": 18
+   },
+   "AVAXUSDT|05": {
+    "n": 470,
+    "min": 15.0,
+    "max": 308.0,
+    "mean": 81.157,
+    "p50": 69.5,
+    "p90": 139.2,
+    "p99": 240.96,
+    "unit": "ms"
+   },
+   "AVAXUSDT|06": {
+    "n": 35,
+    "min": 14.0,
+    "max": 122.0,
+    "mean": 32.514,
+    "p50": 22.0,
+    "p90": 62.4,
+    "p99": null,
+    "suppressed": [
+     "p99"
+    ],
+    "suppressed_reason": "fewer than {'p50': 30, 'p90': 30, 'p99': 100} samples required per percentile",
+    "unit": "ms"
+   },
+   "AVAXUSDT|07": {
+    "n": 40,
+    "min": 14.0,
+    "max": 94.0,
+    "mean": 33.625,
+    "p50": 27.5,
+    "p90": 60.2,
+    "p99": null,
+    "suppressed": [
+     "p99"
+    ],
+    "suppressed_reason": "fewer than {'p50': 30, 'p90': 30, 'p99': 100} samples required per percentile",
+    "unit": "ms"
+   },
+   "AVAXUSDT|08": {
+    "n": 4
+   },
+   "AVAXUSDT|09": {
+    "n": 14
+   },
+   "AVAXUSDT|10": {
+    "n": 48,
+    "min": 14.0,
+    "max": 164.0,
+    "mean": 38.646,
+    "p50": 34.5,
+    "p90": 63.0,
+    "p99": null,
+    "suppressed": [
+     "p99"
+    ],
+    "suppressed_reason": "fewer than {'p50': 30, 'p90': 30, 'p99': 100} samples required per percentile",
+    "unit": "ms"
+   },
+   "AVAXUSDT|11": {
+    "n": 23
+   },
+   "AVAXUSDT|12": {
+    "n": 16
+   },
+   "AVAXUSDT|13": {
+    "n": 66,
+    "min": 13.0,
+    "max": 84.0,
+    "mean": 31.045,
+    "p50": 28.0,
+    "p90": 49.5,
+    "p99": null,
+    "suppressed": [
+     "p99"
+    ],
+    "suppressed_reason": "fewer than {'p50': 30, 'p90': 30, 'p99': 100} samples required per percentile",
+    "unit": "ms"
+   },
+   "AVAXUSDT|14": {
+    "n": 70,
+    "min": 13.0,
+    "max": 112.0,
+    "mean": 38.543,
+    "p50": 33.0,
+    "p90": 68.1,
+    "p99": null,
+    "suppressed": [
+     "p99"
+    ],
+    "suppressed_reason": "fewer than {'p50': 30, 'p90': 30, 'p99': 100} samples required per percentile",
+    "unit": "ms"
+   },
+   "AVAXUSDT|15": {
+    "n": 47,
+    "min": 13.0,
+    "max": 87.0,
+    "mean": 35.0,
+    "p50": 30.0,
+    "p90": 62.4,
+    "p99": null,
+    "suppressed": [
+     "p99"
+    ],
+    "suppressed_reason": "fewer than {'p50': 30, 'p90': 30, 'p99': 100} samples required per percentile",
+    "unit": "ms"
+   },
+   "AVAXUSDT|16": {
+    "n": 34,
+    "min": 13.0,
+    "max": 50.0,
+    "mean": 23.382,
+    "p50": 20.0,
+    "p90": 34.4,
+    "p99": null,
+    "suppressed": [
+     "p99"
+    ],
+    "suppressed_reason": "fewer than {'p50': 30, 'p90': 30, 'p99': 100} samples required per percentile",
+    "unit": "ms"
+   },
+   "AVAXUSDT|17": {
+    "n": 38,
+    "min": 15.0,
+    "max": 647.0,
+    "mean": 44.079,
+    "p50": 20.0,
+    "p90": 56.2,
+    "p99": null,
+    "suppressed": [
+     "p99"
+    ],
+    "suppressed_reason": "fewer than {'p50': 30, 'p90': 30, 'p99': 100} samples required per percentile",
+    "unit": "ms"
+   },
+   "AVAXUSDT|18": {
+    "n": 55,
+    "min": 13.0,
+    "max": 96.0,
+    "mean": 28.782,
+    "p50": 25.0,
+    "p90": 49.0,
+    "p99": null,
+    "suppressed": [
+     "p99"
+    ],
+    "suppressed_reason": "fewer than {'p50': 30, 'p90': 30, 'p99': 100} samples required per percentile",
+    "unit": "ms"
+   },
+   "AVAXUSDT|19": {
+    "n": 45,
+    "min": 14.0,
+    "max": 74.0,
+    "mean": 29.2,
+    "p50": 22.0,
+    "p90": 51.8,
+    "p99": null,
+    "suppressed": [
+     "p99"
+    ],
+    "suppressed_reason": "fewer than {'p50': 30, 'p90': 30, 'p99': 100} samples required per percentile",
+    "unit": "ms"
+   },
+   "AVAXUSDT|20": {
+    "n": 24
+   },
+   "AVAXUSDT|21": {
+    "n": 24
+   },
+   "AVAXUSDT|22": {
+    "n": 31,
+    "min": 12.0,
+    "max": 87.0,
+    "mean": 29.258,
+    "p50": 19.0,
+    "p90": 53.0,
+    "p99": null,
+    "suppressed": [
+     "p99"
+    ],
+    "suppressed_reason": "fewer than {'p50': 30, 'p90': 30, 'p99': 100} samples required per percentile",
+    "unit": "ms"
+   },
+   "AVAXUSDT|23": {
+    "n": 27
+   },
+   "BNBUSDT|00": {
+    "n": 3
+   },
+   "BNBUSDT|01": {
+    "n": 16
+   },
+   "BNBUSDT|02": {
+    "n": 12
+   },
+   "BNBUSDT|03": {
+    "n": 7
+   },
+   "BNBUSDT|08": {
+    "n": 20
+   },
+   "BNBUSDT|09": {
+    "n": 29
+   },
+   "BNBUSDT|10": {
+    "n": 23
+   },
+   "BNBUSDT|11": {
+    "n": 26
+   },
+   "BNBUSDT|12": {
+    "n": 34,
+    "min": 15.0,
+    "max": 128.0,
+    "mean": 39.294,
+    "p50": 31.5,
+    "p90": 73.9,
+    "p99": null,
+    "suppressed": [
+     "p99"
+    ],
+    "suppressed_reason": "fewer than {'p50': 30, 'p90': 30, 'p99': 100} samples required per percentile",
+    "unit": "ms"
+   },
+   "BNBUSDT|13": {
+    "n": 107,
+    "min": 13.0,
+    "max": 120.0,
+    "mean": 39.682,
+    "p50": 32.0,
+    "p90": 79.4,
+    "p99": 111.0,
+    "unit": "ms"
+   },
+   "BNBUSDT|14": {
+    "n": 81,
+    "min": 14.0,
+    "max": 103.0,
+    "mean": 38.222,
+    "p50": 34.0,
+    "p90": 69.0,
+    "p99": null,
+    "suppressed": [
+     "p99"
+    ],
+    "suppressed_reason": "fewer than {'p50': 30, 'p90': 30, 'p99': 100} samples required per percentile",
+    "unit": "ms"
+   },
+   "BNBUSDT|15": {
+    "n": 36,
+    "min": 14.0,
+    "max": 92.0,
+    "mean": 40.111,
+    "p50": 39.0,
+    "p90": 62.0,
+    "p99": null,
+    "suppressed": [
+     "p99"
+    ],
+    "suppressed_reason": "fewer than {'p50': 30, 'p90': 30, 'p99': 100} samples required per percentile",
+    "unit": "ms"
+   },
+   "BNBUSDT|16": {
+    "n": 44,
+    "min": 13.0,
+    "max": 593.0,
+    "mean": 39.227,
+    "p50": 20.5,
+    "p90": 49.8,
+    "p99": null,
+    "suppressed": [
+     "p99"
+    ],
+    "suppressed_reason": "fewer than {'p50': 30, 'p90': 30, 'p99': 100} samples required per percentile",
+    "unit": "ms"
+   },
+   "BNBUSDT|17": {
+    "n": 40,
+    "min": 15.0,
+    "max": 594.0,
+    "mean": 66.125,
+    "p50": 25.5,
+    "p90": 57.2,
+    "p99": null,
+    "suppressed": [
+     "p99"
+    ],
+    "suppressed_reason": "fewer than {'p50': 30, 'p90': 30, 'p99': 100} samples required per percentile",
+    "unit": "ms"
+   },
+   "BNBUSDT|18": {
+    "n": 52,
+    "min": 15.0,
+    "max": 2702.0,
+    "mean": 79.404,
+    "p50": 21.5,
+    "p90": 44.9,
+    "p99": null,
+    "suppressed": [
+     "p99"
+    ],
+    "suppressed_reason": "fewer than {'p50': 30, 'p90': 30, 'p99': 100} samples required per percentile",
+    "unit": "ms"
+   },
+   "BNBUSDT|19": {
+    "n": 45,
+    "min": 15.0,
+    "max": 205.0,
+    "mean": 46.6,
+    "p50": 30.0,
+    "p90": 81.6,
+    "p99": null,
+    "suppressed": [
+     "p99"
+    ],
+    "suppressed_reason": "fewer than {'p50': 30, 'p90': 30, 'p99': 100} samples required per percentile",
+    "unit": "ms"
+   },
+   "BNBUSDT|20": {
+    "n": 21
+   },
+   "BNBUSDT|21": {
+    "n": 31,
+    "min": 13.0,
+    "max": 67.0,
+    "mean": 26.194,
+    "p50": 20.0,
+    "p90": 48.0,
+    "p99": null,
+    "suppressed": [
+     "p99"
+    ],
+    "suppressed_reason": "fewer than {'p50': 30, 'p90': 30, 'p99': 100} samples required per percentile",
+    "unit": "ms"
+   },
+   "BNBUSDT|22": {
+    "n": 12
+   },
+   "BNBUSDT|23": {
+    "n": 10
+   },
+   "BTCUSDT|00": {
+    "n": 8
+   },
+   "BTCUSDT|01": {
+    "n": 77,
+    "min": 26.0,
+    "max": 292.0,
+    "mean": 92.623,
+    "p50": 75.0,
+    "p90": 170.0,
+    "p99": null,
+    "suppressed": [
+     "p99"
+    ],
+    "suppressed_reason": "fewer than {'p50': 30, 'p90': 30, 'p99': 100} samples required per percentile",
+    "unit": "ms"
+   },
+   "BTCUSDT|02": {
+    "n": 6
+   },
+   "BTCUSDT|03": {
+    "n": 2
+   },
+   "BTCUSDT|04": {
+    "n": 4
+   },
+   "BTCUSDT|05": {
+    "n": 34,
+    "min": 16.0,
+    "max": 517.0,
+    "mean": 91.706,
+    "p50": 72.0,
+    "p90": 137.0,
+    "p99": null,
+    "suppressed": [
+     "p99"
+    ],
+    "suppressed_reason": "fewer than {'p50': 30, 'p90': 30, 'p99': 100} samples required per percentile",
+    "unit": "ms"
+   },
+   "BTCUSDT|06": {
+    "n": 93,
+    "min": 13.0,
+    "max": 105.0,
+    "mean": 36.71,
+    "p50": 30.0,
+    "p90": 72.0,
+    "p99": null,
+    "suppressed": [
+     "p99"
+    ],
+    "suppressed_reason": "fewer than {'p50': 30, 'p90': 30, 'p99': 100} samples required per percentile",
+    "unit": "ms"
+   },
+   "BTCUSDT|07": {
+    "n": 48,
+    "min": 14.0,
+    "max": 144.0,
+    "mean": 38.938,
+    "p50": 24.0,
+    "p90": 92.3,
+    "p99": null,
+    "suppressed": [
+     "p99"
+    ],
+    "suppressed_reason": "fewer than {'p50': 30, 'p90': 30, 'p99': 100} samples required per percentile",
+    "unit": "ms"
+   },
+   "BTCUSDT|08": {
+    "n": 4
+   },
+   "BTCUSDT|09": {
+    "n": 9
+   },
+   "BTCUSDT|10": {
+    "n": 29
+   },
+   "BTCUSDT|11": {
+    "n": 33,
+    "min": 13.0,
+    "max": 100.0,
+    "mean": 39.697,
+    "p50": 32.0,
+    "p90": 71.6,
+    "p99": null,
+    "suppressed": [
+     "p99"
+    ],
+    "suppressed_reason": "fewer than {'p50': 30, 'p90': 30, 'p99': 100} samples required per percentile",
+    "unit": "ms"
+   },
+   "BTCUSDT|12": {
+    "n": 9
+   },
+   "BTCUSDT|13": {
+    "n": 17
+   },
+   "BTCUSDT|14": {
+    "n": 25
+   },
+   "BTCUSDT|15": {
+    "n": 25
+   },
+   "BTCUSDT|16": {
+    "n": 17
+   },
+   "BTCUSDT|17": {
+    "n": 12
+   },
+   "BTCUSDT|18": {
+    "n": 10
+   },
+   "BTCUSDT|19": {
+    "n": 4
+   },
+   "BTCUSDT|20": {
+    "n": 15
+   },
+   "BTCUSDT|21": {
+    "n": 31,
+    "min": 14.0,
+    "max": 44.0,
+    "mean": 23.29,
+    "p50": 20.0,
+    "p90": 37.0,
+    "p99": null,
+    "suppressed": [
+     "p99"
+    ],
+    "suppressed_reason": "fewer than {'p50': 30, 'p90': 30, 'p99': 100} samples required per percentile",
+    "unit": "ms"
+   },
+   "BTCUSDT|22": {
+    "n": 11
+   },
+   "BTCUSDT|23": {
+    "n": 8
+   },
+   "DOGEUSDT|00": {
+    "n": 219,
+    "min": 15.0,
+    "max": 321.0,
+    "mean": 75.58,
+    "p50": 66.0,
+    "p90": 134.2,
+    "p99": 234.5,
+    "unit": "ms"
+   },
+   "DOGEUSDT|01": {
+    "n": 563,
+    "min": 15.0,
+    "max": 383.0,
+    "mean": 84.657,
+    "p50": 72.0,
+    "p90": 143.8,
+    "p99": 334.18,
+    "unit": "ms"
+   },
+   "DOGEUSDT|02": {
+    "n": 240,
+    "min": 13.0,
+    "max": 280.0,
+    "mean": 72.642,
+    "p50": 62.0,
+    "p90": 130.2,
+    "p99": 230.66,
+    "unit": "ms"
+   },
+   "DOGEUSDT|03": {
+    "n": 19
+   },
+   "DOGEUSDT|04": {
+    "n": 3
+   },
+   "DOGEUSDT|05": {
+    "n": 31,
+    "min": 17.0,
+    "max": 276.0,
+    "mean": 78.613,
+    "p50": 67.0,
+    "p90": 137.0,
+    "p99": null,
+    "suppressed": [
+     "p99"
+    ],
+    "suppressed_reason": "fewer than {'p50': 30, 'p90': 30, 'p99': 100} samples required per percentile",
+    "unit": "ms"
+   },
+   "DOGEUSDT|08": {
+    "n": 5
+   },
+   "DOGEUSDT|09": {
+    "n": 17
+   },
+   "DOGEUSDT|10": {
+    "n": 9
+   },
+   "DOGEUSDT|11": {
+    "n": 35,
+    "min": 12.0,
+    "max": 41.0,
+    "mean": 20.114,
+    "p50": 17.0,
+    "p90": 30.2,
+    "p99": null,
+    "suppressed": [
+     "p99"
+    ],
+    "suppressed_reason": "fewer than {'p50': 30, 'p90': 30, 'p99': 100} samples required per percentile",
+    "unit": "ms"
+   },
+   "DOGEUSDT|12": {
+    "n": 32,
+    "min": 13.0,
+    "max": 190.0,
+    "mean": 40.656,
+    "p50": 30.5,
+    "p90": 64.9,
+    "p99": null,
+    "suppressed": [
+     "p99"
+    ],
+    "suppressed_reason": "fewer than {'p50': 30, 'p90': 30, 'p99': 100} samples required per percentile",
+    "unit": "ms"
+   },
+   "DOGEUSDT|13": {
+    "n": 44,
+    "min": 14.0,
+    "max": 4130.0,
+    "mean": 136.659,
+    "p50": 44.5,
+    "p90": 71.9,
+    "p99": null,
+    "suppressed": [
+     "p99"
+    ],
+    "suppressed_reason": "fewer than {'p50': 30, 'p90': 30, 'p99': 100} samples required per percentile",
+    "unit": "ms"
+   },
+   "DOGEUSDT|14": {
+    "n": 57,
+    "min": 13.0,
+    "max": 101.0,
+    "mean": 30.842,
+    "p50": 25.0,
+    "p90": 51.0,
+    "p99": null,
+    "suppressed": [
+     "p99"
+    ],
+    "suppressed_reason": "fewer than {'p50': 30, 'p90': 30, 'p99': 100} samples required per percentile",
+    "unit": "ms"
+   },
+   "DOGEUSDT|15": {
+    "n": 106,
+    "min": 12.0,
+    "max": 597.0,
+    "mean": 36.896,
+    "p50": 23.5,
+    "p90": 63.0,
+    "p99": 94.85,
+    "unit": "ms"
+   },
+   "DOGEUSDT|16": {
+    "n": 70,
+    "min": 12.0,
+    "max": 121.0,
+    "mean": 31.143,
+    "p50": 23.5,
+    "p90": 56.2,
+    "p99": null,
+    "suppressed": [
+     "p99"
+    ],
+    "suppressed_reason": "fewer than {'p50': 30, 'p90': 30, 'p99': 100} samples required per percentile",
+    "unit": "ms"
+   },
+   "DOGEUSDT|17": {
+    "n": 49,
+    "min": 12.0,
+    "max": 591.0,
+    "mean": 35.98,
+    "p50": 18.0,
+    "p90": 42.8,
+    "p99": null,
+    "suppressed": [
+     "p99"
+    ],
+    "suppressed_reason": "fewer than {'p50': 30, 'p90': 30, 'p99': 100} samples required per percentile",
+    "unit": "ms"
+   },
+   "DOGEUSDT|18": {
+    "n": 72,
+    "min": 14.0,
+    "max": 122.0,
+    "mean": 37.611,
+    "p50": 34.0,
+    "p90": 71.7,
+    "p99": null,
+    "suppressed": [
+     "p99"
+    ],
+    "suppressed_reason": "fewer than {'p50': 30, 'p90': 30, 'p99': 100} samples required per percentile",
+    "unit": "ms"
+   },
+   "DOGEUSDT|19": {
+    "n": 100,
+    "min": 13.0,
+    "max": 158.0,
+    "mean": 35.9,
+    "p50": 27.0,
+    "p90": 69.1,
+    "p99": 92.66,
+    "unit": "ms"
+   },
+   "DOGEUSDT|20": {
+    "n": 49,
+    "min": 13.0,
+    "max": 73.0,
+    "mean": 27.918,
+    "p50": 24.0,
+    "p90": 44.0,
+    "p99": null,
+    "suppressed": [
+     "p99"
+    ],
+    "suppressed_reason": "fewer than {'p50': 30, 'p90': 30, 'p99': 100} samples required per percentile",
+    "unit": "ms"
+   },
+   "DOGEUSDT|21": {
+    "n": 59,
+    "min": 12.0,
+    "max": 62.0,
+    "mean": 25.661,
+    "p50": 21.0,
+    "p90": 46.0,
+    "p99": null,
+    "suppressed": [
+     "p99"
+    ],
+    "suppressed_reason": "fewer than {'p50': 30, 'p90': 30, 'p99': 100} samples required per percentile",
+    "unit": "ms"
+   },
+   "DOGEUSDT|22": {
+    "n": 97,
+    "min": 13.0,
+    "max": 101.0,
+    "mean": 32.196,
+    "p50": 28.0,
+    "p90": 59.0,
+    "p99": null,
+    "suppressed": [
+     "p99"
+    ],
+    "suppressed_reason": "fewer than {'p50': 30, 'p90': 30, 'p99': 100} samples required per percentile",
+    "unit": "ms"
+   },
+   "DOGEUSDT|23": {
+    "n": 88,
+    "min": 12.0,
+    "max": 130.0,
+    "mean": 41.568,
+    "p50": 34.5,
+    "p90": 82.9,
+    "p99": null,
+    "suppressed": [
+     "p99"
+    ],
+    "suppressed_reason": "fewer than {'p50': 30, 'p90': 30, 'p99': 100} samples required per percentile",
+    "unit": "ms"
+   },
+   "DOTUSDT|00": {
+    "n": 2
+   },
+   "DOTUSDT|01": {
+    "n": 11
+   },
+   "DOTUSDT|02": {
+    "n": 7
+   },
+   "DOTUSDT|03": {
+    "n": 7
+   },
+   "DOTUSDT|05": {
+    "n": 35,
+    "min": 32.0,
+    "max": 238.0,
+    "mean": 82.229,
+    "p50": 70.0,
+    "p90": 143.8,
+    "p99": null,
+    "suppressed": [
+     "p99"
+    ],
+    "suppressed_reason": "fewer than {'p50': 30, 'p90': 30, 'p99': 100} samples required per percentile",
+    "unit": "ms"
+   },
+   "DOTUSDT|08": {
+    "n": 6
+   },
+   "DOTUSDT|09": {
+    "n": 17
+   },
+   "DOTUSDT|10": {
+    "n": 31,
+    "min": 13.0,
+    "max": 66.0,
+    "mean": 30.677,
+    "p50": 26.0,
+    "p90": 46.0,
+    "p99": null,
+    "suppressed": [
+     "p99"
+    ],
+    "suppressed_reason": "fewer than {'p50': 30, 'p90': 30, 'p99': 100} samples required per percentile",
+    "unit": "ms"
+   },
+   "DOTUSDT|11": {
+    "n": 23
+   },
+   "DOTUSDT|12": {
+    "n": 1
+   },
+   "DOTUSDT|13": {
+    "n": 31,
+    "min": 13.0,
+    "max": 381.0,
+    "mean": 39.452,
+    "p50": 22.0,
+    "p90": 50.0,
+    "p99": null,
+    "suppressed": [
+     "p99"
+    ],
+    "suppressed_reason": "fewer than {'p50': 30, 'p90': 30, 'p99': 100} samples required per percentile",
+    "unit": "ms"
+   },
+   "DOTUSDT|14": {
+    "n": 5
+   },
+   "DOTUSDT|15": {
+    "n": 17
+   },
+   "DOTUSDT|16": {
+    "n": 26
+   },
+   "DOTUSDT|17": {
+    "n": 22
+   },
+   "DOTUSDT|18": {
+    "n": 24
+   },
+   "DOTUSDT|19": {
+    "n": 26
+   },
+   "DOTUSDT|20": {
+    "n": 19
+   },
+   "DOTUSDT|21": {
+    "n": 10
+   },
+   "DOTUSDT|22": {
+    "n": 22
+   },
+   "DOTUSDT|23": {
+    "n": 6
+   },
+   "ENAUSDT|00": {
+    "n": 5
+   },
+   "ENAUSDT|01": {
+    "n": 96,
+    "min": 14.0,
+    "max": 421.0,
+    "mean": 89.01,
+    "p50": 79.5,
+    "p90": 141.0,
+    "p99": null,
+    "suppressed": [
+     "p99"
+    ],
+    "suppressed_reason": "fewer than {'p50': 30, 'p90': 30, 'p99': 100} samples required per percentile",
+    "unit": "ms"
+   },
+   "ENAUSDT|02": {
+    "n": 62,
+    "min": 18.0,
+    "max": 188.0,
+    "mean": 77.435,
+    "p50": 68.0,
+    "p90": 124.8,
+    "p99": null,
+    "suppressed": [
+     "p99"
+    ],
+    "suppressed_reason": "fewer than {'p50': 30, 'p90': 30, 'p99': 100} samples required per percentile",
+    "unit": "ms"
+   },
+   "ENAUSDT|03": {
+    "n": 2
+   },
+   "ENAUSDT|08": {
+    "n": 28
+   },
+   "ENAUSDT|09": {
+    "n": 48,
+    "min": 14.0,
+    "max": 71.0,
+    "mean": 29.333,
+    "p50": 22.5,
+    "p90": 55.2,
+    "p99": null,
+    "suppressed": [
+     "p99"
+    ],
+    "suppressed_reason": "fewer than {'p50': 30, 'p90': 30, 'p99': 100} samples required per percentile",
+    "unit": "ms"
+   },
+   "ENAUSDT|10": {
+    "n": 35,
+    "min": 12.0,
+    "max": 81.0,
+    "mean": 33.914,
+    "p50": 32.0,
+    "p90": 58.0,
+    "p99": null,
+    "suppressed": [
+     "p99"
+    ],
+    "suppressed_reason": "fewer than {'p50': 30, 'p90': 30, 'p99': 100} samples required per percentile",
+    "unit": "ms"
+   },
+   "ENAUSDT|11": {
+    "n": 58,
+    "min": 13.0,
+    "max": 69.0,
+    "mean": 25.879,
+    "p50": 20.5,
+    "p90": 42.9,
+    "p99": null,
+    "suppressed": [
+     "p99"
+    ],
+    "suppressed_reason": "fewer than {'p50': 30, 'p90': 30, 'p99': 100} samples required per percentile",
+    "unit": "ms"
+   },
+   "ENAUSDT|12": {
+    "n": 36,
+    "min": 14.0,
+    "max": 117.0,
+    "mean": 35.25,
+    "p50": 30.5,
+    "p90": 57.0,
+    "p99": null,
+    "suppressed": [
+     "p99"
+    ],
+    "suppressed_reason": "fewer than {'p50': 30, 'p90': 30, 'p99': 100} samples required per percentile",
+    "unit": "ms"
+   },
+   "ENAUSDT|13": {
+    "n": 22
+   },
+   "ENAUSDT|14": {
+    "n": 97,
+    "min": 13.0,
+    "max": 82.0,
+    "mean": 31.206,
+    "p50": 27.0,
+    "p90": 51.0,
+    "p99": null,
+    "suppressed": [
+     "p99"
+    ],
+    "suppressed_reason": "fewer than {'p50': 30, 'p90': 30, 'p99': 100} samples required per percentile",
+    "unit": "ms"
+   },
+   "ENAUSDT|15": {
+    "n": 34,
+    "min": 12.0,
+    "max": 80.0,
+    "mean": 27.088,
+    "p50": 24.5,
+    "p90": 43.4,
+    "p99": null,
+    "suppressed": [
+     "p99"
+    ],
+    "suppressed_reason": "fewer than {'p50': 30, 'p90': 30, 'p99': 100} samples required per percentile",
+    "unit": "ms"
+   },
+   "ENAUSDT|16": {
+    "n": 2
+   },
+   "ENAUSDT|17": {
+    "n": 63,
+    "min": 13.0,
+    "max": 100.0,
+    "mean": 29.254,
+    "p50": 20.0,
+    "p90": 57.6,
+    "p99": null,
+    "suppressed": [
+     "p99"
+    ],
+    "suppressed_reason": "fewer than {'p50': 30, 'p90': 30, 'p99': 100} samples required per percentile",
+    "unit": "ms"
+   },
+   "ENAUSDT|18": {
+    "n": 117,
+    "min": 13.0,
+    "max": 272.0,
+    "mean": 39.222,
+    "p50": 31.0,
+    "p90": 69.6,
+    "p99": 160.72,
+    "unit": "ms"
+   },
+   "ENAUSDT|19": {
+    "n": 63,
+    "min": 14.0,
+    "max": 184.0,
+    "mean": 37.571,
+    "p50": 29.0,
+    "p90": 68.0,
+    "p99": null,
+    "suppressed": [
+     "p99"
+    ],
+    "suppressed_reason": "fewer than {'p50': 30, 'p90': 30, 'p99': 100} samples required per percentile",
+    "unit": "ms"
+   },
+   "ENAUSDT|20": {
+    "n": 58,
+    "min": 12.0,
+    "max": 142.0,
+    "mean": 33.276,
+    "p50": 25.0,
+    "p90": 66.6,
+    "p99": null,
+    "suppressed": [
+     "p99"
+    ],
+    "suppressed_reason": "fewer than {'p50': 30, 'p90': 30, 'p99': 100} samples required per percentile",
+    "unit": "ms"
+   },
+   "ENAUSDT|21": {
+    "n": 100,
+    "min": 12.0,
+    "max": 109.0,
+    "mean": 28.26,
+    "p50": 20.5,
+    "p90": 47.4,
+    "p99": 99.1,
+    "unit": "ms"
+   },
+   "ENAUSDT|22": {
+    "n": 74,
+    "min": 14.0,
+    "max": 82.0,
+    "mean": 30.311,
+    "p50": 23.5,
+    "p90": 62.7,
+    "p99": null,
+    "suppressed": [
+     "p99"
+    ],
+    "suppressed_reason": "fewer than {'p50': 30, 'p90': 30, 'p99': 100} samples required per percentile",
+    "unit": "ms"
+   },
+   "ETHUSDT|00": {
+    "n": 96,
+    "min": 12.0,
+    "max": 89.0,
+    "mean": 28.406,
+    "p50": 20.0,
+    "p90": 49.5,
+    "p99": null,
+    "suppressed": [
+     "p99"
+    ],
+    "suppressed_reason": "fewer than {'p50': 30, 'p90': 30, 'p99': 100} samples required per percentile",
+    "unit": "ms"
+   },
+   "ETHUSDT|01": {
+    "n": 268,
+    "min": 13.0,
+    "max": 259.0,
+    "mean": 74.41,
+    "p50": 67.0,
+    "p90": 127.3,
+    "p99": 247.99,
+    "unit": "ms"
+   },
+   "ETHUSDT|02": {
+    "n": 102,
+    "min": 16.0,
+    "max": 237.0,
+    "mean": 69.745,
+    "p50": 62.0,
+    "p90": 121.5,
+    "p99": 227.98,
+    "unit": "ms"
+   },
+   "ETHUSDT|03": {
+    "n": 47,
+    "min": 14.0,
+    "max": 181.0,
+    "mean": 39.362,
+    "p50": 30.0,
+    "p90": 58.4,
+    "p99": null,
+    "suppressed": [
+     "p99"
+    ],
+    "suppressed_reason": "fewer than {'p50': 30, 'p90': 30, 'p99': 100} samples required per percentile",
+    "unit": "ms"
+   },
+   "ETHUSDT|04": {
+    "n": 18
+   },
+   "ETHUSDT|05": {
+    "n": 130,
+    "min": 15.0,
+    "max": 230.0,
+    "mean": 75.392,
+    "p50": 69.5,
+    "p90": 136.7,
+    "p99": 207.42,
+    "unit": "ms"
+   },
+   "ETHUSDT|06": {
+    "n": 90,
+    "min": 13.0,
+    "max": 242.0,
+    "mean": 34.078,
+    "p50": 22.5,
+    "p90": 59.8,
+    "p99": null,
+    "suppressed": [
+     "p99"
+    ],
+    "suppressed_reason": "fewer than {'p50': 30, 'p90': 30, 'p99': 100} samples required per percentile",
+    "unit": "ms"
+   },
+   "ETHUSDT|07": {
+    "n": 113,
+    "min": 13.0,
+    "max": 87.0,
+    "mean": 29.805,
+    "p50": 22.0,
+    "p90": 55.2,
+    "p99": 80.8,
+    "unit": "ms"
+   },
+   "ETHUSDT|08": {
+    "n": 6
+   },
+   "ETHUSDT|09": {
+    "n": 6
+   },
+   "ETHUSDT|10": {
+    "n": 39,
+    "min": 14.0,
+    "max": 161.0,
+    "mean": 40.872,
+    "p50": 28.0,
+    "p90": 75.0,
+    "p99": null,
+    "suppressed": [
+     "p99"
+    ],
+    "suppressed_reason": "fewer than {'p50': 30, 'p90': 30, 'p99': 100} samples required per percentile",
+    "unit": "ms"
+   },
+   "ETHUSDT|11": {
+    "n": 22
+   },
+   "ETHUSDT|12": {
+    "n": 18
+   },
+   "ETHUSDT|13": {
+    "n": 78,
+    "min": 12.0,
+    "max": 106.0,
+    "mean": 28.769,
+    "p50": 21.0,
+    "p90": 51.9,
+    "p99": null,
+    "suppressed": [
+     "p99"
+    ],
+    "suppressed_reason": "fewer than {'p50': 30, 'p90': 30, 'p99': 100} samples required per percentile",
+    "unit": "ms"
+   },
+   "ETHUSDT|14": {
+    "n": 117,
+    "min": 13.0,
+    "max": 101.0,
+    "mean": 34.581,
+    "p50": 29.0,
+    "p90": 61.4,
+    "p99": 94.4,
+    "unit": "ms"
+   },
+   "ETHUSDT|15": {
+    "n": 75,
+    "min": 12.0,
+    "max": 118.0,
+    "mean": 33.413,
+    "p50": 24.0,
+    "p90": 62.2,
+    "p99": null,
+    "suppressed": [
+     "p99"
+    ],
+    "suppressed_reason": "fewer than {'p50': 30, 'p90': 30, 'p99': 100} samples required per percentile",
+    "unit": "ms"
+   },
+   "ETHUSDT|16": {
+    "n": 56,
+    "min": 13.0,
+    "max": 64.0,
+    "mean": 29.571,
+    "p50": 23.5,
+    "p90": 57.0,
+    "p99": null,
+    "suppressed": [
+     "p99"
+    ],
+    "suppressed_reason": "fewer than {'p50': 30, 'p90': 30, 'p99': 100} samples required per percentile",
+    "unit": "ms"
+   },
+   "ETHUSDT|17": {
+    "n": 49,
+    "min": 13.0,
+    "max": 152.0,
+    "mean": 34.857,
+    "p50": 24.0,
+    "p90": 67.0,
+    "p99": null,
+    "suppressed": [
+     "p99"
+    ],
+    "suppressed_reason": "fewer than {'p50': 30, 'p90': 30, 'p99': 100} samples required per percentile",
+    "unit": "ms"
+   },
+   "ETHUSDT|18": {
+    "n": 66,
+    "min": 13.0,
+    "max": 92.0,
+    "mean": 32.818,
+    "p50": 23.5,
+    "p90": 64.0,
+    "p99": null,
+    "suppressed": [
+     "p99"
+    ],
+    "suppressed_reason": "fewer than {'p50': 30, 'p90': 30, 'p99': 100} samples required per percentile",
+    "unit": "ms"
+   },
+   "ETHUSDT|19": {
+    "n": 65,
+    "min": 16.0,
+    "max": 177.0,
+    "mean": 54.046,
+    "p50": 48.0,
+    "p90": 86.4,
+    "p99": null,
+    "suppressed": [
+     "p99"
+    ],
+    "suppressed_reason": "fewer than {'p50': 30, 'p90': 30, 'p99': 100} samples required per percentile",
+    "unit": "ms"
+   },
+   "ETHUSDT|20": {
+    "n": 34,
+    "min": 14.0,
+    "max": 146.0,
+    "mean": 45.088,
+    "p50": 41.0,
+    "p90": 84.1,
+    "p99": null,
+    "suppressed": [
+     "p99"
+    ],
+    "suppressed_reason": "fewer than {'p50': 30, 'p90': 30, 'p99': 100} samples required per percentile",
+    "unit": "ms"
+   },
+   "ETHUSDT|21": {
+    "n": 33,
+    "min": 12.0,
+    "max": 84.0,
+    "mean": 25.939,
+    "p50": 19.0,
+    "p90": 38.0,
+    "p99": null,
+    "suppressed": [
+     "p99"
+    ],
+    "suppressed_reason": "fewer than {'p50': 30, 'p90': 30, 'p99': 100} samples required per percentile",
+    "unit": "ms"
+   },
+   "ETHUSDT|22": {
+    "n": 72,
+    "min": 13.0,
+    "max": 73.0,
+    "mean": 33.931,
+    "p50": 28.0,
+    "p90": 62.6,
+    "p99": null,
+    "suppressed": [
+     "p99"
+    ],
+    "suppressed_reason": "fewer than {'p50': 30, 'p90': 30, 'p99': 100} samples required per percentile",
+    "unit": "ms"
+   },
+   "ETHUSDT|23": {
+    "n": 55,
+    "min": 13.0,
+    "max": 73.0,
+    "mean": 31.8,
+    "p50": 24.0,
+    "p90": 62.0,
+    "p99": null,
+    "suppressed": [
+     "p99"
+    ],
+    "suppressed_reason": "fewer than {'p50': 30, 'p90': 30, 'p99': 100} samples required per percentile",
+    "unit": "ms"
+   },
+   "FILUSDT|00": {
+    "n": 106,
+    "min": 13.0,
+    "max": 303.0,
+    "mean": 62.802,
+    "p50": 48.0,
+    "p90": 118.0,
+    "p99": 289.85,
+    "unit": "ms"
+   },
+   "FILUSDT|01": {
+    "n": 96,
+    "min": 14.0,
+    "max": 279.0,
+    "mean": 58.781,
+    "p50": 52.0,
+    "p90": 112.5,
+    "p99": null,
+    "suppressed": [
+     "p99"
+    ],
+    "suppressed_reason": "fewer than {'p50': 30, 'p90': 30, 'p99': 100} samples required per percentile",
+    "unit": "ms"
+   },
+   "FILUSDT|02": {
+    "n": 80,
+    "min": 16.0,
+    "max": 215.0,
+    "mean": 50.65,
+    "p50": 42.5,
+    "p90": 86.2,
+    "p99": null,
+    "suppressed": [
+     "p99"
+    ],
+    "suppressed_reason": "fewer than {'p50': 30, 'p90': 30, 'p99': 100} samples required per percentile",
+    "unit": "ms"
+   },
+   "FILUSDT|03": {
+    "n": 21
+   },
+   "FILUSDT|04": {
+    "n": 46,
+    "min": 14.0,
+    "max": 104.0,
+    "mean": 47.478,
+    "p50": 45.5,
+    "p90": 88.0,
+    "p99": null,
+    "suppressed": [
+     "p99"
+    ],
+    "suppressed_reason": "fewer than {'p50': 30, 'p90': 30, 'p99': 100} samples required per percentile",
+    "unit": "ms"
+   },
+   "FILUSDT|05": {
+    "n": 171,
+    "min": 16.0,
+    "max": 231.0,
+    "mean": 68.579,
+    "p50": 66.0,
+    "p90": 110.0,
+    "p99": 193.4,
+    "unit": "ms"
+   },
+   "FILUSDT|06": {
+    "n": 27
+   },
+   "FILUSDT|07": {
+    "n": 26
+   },
+   "FILUSDT|08": {
+    "n": 33,
+    "min": 13.0,
+    "max": 96.0,
+    "mean": 32.606,
+    "p50": 22.0,
+    "p90": 66.2,
+    "p99": null,
+    "suppressed": [
+     "p99"
+    ],
+    "suppressed_reason": "fewer than {'p50': 30, 'p90': 30, 'p99': 100} samples required per percentile",
+    "unit": "ms"
+   },
+   "FILUSDT|09": {
+    "n": 38,
+    "min": 13.0,
+    "max": 2152.0,
+    "mean": 92.237,
+    "p50": 29.5,
+    "p90": 58.5,
+    "p99": null,
+    "suppressed": [
+     "p99"
+    ],
+    "suppressed_reason": "fewer than {'p50': 30, 'p90': 30, 'p99': 100} samples required per percentile",
+    "unit": "ms"
+   },
+   "FILUSDT|10": {
+    "n": 49,
+    "min": 13.0,
+    "max": 88.0,
+    "mean": 32.122,
+    "p50": 25.0,
+    "p90": 54.6,
+    "p99": null,
+    "suppressed": [
+     "p99"
+    ],
+    "suppressed_reason": "fewer than {'p50': 30, 'p90': 30, 'p99': 100} samples required per percentile",
+    "unit": "ms"
+   },
+   "FILUSDT|11": {
+    "n": 78,
+    "min": 14.0,
+    "max": 112.0,
+    "mean": 34.513,
+    "p50": 29.5,
+    "p90": 55.5,
+    "p99": null,
+    "suppressed": [
+     "p99"
+    ],
+    "suppressed_reason": "fewer than {'p50': 30, 'p90': 30, 'p99': 100} samples required per percentile",
+    "unit": "ms"
+   },
+   "FILUSDT|12": {
+    "n": 31,
+    "min": 13.0,
+    "max": 128.0,
+    "mean": 38.677,
+    "p50": 25.0,
+    "p90": 88.0,
+    "p99": null,
+    "suppressed": [
+     "p99"
+    ],
+    "suppressed_reason": "fewer than {'p50': 30, 'p90': 30, 'p99': 100} samples required per percentile",
+    "unit": "ms"
+   },
+   "FILUSDT|13": {
+    "n": 86,
+    "min": 13.0,
+    "max": 86.0,
+    "mean": 31.105,
+    "p50": 24.0,
+    "p90": 54.5,
+    "p99": null,
+    "suppressed": [
+     "p99"
+    ],
+    "suppressed_reason": "fewer than {'p50': 30, 'p90': 30, 'p99': 100} samples required per percentile",
+    "unit": "ms"
+   },
+   "FILUSDT|14": {
+    "n": 64,
+    "min": 14.0,
+    "max": 123.0,
+    "mean": 37.578,
+    "p50": 29.5,
+    "p90": 67.5,
+    "p99": null,
+    "suppressed": [
+     "p99"
+    ],
+    "suppressed_reason": "fewer than {'p50': 30, 'p90': 30, 'p99': 100} samples required per percentile",
+    "unit": "ms"
+   },
+   "FILUSDT|15": {
+    "n": 78,
+    "min": 14.0,
+    "max": 89.0,
+    "mean": 35.385,
+    "p50": 28.0,
+    "p90": 67.3,
+    "p99": null,
+    "suppressed": [
+     "p99"
+    ],
+    "suppressed_reason": "fewer than {'p50': 30, 'p90': 30, 'p99': 100} samples required per percentile",
+    "unit": "ms"
+   },
+   "FILUSDT|16": {
+    "n": 36,
+    "min": 14.0,
+    "max": 114.0,
+    "mean": 28.722,
+    "p50": 19.5,
+    "p90": 51.0,
+    "p99": null,
+    "suppressed": [
+     "p99"
+    ],
+    "suppressed_reason": "fewer than {'p50': 30, 'p90': 30, 'p99': 100} samples required per percentile",
+    "unit": "ms"
+   },
+   "FILUSDT|17": {
+    "n": 90,
+    "min": 13.0,
+    "max": 121.0,
+    "mean": 28.122,
+    "p50": 20.5,
+    "p90": 47.3,
+    "p99": null,
+    "suppressed": [
+     "p99"
+    ],
+    "suppressed_reason": "fewer than {'p50': 30, 'p90': 30, 'p99': 100} samples required per percentile",
+    "unit": "ms"
+   },
+   "FILUSDT|18": {
+    "n": 81,
+    "min": 12.0,
+    "max": 120.0,
+    "mean": 35.136,
+    "p50": 26.0,
+    "p90": 71.0,
+    "p99": null,
+    "suppressed": [
+     "p99"
+    ],
+    "suppressed_reason": "fewer than {'p50': 30, 'p90': 30, 'p99': 100} samples required per percentile",
+    "unit": "ms"
+   },
+   "FILUSDT|19": {
+    "n": 58,
+    "min": 14.0,
+    "max": 78.0,
+    "mean": 31.914,
+    "p50": 28.5,
+    "p90": 53.2,
+    "p99": null,
+    "suppressed": [
+     "p99"
+    ],
+    "suppressed_reason": "fewer than {'p50': 30, 'p90': 30, 'p99': 100} samples required per percentile",
+    "unit": "ms"
+   },
+   "FILUSDT|20": {
+    "n": 25
+   },
+   "FILUSDT|21": {
+    "n": 27
+   },
+   "FILUSDT|22": {
+    "n": 68,
+    "min": 13.0,
+    "max": 100.0,
+    "mean": 33.971,
+    "p50": 29.0,
+    "p90": 60.6,
+    "p99": null,
+    "suppressed": [
+     "p99"
+    ],
+    "suppressed_reason": "fewer than {'p50': 30, 'p90': 30, 'p99': 100} samples required per percentile",
+    "unit": "ms"
+   },
+   "FILUSDT|23": {
+    "n": 65,
+    "min": 14.0,
+    "max": 231.0,
+    "mean": 41.523,
+    "p50": 29.0,
+    "p90": 63.4,
+    "p99": null,
+    "suppressed": [
+     "p99"
+    ],
+    "suppressed_reason": "fewer than {'p50': 30, 'p90': 30, 'p99': 100} samples required per percentile",
+    "unit": "ms"
+   },
+   "INJUSDT|00": {
+    "n": 60,
+    "min": 15.0,
+    "max": 191.0,
+    "mean": 66.367,
+    "p50": 57.0,
+    "p90": 115.3,
+    "p99": null,
+    "suppressed": [
+     "p99"
+    ],
+    "suppressed_reason": "fewer than {'p50': 30, 'p90': 30, 'p99': 100} samples required per percentile",
+    "unit": "ms"
+   },
+   "INJUSDT|01": {
+    "n": 64,
+    "min": 16.0,
+    "max": 308.0,
+    "mean": 79.203,
+    "p50": 70.0,
+    "p90": 123.6,
+    "p99": null,
+    "suppressed": [
+     "p99"
+    ],
+    "suppressed_reason": "fewer than {'p50': 30, 'p90': 30, 'p99': 100} samples required per percentile",
+    "unit": "ms"
+   },
+   "INJUSDT|02": {
+    "n": 33,
+    "min": 14.0,
+    "max": 202.0,
+    "mean": 57.758,
+    "p50": 49.0,
+    "p90": 104.2,
+    "p99": null,
+    "suppressed": [
+     "p99"
+    ],
+    "suppressed_reason": "fewer than {'p50': 30, 'p90': 30, 'p99': 100} samples required per percentile",
+    "unit": "ms"
+   },
+   "INJUSDT|03": {
+    "n": 5
+   },
+   "INJUSDT|04": {
+    "n": 6
+   },
+   "INJUSDT|05": {
+    "n": 65,
+    "min": 14.0,
+    "max": 175.0,
+    "mean": 50.785,
+    "p50": 43.0,
+    "p90": 90.6,
+    "p99": null,
+    "suppressed": [
+     "p99"
+    ],
+    "suppressed_reason": "fewer than {'p50': 30, 'p90': 30, 'p99': 100} samples required per percentile",
+    "unit": "ms"
+   },
+   "INJUSDT|06": {
+    "n": 232,
+    "min": 13.0,
+    "max": 88.0,
+    "mean": 29.905,
+    "p50": 21.5,
+    "p90": 57.9,
+    "p99": 81.76,
+    "unit": "ms"
+   },
+   "INJUSDT|07": {
+    "n": 520,
+    "min": 12.0,
+    "max": 99.0,
+    "mean": 31.396,
+    "p50": 26.0,
+    "p90": 55.0,
+    "p99": 80.0,
+    "unit": "ms"
+   },
+   "INJUSDT|08": {
+    "n": 18
+   },
+   "INJUSDT|09": {
+    "n": 21
+   },
+   "INJUSDT|10": {
+    "n": 41,
+    "min": 13.0,
+    "max": 95.0,
+    "mean": 36.073,
+    "p50": 32.0,
+    "p90": 70.0,
+    "p99": null,
+    "suppressed": [
+     "p99"
+    ],
+    "suppressed_reason": "fewer than {'p50': 30, 'p90': 30, 'p99': 100} samples required per percentile",
+    "unit": "ms"
+   },
+   "INJUSDT|11": {
+    "n": 27
+   },
+   "INJUSDT|12": {
+    "n": 51,
+    "min": 15.0,
+    "max": 73.0,
+    "mean": 37.176,
+    "p50": 36.0,
+    "p90": 58.0,
+    "p99": null,
+    "suppressed": [
+     "p99"
+    ],
+    "suppressed_reason": "fewer than {'p50': 30, 'p90': 30, 'p99': 100} samples required per percentile",
+    "unit": "ms"
+   },
+   "INJUSDT|13": {
+    "n": 48,
+    "min": 14.0,
+    "max": 251.0,
+    "mean": 40.896,
+    "p50": 31.5,
+    "p90": 70.5,
+    "p99": null,
+    "suppressed": [
+     "p99"
+    ],
+    "suppressed_reason": "fewer than {'p50': 30, 'p90': 30, 'p99': 100} samples required per percentile",
+    "unit": "ms"
+   },
+   "INJUSDT|14": {
+    "n": 40,
+    "min": 14.0,
+    "max": 989.0,
+    "mean": 229.125,
+    "p50": 57.0,
+    "p90": 771.1,
+    "p99": null,
+    "suppressed": [
+     "p99"
+    ],
+    "suppressed_reason": "fewer than {'p50': 30, 'p90': 30, 'p99': 100} samples required per percentile",
+    "unit": "ms"
+   },
+   "INJUSDT|15": {
+    "n": 30,
+    "min": 13.0,
+    "max": 101.0,
+    "mean": 36.767,
+    "p50": 35.0,
+    "p90": 62.9,
+    "p99": null,
+    "suppressed": [
+     "p99"
+    ],
+    "suppressed_reason": "fewer than {'p50': 30, 'p90': 30, 'p99': 100} samples required per percentile",
+    "unit": "ms"
+   },
+   "INJUSDT|16": {
+    "n": 23
+   },
+   "INJUSDT|17": {
+    "n": 40,
+    "min": 13.0,
+    "max": 100.0,
+    "mean": 31.75,
+    "p50": 25.5,
+    "p90": 58.2,
+    "p99": null,
+    "suppressed": [
+     "p99"
+    ],
+    "suppressed_reason": "fewer than {'p50': 30, 'p90': 30, 'p99': 100} samples required per percentile",
+    "unit": "ms"
+   },
+   "INJUSDT|18": {
+    "n": 21
+   },
+   "INJUSDT|19": {
+    "n": 22
+   },
+   "INJUSDT|20": {
+    "n": 31,
+    "min": 13.0,
+    "max": 192.0,
+    "mean": 28.677,
+    "p50": 19.0,
+    "p90": 39.0,
+    "p99": null,
+    "suppressed": [
+     "p99"
+    ],
+    "suppressed_reason": "fewer than {'p50': 30, 'p90': 30, 'p99': 100} samples required per percentile",
+    "unit": "ms"
+   },
+   "INJUSDT|21": {
+    "n": 31,
+    "min": 12.0,
+    "max": 139.0,
+    "mean": 28.258,
+    "p50": 22.0,
+    "p90": 42.0,
+    "p99": null,
+    "suppressed": [
+     "p99"
+    ],
+    "suppressed_reason": "fewer than {'p50': 30, 'p90': 30, 'p99': 100} samples required per percentile",
+    "unit": "ms"
+   },
+   "INJUSDT|22": {
+    "n": 25
+   },
+   "INJUSDT|23": {
+    "n": 11
+   },
+   "LTCUSDT|00": {
+    "n": 161,
+    "min": 12.0,
+    "max": 208.0,
+    "mean": 48.031,
+    "p50": 41.0,
+    "p90": 85.0,
+    "p99": 165.8,
+    "unit": "ms"
+   },
+   "LTCUSDT|01": {
+    "n": 74,
+    "min": 16.0,
+    "max": 282.0,
+    "mean": 70.365,
+    "p50": 55.5,
+    "p90": 132.6,
+    "p99": null,
+    "suppressed": [
+     "p99"
+    ],
+    "suppressed_reason": "fewer than {'p50': 30, 'p90': 30, 'p99': 100} samples required per percentile",
+    "unit": "ms"
+   },
+   "LTCUSDT|02": {
+    "n": 79,
+    "min": 14.0,
+    "max": 334.0,
+    "mean": 54.291,
+    "p50": 44.0,
+    "p90": 102.2,
+    "p99": null,
+    "suppressed": [
+     "p99"
+    ],
+    "suppressed_reason": "fewer than {'p50': 30, 'p90': 30, 'p99': 100} samples required per percentile",
+    "unit": "ms"
+   },
+   "LTCUSDT|03": {
+    "n": 50,
+    "min": 15.0,
+    "max": 99.0,
+    "mean": 37.9,
+    "p50": 35.5,
+    "p90": 63.0,
+    "p99": null,
+    "suppressed": [
+     "p99"
+    ],
+    "suppressed_reason": "fewer than {'p50': 30, 'p90': 30, 'p99': 100} samples required per percentile",
+    "unit": "ms"
+   },
+   "LTCUSDT|04": {
+    "n": 44,
+    "min": 14.0,
+    "max": 151.0,
+    "mean": 38.727,
+    "p50": 32.5,
+    "p90": 73.9,
+    "p99": null,
+    "suppressed": [
+     "p99"
+    ],
+    "suppressed_reason": "fewer than {'p50': 30, 'p90': 30, 'p99': 100} samples required per percentile",
+    "unit": "ms"
+   },
+   "LTCUSDT|05": {
+    "n": 102,
+    "min": 14.0,
+    "max": 153.0,
+    "mean": 47.51,
+    "p50": 42.5,
+    "p90": 82.8,
+    "p99": 142.93,
+    "unit": "ms"
+   },
+   "LTCUSDT|06": {
+    "n": 88,
+    "min": 14.0,
+    "max": 95.0,
+    "mean": 37.341,
+    "p50": 31.0,
+    "p90": 70.6,
+    "p99": null,
+    "suppressed": [
+     "p99"
+    ],
+    "suppressed_reason": "fewer than {'p50': 30, 'p90': 30, 'p99': 100} samples required per percentile",
+    "unit": "ms"
+   },
+   "LTCUSDT|07": {
+    "n": 77,
+    "min": 16.0,
+    "max": 130.0,
+    "mean": 45.481,
+    "p50": 44.0,
+    "p90": 70.8,
+    "p99": null,
+    "suppressed": [
+     "p99"
+    ],
+    "suppressed_reason": "fewer than {'p50': 30, 'p90': 30, 'p99': 100} samples required per percentile",
+    "unit": "ms"
+   },
+   "LTCUSDT|08": {
+    "n": 54,
+    "min": 15.0,
+    "max": 168.0,
+    "mean": 45.444,
+    "p50": 41.5,
+    "p90": 73.0,
+    "p99": null,
+    "suppressed": [
+     "p99"
+    ],
+    "suppressed_reason": "fewer than {'p50': 30, 'p90': 30, 'p99': 100} samples required per percentile",
+    "unit": "ms"
+   },
+   "LTCUSDT|09": {
+    "n": 53,
+    "min": 13.0,
+    "max": 92.0,
+    "mean": 36.094,
+    "p50": 28.0,
+    "p90": 77.2,
+    "p99": null,
+    "suppressed": [
+     "p99"
+    ],
+    "suppressed_reason": "fewer than {'p50': 30, 'p90': 30, 'p99': 100} samples required per percentile",
+    "unit": "ms"
+   },
+   "LTCUSDT|10": {
+    "n": 172,
+    "min": 12.0,
+    "max": 130.0,
+    "mean": 33.012,
+    "p50": 27.0,
+    "p90": 58.9,
+    "p99": 87.29,
+    "unit": "ms"
+   },
+   "LTCUSDT|11": {
+    "n": 92,
+    "min": 14.0,
+    "max": 321.0,
+    "mean": 43.739,
+    "p50": 30.0,
+    "p90": 79.8,
+    "p99": null,
+    "suppressed": [
+     "p99"
+    ],
+    "suppressed_reason": "fewer than {'p50': 30, 'p90': 30, 'p99': 100} samples required per percentile",
+    "unit": "ms"
+   },
+   "LTCUSDT|12": {
+    "n": 66,
+    "min": 13.0,
+    "max": 259.0,
+    "mean": 50.364,
+    "p50": 32.0,
+    "p90": 98.5,
+    "p99": null,
+    "suppressed": [
+     "p99"
+    ],
+    "suppressed_reason": "fewer than {'p50': 30, 'p90': 30, 'p99': 100} samples required per percentile",
+    "unit": "ms"
+   },
+   "LTCUSDT|13": {
+    "n": 129,
+    "min": 14.0,
+    "max": 253.0,
+    "mean": 39.922,
+    "p50": 31.0,
+    "p90": 64.4,
+    "p99": 167.6,
+    "unit": "ms"
+   },
+   "LTCUSDT|14": {
+    "n": 501,
+    "min": 12.0,
+    "max": 3257.0,
+    "mean": 40.236,
+    "p50": 27.0,
+    "p90": 58.0,
+    "p99": 101.0,
+    "unit": "ms"
+   },
+   "LTCUSDT|15": {
+    "n": 139,
+    "min": 13.0,
+    "max": 133.0,
+    "mean": 38.914,
+    "p50": 31.0,
+    "p90": 71.0,
+    "p99": 103.86,
+    "unit": "ms"
+   },
+   "LTCUSDT|16": {
+    "n": 101,
+    "min": 13.0,
+    "max": 269.0,
+    "mean": 35.673,
+    "p50": 29.0,
+    "p90": 61.0,
+    "p99": 105.0,
+    "unit": "ms"
+   },
+   "LTCUSDT|17": {
+    "n": 133,
+    "min": 13.0,
+    "max": 2000.0,
+    "mean": 43.511,
+    "p50": 23.0,
+    "p90": 49.6,
+    "p99": 120.2,
+    "unit": "ms"
+   },
+   "LTCUSDT|18": {
+    "n": 174,
+    "min": 12.0,
+    "max": 143.0,
+    "mean": 32.851,
+    "p50": 24.0,
+    "p90": 60.7,
+    "p99": 111.24,
+    "unit": "ms"
+   },
+   "LTCUSDT|19": {
+    "n": 126,
+    "min": 12.0,
+    "max": 247.0,
+    "mean": 32.087,
+    "p50": 23.0,
+    "p90": 49.5,
+    "p99": 184.0,
+    "unit": "ms"
+   },
+   "LTCUSDT|20": {
+    "n": 91,
+    "min": 12.0,
+    "max": 88.0,
+    "mean": 25.703,
+    "p50": 19.0,
+    "p90": 50.0,
+    "p99": null,
+    "suppressed": [
+     "p99"
+    ],
+    "suppressed_reason": "fewer than {'p50': 30, 'p90': 30, 'p99': 100} samples required per percentile",
+    "unit": "ms"
+   },
+   "LTCUSDT|21": {
+    "n": 117,
+    "min": 13.0,
+    "max": 202.0,
+    "mean": 28.855,
+    "p50": 23.0,
+    "p90": 43.4,
+    "p99": 130.8,
+    "unit": "ms"
+   },
+   "LTCUSDT|22": {
+    "n": 112,
+    "min": 13.0,
+    "max": 109.0,
+    "mean": 30.946,
+    "p50": 25.5,
+    "p90": 56.0,
+    "p99": 101.48,
+    "unit": "ms"
+   },
+   "LTCUSDT|23": {
+    "n": 62,
+    "min": 15.0,
+    "max": 114.0,
+    "mean": 36.129,
+    "p50": 30.5,
+    "p90": 60.9,
+    "p99": null,
+    "suppressed": [
+     "p99"
+    ],
+    "suppressed_reason": "fewer than {'p50': 30, 'p90': 30, 'p99': 100} samples required per percentile",
+    "unit": "ms"
+   },
+   "MNTUSDT|00": {
+    "n": 50,
+    "min": 13.0,
+    "max": 416.0,
+    "mean": 59.32,
+    "p50": 38.0,
+    "p90": 112.0,
+    "p99": null,
+    "suppressed": [
+     "p99"
+    ],
+    "suppressed_reason": "fewer than {'p50': 30, 'p90': 30, 'p99': 100} samples required per percentile",
+    "unit": "ms"
+   },
+   "MNTUSDT|01": {
+    "n": 15
+   },
+   "MNTUSDT|02": {
+    "n": 28
+   },
+   "MNTUSDT|03": {
+    "n": 12
+   },
+   "MNTUSDT|04": {
+    "n": 1
+   },
+   "MNTUSDT|05": {
+    "n": 41,
+    "min": 12.0,
+    "max": 244.0,
+    "mean": 57.0,
+    "p50": 43.0,
+    "p90": 80.0,
+    "p99": null,
+    "suppressed": [
+     "p99"
+    ],
+    "suppressed_reason": "fewer than {'p50': 30, 'p90': 30, 'p99': 100} samples required per percentile",
+    "unit": "ms"
+   },
+   "MNTUSDT|06": {
+    "n": 23
+   },
+   "MNTUSDT|07": {
+    "n": 30,
+    "min": 14.0,
+    "max": 121.0,
+    "mean": 37.433,
+    "p50": 24.5,
+    "p90": 67.1,
+    "p99": null,
+    "suppressed": [
+     "p99"
+    ],
+    "suppressed_reason": "fewer than {'p50': 30, 'p90': 30, 'p99': 100} samples required per percentile",
+    "unit": "ms"
+   },
+   "MNTUSDT|08": {
+    "n": 17
+   },
+   "MNTUSDT|09": {
+    "n": 32,
+    "min": 13.0,
+    "max": 86.0,
+    "mean": 32.062,
+    "p50": 30.0,
+    "p90": 58.1,
+    "p99": null,
+    "suppressed": [
+     "p99"
+    ],
+    "suppressed_reason": "fewer than {'p50': 30, 'p90': 30, 'p99': 100} samples required per percentile",
+    "unit": "ms"
+   },
+   "MNTUSDT|10": {
+    "n": 51,
+    "min": 14.0,
+    "max": 117.0,
+    "mean": 32.255,
+    "p50": 25.0,
+    "p90": 53.0,
+    "p99": null,
+    "suppressed": [
+     "p99"
+    ],
+    "suppressed_reason": "fewer than {'p50': 30, 'p90': 30, 'p99': 100} samples required per percentile",
+    "unit": "ms"
+   },
+   "MNTUSDT|11": {
+    "n": 40,
+    "min": 13.0,
+    "max": 82.0,
+    "mean": 29.15,
+    "p50": 21.5,
+    "p90": 65.1,
+    "p99": null,
+    "suppressed": [
+     "p99"
+    ],
+    "suppressed_reason": "fewer than {'p50': 30, 'p90': 30, 'p99': 100} samples required per percentile",
+    "unit": "ms"
+   },
+   "MNTUSDT|12": {
+    "n": 14
+   },
+   "MNTUSDT|13": {
+    "n": 57,
+    "min": 13.0,
+    "max": 117.0,
+    "mean": 37.439,
+    "p50": 33.0,
+    "p90": 67.4,
+    "p99": null,
+    "suppressed": [
+     "p99"
+    ],
+    "suppressed_reason": "fewer than {'p50': 30, 'p90': 30, 'p99': 100} samples required per percentile",
+    "unit": "ms"
+   },
+   "MNTUSDT|14": {
+    "n": 77,
+    "min": 13.0,
+    "max": 109.0,
+    "mean": 42.571,
+    "p50": 37.0,
+    "p90": 74.4,
+    "p99": null,
+    "suppressed": [
+     "p99"
+    ],
+    "suppressed_reason": "fewer than {'p50': 30, 'p90': 30, 'p99': 100} samples required per percentile",
+    "unit": "ms"
+   },
+   "MNTUSDT|15": {
+    "n": 7
+   },
+   "MNTUSDT|16": {
+    "n": 2
+   },
+   "MNTUSDT|17": {
+    "n": 21
+   },
+   "MNTUSDT|18": {
+    "n": 27
+   },
+   "MNTUSDT|19": {
+    "n": 37,
+    "min": 15.0,
+    "max": 329.0,
+    "mean": 52.514,
+    "p50": 27.0,
+    "p90": 90.0,
+    "p99": null,
+    "suppressed": [
+     "p99"
+    ],
+    "suppressed_reason": "fewer than {'p50': 30, 'p90': 30, 'p99': 100} samples required per percentile",
+    "unit": "ms"
+   },
+   "MNTUSDT|20": {
+    "n": 43,
+    "min": 13.0,
+    "max": 106.0,
+    "mean": 34.535,
+    "p50": 21.0,
+    "p90": 75.8,
+    "p99": null,
+    "suppressed": [
+     "p99"
+    ],
+    "suppressed_reason": "fewer than {'p50': 30, 'p90': 30, 'p99': 100} samples required per percentile",
+    "unit": "ms"
+   },
+   "MNTUSDT|21": {
+    "n": 46,
+    "min": 13.0,
+    "max": 175.0,
+    "mean": 34.609,
+    "p50": 23.5,
+    "p90": 63.5,
+    "p99": null,
+    "suppressed": [
+     "p99"
+    ],
+    "suppressed_reason": "fewer than {'p50': 30, 'p90': 30, 'p99': 100} samples required per percentile",
+    "unit": "ms"
+   },
+   "MNTUSDT|22": {
+    "n": 53,
+    "min": 13.0,
+    "max": 75.0,
+    "mean": 25.906,
+    "p50": 21.0,
+    "p90": 50.0,
+    "p99": null,
+    "suppressed": [
+     "p99"
+    ],
+    "suppressed_reason": "fewer than {'p50': 30, 'p90': 30, 'p99': 100} samples required per percentile",
+    "unit": "ms"
+   },
+   "MNTUSDT|23": {
+    "n": 28
+   },
+   "NEARUSDT|00": {
+    "n": 8
+   },
+   "NEARUSDT|01": {
+    "n": 10
+   },
+   "NEARUSDT|02": {
+    "n": 10
+   },
+   "NEARUSDT|03": {
+    "n": 3
+   },
+   "NEARUSDT|06": {
+    "n": 182,
+    "min": 13.0,
+    "max": 176.0,
+    "mean": 33.533,
+    "p50": 29.0,
+    "p90": 56.8,
+    "p99": 81.52,
+    "unit": "ms"
+   },
+   "NEARUSDT|07": {
+    "n": 8
+   },
+   "NEARUSDT|08": {
+    "n": 15
+   },
+   "NEARUSDT|09": {
+    "n": 11
+   },
+   "NEARUSDT|10": {
+    "n": 20
+   },
+   "NEARUSDT|11": {
+    "n": 16
+   },
+   "NEARUSDT|12": {
+    "n": 12
+   },
+   "NEARUSDT|13": {
+    "n": 31,
+    "min": 17.0,
+    "max": 273.0,
+    "mean": 58.548,
+    "p50": 39.0,
+    "p90": 92.0,
+    "p99": null,
+    "suppressed": [
+     "p99"
+    ],
+    "suppressed_reason": "fewer than {'p50': 30, 'p90': 30, 'p99': 100} samples required per percentile",
+    "unit": "ms"
+   },
+   "NEARUSDT|14": {
+    "n": 27
+   },
+   "NEARUSDT|15": {
+    "n": 29
+   },
+   "NEARUSDT|16": {
+    "n": 13
+   },
+   "NEARUSDT|17": {
+    "n": 30,
+    "min": 13.0,
+    "max": 72.0,
+    "mean": 29.967,
+    "p50": 23.5,
+    "p90": 63.2,
+    "p99": null,
+    "suppressed": [
+     "p99"
+    ],
+    "suppressed_reason": "fewer than {'p50': 30, 'p90': 30, 'p99': 100} samples required per percentile",
+    "unit": "ms"
+   },
+   "NEARUSDT|18": {
+    "n": 38,
+    "min": 12.0,
+    "max": 207.0,
+    "mean": 33.579,
+    "p50": 20.0,
+    "p90": 62.7,
+    "p99": null,
+    "suppressed": [
+     "p99"
+    ],
+    "suppressed_reason": "fewer than {'p50': 30, 'p90': 30, 'p99': 100} samples required per percentile",
+    "unit": "ms"
+   },
+   "NEARUSDT|19": {
+    "n": 60,
+    "min": 12.0,
+    "max": 225.0,
+    "mean": 32.633,
+    "p50": 17.0,
+    "p90": 70.7,
+    "p99": null,
+    "suppressed": [
+     "p99"
+    ],
+    "suppressed_reason": "fewer than {'p50': 30, 'p90': 30, 'p99': 100} samples required per percentile",
+    "unit": "ms"
+   },
+   "NEARUSDT|20": {
+    "n": 19
+   },
+   "NEARUSDT|21": {
+    "n": 12
+   },
+   "NEARUSDT|22": {
+    "n": 19
+   },
+   "NEARUSDT|23": {
+    "n": 2
+   },
+   "OPUSDT|00": {
+    "n": 83,
+    "min": 15.0,
+    "max": 213.0,
+    "mean": 75.193,
+    "p50": 62.0,
+    "p90": 160.8,
+    "p99": null,
+    "suppressed": [
+     "p99"
+    ],
+    "suppressed_reason": "fewer than {'p50': 30, 'p90': 30, 'p99': 100} samples required per percentile",
+    "unit": "ms"
+   },
+   "OPUSDT|01": {
+    "n": 72,
+    "min": 13.0,
+    "max": 232.0,
+    "mean": 69.194,
+    "p50": 58.5,
+    "p90": 126.9,
+    "p99": null,
+    "suppressed": [
+     "p99"
+    ],
+    "suppressed_reason": "fewer than {'p50': 30, 'p90': 30, 'p99': 100} samples required per percentile",
+    "unit": "ms"
+   },
+   "OPUSDT|02": {
+    "n": 48,
+    "min": 15.0,
+    "max": 208.0,
+    "mean": 49.917,
+    "p50": 45.5,
+    "p90": 80.6,
+    "p99": null,
+    "suppressed": [
+     "p99"
+    ],
+    "suppressed_reason": "fewer than {'p50': 30, 'p90': 30, 'p99': 100} samples required per percentile",
+    "unit": "ms"
+   },
+   "OPUSDT|03": {
+    "n": 30,
+    "min": 16.0,
+    "max": 194.0,
+    "mean": 44.967,
+    "p50": 33.5,
+    "p90": 79.0,
+    "p99": null,
+    "suppressed": [
+     "p99"
+    ],
+    "suppressed_reason": "fewer than {'p50': 30, 'p90': 30, 'p99': 100} samples required per percentile",
+    "unit": "ms"
+   },
+   "OPUSDT|04": {
+    "n": 27
+   },
+   "OPUSDT|05": {
+    "n": 440,
+    "min": 12.0,
+    "max": 103.0,
+    "mean": 30.798,
+    "p50": 24.0,
+    "p90": 55.1,
+    "p99": 71.22,
+    "unit": "ms"
+   },
+   "OPUSDT|06": {
+    "n": 44,
+    "min": 13.0,
+    "max": 156.0,
+    "mean": 49.205,
+    "p50": 47.5,
+    "p90": 86.9,
+    "p99": null,
+    "suppressed": [
+     "p99"
+    ],
+    "suppressed_reason": "fewer than {'p50': 30, 'p90': 30, 'p99': 100} samples required per percentile",
+    "unit": "ms"
+   },
+   "OPUSDT|07": {
+    "n": 54,
+    "min": 16.0,
+    "max": 105.0,
+    "mean": 38.852,
+    "p50": 31.0,
+    "p90": 69.1,
+    "p99": null,
+    "suppressed": [
+     "p99"
+    ],
+    "suppressed_reason": "fewer than {'p50': 30, 'p90': 30, 'p99': 100} samples required per percentile",
+    "unit": "ms"
+   },
+   "OPUSDT|08": {
+    "n": 42,
+    "min": 15.0,
+    "max": 117.0,
+    "mean": 44.357,
+    "p50": 39.5,
+    "p90": 71.9,
+    "p99": null,
+    "suppressed": [
+     "p99"
+    ],
+    "suppressed_reason": "fewer than {'p50': 30, 'p90': 30, 'p99': 100} samples required per percentile",
+    "unit": "ms"
+   },
+   "OPUSDT|09": {
+    "n": 53,
+    "min": 13.0,
+    "max": 190.0,
+    "mean": 41.906,
+    "p50": 28.0,
+    "p90": 89.0,
+    "p99": null,
+    "suppressed": [
+     "p99"
+    ],
+    "suppressed_reason": "fewer than {'p50': 30, 'p90': 30, 'p99': 100} samples required per percentile",
+    "unit": "ms"
+   },
+   "OPUSDT|10": {
+    "n": 82,
+    "min": 14.0,
+    "max": 119.0,
+    "mean": 35.402,
+    "p50": 29.5,
+    "p90": 61.9,
+    "p99": null,
+    "suppressed": [
+     "p99"
+    ],
+    "suppressed_reason": "fewer than {'p50': 30, 'p90': 30, 'p99': 100} samples required per percentile",
+    "unit": "ms"
+   },
+   "OPUSDT|11": {
+    "n": 43,
+    "min": 14.0,
+    "max": 83.0,
+    "mean": 31.558,
+    "p50": 23.0,
+    "p90": 54.8,
+    "p99": null,
+    "suppressed": [
+     "p99"
+    ],
+    "suppressed_reason": "fewer than {'p50': 30, 'p90': 30, 'p99': 100} samples required per percentile",
+    "unit": "ms"
+   },
+   "OPUSDT|12": {
+    "n": 26
+   },
+   "OPUSDT|13": {
+    "n": 72,
+    "min": 13.0,
+    "max": 89.0,
+    "mean": 36.347,
+    "p50": 33.0,
+    "p90": 64.9,
+    "p99": null,
+    "suppressed": [
+     "p99"
+    ],
+    "suppressed_reason": "fewer than {'p50': 30, 'p90': 30, 'p99': 100} samples required per percentile",
+    "unit": "ms"
+   },
+   "OPUSDT|14": {
+    "n": 117,
+    "min": 14.0,
+    "max": 150.0,
+    "mean": 39.855,
+    "p50": 39.0,
+    "p90": 69.0,
+    "p99": 98.0,
+    "unit": "ms"
+   },
+   "OPUSDT|15": {
+    "n": 30,
+    "min": 15.0,
+    "max": 127.0,
+    "mean": 39.3,
+    "p50": 34.0,
+    "p90": 65.2,
+    "p99": null,
+    "suppressed": [
+     "p99"
+    ],
+    "suppressed_reason": "fewer than {'p50': 30, 'p90': 30, 'p99': 100} samples required per percentile",
+    "unit": "ms"
+   },
+   "OPUSDT|16": {
+    "n": 43,
+    "min": 13.0,
+    "max": 101.0,
+    "mean": 30.674,
+    "p50": 25.0,
+    "p90": 47.6,
+    "p99": null,
+    "suppressed": [
+     "p99"
+    ],
+    "suppressed_reason": "fewer than {'p50': 30, 'p90': 30, 'p99': 100} samples required per percentile",
+    "unit": "ms"
+   },
+   "OPUSDT|17": {
+    "n": 22
+   },
+   "OPUSDT|18": {
+    "n": 37,
+    "min": 13.0,
+    "max": 115.0,
+    "mean": 32.486,
+    "p50": 25.0,
+    "p90": 52.4,
+    "p99": null,
+    "suppressed": [
+     "p99"
+    ],
+    "suppressed_reason": "fewer than {'p50': 30, 'p90': 30, 'p99': 100} samples required per percentile",
+    "unit": "ms"
+   },
+   "OPUSDT|19": {
+    "n": 37,
+    "min": 13.0,
+    "max": 108.0,
+    "mean": 34.946,
+    "p50": 26.0,
+    "p90": 67.4,
+    "p99": null,
+    "suppressed": [
+     "p99"
+    ],
+    "suppressed_reason": "fewer than {'p50': 30, 'p90': 30, 'p99': 100} samples required per percentile",
+    "unit": "ms"
+   },
+   "OPUSDT|20": {
+    "n": 40,
+    "min": 13.0,
+    "max": 220.0,
+    "mean": 33.925,
+    "p50": 28.0,
+    "p90": 48.1,
+    "p99": null,
+    "suppressed": [
+     "p99"
+    ],
+    "suppressed_reason": "fewer than {'p50': 30, 'p90': 30, 'p99': 100} samples required per percentile",
+    "unit": "ms"
+   },
+   "OPUSDT|21": {
+    "n": 46,
+    "min": 13.0,
+    "max": 112.0,
+    "mean": 29.87,
+    "p50": 23.5,
+    "p90": 49.5,
+    "p99": null,
+    "suppressed": [
+     "p99"
+    ],
+    "suppressed_reason": "fewer than {'p50': 30, 'p90': 30, 'p99': 100} samples required per percentile",
+    "unit": "ms"
+   },
+   "OPUSDT|22": {
+    "n": 51,
+    "min": 14.0,
+    "max": 105.0,
+    "mean": 33.824,
+    "p50": 28.0,
+    "p90": 66.0,
+    "p99": null,
+    "suppressed": [
+     "p99"
+    ],
+    "suppressed_reason": "fewer than {'p50': 30, 'p90': 30, 'p99': 100} samples required per percentile",
+    "unit": "ms"
+   },
+   "OPUSDT|23": {
+    "n": 39,
+    "min": 13.0,
+    "max": 87.0,
+    "mean": 37.641,
+    "p50": 29.0,
+    "p90": 72.6,
+    "p99": null,
+    "suppressed": [
+     "p99"
+    ],
+    "suppressed_reason": "fewer than {'p50': 30, 'p90': 30, 'p99': 100} samples required per percentile",
+    "unit": "ms"
+   },
+   "SOLUSDT|00": {
+    "n": 242,
+    "min": 12.0,
+    "max": 383.0,
+    "mean": 54.785,
+    "p50": 44.0,
+    "p90": 100.8,
+    "p99": 254.71,
+    "unit": "ms"
+   },
+   "SOLUSDT|01": {
+    "n": 152,
+    "min": 15.0,
+    "max": 255.0,
+    "mean": 63.954,
+    "p50": 54.5,
+    "p90": 126.1,
+    "p99": 183.9,
+    "unit": "ms"
+   },
+   "SOLUSDT|02": {
+    "n": 122,
+    "min": 14.0,
+    "max": 186.0,
+    "mean": 47.967,
+    "p50": 39.0,
+    "p90": 83.9,
+    "p99": 134.69,
+    "unit": "ms"
+   },
+   "SOLUSDT|03": {
+    "n": 77,
+    "min": 14.0,
+    "max": 95.0,
+    "mean": 42.156,
+    "p50": 38.0,
+    "p90": 76.0,
+    "p99": null,
+    "suppressed": [
+     "p99"
+    ],
+    "suppressed_reason": "fewer than {'p50': 30, 'p90': 30, 'p99': 100} samples required per percentile",
+    "unit": "ms"
+   },
+   "SOLUSDT|04": {
+    "n": 28
+   },
+   "SOLUSDT|05": {
+    "n": 63,
+    "min": 17.0,
+    "max": 180.0,
+    "mean": 52.0,
+    "p50": 46.0,
+    "p90": 94.0,
+    "p99": null,
+    "suppressed": [
+     "p99"
+    ],
+    "suppressed_reason": "fewer than {'p50': 30, 'p90': 30, 'p99': 100} samples required per percentile",
+    "unit": "ms"
+   },
+   "SOLUSDT|06": {
+    "n": 63,
+    "min": 14.0,
+    "max": 138.0,
+    "mean": 36.143,
+    "p50": 29.0,
+    "p90": 62.8,
+    "p99": null,
+    "suppressed": [
+     "p99"
+    ],
+    "suppressed_reason": "fewer than {'p50': 30, 'p90': 30, 'p99': 100} samples required per percentile",
+    "unit": "ms"
+   },
+   "SOLUSDT|07": {
+    "n": 84,
+    "min": 16.0,
+    "max": 134.0,
+    "mean": 44.381,
+    "p50": 40.5,
+    "p90": 70.7,
+    "p99": null,
+    "suppressed": [
+     "p99"
+    ],
+    "suppressed_reason": "fewer than {'p50': 30, 'p90': 30, 'p99': 100} samples required per percentile",
+    "unit": "ms"
+   },
+   "SOLUSDT|08": {
+    "n": 66,
+    "min": 16.0,
+    "max": 121.0,
+    "mean": 42.727,
+    "p50": 34.5,
+    "p90": 80.5,
+    "p99": null,
+    "suppressed": [
+     "p99"
+    ],
+    "suppressed_reason": "fewer than {'p50': 30, 'p90': 30, 'p99': 100} samples required per percentile",
+    "unit": "ms"
+   },
+   "SOLUSDT|09": {
+    "n": 62,
+    "min": 13.0,
+    "max": 2874.0,
+    "mean": 76.258,
+    "p50": 24.5,
+    "p90": 59.2,
+    "p99": null,
+    "suppressed": [
+     "p99"
+    ],
+    "suppressed_reason": "fewer than {'p50': 30, 'p90': 30, 'p99': 100} samples required per percentile",
+    "unit": "ms"
+   },
+   "SOLUSDT|10": {
+    "n": 150,
+    "min": 13.0,
+    "max": 197.0,
+    "mean": 34.233,
+    "p50": 26.0,
+    "p90": 58.1,
+    "p99": 163.48,
+    "unit": "ms"
+   },
+   "SOLUSDT|11": {
+    "n": 167,
+    "min": 12.0,
+    "max": 178.0,
+    "mean": 37.269,
+    "p50": 29.0,
+    "p90": 69.4,
+    "p99": 140.22,
+    "unit": "ms"
+   },
+   "SOLUSDT|12": {
+    "n": 105,
+    "min": 13.0,
+    "max": 3694.0,
+    "mean": 82.048,
+    "p50": 36.0,
+    "p90": 78.2,
+    "p99": 374.16,
+    "unit": "ms"
+   },
+   "SOLUSDT|13": {
+    "n": 147,
+    "min": 13.0,
+    "max": 211.0,
+    "mean": 45.374,
+    "p50": 41.0,
+    "p90": 81.4,
+    "p99": 116.54,
+    "unit": "ms"
+   },
+   "SOLUSDT|14": {
+    "n": 221,
+    "min": 13.0,
+    "max": 11712.0,
+    "mean": 144.516,
+    "p50": 40.0,
+    "p90": 78.0,
+    "p99": 185.0,
+    "unit": "ms"
+   },
+   "SOLUSDT|15": {
+    "n": 193,
+    "min": 13.0,
+    "max": 748.0,
+    "mean": 36.135,
+    "p50": 28.0,
+    "p90": 57.8,
+    "p99": 101.08,
+    "unit": "ms"
+   },
+   "SOLUSDT|16": {
+    "n": 202,
+    "min": 12.0,
+    "max": 90.0,
+    "mean": 33.47,
+    "p50": 29.0,
+    "p90": 64.0,
+    "p99": 88.96,
+    "unit": "ms"
+   },
+   "SOLUSDT|17": {
+    "n": 164,
+    "min": 13.0,
+    "max": 92.0,
+    "mean": 28.262,
+    "p50": 24.0,
+    "p90": 43.0,
+    "p99": 73.22,
+    "unit": "ms"
+   },
+   "SOLUSDT|18": {
+    "n": 275,
+    "min": 13.0,
+    "max": 1492.0,
+    "mean": 37.411,
+    "p50": 26.0,
+    "p90": 55.6,
+    "p99": 108.16,
+    "unit": "ms"
+   },
+   "SOLUSDT|19": {
+    "n": 213,
+    "min": 12.0,
+    "max": 2545.0,
+    "mean": 43.629,
+    "p50": 24.0,
+    "p90": 60.6,
+    "p99": 112.32,
+    "unit": "ms"
+   },
+   "SOLUSDT|20": {
+    "n": 128,
+    "min": 12.0,
+    "max": 293.0,
+    "mean": 34.836,
+    "p50": 25.0,
+    "p90": 64.3,
+    "p99": 137.66,
+    "unit": "ms"
+   },
+   "SOLUSDT|21": {
+    "n": 142,
+    "min": 12.0,
+    "max": 103.0,
+    "mean": 29.465,
+    "p50": 23.0,
+    "p90": 49.7,
+    "p99": 91.36,
+    "unit": "ms"
+   },
+   "SOLUSDT|22": {
+    "n": 142,
+    "min": 12.0,
+    "max": 128.0,
+    "mean": 35.754,
+    "p50": 30.0,
+    "p90": 68.9,
+    "p99": 110.49,
+    "unit": "ms"
+   },
+   "SOLUSDT|23": {
+    "n": 95,
+    "min": 13.0,
+    "max": 291.0,
+    "mean": 53.063,
+    "p50": 43.0,
+    "p90": 95.6,
+    "p99": null,
+    "suppressed": [
+     "p99"
+    ],
+    "suppressed_reason": "fewer than {'p50': 30, 'p90': 30, 'p99': 100} samples required per percentile",
+    "unit": "ms"
+   },
+   "SUIUSDT|00": {
+    "n": 107,
+    "min": 14.0,
+    "max": 352.0,
+    "mean": 60.57,
+    "p50": 45.0,
+    "p90": 108.8,
+    "p99": 296.44,
+    "unit": "ms"
+   },
+   "SUIUSDT|01": {
+    "n": 141,
+    "min": 15.0,
+    "max": 392.0,
+    "mean": 69.801,
+    "p50": 59.0,
+    "p90": 125.0,
+    "p99": 304.8,
+    "unit": "ms"
+   },
+   "SUIUSDT|02": {
+    "n": 123,
+    "min": 14.0,
+    "max": 241.0,
+    "mean": 49.098,
+    "p50": 40.0,
+    "p90": 87.6,
+    "p99": 221.82,
+    "unit": "ms"
+   },
+   "SUIUSDT|03": {
+    "n": 37,
+    "min": 13.0,
+    "max": 101.0,
+    "mean": 37.027,
+    "p50": 32.0,
+    "p90": 69.0,
+    "p99": null,
+    "suppressed": [
+     "p99"
+    ],
+    "suppressed_reason": "fewer than {'p50': 30, 'p90': 30, 'p99': 100} samples required per percentile",
+    "unit": "ms"
+   },
+   "SUIUSDT|04": {
+    "n": 55,
+    "min": 14.0,
+    "max": 94.0,
+    "mean": 43.055,
+    "p50": 40.0,
+    "p90": 75.6,
+    "p99": null,
+    "suppressed": [
+     "p99"
+    ],
+    "suppressed_reason": "fewer than {'p50': 30, 'p90': 30, 'p99': 100} samples required per percentile",
+    "unit": "ms"
+   },
+   "SUIUSDT|05": {
+    "n": 113,
+    "min": 13.0,
+    "max": 281.0,
+    "mean": 50.513,
+    "p50": 45.0,
+    "p90": 83.8,
+    "p99": 142.56,
+    "unit": "ms"
+   },
+   "SUIUSDT|06": {
+    "n": 115,
+    "min": 14.0,
+    "max": 103.0,
+    "mean": 40.548,
+    "p50": 34.0,
+    "p90": 71.6,
+    "p99": 98.16,
+    "unit": "ms"
+   },
+   "SUIUSDT|07": {
+    "n": 72,
+    "min": 15.0,
+    "max": 154.0,
+    "mean": 48.361,
+    "p50": 46.0,
+    "p90": 80.0,
+    "p99": null,
+    "suppressed": [
+     "p99"
+    ],
+    "suppressed_reason": "fewer than {'p50': 30, 'p90': 30, 'p99': 100} samples required per percentile",
+    "unit": "ms"
+   },
+   "SUIUSDT|08": {
+    "n": 41,
+    "min": 13.0,
+    "max": 164.0,
+    "mean": 46.537,
+    "p50": 39.0,
+    "p90": 84.0,
+    "p99": null,
+    "suppressed": [
+     "p99"
+    ],
+    "suppressed_reason": "fewer than {'p50': 30, 'p90': 30, 'p99': 100} samples required per percentile",
+    "unit": "ms"
+   },
+   "SUIUSDT|09": {
+    "n": 103,
+    "min": 13.0,
+    "max": 165.0,
+    "mean": 36.864,
+    "p50": 33.0,
+    "p90": 60.6,
+    "p99": 128.46,
+    "unit": "ms"
+   },
+   "SUIUSDT|10": {
+    "n": 187,
+    "min": 14.0,
+    "max": 255.0,
+    "mean": 37.139,
+    "p50": 27.0,
+    "p90": 67.0,
+    "p99": 134.56,
+    "unit": "ms"
+   },
+   "SUIUSDT|11": {
+    "n": 123,
+    "min": 13.0,
+    "max": 257.0,
+    "mean": 41.098,
+    "p50": 29.0,
+    "p90": 75.8,
+    "p99": 180.02,
+    "unit": "ms"
+   },
+   "SUIUSDT|12": {
+    "n": 108,
+    "min": 15.0,
+    "max": 4307.0,
+    "mean": 116.25,
+    "p50": 34.0,
+    "p90": 77.2,
+    "p99": 3086.28,
+    "unit": "ms"
+   },
+   "SUIUSDT|13": {
+    "n": 178,
+    "min": 13.0,
+    "max": 2282.0,
+    "mean": 65.494,
+    "p50": 36.5,
+    "p90": 73.6,
+    "p99": 589.35,
+    "unit": "ms"
+   },
+   "SUIUSDT|14": {
+    "n": 254,
+    "min": 14.0,
+    "max": 854.0,
+    "mean": 47.972,
+    "p50": 34.0,
+    "p90": 77.0,
+    "p99": 367.53,
+    "unit": "ms"
+   },
+   "SUIUSDT|15": {
+    "n": 194,
+    "min": 13.0,
+    "max": 791.0,
+    "mean": 47.794,
+    "p50": 37.0,
+    "p90": 73.8,
+    "p99": 161.26,
+    "unit": "ms"
+   },
+   "SUIUSDT|16": {
+    "n": 128,
+    "min": 13.0,
+    "max": 123.0,
+    "mean": 35.477,
+    "p50": 30.0,
+    "p90": 59.6,
+    "p99": 114.03,
+    "unit": "ms"
+   },
+   "SUIUSDT|17": {
+    "n": 189,
+    "min": 12.0,
+    "max": 2345.0,
+    "mean": 40.783,
+    "p50": 22.0,
+    "p90": 52.2,
+    "p99": 106.6,
+    "unit": "ms"
+   },
+   "SUIUSDT|18": {
+    "n": 199,
+    "min": 12.0,
+    "max": 158.0,
+    "mean": 30.462,
+    "p50": 22.0,
+    "p90": 53.2,
+    "p99": 108.5,
+    "unit": "ms"
+   },
+   "SUIUSDT|19": {
+    "n": 220,
+    "min": 13.0,
+    "max": 2702.0,
+    "mean": 48.509,
+    "p50": 29.0,
+    "p90": 67.0,
+    "p99": 149.53,
+    "unit": "ms"
+   },
+   "SUIUSDT|20": {
+    "n": 146,
+    "min": 12.0,
+    "max": 175.0,
+    "mean": 35.281,
+    "p50": 28.5,
+    "p90": 57.0,
+    "p99": 132.55,
+    "unit": "ms"
+   },
+   "SUIUSDT|21": {
+    "n": 139,
+    "min": 13.0,
+    "max": 118.0,
+    "mean": 33.741,
+    "p50": 28.0,
+    "p90": 63.4,
+    "p99": 85.86,
+    "unit": "ms"
+   },
+   "SUIUSDT|22": {
+    "n": 98,
+    "min": 13.0,
+    "max": 626.0,
+    "mean": 38.367,
+    "p50": 24.5,
+    "p90": 58.6,
+    "p99": null,
+    "suppressed": [
+     "p99"
+    ],
+    "suppressed_reason": "fewer than {'p50': 30, 'p90': 30, 'p99': 100} samples required per percentile",
+    "unit": "ms"
+   },
+   "SUIUSDT|23": {
+    "n": 78,
+    "min": 12.0,
+    "max": 197.0,
+    "mean": 41.487,
+    "p50": 31.0,
+    "p90": 78.3,
+    "p99": null,
+    "suppressed": [
+     "p99"
+    ],
+    "suppressed_reason": "fewer than {'p50': 30, 'p90': 30, 'p99': 100} samples required per percentile",
+    "unit": "ms"
+   },
+   "UNIUSDT|01": {
+    "n": 13
+   },
+   "UNIUSDT|02": {
+    "n": 2
+   },
+   "UNIUSDT|04": {
+    "n": 1
+   },
+   "UNIUSDT|05": {
+    "n": 18
+   },
+   "UNIUSDT|06": {
+    "n": 13
+   },
+   "UNIUSDT|08": {
+    "n": 9
+   },
+   "UNIUSDT|09": {
+    "n": 13
+   },
+   "UNIUSDT|10": {
+    "n": 32,
+    "min": 13.0,
+    "max": 58.0,
+    "mean": 27.438,
+    "p50": 22.5,
+    "p90": 46.6,
+    "p99": null,
+    "suppressed": [
+     "p99"
+    ],
+    "suppressed_reason": "fewer than {'p50': 30, 'p90': 30, 'p99': 100} samples required per percentile",
+    "unit": "ms"
+   },
+   "UNIUSDT|11": {
+    "n": 21
+   },
+   "UNIUSDT|12": {
+    "n": 24
+   },
+   "UNIUSDT|13": {
+    "n": 53,
+    "min": 12.0,
+    "max": 320.0,
+    "mean": 44.038,
+    "p50": 34.0,
+    "p90": 74.6,
+    "p99": null,
+    "suppressed": [
+     "p99"
+    ],
+    "suppressed_reason": "fewer than {'p50': 30, 'p90': 30, 'p99': 100} samples required per percentile",
+    "unit": "ms"
+   },
+   "UNIUSDT|14": {
+    "n": 52,
+    "min": 26.0,
+    "max": 10979.0,
+    "mean": 263.885,
+    "p50": 46.0,
+    "p90": 86.9,
+    "p99": null,
+    "suppressed": [
+     "p99"
+    ],
+    "suppressed_reason": "fewer than {'p50': 30, 'p90': 30, 'p99': 100} samples required per percentile",
+    "unit": "ms"
+   },
+   "UNIUSDT|15": {
+    "n": 27
+   },
+   "UNIUSDT|16": {
+    "n": 21
+   },
+   "UNIUSDT|17": {
+    "n": 33,
+    "min": 15.0,
+    "max": 85.0,
+    "mean": 33.333,
+    "p50": 22.0,
+    "p90": 67.8,
+    "p99": null,
+    "suppressed": [
+     "p99"
+    ],
+    "suppressed_reason": "fewer than {'p50': 30, 'p90': 30, 'p99': 100} samples required per percentile",
+    "unit": "ms"
+   },
+   "UNIUSDT|18": {
+    "n": 34,
+    "min": 14.0,
+    "max": 159.0,
+    "mean": 40.912,
+    "p50": 34.0,
+    "p90": 61.4,
+    "p99": null,
+    "suppressed": [
+     "p99"
+    ],
+    "suppressed_reason": "fewer than {'p50': 30, 'p90': 30, 'p99': 100} samples required per percentile",
+    "unit": "ms"
+   },
+   "UNIUSDT|19": {
+    "n": 28
+   },
+   "UNIUSDT|20": {
+    "n": 20
+   },
+   "UNIUSDT|21": {
+    "n": 19
+   },
+   "UNIUSDT|22": {
+    "n": 8
+   },
+   "UNIUSDT|23": {
+    "n": 2
+   },
+   "XRPUSDT|00": {
+    "n": 28
+   },
+   "XRPUSDT|01": {
+    "n": 172,
+    "min": 17.0,
+    "max": 358.0,
+    "mean": 88.593,
+    "p50": 75.0,
+    "p90": 161.2,
+    "p99": 311.16,
+    "unit": "ms"
+   },
+   "XRPUSDT|02": {
+    "n": 63,
+    "min": 15.0,
+    "max": 372.0,
+    "mean": 69.016,
+    "p50": 58.0,
+    "p90": 119.8,
+    "p99": null,
+    "suppressed": [
+     "p99"
+    ],
+    "suppressed_reason": "fewer than {'p50': 30, 'p90': 30, 'p99': 100} samples required per percentile",
+    "unit": "ms"
+   },
+   "XRPUSDT|03": {
+    "n": 22
+   },
+   "XRPUSDT|04": {
+    "n": 32,
+    "min": 16.0,
+    "max": 92.0,
+    "mean": 44.5,
+    "p50": 42.5,
+    "p90": 70.8,
+    "p99": null,
+    "suppressed": [
+     "p99"
+    ],
+    "suppressed_reason": "fewer than {'p50': 30, 'p90': 30, 'p99': 100} samples required per percentile",
+    "unit": "ms"
+   },
+   "XRPUSDT|05": {
+    "n": 63,
+    "min": 12.0,
+    "max": 226.0,
+    "mean": 58.778,
+    "p50": 51.0,
+    "p90": 105.6,
+    "p99": null,
+    "suppressed": [
+     "p99"
+    ],
+    "suppressed_reason": "fewer than {'p50': 30, 'p90': 30, 'p99': 100} samples required per percentile",
+    "unit": "ms"
+   },
+   "XRPUSDT|06": {
+    "n": 62,
+    "min": 13.0,
+    "max": 271.0,
+    "mean": 41.435,
+    "p50": 30.0,
+    "p90": 67.7,
+    "p99": null,
+    "suppressed": [
+     "p99"
+    ],
+    "suppressed_reason": "fewer than {'p50': 30, 'p90': 30, 'p99': 100} samples required per percentile",
+    "unit": "ms"
+   },
+   "XRPUSDT|07": {
+    "n": 50,
+    "min": 14.0,
+    "max": 132.0,
+    "mean": 46.38,
+    "p50": 36.0,
+    "p90": 85.1,
+    "p99": null,
+    "suppressed": [
+     "p99"
+    ],
+    "suppressed_reason": "fewer than {'p50': 30, 'p90': 30, 'p99': 100} samples required per percentile",
+    "unit": "ms"
+   },
+   "XRPUSDT|08": {
+    "n": 35,
+    "min": 15.0,
+    "max": 119.0,
+    "mean": 43.171,
+    "p50": 40.0,
+    "p90": 70.6,
+    "p99": null,
+    "suppressed": [
+     "p99"
+    ],
+    "suppressed_reason": "fewer than {'p50': 30, 'p90': 30, 'p99': 100} samples required per percentile",
+    "unit": "ms"
+   },
+   "XRPUSDT|09": {
+    "n": 89,
+    "min": 13.0,
+    "max": 111.0,
+    "mean": 35.191,
+    "p50": 29.0,
+    "p90": 65.4,
+    "p99": null,
+    "suppressed": [
+     "p99"
+    ],
+    "suppressed_reason": "fewer than {'p50': 30, 'p90': 30, 'p99': 100} samples required per percentile",
+    "unit": "ms"
+   },
+   "XRPUSDT|10": {
+    "n": 68,
+    "min": 13.0,
+    "max": 180.0,
+    "mean": 42.235,
+    "p50": 33.5,
+    "p90": 77.2,
+    "p99": null,
+    "suppressed": [
+     "p99"
+    ],
+    "suppressed_reason": "fewer than {'p50': 30, 'p90': 30, 'p99': 100} samples required per percentile",
+    "unit": "ms"
+   },
+   "XRPUSDT|11": {
+    "n": 45,
+    "min": 13.0,
+    "max": 201.0,
+    "mean": 38.533,
+    "p50": 27.0,
+    "p90": 68.8,
+    "p99": null,
+    "suppressed": [
+     "p99"
+    ],
+    "suppressed_reason": "fewer than {'p50': 30, 'p90': 30, 'p99': 100} samples required per percentile",
+    "unit": "ms"
+   },
+   "XRPUSDT|12": {
+    "n": 25
+   },
+   "XRPUSDT|13": {
+    "n": 68,
+    "min": 13.0,
+    "max": 112.0,
+    "mean": 39.426,
+    "p50": 35.5,
+    "p90": 67.6,
+    "p99": null,
+    "suppressed": [
+     "p99"
+    ],
+    "suppressed_reason": "fewer than {'p50': 30, 'p90': 30, 'p99': 100} samples required per percentile",
+    "unit": "ms"
+   },
+   "XRPUSDT|14": {
+    "n": 78,
+    "min": 14.0,
+    "max": 353.0,
+    "mean": 43.949,
+    "p50": 34.0,
+    "p90": 66.3,
+    "p99": null,
+    "suppressed": [
+     "p99"
+    ],
+    "suppressed_reason": "fewer than {'p50': 30, 'p90': 30, 'p99': 100} samples required per percentile",
+    "unit": "ms"
+   },
+   "XRPUSDT|15": {
+    "n": 62,
+    "min": 13.0,
+    "max": 169.0,
+    "mean": 41.387,
+    "p50": 32.0,
+    "p90": 84.3,
+    "p99": null,
+    "suppressed": [
+     "p99"
+    ],
+    "suppressed_reason": "fewer than {'p50': 30, 'p90': 30, 'p99': 100} samples required per percentile",
+    "unit": "ms"
+   },
+   "XRPUSDT|16": {
+    "n": 94,
+    "min": 13.0,
+    "max": 95.0,
+    "mean": 27.074,
+    "p50": 22.0,
+    "p90": 42.0,
+    "p99": null,
+    "suppressed": [
+     "p99"
+    ],
+    "suppressed_reason": "fewer than {'p50': 30, 'p90': 30, 'p99': 100} samples required per percentile",
+    "unit": "ms"
+   },
+   "XRPUSDT|17": {
+    "n": 52,
+    "min": 12.0,
+    "max": 79.0,
+    "mean": 28.788,
+    "p50": 23.0,
+    "p90": 53.2,
+    "p99": null,
+    "suppressed": [
+     "p99"
+    ],
+    "suppressed_reason": "fewer than {'p50': 30, 'p90': 30, 'p99': 100} samples required per percentile",
+    "unit": "ms"
+   },
+   "XRPUSDT|18": {
+    "n": 101,
+    "min": 13.0,
+    "max": 155.0,
+    "mean": 34.614,
+    "p50": 28.0,
+    "p90": 66.0,
+    "p99": 131.0,
+    "unit": "ms"
+   },
+   "XRPUSDT|19": {
+    "n": 73,
+    "min": 12.0,
+    "max": 184.0,
+    "mean": 31.945,
+    "p50": 23.0,
+    "p90": 51.8,
+    "p99": null,
+    "suppressed": [
+     "p99"
+    ],
+    "suppressed_reason": "fewer than {'p50': 30, 'p90': 30, 'p99': 100} samples required per percentile",
+    "unit": "ms"
+   },
+   "XRPUSDT|20": {
+    "n": 68,
+    "min": 13.0,
+    "max": 73.0,
+    "mean": 24.809,
+    "p50": 19.5,
+    "p90": 47.1,
+    "p99": null,
+    "suppressed": [
+     "p99"
+    ],
+    "suppressed_reason": "fewer than {'p50': 30, 'p90': 30, 'p99': 100} samples required per percentile",
+    "unit": "ms"
+   },
+   "XRPUSDT|21": {
+    "n": 83,
+    "min": 12.0,
+    "max": 99.0,
+    "mean": 27.386,
+    "p50": 21.0,
+    "p90": 50.0,
+    "p99": null,
+    "suppressed": [
+     "p99"
+    ],
+    "suppressed_reason": "fewer than {'p50': 30, 'p90': 30, 'p99': 100} samples required per percentile",
+    "unit": "ms"
+   },
+   "XRPUSDT|22": {
+    "n": 85,
+    "min": 13.0,
+    "max": 82.0,
+    "mean": 33.506,
+    "p50": 29.0,
+    "p90": 61.0,
+    "p99": null,
+    "suppressed": [
+     "p99"
+    ],
+    "suppressed_reason": "fewer than {'p50': 30, 'p90': 30, 'p99': 100} samples required per percentile",
+    "unit": "ms"
+   },
+   "XRPUSDT|23": {
+    "n": 59,
+    "min": 14.0,
+    "max": 98.0,
+    "mean": 34.864,
+    "p50": 26.0,
+    "p90": 65.4,
+    "p99": null,
+    "suppressed": [
+     "p99"
+    ],
+    "suppressed_reason": "fewer than {'p50': 30, 'p90': 30, 'p99': 100} samples required per percentile",
+    "unit": "ms"
+   }
+  },
+  "by_coin_hour_note": "cells with n < 30 carry n only",
+  "empirical_quantile_grids": {
+   "before_2026-04-19": {
+    "n": 405,
+    "q": [
+     0.0,
+     0.01,
+     0.02,
+     0.03,
+     0.04,
+     0.05,
+     0.06,
+     0.07,
+     0.08,
+     0.09,
+     0.1,
+     0.11,
+     0.12,
+     0.13,
+     0.14,
+     0.15,
+     0.16,
+     0.17,
+     0.18,
+     0.19,
+     0.2,
+     0.21,
+     0.22,
+     0.23,
+     0.24,
+     0.25,
+     0.26,
+     0.27,
+     0.28,
+     0.29,
+     0.3,
+     0.31,
+     0.32,
+     0.33,
+     0.34,
+     0.35,
+     0.36,
+     0.37,
+     0.38,
+     0.39,
+     0.4,
+     0.41,
+     0.42,
+     0.43,
+     0.44,
+     0.45,
+     0.46,
+     0.47,
+     0.48,
+     0.49,
+     0.5,
+     0.51,
+     0.52,
+     0.53,
+     0.54,
+     0.55,
+     0.56,
+     0.57,
+     0.58,
+     0.59,
+     0.6,
+     0.61,
+     0.62,
+     0.63,
+     0.64,
+     0.65,
+     0.66,
+     0.67,
+     0.68,
+     0.69,
+     0.7,
+     0.71,
+     0.72,
+     0.73,
+     0.74,
+     0.75,
+     0.76,
+     0.77,
+     0.78,
+     0.79,
+     0.8,
+     0.81,
+     0.82,
+     0.83,
+     0.84,
+     0.85,
+     0.86,
+     0.87,
+     0.88,
+     0.89,
+     0.9,
+     0.91,
+     0.92,
+     0.93,
+     0.94,
+     0.95,
+     0.96,
+     0.97,
+     0.98,
+     0.99,
+     0.995,
+     0.999,
+     1.0
+    ],
+    "ms": [
+     12.0,
+     13.0,
+     13.0,
+     13.12,
+     14.0,
+     14.0,
+     14.0,
+     14.0,
+     14.0,
+     14.0,
+     14.0,
+     15.0,
+     15.0,
+     15.0,
+     15.0,
+     15.0,
+     15.0,
+     15.0,
+     15.0,
+     15.0,
+     15.0,
+     15.0,
+     15.0,
+     15.0,
+     15.0,
+     16.0,
+     16.0,
+     16.0,
+     16.0,
+     16.0,
+     16.0,
+     16.0,
+     16.0,
+     16.0,
+     16.0,
+     16.0,
+     16.0,
+     16.0,
+     16.0,
+     16.0,
+     16.0,
+     16.0,
+     16.0,
+     16.0,
+     17.0,
+     17.0,
+     17.0,
+     17.0,
+     17.0,
+     17.0,
+     17.0,
+     17.0,
+     17.0,
+     17.0,
+     17.0,
+     17.0,
+     17.0,
+     17.0,
+     17.0,
+     17.36,
+     18.0,
+     18.0,
+     18.0,
+     18.0,
+     18.0,
+     18.0,
+     18.0,
+     18.0,
+     18.0,
+     18.0,
+     18.0,
+     18.0,
+     18.0,
+     19.0,
+     19.0,
+     19.0,
+     19.0,
+     19.0,
+     19.0,
+     19.0,
+     20.0,
+     20.0,
+     20.0,
+     20.0,
+     20.0,
+     20.0,
+     21.0,
+     21.0,
+     22.0,
+     22.0,
+     23.0,
+     23.0,
+     24.0,
+     24.0,
+     25.0,
+     25.0,
+     27.84,
+     29.0,
+     32.0,
+     35.0,
+     40.98,
+     45.98,
+     48.0
+    ]
+   },
+   "2026-04-19..2026-04-25": {
+    "n": 12916,
+    "q": [
+     0.0,
+     0.01,
+     0.02,
+     0.03,
+     0.04,
+     0.05,
+     0.06,
+     0.07,
+     0.08,
+     0.09,
+     0.1,
+     0.11,
+     0.12,
+     0.13,
+     0.14,
+     0.15,
+     0.16,
+     0.17,
+     0.18,
+     0.19,
+     0.2,
+     0.21,
+     0.22,
+     0.23,
+     0.24,
+     0.25,
+     0.26,
+     0.27,
+     0.28,
+     0.29,
+     0.3,
+     0.31,
+     0.32,
+     0.33,
+     0.34,
+     0.35,
+     0.36,
+     0.37,
+     0.38,
+     0.39,
+     0.4,
+     0.41,
+     0.42,
+     0.43,
+     0.44,
+     0.45,
+     0.46,
+     0.47,
+     0.48,
+     0.49,
+     0.5,
+     0.51,
+     0.52,
+     0.53,
+     0.54,
+     0.55,
+     0.56,
+     0.57,
+     0.58,
+     0.59,
+     0.6,
+     0.61,
+     0.62,
+     0.63,
+     0.64,
+     0.65,
+     0.66,
+     0.67,
+     0.68,
+     0.69,
+     0.7,
+     0.71,
+     0.72,
+     0.73,
+     0.74,
+     0.75,
+     0.76,
+     0.77,
+     0.78,
+     0.79,
+     0.8,
+     0.81,
+     0.82,
+     0.83,
+     0.84,
+     0.85,
+     0.86,
+     0.87,
+     0.88,
+     0.89,
+     0.9,
+     0.91,
+     0.92,
+     0.93,
+     0.94,
+     0.95,
+     0.96,
+     0.97,
+     0.98,
+     0.99,
+     0.995,
+     0.999,
+     1.0
+    ],
+    "ms": [
+     12.0,
+     13.0,
+     14.0,
+     14.0,
+     14.0,
+     15.0,
+     15.0,
+     15.0,
+     15.0,
+     15.0,
+     16.0,
+     16.0,
+     16.0,
+     16.0,
+     16.0,
+     17.0,
+     17.0,
+     17.0,
+     17.0,
+     17.0,
+     17.0,
+     18.0,
+     18.0,
+     18.0,
+     18.0,
+     19.0,
+     19.0,
+     19.0,
+     19.0,
+     20.0,
+     20.0,
+     20.0,
+     21.0,
+     21.0,
+     21.0,
+     22.0,
+     22.0,
+     22.0,
+     23.0,
+     23.0,
+     24.0,
+     24.0,
+     25.0,
+     25.0,
+     26.0,
+     26.0,
+     27.0,
+     28.0,
+     28.0,
+     29.0,
+     29.0,
+     30.0,
+     30.0,
+     31.0,
+     31.0,
+     32.0,
+     33.0,
+     33.0,
+     34.0,
+     34.0,
+     35.0,
+     36.0,
+     36.0,
+     37.0,
+     38.0,
+     39.0,
+     39.0,
+     40.0,
+     41.0,
+     42.0,
+     43.0,
+     44.0,
+     45.0,
+     46.0,
+     47.0,
+     48.0,
+     49.0,
+     50.0,
+     51.0,
+     53.0,
+     54.0,
+     56.0,
+     57.0,
+     59.0,
+     60.0,
+     62.0,
+     64.0,
+     66.0,
+     68.0,
+     69.0,
+     72.0,
+     74.0,
+     77.0,
+     81.0,
+     85.0,
+     89.0,
+     95.0,
+     107.0,
+     128.7,
+     206.0,
+     372.55,
+     3258.53,
+     11712.0
+    ]
+   },
+   "2026-04-26..2026-05-02": {
+    "n": 15794,
+    "q": [
+     0.0,
+     0.01,
+     0.02,
+     0.03,
+     0.04,
+     0.05,
+     0.06,
+     0.07,
+     0.08,
+     0.09,
+     0.1,
+     0.11,
+     0.12,
+     0.13,
+     0.14,
+     0.15,
+     0.16,
+     0.17,
+     0.18,
+     0.19,
+     0.2,
+     0.21,
+     0.22,
+     0.23,
+     0.24,
+     0.25,
+     0.26,
+     0.27,
+     0.28,
+     0.29,
+     0.3,
+     0.31,
+     0.32,
+     0.33,
+     0.34,
+     0.35,
+     0.36,
+     0.37,
+     0.38,
+     0.39,
+     0.4,
+     0.41,
+     0.42,
+     0.43,
+     0.44,
+     0.45,
+     0.46,
+     0.47,
+     0.48,
+     0.49,
+     0.5,
+     0.51,
+     0.52,
+     0.53,
+     0.54,
+     0.55,
+     0.56,
+     0.57,
+     0.58,
+     0.59,
+     0.6,
+     0.61,
+     0.62,
+     0.63,
+     0.64,
+     0.65,
+     0.66,
+     0.67,
+     0.68,
+     0.69,
+     0.7,
+     0.71,
+     0.72,
+     0.73,
+     0.74,
+     0.75,
+     0.76,
+     0.77,
+     0.78,
+     0.79,
+     0.8,
+     0.81,
+     0.82,
+     0.83,
+     0.84,
+     0.85,
+     0.86,
+     0.87,
+     0.88,
+     0.89,
+     0.9,
+     0.91,
+     0.92,
+     0.93,
+     0.94,
+     0.95,
+     0.96,
+     0.97,
+     0.98,
+     0.99,
+     0.995,
+     0.999,
+     1.0
+    ],
+    "ms": [
+     12.0,
+     13.0,
+     14.0,
+     14.0,
+     14.0,
+     15.0,
+     15.0,
+     15.0,
+     16.0,
+     16.0,
+     16.0,
+     16.0,
+     17.0,
+     17.0,
+     17.0,
+     17.0,
+     18.0,
+     18.0,
+     18.0,
+     19.0,
+     19.0,
+     19.0,
+     20.0,
+     20.0,
+     21.0,
+     21.0,
+     21.0,
+     22.0,
+     22.0,
+     23.0,
+     23.0,
+     24.0,
+     25.0,
+     25.0,
+     26.0,
+     27.0,
+     27.0,
+     28.0,
+     29.0,
+     29.0,
+     30.0,
+     31.0,
+     32.0,
+     33.0,
+     33.0,
+     34.0,
+     35.0,
+     36.0,
+     37.0,
+     38.0,
+     38.0,
+     39.0,
+     40.0,
+     41.0,
+     41.0,
+     42.0,
+     43.0,
+     44.0,
+     45.0,
+     45.0,
+     46.0,
+     47.0,
+     48.0,
+     49.0,
+     50.0,
+     51.0,
+     52.0,
+     53.0,
+     54.0,
+     55.0,
+     56.0,
+     57.0,
+     59.0,
+     60.0,
+     61.0,
+     62.0,
+     64.0,
+     65.0,
+     67.0,
+     68.0,
+     70.0,
+     72.0,
+     73.0,
+     75.0,
+     77.0,
+     79.0,
+     81.0,
+     84.0,
+     86.0,
+     89.0,
+     93.0,
+     97.0,
+     103.0,
+     109.0,
+     116.0,
+     124.0,
+     133.0,
+     149.21,
+     166.0,
+     209.07,
+     252.0,
+     360.484,
+     557.0
+    ]
+   },
+   "unfilled_window": {
+    "n": 9341,
+    "q": [
+     0.0,
+     0.01,
+     0.02,
+     0.03,
+     0.04,
+     0.05,
+     0.06,
+     0.07,
+     0.08,
+     0.09,
+     0.1,
+     0.11,
+     0.12,
+     0.13,
+     0.14,
+     0.15,
+     0.16,
+     0.17,
+     0.18,
+     0.19,
+     0.2,
+     0.21,
+     0.22,
+     0.23,
+     0.24,
+     0.25,
+     0.26,
+     0.27,
+     0.28,
+     0.29,
+     0.3,
+     0.31,
+     0.32,
+     0.33,
+     0.34,
+     0.35,
+     0.36,
+     0.37,
+     0.38,
+     0.39,
+     0.4,
+     0.41,
+     0.42,
+     0.43,
+     0.44,
+     0.45,
+     0.46,
+     0.47,
+     0.48,
+     0.49,
+     0.5,
+     0.51,
+     0.52,
+     0.53,
+     0.54,
+     0.55,
+     0.56,
+     0.57,
+     0.58,
+     0.59,
+     0.6,
+     0.61,
+     0.62,
+     0.63,
+     0.64,
+     0.65,
+     0.66,
+     0.67,
+     0.68,
+     0.69,
+     0.7,
+     0.71,
+     0.72,
+     0.73,
+     0.74,
+     0.75,
+     0.76,
+     0.77,
+     0.78,
+     0.79,
+     0.8,
+     0.81,
+     0.82,
+     0.83,
+     0.84,
+     0.85,
+     0.86,
+     0.87,
+     0.88,
+     0.89,
+     0.9,
+     0.91,
+     0.92,
+     0.93,
+     0.94,
+     0.95,
+     0.96,
+     0.97,
+     0.98,
+     0.99,
+     0.995,
+     0.999,
+     1.0
+    ],
+    "ms": [
+     12.0,
+     13.0,
+     14.0,
+     14.0,
+     15.0,
+     15.0,
+     15.0,
+     16.0,
+     16.0,
+     16.0,
+     17.0,
+     17.0,
+     17.0,
+     18.0,
+     18.0,
+     19.0,
+     19.0,
+     20.0,
+     20.0,
+     21.0,
+     22.0,
+     22.0,
+     23.0,
+     23.0,
+     24.0,
+     25.0,
+     26.0,
+     27.0,
+     28.0,
+     29.0,
+     30.0,
+     31.0,
+     32.0,
+     34.0,
+     35.0,
+     36.0,
+     37.0,
+     38.0,
+     39.0,
+     40.0,
+     40.0,
+     41.0,
+     42.0,
+     43.0,
+     43.0,
+     44.0,
+     45.0,
+     46.0,
+     47.0,
+     48.0,
+     48.0,
+     49.0,
+     50.0,
+     51.0,
+     52.0,
+     53.0,
+     54.0,
+     55.0,
+     56.0,
+     57.0,
+     58.0,
+     58.0,
+     59.0,
+     61.0,
+     62.0,
+     63.0,
+     64.0,
+     66.0,
+     66.0,
+     67.0,
+     69.0,
+     70.0,
+     72.0,
+     73.0,
+     74.0,
+     76.0,
+     77.0,
+     79.0,
+     80.0,
+     82.0,
+     83.0,
+     85.0,
+     87.0,
+     89.0,
+     91.6,
+     94.0,
+     97.0,
+     101.0,
+     105.0,
+     109.0,
+     114.0,
+     119.0,
+     124.0,
+     129.0,
+     137.0,
+     148.0,
+     158.0,
+     170.0,
+     199.0,
+     239.6,
+     294.9,
+     389.28,
+     557.0
+    ]
+   },
+   "all": {
+    "n": 29115,
+    "q": [
+     0.0,
+     0.01,
+     0.02,
+     0.03,
+     0.04,
+     0.05,
+     0.06,
+     0.07,
+     0.08,
+     0.09,
+     0.1,
+     0.11,
+     0.12,
+     0.13,
+     0.14,
+     0.15,
+     0.16,
+     0.17,
+     0.18,
+     0.19,
+     0.2,
+     0.21,
+     0.22,
+     0.23,
+     0.24,
+     0.25,
+     0.26,
+     0.27,
+     0.28,
+     0.29,
+     0.3,
+     0.31,
+     0.32,
+     0.33,
+     0.34,
+     0.35,
+     0.36,
+     0.37,
+     0.38,
+     0.39,
+     0.4,
+     0.41,
+     0.42,
+     0.43,
+     0.44,
+     0.45,
+     0.46,
+     0.47,
+     0.48,
+     0.49,
+     0.5,
+     0.51,
+     0.52,
+     0.53,
+     0.54,
+     0.55,
+     0.56,
+     0.57,
+     0.58,
+     0.59,
+     0.6,
+     0.61,
+     0.62,
+     0.63,
+     0.64,
+     0.65,
+     0.66,
+     0.67,
+     0.68,
+     0.69,
+     0.7,
+     0.71,
+     0.72,
+     0.73,
+     0.74,
+     0.75,
+     0.76,
+     0.77,
+     0.78,
+     0.79,
+     0.8,
+     0.81,
+     0.82,
+     0.83,
+     0.84,
+     0.85,
+     0.86,
+     0.87,
+     0.88,
+     0.89,
+     0.9,
+     0.91,
+     0.92,
+     0.93,
+     0.94,
+     0.95,
+     0.96,
+     0.97,
+     0.98,
+     0.99,
+     0.995,
+     0.999,
+     1.0
+    ],
+    "ms": [
+     12.0,
+     13.0,
+     14.0,
+     14.0,
+     14.0,
+     15.0,
+     15.0,
+     15.0,
+     15.0,
+     16.0,
+     16.0,
+     16.0,
+     16.0,
+     16.0,
+     17.0,
+     17.0,
+     17.0,
+     17.0,
+     17.0,
+     18.0,
+     18.0,
+     18.0,
+     18.0,
+     19.0,
+     19.0,
+     19.0,
+     20.0,
+     20.0,
+     20.0,
+     21.0,
+     21.0,
+     22.0,
+     22.0,
+     22.0,
+     23.0,
+     23.0,
+     24.0,
+     24.0,
+     25.0,
+     26.0,
+     26.0,
+     27.0,
+     28.0,
+     28.0,
+     29.0,
+     30.0,
+     30.0,
+     31.0,
+     32.0,
+     32.0,
+     33.0,
+     34.0,
+     34.0,
+     35.0,
+     36.0,
+     37.0,
+     37.0,
+     38.0,
+     39.0,
+     40.0,
+     41.0,
+     41.0,
+     42.0,
+     43.0,
+     44.0,
+     45.0,
+     46.0,
+     47.0,
+     48.0,
+     49.0,
+     50.0,
+     51.0,
+     52.0,
+     53.0,
+     54.0,
+     56.0,
+     57.0,
+     58.0,
+     60.0,
+     61.0,
+     63.0,
+     64.0,
+     66.0,
+     67.0,
+     69.0,
+     71.0,
+     73.0,
+     75.0,
+     78.0,
+     80.0,
+     83.0,
+     86.0,
+     90.0,
+     95.0,
+     101.0,
+     109.0,
+     120.0,
+     133.0,
+     158.0,
+     207.86,
+     282.43,
+     866.404,
+     11712.0
+    ]
+   }
+  },
+  "rejected_orders_only": {
+   "n": 596,
+   "min": 13.0,
+   "max": 392.0,
+   "mean": 78.621,
+   "p50": 68.0,
+   "p90": 141.5,
+   "p99": 260.95,
+   "unit": "ms"
+  },
+  "return_leg_exchange_to_client": null,
+  "return_leg_reason": "not in the export (no client receive times)"
+ },
+ "rejects": {
+  "window": [
+   "2026-05-01T00:00:00+00:00",
+   "2026-05-02T14:46:25.581000+00:00"
+  ],
+  "denominator_note": "PostOnly orders created in the window (Filled + Cancelled + PartiallyFilledCanceled + Rejected)",
+  "postonly_would_take_liquidity": {
+   "k": 596,
+   "n": 9341,
+   "rate": 0.063805,
+   "wilson95": [
+    0.059025,
+    0.068943
+   ]
+  },
+  "other_reasons": {
+   "count": 0,
+   "by_reason": {},
+   "rate_over_all_orders_in_window": {
+    "k": 0,
+    "n": 9383,
+    "rate": 0.0,
+    "wilson95": [
+     0.0,
+     0.000409
+    ]
+   },
+   "rate_over_non_postonly_orders": {
+    "k": 0,
+    "n": 42,
+    "rate": 0.0,
+    "wilson95": [
+     0.0,
+     0.083802
+    ]
+   },
+   "upper_bound_95_rule_of_three": 0.00032,
+   "interpretation": "zero non-PostOnly rejects were observed; the data bound the rate, they do not measure it"
+  },
+  "by_reason_counts": {
+   "EC_PostOnlyWillTakeLiquidity": 596
+  },
+  "by_coin": {
+   "AAVEUSDT": {
+    "k": 9,
+    "n": 26,
+    "rate": 0.346154,
+    "wilson95": [
+     0.19412,
+     0.537798
+    ]
+   },
+   "ADAUSDT": {
+    "k": 22,
+    "n": 759,
+    "rate": 0.028986,
+    "wilson95": [
+     0.019218,
+     0.043497
+    ]
+   },
+   "APTUSDT": {
+    "k": 1,
+    "n": 432,
+    "rate": 0.002315,
+    "wilson95": [
+     0.000409,
+     0.012994
+    ]
+   },
+   "ARBUSDT": {
+    "k": 12,
+    "n": 83,
+    "rate": 0.144578,
+    "wilson95": [
+     0.084682,
+     0.23592
+    ]
+   },
+   "ATOMUSDT": {
+    "k": 2,
+    "n": 400,
+    "rate": 0.005,
+    "wilson95": [
+     0.001372,
+     0.018045
+    ]
+   },
+   "AVAXUSDT": {
+    "k": 12,
+    "n": 832,
+    "rate": 0.014423,
+    "wilson95": [
+     0.008269,
+     0.02504
+    ]
+   },
+   "BNBUSDT": {
+    "k": 0,
+    "n": 47,
+    "rate": 0.0,
+    "wilson95": [
+     0.0,
+     0.07556
+    ]
+   },
+   "BTCUSDT": {
+    "k": 44,
+    "n": 268,
+    "rate": 0.164179,
+    "wilson95": [
+     0.124633,
+     0.213216
+    ]
+   },
+   "DOGEUSDT": {
+    "k": 105,
+    "n": 993,
+    "rate": 0.10574,
+    "wilson95": [
+     0.08811,
+     0.126409
+    ]
+   },
+   "DOTUSDT": {
+    "k": 1,
+    "n": 99,
+    "rate": 0.010101,
+    "wilson95": [
+     0.001785,
+     0.055017
+    ]
+   },
+   "ENAUSDT": {
+    "k": 50,
+    "n": 232,
+    "rate": 0.215517,
+    "wilson95": [
+     0.167469,
+     0.272834
+    ]
+   },
+   "ETHUSDT": {
+    "k": 119,
+    "n": 735,
+    "rate": 0.161905,
+    "wilson95": [
+     0.137043,
+     0.190283
+    ]
+   },
+   "FILUSDT": {
+    "k": 11,
+    "n": 334,
+    "rate": 0.032934,
+    "wilson95": [
+     0.018487,
+     0.058003
+    ]
+   },
+   "INJUSDT": {
+    "k": 3,
+    "n": 959,
+    "rate": 0.003128,
+    "wilson95": [
+     0.001064,
+     0.009157
+    ]
+   },
+   "LTCUSDT": {
+    "k": 31,
+    "n": 716,
+    "rate": 0.043296,
+    "wilson95": [
+     0.030667,
+     0.0608
+    ]
+   },
+   "MNTUSDT": {
+    "k": 16,
+    "n": 204,
+    "rate": 0.078431,
+    "wilson95": [
+     0.048851,
+     0.123596
+    ]
+   },
+   "NEARUSDT": {
+    "k": 0,
+    "n": 204,
+    "rate": 0.0,
+    "wilson95": [
+     0.0,
+     0.018483
+    ]
+   },
+   "OPUSDT": {
+    "k": 3,
+    "n": 680,
+    "rate": 0.004412,
+    "wilson95": [
+     0.001501,
+     0.01289
+    ]
+   },
+   "SOLUSDT": {
+    "k": 45,
+    "n": 454,
+    "rate": 0.099119,
+    "wilson95": [
+     0.074904,
+     0.130061
+    ]
+   },
+   "SUIUSDT": {
+    "k": 52,
+    "n": 428,
+    "rate": 0.121495,
+    "wilson95": [
+     0.093865,
+     0.15586
+    ]
+   },
+   "UNIUSDT": {
+    "k": 3,
+    "n": 92,
+    "rate": 0.032609,
+    "wilson95": [
+     0.011151,
+     0.091535
+    ]
+   },
+   "XRPUSDT": {
+    "k": 55,
+    "n": 364,
+    "rate": 0.151099,
+    "wilson95": [
+     0.117961,
+     0.191524
+    ]
+   }
+  },
+  "by_hour_utc": {
+   "00": {
+    "k": 91,
+    "n": 888,
+    "rate": 0.102477,
+    "wilson95": [
+     0.084212,
+     0.124168
+    ]
+   },
+   "01": {
+    "k": 231,
+    "n": 1643,
+    "rate": 0.140596,
+    "wilson95": [
+     0.124625,
+     0.158244
+    ]
+   },
+   "02": {
+    "k": 83,
+    "n": 847,
+    "rate": 0.097993,
+    "wilson95": [
+     0.079749,
+     0.119867
+    ]
+   },
+   "03": {
+    "k": 0,
+    "n": 0,
+    "rate": null,
+    "wilson95": [
+     null,
+     null
+    ]
+   },
+   "04": {
+    "k": 0,
+    "n": 28,
+    "rate": 0.0,
+    "wilson95": [
+     0.0,
+     0.120647
+    ]
+   },
+   "05": {
+    "k": 72,
+    "n": 2304,
+    "rate": 0.03125,
+    "wilson95": [
+     0.024889,
+     0.039172
+    ]
+   },
+   "06": {
+    "k": 53,
+    "n": 895,
+    "rate": 0.059218,
+    "wilson95": [
+     0.045556,
+     0.076647
+    ]
+   },
+   "07": {
+    "k": 21,
+    "n": 1062,
+    "rate": 0.019774,
+    "wilson95": [
+     0.012969,
+     0.030041
+    ]
+   },
+   "08": {
+    "k": 0,
+    "n": 0,
+    "rate": null,
+    "wilson95": [
+     null,
+     null
+    ]
+   },
+   "09": {
+    "k": 0,
+    "n": 0,
+    "rate": null,
+    "wilson95": [
+     null,
+     null
+    ]
+   },
+   "10": {
+    "k": 11,
+    "n": 389,
+    "rate": 0.028278,
+    "wilson95": [
+     0.015862,
+     0.04992
+    ]
+   },
+   "11": {
+    "k": 2,
+    "n": 124,
+    "rate": 0.016129,
+    "wilson95": [
+     0.004434,
+     0.056904
+    ]
+   },
+   "12": {
+    "k": 0,
+    "n": 0,
+    "rate": null,
+    "wilson95": [
+     null,
+     null
+    ]
+   },
+   "13": {
+    "k": 13,
+    "n": 335,
+    "rate": 0.038806,
+    "wilson95": [
+     0.022816,
+     0.065253
+    ]
+   },
+   "14": {
+    "k": 19,
+    "n": 826,
+    "rate": 0.023002,
+    "wilson95": [
+     0.014774,
+     0.035647
+    ]
+   },
+   "15": {
+    "k": 0,
+    "n": 0,
+    "rate": null,
+    "wilson95": [
+     null,
+     null
+    ]
+   },
+   "16": {
+    "k": 0,
+    "n": 0,
+    "rate": null,
+    "wilson95": [
+     null,
+     null
+    ]
+   },
+   "17": {
+    "k": 0,
+    "n": 0,
+    "rate": null,
+    "wilson95": [
+     null,
+     null
+    ]
+   },
+   "18": {
+    "k": 0,
+    "n": 0,
+    "rate": null,
+    "wilson95": [
+     null,
+     null
+    ]
+   },
+   "19": {
+    "k": 0,
+    "n": 0,
+    "rate": null,
+    "wilson95": [
+     null,
+     null
+    ]
+   },
+   "20": {
+    "k": 0,
+    "n": 0,
+    "rate": null,
+    "wilson95": [
+     null,
+     null
+    ]
+   },
+   "21": {
+    "k": 0,
+    "n": 0,
+    "rate": null,
+    "wilson95": [
+     null,
+     null
+    ]
+   },
+   "22": {
+    "k": 0,
+    "n": 0,
+    "rate": null,
+    "wilson95": [
+     null,
+     null
+    ]
+   },
+   "23": {
+    "k": 0,
+    "n": 0,
+    "rate": null,
+    "wilson95": [
+     null,
+     null
+    ]
+   }
+  },
+  "by_day_utc": {
+   "2026-05-01": {
+    "k": 405,
+    "n": 3378,
+    "rate": 0.119893,
+    "wilson95": [
+     0.109368,
+     0.131282
+    ]
+   },
+   "2026-05-02": {
+    "k": 191,
+    "n": 5963,
+    "rate": 0.032031,
+    "wilson95": [
+     0.027854,
+     0.03681
+    ]
+   }
+  },
+  "rejected_side_counts": {
+   "Sell": 192,
+   "Buy": 404
+  },
+  "reject_processing_time_ms_updated_minus_created": {
+   "n": 596,
+   "min": 1.0,
+   "max": 96801.0,
+   "mean": 3184.54,
+   "p50": 1.0,
+   "p90": 6595.5,
+   "p99": 58225.7,
+   "unit": "ms"
+  }
+ },
+ "cancel_latency": {
+  "cancel_latency_sent_to_confirmed": null,
+  "reason": "the export has no cancel-request timestamp; updatedTime of a Cancelled order is the confirmation time and the send time is not recorded",
+  "informational_resting_time_before_cancel_confirmed_ms": {
+   "n": 7917,
+   "min": 1.0,
+   "max": 6307105.0,
+   "mean": 38503.101,
+   "p50": 1428.0,
+   "p90": 86830.8,
+   "p99": 223421.76,
+   "unit": "ms"
+  },
+  "informational_note": "this is order lifetime, driven by the strategy's own timeout, not a latency",
+  "cancelled_orders_in_window": 7917,
+  "cancelled_by_type": {
+   "CancelByUser": 7917
+  }
+ },
+ "cancel_fill_races": {
+  "definitions": {
+   "filled_after_cancel_requested": "orderStatus Filled with cancelType CancelByUser: a cancel was sent, the order filled anyway",
+   "cancel_found_nothing": "orderStatus Filled with rejectReason EC_OrigClOrdIDDoesNotExist: the cancel / amend reached the exchange after the order was gone",
+   "partial_then_cancelled": "orderStatus PartiallyFilledCanceled: some fill, then cancelled; whether the fill came after the cancel was sent is not recorded"
+  },
+  "filled_after_cancel_requested": {
+   "all_days": 4,
+   "in_unfilled_window": 0,
+   "by_day": {
+    "2026-04-24": 2,
+    "2026-04-23": 2
+   }
+  },
+  "cancel_found_nothing": {
+   "all_days": 5,
+   "in_unfilled_window": 0,
+   "by_day": {
+    "2026-04-24": 3,
+    "2026-04-23": 2
+   }
+  },
+  "overlap_of_the_two_groups": 4,
+  "union_of_the_two_groups": 5,
+  "partial_then_cancelled": {
+   "all_days": 23,
+   "in_unfilled_window": 0,
+   "last_fill_to_cancel_confirmed_ms": {
+    "n": 23,
+    "min": 4.0,
+    "max": 6240498.0,
+    "mean": 741668.435,
+    "p50": null,
+    "p90": null,
+    "p99": null,
+    "suppressed": [
+     "p50",
+     "p90",
+     "p99"
+    ],
+    "suppressed_reason": "fewer than {'p50': 30, 'p90': 30, 'p99': 100} samples required per percentile",
+    "unit": "ms"
+   },
+   "share_with_last_fill_within_ms": {
+    "50": {
+     "k": 3,
+     "n": 23,
+     "rate": 0.130435,
+     "wilson95": [
+      0.045376,
+      0.321279
+     ]
+    },
+    "100": {
+     "k": 5,
+     "n": 23,
+     "rate": 0.217391,
+     "wilson95": [
+      0.096638,
+      0.419039
+     ]
+    },
+    "250": {
+     "k": 6,
+     "n": 23,
+     "rate": 0.26087,
+     "wilson95": [
+      0.125484,
+      0.464704
+     ]
+    },
+    "500": {
+     "k": 7,
+     "n": 23,
+     "rate": 0.304348,
+     "wilson95": [
+      0.156038,
+      0.508661
+     ]
+    },
+    "1000": {
+     "k": 7,
+     "n": 23,
+     "rate": 0.304348,
+     "wilson95": [
+      0.156038,
+      0.508661
+     ]
+    }
+   }
+  },
+  "cancel_requests_visible_in_unfilled_window": 7917,
+  "race_share_in_unfilled_window": {
+   "k": 0,
+   "n": 7917,
+   "rate": 0.0,
+   "wilson95": [
+    0.0,
+    0.000485
+   ]
+  },
+  "race_share_note": "numerator = filled orders that carry evidence of a cancel; denominator = every cancel attempt that left a trace in the window. A cancel sent to an order that filled normally leaves no trace only when it also found nothing, so this is a lower bound on the true race share.",
+  "integrity_checks": {
+   "cancelled_orders_with_executions": 0,
+   "executions_after_cancel_confirmed": 0
+  }
+ },
+ "disconnect_candidates": {
+  "window": [
+   "2026-05-01T00:00:00.891000+00:00",
+   "2026-05-02T14:47:50.414000+00:00"
+  ],
+  "window_seconds": 139669.5,
+  "events_used": 19668,
+  "definition": "interval with no order create / fill / final-update event on ANY of the 22 symbols",
+  "by_threshold": {
+   ">10s": {
+    "all_gaps": 694,
+    "all_gap_seconds": 123968.8,
+    "with_an_order_open_across": 684,
+    "open_gap_seconds": 12049.0
+   },
+   ">30s": {
+    "all_gaps": 61,
+    "all_gap_seconds": 114022.7,
+    "with_an_order_open_across": 53,
+    "open_gap_seconds": 2131.6
+   },
+   ">60s": {
+    "all_gaps": 10,
+    "all_gap_seconds": 112078.4,
+    "with_an_order_open_across": 2,
+    "open_gap_seconds": 187.3
+   },
+   ">120s": {
+    "all_gaps": 9,
+    "all_gap_seconds": 112013.2,
+    "with_an_order_open_across": 1,
+    "open_gap_seconds": 122.1
+   },
+   ">300s": {
+    "all_gaps": 7,
+    "all_gap_seconds": 111676.3,
+    "with_an_order_open_across": 0,
+    "open_gap_seconds": 0
+   },
+   ">900s": {
+    "all_gaps": 4,
+    "all_gap_seconds": 110348.9,
+    "with_an_order_open_across": 0,
+    "open_gap_seconds": 0
+   }
+  },
+  "longest_with_an_order_open_across": [
+   {
+    "start_utc": "2026-05-02T11:21:42.533000+00:00",
+    "end_utc": "2026-05-02T11:23:44.602000+00:00",
+    "seconds": 122.1
+   },
+   {
+    "start_utc": "2026-05-02T06:40:58.392000+00:00",
+    "end_utc": "2026-05-02T06:42:03.640000+00:00",
+    "seconds": 65.2
+   },
+   {
+    "start_utc": "2026-05-02T10:33:02.945000+00:00",
+    "end_utc": "2026-05-02T10:33:59.096000+00:00",
+    "seconds": 56.2
+   },
+   {
+    "start_utc": "2026-05-01T00:47:33.110000+00:00",
+    "end_utc": "2026-05-01T00:48:27.378000+00:00",
+    "seconds": 54.3
+   },
+   {
+    "start_utc": "2026-05-02T11:24:57.297000+00:00",
+    "end_utc": "2026-05-02T11:25:47.215000+00:00",
+    "seconds": 49.9
+   },
+   {
+    "start_utc": "2026-05-02T10:41:54.523000+00:00",
+    "end_utc": "2026-05-02T10:42:43.663000+00:00",
+    "seconds": 49.1
+   },
+   {
+    "start_utc": "2026-05-02T10:44:06.742000+00:00",
+    "end_utc": "2026-05-02T10:44:54.710000+00:00",
+    "seconds": 48.0
+   },
+   {
+    "start_utc": "2026-05-02T11:31:03.119000+00:00",
+    "end_utc": "2026-05-02T11:31:49.886000+00:00",
+    "seconds": 46.8
+   },
+   {
+    "start_utc": "2026-05-02T10:35:15.406000+00:00",
+    "end_utc": "2026-05-02T10:36:01.633000+00:00",
+    "seconds": 46.2
+   },
+   {
+    "start_utc": "2026-05-02T14:44:12.647000+00:00",
+    "end_utc": "2026-05-02T14:44:58.284000+00:00",
+    "seconds": 45.6
+   }
+  ],
+  "interpretation": "CANDIDATES ONLY. The export cannot tell a connection loss from an idle bot or a quiet market; a final-state record carries no heartbeat. No disconnect rate is derived from this.",
+  "disconnect_rate_per_day": null,
+  "disconnect_duration_distribution": null,
+  "reason_null": "not observable from final-state order records"
+ }
+}

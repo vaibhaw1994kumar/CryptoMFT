@@ -1,0 +1,16 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "crypto-stat-arb-platform"
+version = "0.1.0"
+description = "Deterministic multi-venue crypto statistical-arbitrage backtest and paper-trading core"
+requires-python = ">=3.11"
+dependencies = ["websockets>=12,<17"]
+
+[project.scripts]
+crypto-stat-arb = "crypto_stat_arb.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]

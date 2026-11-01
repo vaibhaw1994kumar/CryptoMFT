@@ -1,0 +1,39 @@
+# legacy_v0 — the comparison baseline: every switch at the value the engine used before 2026-11-01. This profile is exempt from the
+# MANDATORY check by name (profiles.check_mandatory) so results can be compared; it must never be used for a release.
+name: legacy_v0
+description: pre-2026-11-01 behaviour, bit-identical; comparison only
+product: perp
+product_fee_consistency: false           # legacy: a family mismatch only warns
+latency_preset: colocated_both
+fee_presets:
+  bybit: bybit_perp_mm
+  binance: binance_perp_vip0
+valuation: last_mark                     # LEGACY_COMPAT: each venue at its own last mid (fails the bridge on days with a stopped feed)
+equity_bridge: warn
+enforce_book_state: false
+trade_dedupe: set
+delta_uses_book_size: true
+cancel_time_basis: receive
+postonly_reject_model: "off"
+arb:
+  profile: legacy_v0
+  mode: maker_taker
+  dispatch_mode: fill_triggered
+  maker_passive_side: bid
+  min_net_edge_bps: 1.0
+  maker_max_age_s: 15.0
+  count_pending_exposure: false
+  count_unknown_exposure: false
+  net_ceiling_multiple: 2.0
+maker:
+  min_queue_ahead: 25.0
+  unknown_queue_model: legacy
+  cancel_model: proportional
+  vanish_clears_queue: false
+  fill_evidence: "off"
+  share_trade_volume: true
+  dedupe_trade_depth: true
+  exchange_time_eligibility: true
+  level_creator_trade_only: false
+hedge_faults:
+  response: legacy
