@@ -9,8 +9,10 @@ Baseline: measured on the unmodified OMS and MakerExecutor before the PostOnly-r
 """
 from __future__ import annotations
 
+import functools
 import itertools
 import warnings
+from pathlib import Path
 
 import pytest
 
@@ -18,9 +20,22 @@ from new_backtest.order_state_machine import ALLOWED_TRANSITIONS, TERMINAL, Kind
 from parity_adapters import NotRepresentable, Outcome, run_maker, run_oms, run_spec
 from parity_scenarios import SCENARIOS
 
-SYSTEMS = {"oms": run_oms, "maker": run_maker}
+def _perp_cfg():
+    """The maker lifecycle settings of the perp profile that matter here (read from the profile, so the test follows it)."""
+    from new_backtest.profiles import load_profile
+    doc = load_profile(Path(__file__).resolve().parents[1] / "profiles" / "perp_perp_maker_taker_v1.yaml")
+    assert doc["postonly_reject_model"] == "on" and doc["cancel_time_basis"] == "exchange"
+    return {"postonly_reject_model": doc["postonly_reject_model"], "cancel_time_basis": doc["cancel_time_basis"],
+            "postonly_notice_s": 0.0}      # the script pins the time the strategy learns of a reject
 
-# (scenario, system) -> (id, what differs)
+
+# "maker"      = the engine with its defaults, which is what legacy_v0 runs (kept bit-identical on purpose)
+# "maker_perp" = the same lifecycle code with the settings perp_perp_maker_taker_v1 turns on: PostOnly rejects (D-01), exchange-time cancel
+#                basis (D-03) and the explicit UNKNOWN state (D-02). No strict xfail may remain in this column.
+SYSTEMS = {"oms": run_oms, "maker": run_maker, "maker_perp": functools.partial(run_maker, cfg_kw=_perp_cfg(), unknown_model=True)}
+
+# (scenario, system) -> (id, what differs).  Only the legacy-default column ("maker") keeps any: they are the documented reasons the perp profile
+# switches the corresponding features on, not open defects.
 DISAGREEMENTS = {
     ("reject", "maker"): ("D-01", "MakerExecutor/backtester cannot reject a passive order: every order that arrives is accepted and rests"),
     ("reject_after_partial_fill", "maker"): ("D-01", "MakerExecutor/backtester cannot reject a passive order, so a late reject cannot even be expressed"),
@@ -82,9 +97,47 @@ def test_d01_a_postonly_reject_is_now_expressible_with_the_postonly_model_on():
     assert (got.state, got.booked, got.fills) == (expected.state, expected.booked, expected.fills)
 
 
-def test_d01_a_reject_after_a_fill_remains_inexpressible():
+def test_d01_reject_after_a_fill_is_expressible_in_the_perp_configuration_and_keeps_the_fill():
+    expected = run_spec(SCENARIOS["reject_after_partial_fill"])
+    got = SYSTEMS["maker_perp"](SCENARIOS["reject_after_partial_fill"])
+    assert (got.state, got.booked, got.fills) == (expected.state, expected.booked, expected.fills) == ("partially_filled", 0.4, (0.4,))
+
+
+def test_d01_with_the_postonly_model_off_a_reject_is_not_representable():
     with pytest.raises(NotRepresentable):
-        run_maker(SCENARIOS["reject_after_partial_fill"], cfg_kw={"postonly_reject_model": "on"})
+        run_maker(SCENARIOS["reject_after_partial_fill"], cfg_kw={})
+
+
+@pytest.mark.parametrize("scenario,state", [("ack_timeout_then_fill", "filled"), ("ack_timeout_then_ack", "resting"), ("ack_timeout_unresolved", "unknown")])
+def test_d02_unknown_is_an_explicit_state_and_agrees_with_the_specification(scenario, state):
+    got = SYSTEMS["maker_perp"](SCENARIOS[scenario])
+    assert got.state == state == run_spec(SCENARIOS[scenario]).state
+
+
+def test_d02_without_the_unknown_model_a_timeout_is_not_representable():
+    with pytest.raises(NotRepresentable):
+        run_maker(SCENARIOS["ack_timeout_unresolved"])
+
+
+def test_the_perp_column_has_no_listed_disagreement():
+    assert not [k for k in DISAGREEMENTS if k[1] == "maker_perp"]
+
+
+def test_a_reject_notice_is_counted_once_and_does_not_double_book():
+    """venue_reject_notice twice for the same order: one alarm, the fill booked once."""
+    from test_maker_order_lifetime import BINANCE, BYBIT, Harness
+    from new_backtest.event_loader import TRADE
+    h = Harness(ttl=0.0, entry_s=0.003, cancel_s=1e6, queue=0.0, max_live=4, cfg_kw=_perp_cfg())
+    h.bt.latency.aligner.samples = 1
+    h.book(-1.0, BYBIT); h.book(-1.0, BINANCE)
+    h.send_maker(0.0, qty=2.0, price=100.0)
+    h.event(0.003, TRADE, BYBIT, {"price": 150.0, "volume": 0.001, "side": "b"}, exchange_ts=0.003)
+    h.sell_trade(0.5, BYBIT, volume=0.8, price=100.0, exchange_ts=0.5)
+    mo = next(iter(h.bt.maker.orders.values()))
+    assert h.bt.venue_reject_notice(mo.order_id, 1.0) == "partially_filled"
+    assert h.bt.venue_reject_notice(mo.order_id, 1.1) == "partially_filled"
+    assert h.bt.hedge["reject_after_fill_alarms"] == 1
+    assert sum(r["qty"] for r in h.bt.trade_log if r["venue"] == BYBIT and not r["taker"]) == pytest.approx(0.8)
 
 
 def test_every_disagreement_refers_to_a_real_scenario():

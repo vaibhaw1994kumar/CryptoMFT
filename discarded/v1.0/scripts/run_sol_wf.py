@@ -40,14 +40,20 @@ OUTPUT_ROOT = Path("/Users/vaibhav/Documents/Newproject/out/sol_wf_backtest")
 _FUNDING_DIR = Path("/Users/vaibhav/Documents/Newproject/out/funding/SOLUSDT")
 FUNDING_DIR: str | None = str(_FUNDING_DIR) if _FUNDING_DIR.exists() else None
 
-# Date window — full January 2022 (bybit_out2 + binance_out on JupyterHub).
+# Date window — Oct 2024 (Bybit from Tardis IOBC + Binance synthetic from data.binance.vision).
+# Bybit: real L2 data (Tardis/IOBC, book_snapshots + book_events from depthUpdate stream).
+# Binance: synthetic L2 data (built from public aggTrades; best_bid/ask from data-driven
+#   spread estimation; depth levels uniform 50 SOL per tick; fetch_binance_public.py on JupyterHub).
+#   Note: fill simulation on the Binance hedge leg uses synthetic book depth (uniform), so
+#   walk-the-book VWAP is approximate.  Spread itself is data-driven (≥1 tick floor).
+#
 # Sync data first:
-#   rsync -avz --progress datauser@103.16.231.53:/home/jovyan/work/tardis-iobc-client-master/bybit_out2/bybit/ \
+#   rsync -avz --progress datauser@103.16.231.53:/home/jovyan/work/tardis-iobc-client-master/bybit_oct24/bybit/ \
 #       /Users/vaibhav/Documents/Newproject/data/bybit/
-#   rsync -avz --progress datauser@103.16.231.53:/home/jovyan/work/tardis-iobc-client-master/binance_out/binance/ \
+#   rsync -avz --progress datauser@103.16.231.53:/home/jovyan/work/tardis-iobc-client-master/binance_oct24/binance/ \
 #       /Users/vaibhav/Documents/Newproject/data/binance/
-START_DATE = "2022-01-03"
-END_DATE   = "2022-01-31"   # Full Jan 2022 (29 days) → 25 WF folds with window=4d, step=1d.
+START_DATE = "2024-10-01"
+END_DATE   = "2024-10-15"   # Oct 1-14 2024 (14 days) → 8 WF folds with window=7d, step=1d.
 
 BASE_CFG = ArbBacktestConfig(
     data_root=DATA_ROOT,

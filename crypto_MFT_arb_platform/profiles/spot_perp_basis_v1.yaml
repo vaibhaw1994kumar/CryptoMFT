@@ -4,7 +4,7 @@ name: spot_perp_basis_v1
 description: spot-perp basis; funding on the perp leg only; mechanics only, unvalidated strategy
 product: spot_perp                       # bybit spot, binance perp (per-venue product follows the fee preset family)
 product_fee_consistency: true
-latency_preset: colocated_both
+latency_preset: singapore                # ASSUMED; owner decision 2026-11-02 (was colocated_both, which startup now refuses outside sensitivity runs)
 fee_presets:
   bybit: bybit_spot_mm
   binance: binance_perp_vip0
@@ -39,7 +39,7 @@ maker:
   dedupe_trade_depth: true
   exchange_time_eligibility: true
 timing:
-  from_latency_preset: colocated_both
+  from_latency_preset: singapore         # same preset as latency_preset (2026-11-02)
   equal_time_policy: market_first
   dead_feed_s: 5.0
   truth_books: true

@@ -187,7 +187,10 @@ class VenueTruthTests(unittest.TestCase):
         leg = ArbLeg(venue=BINANCE, side="sell", qty=1.0, limit_price=0.0, is_taker=True, expected_price=99.0, fee_bps=5.0)
         sig = ArbSignal(signal_id=99, ts=t, buy_venue=BYBIT, sell_venue=BINANCE, qty=1.0, gross_edge_bps=5.0, fee_bps=1.0, net_edge_bps=4.0,
                         legs=[leg], mode=TAKER_TAKER, buy_price=98.0, sell_price=99.0)
-        h.bt._send_leg(leg, sig, t, is_hedge=True)
+        from new_backtest.execution import Role
+        it = h.bt.xl.open_intent(role=Role.PRIMARY, side=leg.side, qty=leg.qty, venues=(leg.venue,), worst_price=leg.limit_price, now=t,
+                                 signal_id=sig.signal_id, reason="test taker leg")
+        h.bt._send_leg(leg, sig, t, is_hedge=True, intent=it)
 
     def _late_book(self):
         from types import SimpleNamespace

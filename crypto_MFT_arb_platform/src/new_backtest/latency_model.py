@@ -329,6 +329,7 @@ class InFlightOrder:
     partial_fraction: float = 1.0
     ghost: bool = False        # delivered after the strategy gave up on it
     origin_id: int = 0         # order_id of the first hedge of a retry/unwind chain (0 = this order is its own origin)
+    intent_id: str = ""        # canonical execution layer: the intent this child order belongs to
 
 
 class PendingOrderQueue:
@@ -420,6 +421,7 @@ class _PendingMarkout:
     side: str
     price: float
     qty: float
+    role: str = ""
 
 
 class MarkoutTracker:
@@ -438,12 +440,13 @@ class MarkoutTracker:
             h: {"count": 0.0, "qty": 0.0, "bps_qty_sum": 0.0, "adverse": 0.0}
             for h in horizons_s
         }
+        self.by_venue_role: dict[str, dict[float, dict[str, float]]] = {}
 
-    def record_fill(self, ts: float, venue: str, side: str, price: float, qty: float) -> None:
+    def record_fill(self, ts: float, venue: str, side: str, price: float, qty: float, role: str = "") -> None:
         if price <= 0 or qty <= 0:
             return
         for h in self.horizons_s:
-            pm = _PendingMarkout(ts + h, h, venue, side, price, qty)
+            pm = _PendingMarkout(ts + h, h, venue, side, price, qty, role)
             heapq.heappush(self._pending, (pm.target_ts, next(self._counter), pm))
 
     def resolve(self, now: float, mids: dict[str, float], finalize: bool = False) -> None:
@@ -460,6 +463,13 @@ class MarkoutTracker:
             st["qty"] += pm.qty
             st["bps_qty_sum"] += bps * pm.qty
             st["adverse"] += float(bps < 0.0)
+            if pm.role:                       # the same number, split by (venue, role); the pooled stats above are untouched
+                sv = self.by_venue_role.setdefault(f"{pm.venue}/{pm.role}", {}).setdefault(
+                    pm.horizon_s, {"count": 0.0, "qty": 0.0, "bps_qty_sum": 0.0, "adverse": 0.0})
+                sv["count"] += 1.0
+                sv["qty"] += pm.qty
+                sv["bps_qty_sum"] += bps * pm.qty
+                sv["adverse"] += float(bps < 0.0)
 
     def summary(self) -> dict[str, dict[str, float]]:
         out: dict[str, dict[str, float]] = {}
@@ -470,4 +480,15 @@ class MarkoutTracker:
                 "qty_weighted_markout_bps": st["bps_qty_sum"] / q if q > 0 else 0.0,
                 "adverse_rate": st["adverse"] / c if c > 0 else 0.0,
             }
+        return out
+
+    def summary_by_venue_role(self) -> dict[str, dict[str, dict[str, float]]]:
+        """{"bybit/maker": {"1s": {...}, ...}, "binance/taker": ...}: same fields as summary(), one block per (venue, maker|taker)."""
+        out: dict[str, dict[str, dict[str, float]]] = {}
+        for key, per_h in sorted(self.by_venue_role.items()):
+            out[key] = {}
+            for h, st in sorted(per_h.items()):
+                c, q = st["count"], st["qty"]
+                out[key][f"{h:g}s"] = {"count": c, "qty_weighted_markout_bps": st["bps_qty_sum"] / q if q > 0 else 0.0,
+                                       "adverse_rate": st["adverse"] / c if c > 0 else 0.0}
         return out

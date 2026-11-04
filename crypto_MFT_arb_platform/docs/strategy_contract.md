@@ -165,8 +165,11 @@ maker/taker opportunity must be built explicitly with `maker=True` and `FILL_TRI
   than 5 s; an order UNKNOWN for more than 2 s; gateway down (silent for `heartbeat_timeout_s`, ASSUMED 10 s). Counting rule: one
   hedge FAILURE per hedge chain (its first failed attempt) — a rejected hedge and its retries count once; only a clean
   first-attempt hedge counts as a success; unwind failures feed the separate failed-unwind trigger. UNKNOWN age starts when the
-  ack timeout expires and stops at resolution. Reset is MANUAL ONLY (`reset_breaker()`). A trip blocks new signals; it does NOT
-  cancel resting maker orders (two earlier reports said it did — not implemented; they can still fill and are hedged).
+  ack timeout expires and stops at resolution. Reset is MANUAL ONLY (`reset_breaker()`). A trip blocks new signals AND cancels every
+  resting maker order (implemented 2026-11-01 at the owner's request; two earlier reports had claimed it before it existed): each
+  order gets a cancel request at the trip with its own cancel latency, fills inside that window are kept and hedged, an order
+  that lands after the trip is cancelled at placement, and the handler runs once per trip (a manual reset re-arms it). The 5 s
+  net-exposure rule is kept as specified.
   Fault injector: `reject_prob` 0 / 0.1 / 0.3 changes failed-hedge counts and cash (pinned); the stressed
   preset no longer hits a hedge with both the hedge and the by-venue reject probability (`venue_reject_applies_to_hedges`).
   Restart is a MODELLED scenario (`restart_s`, `restart_at_fills`), not the live `RestartCoordinator` path.
@@ -205,3 +208,146 @@ produces a maker leg yet. `crypto_stat_arb/sdk.py` maps a `MAKER_TAKER` executio
 `ArbBacktestConfig.delta_uses_book_size=False` is a known defect (level removals never drained a queue); it is kept only so
 results published before the fix can be reproduced. The default is the fixed behaviour. A label is not a fix: results that still
 rely on the legacy setting are wrong by the amount the followup report measured.
+
+## 4f. Perp order lifecycle (2026-11-02)
+
+* **Calibration is product-checked.** `perp_perp_maker_taker_v1` names `config/lifecycle_calibration_perp_bybit.json` in its `calibration:` block. `profiles.resolve_calibration`
+  refuses a file whose `product` is not `perp` (the spot file has none and is read as spot), whose venue differs, or whose content hash no longer matches. The file's sha256, content hash,
+  venue, product and networks go into `release_identity["calibration"]`. The files hold TESTNET measurements taken from the Mac; there is no mainnet order-event data.
+* **`postonly_reject_model` is MANDATORY in a perp profile.** Arrival = decision + a latency drawn from the measured entry grid (REST round trip / 2, local clock only).
+* **Venue message semantics** live in `new_backtest/venue_semantics_perp.py`. A PostOnly would-cross is `postonly_reject` on both venues (Bybit: Cancelled + EC_PostOnlyWillTakeLiquidity with no New before it;
+  Binance: REST -5022 observed, stream EXPIRED on a GTX order not cancelled by us = spec, not observed). An unmapped status raises `ORDER_TRANSITION_UNEXPECTED`.
+* **MakerExecutor has explicit REJECTED and UNKNOWN states** (`lifecycle_state`, bookkeeping only) and `venue_reject_notice` (a reject after a fill keeps the fill, one alarm). The legacy-default
+  engine keeps D-01..D-03 on purpose (legacy_v0 bit-identical); the parity matrix has a `maker_perp` column in which nothing is expected to fail.
+* **Injector additions:** `outage_on_fill_venue` ("hedge" | "maker") and `ack_unknown_scope` ("both" | "hedge" | "maker"); defaults reproduce the old behaviour.
+
+## 4g. Canonical execution layer, phase 0 (2026-11-03)
+
+* **One place decides how an order is worked.** `new_backtest/execution/` holds `ExecutionIntent` (what the strategy wants: role, side, qty, venues, `worst_price`, urgency, deadline, reason), the tactic registry (three tactics, see 4h.6) and `ExecutionLayer`. `CrossVenueArbBacktester._send_leg` requires an intent, so every order that goes through the in-flight queue has one. Every child `InFlightOrder` carries `intent_id`. **Not yet routed (named, not hidden):** the margin model's liquidation and flatten fills (`_margin_step`) and the legacy latency-free `_unwind` execute against the book directly without a child order; the latter is journaled (`note_instant`), the former is not.
+* **Phase 0 changes no behaviour.** The maker leg is a `PASSIVE` intent with placement `deep` (price: the edge-required quote the strategy computes), the fill-triggered hedge an `IOC_CAPPED` intent for the filled quantity (cap rule `touch_slack`: hedge-venue touch moved by `max(arb.max_walk_bps, 5)` bps, re-taken on every attempt, computed in the layer independently of `ArbStrategy.hedge_leg` and checked against it), the price-banded unwind a `MARKET_BANDED` intent; the latency-free legacy `_unwind` is journaled, not routed. Intents draw nothing random and touch no engine counter. Gate 0 (2026-11-03): `legacy_v0` and `perp_perp_maker_taker_v1` on 2022-01-05 and 2022-01-13 (singapore, bybit_perp_mm, clean) are identical before and after: trades, fill events, fill-bucket stats and model settings byte for byte, every `summary.json` field except `wall_s`, `release_identity` and `switch_table` (those change by design: code hash, profile hash, the `execution` block, two new switch rows).
+* **Rules enforced in the layer.** The intent is journaled before its first child. Every intent but unwind / flatten carries a `worst_price` and each child stays inside it (`price_cap_required`, CALIBRATED: true in both profiles, may be changed only by the cap decision; see 4h.7). A hedge intent exists only for a quantity already filled on its parent (except `dispatch_mode: simultaneous`, which hedges before the fill on purpose). One live hedge child per hedge intent (`one_hedge_child`, MANDATORY in perp, never `off`): **`count` today, not `enforce`.** A probe (out/exec_layer/one_hedge_child_probe.txt) shows the ghost outage policy plus retries puts up to four hedge children live at once; `enforce` would refuse the retry sent while the ghost is live, which is a behaviour change reserved for a gated phase.
+* **Profile.** Both `legacy_v0` and `perp_perp_maker_taker_v1` carry an `execution:` block with the values that reproduce today. `pairing` must equal `arb.mode`; `maker_maker` raises until phase 3. The resolved block and its hash are in `release_identity["execution"]` and the result's `execution_report`.
+
+## 4h. Canonical execution layer, phase 0 hardening (2026-11-03) — SPECIFICATION
+
+Written before the code. Phase 1 (policy optimisation) does not start until every rule below has a test, and the four
+mutation tests in `tests/test_execution_contract.py` fail when the rule is broken. Nothing here promotes a tactic to production.
+
+### 4h.1 Intent lifecycle
+
+States: `accepted, working, partially_done, done, escalated, failed, unknown`. `done` and `failed` are terminal. A transition not
+in the table raises `IntentError`; nothing in the engine moves a state any other way (`ExecutionIntent.move`).
+
+| from \ to        | working | partially_done | done | escalated | failed | unknown |
+|------------------|:-:|:-:|:-:|:-:|:-:|:-:|
+| accepted         | x |   |   |   | x |   |
+| working          | x | x | x | x | x | x |
+| partially_done   | x | x | x | x | x | x |
+| escalated        |   | x | x | x | x | x |
+| unknown          | x | x | x | x | x |   |
+| done / failed    |   |   |   |   |   |   |
+
+* `accepted -> working` when the first child is sent. `failed` straight from `accepted` = refused or never sent (a primary whose
+  maker order was rejected before it rested, a hedge whose cap was unreachable on every attempt).
+* A child that the strategy has given up on but that is still delivered later (`ghost`, an acknowledgement lost) makes the intent
+  `unknown`. **An `unknown` intent is never settled and never gets a second live child**: a hedge retry waits for the outcome of
+  the first (the venue is queried once the ghost's release time plus the acknowledgement delay has passed). `unknown -> working`
+  when the child is resolved.
+* `settle(intent)` is the only way to a terminal state: `done` if the filled quantity covers the intent, otherwise `failed`
+  (a partial fill that was closed short is `failed` with `filled_qty > 0`). It is a no-op while any child is live.
+* A fill after a terminal state is an **overfill**: counted, journaled, never a transition.
+
+### 4h.2 Atomic risk reservation
+
+* Only a `primary` intent adds exposure; hedge, unwind, flatten and rebalance intents reduce it and are exempt from the check.
+* `open_intent`/`open_group` run **check and reserve as one call**: the worst-case exposure with the new legs added is compared to
+  the limits, and only if it fits are the legs reserved, the intent created and journaled. A refusal changes nothing: no serial
+  number, no journal line, no reservation, no counter other than `risk_refusals`. A signal with several primary legs is reserved
+  as a group, all or none.
+* Limits mirror `ArbStrategy._inventory_room` (per-venue cap `max_venue_imbalance_base` or `net_ceiling_multiple x max_position_base
+  + fill_headroom_base`; net ceiling `max_net_base_hard` or the multiple, plus headroom), applied to the venues the intent touches
+  and to the net. Worst case, nothing nets off: reserved buys count on the buy venue, reserved sells on the sell venue. The layer
+  keeps its **own** reservation book; it does not read the engine's `PendingExposure`.
+* A reservation is consumed by fills (`note_filled`) and released in full at the intent's terminal state (`settle`) and at
+  `finalize`. `reservations_open` must be zero for every settled intent; a leak is reported and, in `enforce`, fails the run.
+* `execution.risk_reservation`: `off | count | enforce` (MANDATORY, never `off` in a perp profile). `count` records what would be
+  refused; `enforce` refuses and the engine drops the signal (`signals_refused_by_risk`).
+
+### 4h.3 IOC cap semantics
+
+* A taker child carries the intent's `worst_price` at the moment it is sent (`cap_at_send`). A buy never fills above it and a sell
+  never below it. The engine checks this **again at booking time** from the fill, independently of the tactic that built the order.
+* A cap may be re-taken from the then-current touch only under the `touch_slack` rule (and the banded unwind): `retarget` takes the
+  touch and refuses a cap looser than `touch -/+ max(max_walk_bps, slack_bps_floor)` bps. Any other cap rule (phase 1: the break-even
+  cap) is fixed when the intent is opened and `retarget` raises.
+* A partial-fill remainder keeps its cap: the retry is for `intent.qty - intent.filled_qty` at most (counted as
+  `retry_exceeds_remaining`; refused under `one_hedge_child: enforce`) and is re-capped by the same rule.
+* A cap that no price can satisfy (phase 1: break-even unreachable) sends nothing, is counted (`hedge_cap_unreachable`), and the
+  chain goes down the ladder to the price-banded unwind.
+
+### 4h.4 One live hedge child, fill-triggered
+
+* A hedge intent is opened only after the maker fill that creates it, for at most the filled quantity (`dispatch_mode:
+  simultaneous` is the one deliberate exception, a comparison mode).
+* `execution.one_hedge_child` is `enforce` in `perp_perp_maker_taker_v1` and stays `count` in `legacy_v0`, so the legacy
+  behaviour is reproducible bit for bit while the canonical contract is the default for the new profile. Clean runs (no injected
+  fault) are identical under both; the two differ only when a ghost order is live, which `count` lets the retry overlap.
+
+### 4h.5 Independent reconciliation
+
+`execution/reconcile.py` rebuilds the books from the fill journal **only** (every fill the engine books is journaled by
+`_on_fill`, with the intent that sent it or an explicit kind: `instant_unwind`, `margin_liquidation`, `margin_flatten`,
+`synthetic`) and compares them with the engine:
+
+1. every fill is attributed — to an intent whose venue and side it matches, or to an explicit kind;
+2. fee = qty x price x bps from the venue schedule, recomputed (plus the declared liquidation fee), equals the booked fee;
+3. per-venue base and cash rebuilt from the journal equal the inventory ledger; total cash less funding equals `cash_pnl`;
+4. the journal and the engine's `trade_log` hold the same fills (count, notional, row by row);
+5. every taker child fill is inside the cap it was sent with;
+6. no intent is filled beyond its quantity (an overfill is reported; under `enforce` it fails).
+
+It runs at the end of every replay; a failure raises `ExecutionReconciliationError` unless `equity_bridge == "warn"`. It is a
+second ledger over the same fills, so it cannot detect a wrong fill *price*, only a fill that is mis-booked, mis-fee'd, lost,
+double-counted, unattributed, or booked outside its cap. The fill model itself is validated elsewhere (`probe_crosscheck`).
+
+### 4h.6 Tactic set (decision 2026-11-03, replaces the seven-tactic registry of 4g)
+
+Only three tactics exist. There is no speculative-IOC and no scheduled tactic, and no code path or stub for them.
+
+| tactic | used for | notes |
+|---|---|---|
+| `PASSIVE` | the maker leg | PostOnly. `placement` in `{touch, improve, deep}`; one order type, fill model, lifetime and cancel/replace rule for all three |
+| `IOC_CAPPED` | the hedge, and taker_taker legs | capped at the intent's `worst_price` |
+| `MARKET_BANDED` | breaker flatten and unwinds only | the only tactic that may carry no `worst_price` |
+
+* `touch` = best bid (buy) / best ask (sell). `improve` = one tick inside the spread when the spread is wider than one tick, else the
+  touch. `deep` = the price the edge requires, or `deep_ticks` ticks behind the touch when `execution.primary.deep_ticks` is set.
+  Every placement is capped by the edge price: a buy never rests above it, a sell never below it, and a price that would cross the
+  book falls back to the touch. The intent's `worst_price` is the edge price, so the cap check applies to all three.
+* **Today's behaviour is placement `deep` in both profiles** (confirmed from `ArbStrategy.evaluate_maker_taker`: the order rests at
+  `max_bid`/`min_ask`, the price the edge requires; `legacy_v0` computes it from the naive edge — `price_rule: naive_edge` — and
+  `perp_perp_maker_taker_v1` from the conditional edge — `price_rule: conditional_edge`; neither quotes at the touch, and
+  `ArbConfig.maker_improve_ticks` is declared but never read). `deep` without `deep_ticks` sends the strategy's price unchanged, so
+  replays are bit-identical. `touch` and `improve` re-price the maker leg in `_fire`, after the intent and its reservation exist.
+* The profile `execution:` block names `tactic: PASSIVE` / `IOC_CAPPED` / `MARKET_BANDED`; any other name (including the retired
+  `PASSIVE_TOUCH`, `PASSIVE_IMPROVE`, `PASSIVE_DEEP`, `IOC_SPECULATIVE`, `SCHEDULED`) is a startup error.
+
+### 4h.7 Observation records and the public-book invariant (brief steps 6-8, 2026-11-03)
+
+* **Observation only.** `execution/observation.py` and the `obs` dict on a maker `Fill` are written by the engine and read by nothing in it
+  (a test greps the source); they draw no random number and change no state, so replays are identical with them on or off
+  (`ArbBacktestConfig.record_maker_obs`, default on; `maker_observations.jsonl` is written with `output_dir`).
+* **Per maker order, at placement:** relative queue position (queue ahead / level size), near-side and opposite-side size at our price,
+  the touch imbalance (B - A) / (B + A) on BOTH venues, the hedge venue's touch at the decision. **At each maker fill:** the same,
+  plus the fill record: cause tag (`trade`, `trade_through`, `trade_after_front`, `delta_share`, `delta_vanish`, `snapshot`,
+  `opposite_cross`) and the print's own id when the record has one (Jan-2022 files carry none), volume offered by the event and
+  consumed by the queue ahead and by the fill, the queue estimate before the fill, the netting credit (`dedupe_trade_depth`) used,
+  the cancel model, and uncertainty flags: `queue_unknown` / `outside_captured_depth` (level absent and outside the captured depth),
+  `queue_proxy` (absent level standing in `min_queue_ahead`), `ambiguous_trade_depth` (a netting credit or fill-evidence rule
+  attributed volume, or the fill came from a depth decrease). **At each hedge arrival:** the hedge venue's touch at arrival and at the decision.
+* **Invariant (`tests/test_public_book_invariant.py`).** A reference engine fed the same public events and no orders is the public
+  reconstruction. An own MAKER fill never changes the engine's book. An own TAKER fill never does either when
+  `consume_liquidity` is off. **With `consume_liquidity` on (the engine default, used by both profiles) a taker fill removes what it
+  walked from the hedge venue's VIEW book until a feed update overwrites that level — a deliberate own-impact model, not a violation
+  of the maker rule, and counted in `maker_observations.own_taker_book_consumption`.** Switching it off changes every replay's
+  P&L slightly, so it is a decision for the user, not part of a no-behaviour-change phase.

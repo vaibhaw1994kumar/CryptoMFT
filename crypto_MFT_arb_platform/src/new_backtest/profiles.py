@@ -26,6 +26,7 @@ from .config import FEE_PRESETS, LATENCY_PRESETS
 
 PROFILES_DIR = Path(__file__).resolve().parents[2] / "profiles"
 ENGINE_DIR = Path(__file__).resolve().parent
+PLATFORM_DIR = ENGINE_DIR.parents[1]          # the platform checkout / release root (config/, profiles/ live here)
 
 
 class ProfileError(ValueError):
@@ -65,13 +66,26 @@ SWITCHES: tuple[Switch, ...] = (
     Switch("maker.vanish_clears_queue", "LEGACY_COMPAT", note="True in v1 (PROVISIONAL)"),
     Switch("maker.fill_evidence", "CALIBRATED", note="confirm_delta 20 ms in v1 (PROVISIONAL)"),
     Switch("maker.level_creator_trade_only", "LEGACY_COMPAT", note="opt-in"),
+    Switch("maker.opposite_cross_fills", "CALIBRATED", note="True in v1 (PROVISIONAL): fill in full once the opposite best quote reaches our price (probe cross-check vs hftbacktest 2026-11-03)"),
+    Switch("maker.opposite_cross_confirm_ms", "CALIBRATED", note="0 (off) in v1; v1.1 step 8 sets 500: a cross fills only with a reaching print on the same venue within +-500 ms, else it is dropped (EXPLORATORY window)"),
+    Switch("maker.opposite_cross_cap_to_print", "CALIBRATED", note="False in v1; v1.1 step 9c sets True: a confirmed cross fills at most the reaching prints' unused volume (EXPLORATORY)"),
+    Switch("arb.round_quotes_to_tick", "LEGACY_COMPAT", note="False in v1 (off-grid quotes); v1.1 step 9b sets True: bids round down, asks up, onto the declared venue tick"),
+    Switch("hedge_arrival_book", "LEGACY_COMPAT", note="view in v1 (default); v1.1 step 9e sets truth: hedge IOCs execute on the venue-truth book at arrival"),
     Switch("arb.net_ceiling_multiple", "MANDATORY", note="1.0 in the perp profile — DECISION_PENDING (1x vs fill headroom)"),
     Switch("arb.p_fail", "CALIBRATED", note="PLACEHOLDER 0.07; estimate on training days only"),
     Switch("arb.loss_fail_bps", "CALIBRATED", note="hedge-failure study"),
     Switch("arb.expected_hedge_move_bps_bid", "CALIBRATED", note="training-day executed hedge move"),
     Switch("latency_preset", "CALIBRATED", note="ASSUMED until ollog measurements replace it"),
     Switch("margin", "MANDATORY", (None,), "margin model configured in a perp profile"),
+    Switch("postonly_reject_model", "MANDATORY", ("off", None), "perp profile: PostOnly would-cross orders are rejected at exchange arrival time (lifecycle task 5); perp profiles only"),
     Switch("product_fee_consistency", "MANDATORY", (False,), "fee preset must match the venue's product"),
+    Switch("book_tape_repair", "LEGACY_COMPAT", note="engine default True (and in v1): the trade tape lowers book levels, which double-depletes when the depth decrease arrives first; v1.1 sets False"),
+    Switch("own_impact", "LEGACY_COMPAT", note="legacy (v1): own taker consumption mutates the public book; overlay (v1.1): a shadow overlay cleared at the next public update of that level"),
+    Switch("maker.ledger_epoch", "LEGACY_COMPAT", note="off in v1; v1.1 sets True: a snapshot / reset invalidates old netting credit, ambiguous associations are flagged"),
+    Switch("maker.unknown_queue_dist", "CALIBRATED", note="floor in v1 (hand-set 25); v1.1: fitted on strictly earlier days, floor 0, flagged fallback 25 where the fit has no data (unknown_queue_fallback)"),
+    Switch("execution.price_cap_required", "CALIBRATED", note="execution layer: every non-unwind intent carries a worst price and every child stays inside it; true in both profiles (today's behaviour), CALIBRATED until the cap decision (brief step 11) is made"),
+    Switch("execution.one_hedge_child", "MANDATORY", ("off",), "execution layer: one live hedge child per hedge intent (counted, or refused in enforce mode)"),
+    Switch("execution.risk_reservation", "MANDATORY", ("off",), "execution layer: primary exposure is checked and reserved in one call and released at the terminal state (counted, or refused in enforce mode)"),
 )
 MANDATORY = {s.key: s for s in SWITCHES if s.cls == "MANDATORY"}
 
@@ -109,8 +123,8 @@ def check_mandatory(doc: dict) -> list[str]:
             val = doc.get("breaker")
         if key == "margin":
             val = doc.get("margin")
-        if val in sw.forbidden or (val is None and key in ("timing.dead_feed_s", "breaker", "margin") and doc.get("product", "perp") == "perp"):
-            if key == "margin" and doc.get("product") != "perp":
+        if val in sw.forbidden or (val is None and key in ("timing.dead_feed_s", "breaker", "margin", "postonly_reject_model") and doc.get("product", "perp") == "perp"):
+            if key in ("margin", "postonly_reject_model") and doc.get("product") != "perp":
                 continue
             bad.append(f"{key}={val!r} disables a MANDATORY control: {sw.note}")
     return bad
@@ -153,15 +167,16 @@ def apply_profile(doc: dict, **overrides):
         raise ProfileError(f"profile {doc.get('name')}: " + "; ".join(bad))
     body = {k: v for k, v in doc.items() if not k.startswith("_") and k not in ("name", "description", "classification", "decision_status",
                                                                                "product_fee_consistency", "timing", "breaker", "margin",
-                                                                               "fee_presets", "calibration")}
+                                                                               "fee_presets", "calibration", "execution")}
     cfg_kw: dict[str, Any] = dict(body)
     cfg_kw["product_fee_consistency"] = bool(doc.get("product_fee_consistency", True))
     for k, v in (doc.get("fee_presets") or {}).items():
         cfg_kw[f"{k}_fee_preset"] = v
+    timing_preset = None
     t = doc.get("timing")
     if t:
         t = dict(t)
-        preset = t.pop("from_latency_preset", None) or doc.get("latency_preset")
+        preset = timing_preset = t.pop("from_latency_preset", None) or doc.get("latency_preset")
         clock = t.pop("clock", None)
         if clock:
             t["clock"] = ClockConfig(**clock)
@@ -178,15 +193,46 @@ def apply_profile(doc: dict, **overrides):
             venues[v] = VenueMargin(tiers=tiers, **spec)
         rest = {k: v for k, v in m.items() if k != "venues"}
         cfg_kw["margin"] = MarginModelConfig(venues=venues, **rest)
+    ex = doc.get("execution")
+    if ex is not None:
+        from .execution import ExecutionConfig, ExecutionConfigError
+        try:
+            cfg_kw["execution"] = ExecutionConfig(**ex)
+        except (ExecutionConfigError, TypeError) as e:
+            raise ProfileError(f"profile {doc.get('name')}: execution block: {e}") from e
     hf = cfg_kw.pop("hedge_faults", None)
     if isinstance(hf, dict):
         cfg_kw["hedge_faults"] = HedgeFaultConfig(**hf)
+    cal = doc.get("calibration")
+    if cal:
+        path = resolve_calibration(doc, cal)
+        al = dict(cfg_kw.get("ack_latency") or {})
+        cfg_kw["ack_latency"] = AckLatencyConfig(source="empirical", calibration_path=str(path), period=cal.get("period", "all"),
+                                                 **{k: v for k, v in al.items() if k not in ("source", "calibration_path", "period")})
     cfg_kw.update(overrides)
+    sensitivity = cfg_kw.pop("latency_sensitivity", None)
+    check_latency_preset(doc, cfg_kw.get("latency_preset"), timing_preset, sensitivity)
     cfg = _build(ArbBacktestConfig, cfg_kw, where=f"profile {doc.get('name')}",
                  nested={"arb": ArbConfig, "maker": MakerConfig, "venue_state": VenueStateConfig, "agent_flow": AgentFlowConfig,
                          "ack_latency": AckLatencyConfig})
     cfg.release_identity = release_identity(cfg, doc)
+    cfg.release_identity["latency_sensitivity"] = sensitivity
     return cfg
+
+
+# Latency presets that cannot exist in production (config.py: nobody is co-located with both venues). A non-legacy profile refuses
+# them unless the run is declared a sensitivity run: apply_profile(..., latency_sensitivity="<why>"), recorded in release_identity.
+SENSITIVITY_ONLY_LATENCY = ("colocated_both",)
+
+
+def check_latency_preset(doc: dict, latency_preset, timing_preset, sensitivity) -> None:
+    if doc.get("name") == "legacy_v0":              # the frozen comparison baseline keeps its historical preset
+        return
+    used = sorted({p for p in (latency_preset, timing_preset) if p in SENSITIVITY_ONLY_LATENCY})
+    if used and not (isinstance(sensitivity, str) and sensitivity.strip()):
+        raise ProfileError(
+            f"profile {doc.get('name')}: latency preset {', '.join(used)} is physically impossible and allowed only in a sensitivity run; "
+            f"pass latency_sensitivity='<reason>' to label the run, or use singapore / tokyo / neutral")
 
 
 def _sha_files(paths) -> str:
@@ -198,7 +244,7 @@ def _sha_files(paths) -> str:
 
 
 def code_hash() -> dict:
-    files = [p for p in ENGINE_DIR.glob("*.py")]
+    files = [p for p in ENGINE_DIR.glob("*.py")] + [p for p in (ENGINE_DIR / "execution").rglob("*.py")]
     root = ENGINE_DIR.parents[2]
     try:
         rev = subprocess.run(["git", "rev-parse", "--short", "HEAD"], cwd=root, capture_output=True, text=True, timeout=10).stdout.strip()
@@ -228,12 +274,46 @@ def data_manifest_hash(data_root: str | Path, pair: str, venues, start_date: str
             "day_listing_sha256": listing.hexdigest(), "files_listed": n}
 
 
+def read_calibration(path) -> dict:
+    return json.loads(Path(path).read_text())
+
+
+def resolve_calibration(doc: dict, cal: dict) -> Path:
+    """Path of the lifecycle calibration file a profile names, after checking it measured the profile's product.
+
+    A perp profile refuses a file whose `product` is not 'perp' (the spot calibration config/lifecycle_calibration_bybit.json has no
+    `product` key and is read as spot), and a spot profile refuses a perp file. The file's content hash must also match its own recorded hash."""
+    p = Path(cal["file"])
+    path = p if p.is_absolute() else PLATFORM_DIR / p
+    if not path.exists():
+        raise ProfileError(f"profile {doc.get('name')}: calibration file {path} does not exist")
+    c = read_calibration(path)
+    got = c.get("product", "spot")
+    want = doc.get("product", "perp")
+    if got != want:
+        raise ProfileError(f"profile {doc.get('name')} (product {want}) refuses calibration {path.name}: it measured product {got!r}")
+    if cal.get("venue") and c.get("venue") != cal["venue"]:
+        raise ProfileError(f"profile {doc.get('name')}: calibration {path.name} is for venue {c.get('venue')!r}, profile asks for {cal['venue']!r}")
+    body = {k: v for k, v in c.items() if k != "meta"}
+    if (c.get("meta") or {}).get("content_sha256") != hashlib.sha256(json.dumps(body, sort_keys=True, default=str).encode()).hexdigest():
+        raise ProfileError(f"calibration {path.name}: content hash does not match its recorded content_sha256 (file edited after it was written)")
+    return path
+
+
 def release_identity(cfg, doc: dict | None = None) -> dict:
     root = ENGINE_DIR.parents[2]
     fee_snapshot = hashlib.sha256(json.dumps({k: (v.maker_bps, v.taker_bps) for k, v in sorted(FEE_PRESETS.items())}).encode()).hexdigest()
     cm = root / "data" / "contract_master"
     cm_files = sorted(cm.glob("*")) if cm.is_dir() else []
-    calib = root / "config" / "lifecycle_calibration_bybit.json"
+    calib = PLATFORM_DIR / "config" / "lifecycle_calibration_bybit.json"
+    pcal = (doc or {}).get("calibration")
+    calib_info = None
+    if pcal:
+        calib = resolve_calibration(doc, pcal)
+        cj = read_calibration(calib)
+        calib_info = {"file": str(calib), "file_sha256": hashlib.sha256(calib.read_bytes()).hexdigest(),
+                      "content_sha256": (cj.get("meta") or {}).get("content_sha256"), "product": cj.get("product", "spot"),
+                      "venue": cj.get("venue"), "schema": cj.get("schema"), "networks_with_data": (cj.get("provenance") or {}).get("networks_with_data")}
     cutoff = None
     if calib.exists():
         try:
@@ -247,8 +327,9 @@ def release_identity(cfg, doc: dict | None = None) -> dict:
             "data": data_manifest_hash(cfg.data_root, cfg.pair, cfg.venues, cfg.start_date, cfg.end_date),
             "fee_snapshot_sha256": fee_snapshot, "fee_presets": {"bybit": cfg.bybit_fee_preset, "binance": cfg.binance_fee_preset},
             "instrument_master_sha256": _sha_files(cm_files) if cm_files else None,
-            "calibration_file": str(calib) if calib.exists() else None, "calibration_cutoff": cutoff,
-            "seed": cfg.seed, "latency_preset": cfg.latency_preset}
+            "calibration_file": str(calib) if calib.exists() else None, "calibration_cutoff": cutoff, "calibration": calib_info,
+            "seed": cfg.seed, "latency_preset": cfg.latency_preset,
+            "execution": ({"config": cfg.execution.as_dict(), "config_sha256": cfg.execution.sha256()} if getattr(cfg, "execution", None) is not None else None)}
 
 
 def switch_table(doc: dict) -> list[dict]:

@@ -195,6 +195,14 @@ class ArbConfig:
     # never simultaneously actionable (e.g. Bybit at T vs Binance at T-490ms).
     # 0.0 = disabled.  Default 0.2 s is half the per-venue max_book_age_s.
     max_cross_venue_skew_s: float = 0.2
+    # v1.1 step 9, opt-in (defaults keep every result unchanged). round_quotes_to_tick: a maker quote is rounded onto the venue's price grid BEFORE the
+    # improve-the-touch check and the edge calculation (bids down, asks up), so the edge, the gate and the order that is sent are the same price.
+    # venue_ticks = the declared tick per venue ({"bybit": 0.001, ...}), supplied by the runner from the dataset; there is no fallback (a missing tick is an
+    # error). A quote that no longer improves the touch once rounded is refused (reject "tick_rounding_no_improve"), it does not join the queue.
+    round_quotes_to_tick: bool = False
+    venue_ticks: dict = field(default_factory=dict)
+    # maker_venues: the venues a passive quote may rest on (empty = either, as before). The hedge goes to the other venue.
+    maker_venues: tuple = ()
 
     def __post_init__(self) -> None:
         validate_maker_lifetime(self.maker_max_age_s)
@@ -305,6 +313,13 @@ class CrossVenueArbStrategy:
         self.config = config or ArbConfig()
         if self.config.maker_passive_side not in ("bid", "ask", "both"):
             raise ValueError(f"ArbConfig.maker_passive_side must be 'bid', 'ask' or 'both', got {self.config.maker_passive_side!r}")
+        if self.config.round_quotes_to_tick:
+            missing = [v for v in self.venue_names_cfg(venues) if not (self.config.venue_ticks.get(v, 0.0) > 0.0)]
+            if missing:
+                raise ValueError(f"ArbConfig.round_quotes_to_tick needs a declared venue_ticks[venue] > 0 for every venue; missing {missing}")
+        unknown = [v for v in self.config.maker_venues if v not in venues]
+        if unknown:
+            raise ValueError(f"ArbConfig.maker_venues {unknown} are not among the venues {sorted(venues)}")
         if self.config.profile not in PROFILES:
             raise ValueError(f"ArbConfig.profile must be one of {PROFILES}, got {self.config.profile!r}")
         if self.config.dispatch_mode not in DISPATCH_MODES:
@@ -329,6 +344,19 @@ class CrossVenueArbStrategy:
         self.evaluations = 0
         self.signals = 0
         self.best_edge_seen_bps = float("-inf")
+
+    @staticmethod
+    def venue_names_cfg(venues) -> list[str]:
+        return sorted(venues)
+
+    def _quote_to_tick(self, venue: str, price: float, side: str) -> float:
+        """The quote on the venue's price grid: bids round down, asks up (1e-9 of a tick of float slack)."""
+        tick = self.config.venue_ticks[venue]
+        n = math.floor(price / tick + 1e-9) if side == "bid" else math.ceil(price / tick - 1e-9)
+        return round(n * tick, 10)
+
+    def _maker_allowed(self, venue: str) -> bool:
+        return not self.config.maker_venues or venue in self.config.maker_venues
 
     # ── Gates ────────────────────────────────────────────────────────────────
 
@@ -585,6 +613,8 @@ class CrossVenueArbStrategy:
     ) -> ArbSignal | None:
         """Rest a passive bid on maker_venue, hedge by selling on taker_venue."""
         cfg = self.config
+        if not self._maker_allowed(maker_venue):
+            return None
         maker_book, taker_book = books[maker_venue], books[taker_venue]
         maker_fees, taker_fees = self.venues[maker_venue].fees, self.venues[taker_venue].fees
 
@@ -605,6 +635,14 @@ class CrossVenueArbStrategy:
 
         # Must be a real improvement on the maker venue's book, and never cross it.
         touch_bid, touch_ask = maker_book.best_bid, maker_book.best_ask
+        if cfg.round_quotes_to_tick:
+            was_ok = touch_bid < max_bid < touch_ask
+            max_bid = self._quote_to_tick(maker_venue, max_bid, "bid")
+            if abs(max_bid - touch_bid) < 1e-6 * cfg.venue_ticks[maker_venue]:
+                max_bid = touch_bid
+            if was_ok and not touch_bid < max_bid < touch_ask:
+                self.rejects["tick_rounding_no_improve"] = self.rejects.get("tick_rounding_no_improve", 0) + 1
+                return None
         if max_bid <= touch_bid or max_bid >= touch_ask:
             self.rejects["no_edge"] += 1
             return None
@@ -711,6 +749,8 @@ class CrossVenueArbStrategy:
     ) -> ArbSignal | None:
         """Rest a passive ask on maker_venue, hedge by buying on taker_venue (mirror of _evaluate_maker_taker)."""
         cfg = self.config
+        if not self._maker_allowed(maker_venue):
+            return None
         maker_book, taker_book = books[maker_venue], books[taker_venue]
         maker_fees, taker_fees = self.venues[maker_venue].fees, self.venues[taker_venue].fees
 
@@ -729,6 +769,14 @@ class CrossVenueArbStrategy:
             min_ask = expected_hedge / (1.0 - (required_bps + extra_bps) / 10_000.0)
 
         touch_bid, touch_ask = maker_book.best_bid, maker_book.best_ask
+        if cfg.round_quotes_to_tick:
+            was_ok = touch_bid < min_ask < touch_ask
+            min_ask = self._quote_to_tick(maker_venue, min_ask, "ask")
+            if abs(min_ask - touch_ask) < 1e-6 * cfg.venue_ticks[maker_venue]:
+                min_ask = touch_ask
+            if was_ok and not touch_bid < min_ask < touch_ask:
+                self.rejects["tick_rounding_no_improve"] = self.rejects.get("tick_rounding_no_improve", 0) + 1
+                return None
         if min_ask >= touch_ask or min_ask <= touch_bid:
             self.rejects["no_edge"] += 1
             return None

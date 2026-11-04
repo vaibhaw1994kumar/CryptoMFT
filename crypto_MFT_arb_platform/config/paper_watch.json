@@ -108,7 +108,7 @@
       "unwind_urgency": "NORMAL",
       "unwind_price_slippage_bps": "10",
       "allow_risk_reducing_under_stop": true,
-      "max_unwind_attempts": 2,
+      "max_unwind_attempts": 3,
       "max_one_sided_notional": "1000",
       "hold_new_risk_on_breach": true,
       "kill_after_ms": 30000

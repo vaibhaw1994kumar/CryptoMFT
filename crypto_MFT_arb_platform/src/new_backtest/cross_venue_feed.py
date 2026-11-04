@@ -83,6 +83,8 @@ class CrossVenueFeed:
         quality_preflight: bool = False,
         quality_report_only: bool = True,
         trade_dedupe: str = "set",
+        event_order: str = "legacy",
+        skip_snapshots: tuple[str, ...] = (),
     ) -> None:
         self.data_root = Path(data_root)
         self.pair = pair
@@ -95,6 +97,8 @@ class CrossVenueFeed:
         self.venue_roots = venue_roots or {}
         self._run_quality_preflight = quality_preflight
         self.trade_dedupe = trade_dedupe
+        self.event_order = event_order
+        self.skip_snapshots = tuple(skip_snapshots)       # venues whose book_snapshots stream is ignored (placeholder snapshots); their book is rebuilt from deltas only
         self._quality_report_only = quality_report_only
 
         # Diagnostics — reported at end of run so feed quality is auditable.
@@ -117,8 +121,10 @@ class CrossVenueFeed:
         for ev in iter_venue_events(
             root, venue, self.pair, self.start_day, self.end_day,
             include_deltas=self.include_deltas,
+            include_snapshots=venue not in self.skip_snapshots,
             stats=self.loader_stats[venue],
             trade_dedupe=self.trade_dedupe,
+            event_order=self.event_order,
         ):
             if trust and ev.local_ts > 0.0:
                 recv, measured = vl.observe_receive_ts(ev.exchange_ts, ev.local_ts)

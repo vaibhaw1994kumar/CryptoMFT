@@ -44,13 +44,27 @@ class RawEvent:
     payload: dict
 
 
+# Side channel only: the loader still keeps what it read and yields exactly the same events. A gzip stream that ends early (truncated tail) is counted here so every
+# result can say how many input files were cut off (audit decision A, 2026-11-04). reset_truncation() at the start of a run, truncation_report() at its end.
+_TRUNCATED: dict[str, str] = {}
+
+
+def reset_truncation() -> None:
+    _TRUNCATED.clear()
+
+
+def truncation_report() -> dict:
+    return {"truncated_files": len(_TRUNCATED), "files": sorted(_TRUNCATED), "note": "gzip streams that ended early; the rows read before the cut are used, nothing after it exists"}
+
+
 def _iter_jsonl_gz(path: Path) -> Iterator[dict]:
     try:
         with gzip.open(path, "rt") as fh:
             while True:
                 try:
                     line = fh.readline()
-                except (EOFError, OSError):
+                except (EOFError, OSError) as e:
+                    _TRUNCATED[str(path)] = type(e).__name__
                     return          # truncated tail: keep what we read
                 if not line:
                     return
@@ -61,7 +75,8 @@ def _iter_jsonl_gz(path: Path) -> Iterator[dict]:
                     yield json.loads(line)
                 except json.JSONDecodeError:
                     continue
-    except (OSError, EOFError):
+    except (OSError, EOFError) as e:
+        _TRUNCATED.setdefault(str(path), type(e).__name__)
         return
 
 
@@ -242,8 +257,14 @@ def iter_venue_events(
     include_trades: bool = True,
     stats: dict[str, int] | None = None,
     trade_dedupe: str = "set",
+    event_order: str = "legacy",
 ) -> Iterator[RawEvent]:
     """Chronological (exchange_ts) merge of one venue's three streams.
+
+    event_order="legacy" (default): equal timestamps are ordered snapshot -> delta -> trade (below).
+    event_order="capture": exchange time, then local receive time, then the record's position in its own stream; no ordering by kind.
+    The position tie-break between streams is the record's index within its stream, then the stream's index (snapshots, deltas, trades):
+    when two records of different streams agree on both clocks and on the index, the files do not say which came first.
 
     Day-by-day so memory stays flat: only the current day's file handles are
     open regardless of how long the date range is. `stats`, if given, receives
@@ -251,6 +272,8 @@ def iter_venue_events(
     """
     if trade_dedupe not in ("set", "multiset"):
         raise ValueError(f"trade_dedupe must be 'set' or 'multiset', got {trade_dedupe!r}")
+    if event_order not in ("legacy", "capture"):
+        raise ValueError(f"event_order must be 'legacy' or 'capture', got {event_order!r}")
     root = venue_root(data_root, venue)
 
     for day in _day_range(start_day, end_day):
@@ -258,6 +281,10 @@ def iter_venue_events(
         deltas = _stream_dir(root, "book_events", pair, day, "exchange_ts", stats) if include_deltas else iter(())
         trades = (_stream_dir(root, "trades", pair, day, "exchange_ts", stats, multiset=(trade_dedupe == "multiset"))
                   if include_trades else iter(()))
+
+        if event_order == "capture":
+            yield from _capture_merge(venue, pair, snaps, deltas, trades)
+            continue
 
         ns = next(snaps, None)
         nd = next(deltas, None)
@@ -279,6 +306,20 @@ def iter_venue_events(
             else:
                 yield RawEvent(ts_t, float(nt.get("local_ts", 0.0) or 0.0), venue, pair, TRADE, nt)
                 nt = next(trades, None)
+
+
+def _capture_merge(venue: str, pair: str, snaps: Iterator[dict], deltas: Iterator[dict], trades: Iterator[dict]) -> Iterator[RawEvent]:
+    """event_order="capture": order by (exchange time, local receive time, index within the record's own stream, stream index)."""
+    import heapq
+
+    def keyed(it: Iterator[dict], kind: str, tkey: str, sidx: int):
+        for n, rec in enumerate(it):
+            yield (float(rec.get(tkey, 0.0) or 0.0), float(rec.get("local_ts", 0.0) or 0.0), n, sidx), kind, rec
+
+    its = [keyed(snaps, BOOK, "timestamp", 0), keyed(deltas, DELTA, "exchange_ts", 1), keyed(trades, TRADE, "exchange_ts", 2)]
+    for _k, kind, rec in heapq.merge(*its, key=lambda x: x[0]):
+        ts = float(rec.get("timestamp" if kind == BOOK else "exchange_ts", 0.0) or 0.0)
+        yield RawEvent(ts, float(rec.get("local_ts", 0.0) or 0.0), venue, pair, kind, rec)
 
 
 # ── Payload normalisation ─────────────────────────────────────────────────────

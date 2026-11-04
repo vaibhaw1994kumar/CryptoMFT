@@ -53,6 +53,7 @@ class Fill:
     signal_id: int = 0
     is_synthetic: bool = False    # True when triggered by BackgroundAgentModel
     cause: str = ""               # maker fills only: trade | delta_share | delta_vanish | snapshot (what produced the fill)
+    obs: dict | None = None       # observation only (MakerExecutor.obs_enabled): queue estimate, volume available / consumed, flags; no decision reads it
 
     @property
     def notional(self) -> float:
@@ -83,12 +84,17 @@ class TakerOutcome:
 class TakerExecutor:
     """Aggressive execution against a replayed book."""
 
-    def __init__(self, consume_liquidity: bool = True) -> None:
+    def __init__(self, consume_liquidity: bool = True, own_impact: str = "legacy") -> None:
+        if own_impact not in ("legacy", "overlay"):
+            raise ValueError(f"own_impact must be 'legacy' or 'overlay', got {own_impact!r}")
+        self.own_impact = own_impact        # overlay: our consumption goes to OrderBook.consume_overlay, the public levels are never changed
         # When True our own fill removes the liquidity it took, so two signals in
         # the same instant cannot both fill off the same resting size. The next
         # feed update overwrites the book, bounding own-impact to sub-tick time.
         self.consume_liquidity = consume_liquidity
         self._ids = itertools.count(1)
+        self.consume_calls = 0           # observation only: own taker fills that removed liquidity from the book they walked
+        self.consumed_qty = 0.0
 
     def execute(
         self,
@@ -105,8 +111,10 @@ class TakerExecutor:
             return TakerOutcome(False, None, qty, "no_liquidity")
 
         book_side = "ask" if side == "buy" else "bid"
-        walk = book.consume(book_side, qty, limit_price) if self.consume_liquidity \
-            else book.walk(book_side, qty, limit_price)
+        if self.consume_liquidity:
+            walk = (book.consume_overlay if self.own_impact == "overlay" else book.consume)(book_side, qty, limit_price)
+        else:
+            walk = book.walk(book_side, qty, limit_price)
 
         if walk.is_empty:
             # The book moved through our limit during flight — the opportunity
@@ -114,6 +122,9 @@ class TakerExecutor:
             # mode of cross-exchange arb and must not be silently dropped.
             return TakerOutcome(False, None, qty, "price_moved")
 
+        if self.consume_liquidity:
+            self.consume_calls += 1
+            self.consumed_qty += walk.filled_qty
         notional = walk.vwap * walk.filled_qty
         fee = notional * (fee_bps / 10_000.0)
 
@@ -170,6 +181,7 @@ class MakerOrder:
     trade_fill_qty: float = 0.0
     delta_fill_qty: float = 0.0
     snapshot_fill_qty: float = 0.0
+    cross_fill_qty: float = 0.0       # qty filled because the opposite best quote reached our price (opposite_cross_fills)
     synthetic_fill_qty: float = 0.0   # qty filled by BackgroundAgentModel synthetic trades
 
     # Cancel lifecycle (set by the backtester's lifetime handling; None until a cancel is requested).
@@ -191,6 +203,12 @@ class MakerOrder:
     # front of the queue without filling it. A real trade at the order's price within evidence_window_ms of front_ts fills it.
     front_ts: float | None = None
     front_decrease: float = 0.0
+    # opposite_cross_confirm_ms > 0: None (no cross) | "pending" (crossed, waiting for a reaching print until cross_deadline) | "dropped" (window passed
+    # with no print; stays dropped until the book uncrosses). Credit-clock times.
+    cross_state: str | None = None
+    cross_ts: float = 0.0
+    cross_deadline: float = 0.0
+    cross_gap: bool = False            # the book uncrossed while a wait was still inside its window
 
     @property
     def is_live(self) -> bool:
@@ -210,6 +228,27 @@ class MakerOrder:
 _TRADE_CONFIRM_MODES = ("trade_confirm", "trade_confirm+fractional", "confirm_delta_snapshot", "confirm_delta")
 _GATED_MODES = ("confirm_delta_snapshot", "confirm_delta")
 _WHOLE_RULE_MODES = ("trade_confirm", "fractional", "trade_confirm+fractional")
+
+
+@dataclass
+class LifecycleRecord:
+    """Explicit lifecycle of one passive order in the shared vocabulary (order_state_machine.State), kept by the executor.
+
+    Keyed by the in-flight order id (the id the strategy and the backtester know the order by; a rejected order never becomes a MakerOrder).
+    Bookkeeping only: nothing here moves a fill, a queue position or a timer, so recording it cannot change a result.
+    `source` of every transition is historical | modelled | injected (order_events.SOURCES)."""
+    inflight_id: int
+    venue: str
+    maker_id: int | None = None
+    state: str = "submitted"
+    unknown_since: float | None = None
+    unknown_until: float | None = None        # when a status query / late ack settles it; None = never within the data
+    reject_ts: float | None = None
+    reject_reason: str = ""
+    reject_after_fill: bool = False
+    cancelled_ts: float | None = None
+    order: object = None                       # the MakerOrder once it rests (kept after it leaves the book, for its final fill total)
+    history: list = field(default_factory=list)
 
 
 @dataclass
@@ -235,6 +274,13 @@ class MakerConfig:
     # log-std unknown_queue_sigma, seeded) and the order is flagged queue_unknown.
     unknown_queue_model: str = "legacy"
     unknown_queue_dist: str = "floor"
+    # "fitted" (queue model v2, step 7): draw from the distribution fitted on in-depth observations at comparable distance from the touch (training days only),
+    # file = unknown_queue_fit (queue_v2/unknown_queue.py), one seeded draw per order. unknown_queue_floor remains the lower bound only when > 0.
+    unknown_queue_fit: str = ""
+    # v1.1 (audit decision C step 6): the queue used where the fitted distribution has NO data for a venue (counted in diag unknown_queue_fit_missing_venue_used_floor).
+    # -1 (default, bit-identical): unknown_queue_floor plays both roles (lower bound of a draw AND the no-fit fallback). >= 0: unknown_queue_floor stays the lower bound
+    # of a draw only (0 = no universal floor on a fitted draw) and this value is the flagged fallback.
+    unknown_queue_fallback: float = -1.0
     unknown_queue_floor: float = 0.0
     unknown_queue_median: float = 0.0
     unknown_queue_sigma: float = 0.0
@@ -303,19 +349,46 @@ class MakerConfig:
     # (queue_ahead = 0) before the fill is computed. False (default): the proportional share rule leaves a residual queue
     # (the part of the vanished level that a trade had already explained is not charged to it), which can block the fill.
     vanish_clears_queue: bool = False
+    # Queue model v2 (step 4), opt-in. False (default): netting credits expire only with dedupe_window_s (legacy, bit-identical). True: a credit also
+    # belongs to its connection epoch, so a snapshot (and reset_credits(), called on a feed reset / reconnect) invalidates every credit of that venue, and a print
+    # that has to choose between several pending credits at one level inside the window is counted as an AMBIGUOUS association (diag ledger_ambiguous,
+    # obs flag ambiguous_trade_depth) instead of being silently resolved.
+    ledger_epoch: bool = False
+    # Queue model v2 (step 6), opt-in. "scalar" (default): one number, queue_ahead, per order (legacy). "cohort": the external size at our price is kept as cohorts by
+    # arrival with our own orders interleaved (queue_v2/cohort.py); residual cancellations are removed by `cohort_age`; the cancel_model arithmetic is NOT used. The
+    # initial displayed size is one cohort of unknown age (cohort_unknown_age_s, an assumption). Not supported with opposite_cross_fills or amend.
+    queue_model: str = "scalar"
+    cohort_age: str = "uniform"
+    cohort_hazard_theta: float = 1.0
+    cohort_unknown_age_s: float = 30.0
     queue_empty_threshold: str = "absolute"
     queue_empty_lot: float = 0.0
     queue_empty_frac: float = 0.05
 
-    CANCEL_MODELS = ("all_ahead", "proportional", "power")
+    CANCEL_MODELS = ("all_ahead", "min_baseline", "proportional", "power", "behind_first", "ahead_first")
     UNKNOWN_QUEUE_MODELS = ("legacy", "depth_aware")
-    UNKNOWN_QUEUE_DISTS = ("floor", "lognormal")
+    UNKNOWN_QUEUE_DISTS = ("floor", "lognormal", "fitted")
     FILL_EVIDENCE_MODES = ("off", "trade_confirm", "fractional", "trade_confirm+fractional", "confirm_delta_snapshot", "confirm_delta")
     QUEUE_EMPTY_MODES = ("absolute", "lot", "frac_of_order")
 
     def __post_init__(self) -> None:
         if self.cancel_model is not None and self.cancel_model not in self.CANCEL_MODELS:
             raise ValueError(f"cancel_model must be one of {self.CANCEL_MODELS} or None, got {self.cancel_model!r}")
+        if self.queue_model not in ("scalar", "cohort"):
+            raise ValueError(f"queue_model must be 'scalar' or 'cohort', got {self.queue_model!r}")
+        if self.queue_model == "cohort":
+            if self.cohort_age not in ("youngest_first", "oldest_first", "uniform", "hazard"):
+                raise ValueError(f"cohort_age must be youngest_first | oldest_first | uniform | hazard, got {self.cohort_age!r}")
+            if self.opposite_cross_fills:
+                raise ValueError("queue_model='cohort' does not support opposite_cross_fills")
+            if self.cohort_hazard_theta < 0.0 or self.cohort_unknown_age_s < 0.0:
+                raise ValueError("cohort_hazard_theta and cohort_unknown_age_s must be >= 0")
+        if not (self.opposite_cross_confirm_ms >= 0.0):
+            raise ValueError(f"opposite_cross_confirm_ms must be >= 0, got {self.opposite_cross_confirm_ms!r}")
+        if self.opposite_cross_confirm_ms > 0.0 and not self.opposite_cross_fills:
+            raise ValueError("opposite_cross_confirm_ms > 0 needs opposite_cross_fills")
+        if self.opposite_cross_cap_to_print and not self.opposite_cross_confirm_ms > 0.0:
+            raise ValueError("opposite_cross_cap_to_print needs opposite_cross_confirm_ms > 0")
         if not (self.cancel_power_n > 0.0):
             raise ValueError(f"cancel_power_n must be > 0, got {self.cancel_power_n!r}")
         if self.fill_evidence not in self.FILL_EVIDENCE_MODES:
@@ -339,11 +412,34 @@ class MakerConfig:
 
     @property
     def effective_cancel_model(self) -> str:
-        return self.cancel_model or "proportional"
+        """The engine's name: min_baseline is the guide's name for all_ahead (the old name stays the canonical one in outputs)."""
+        m = self.cancel_model or "proportional"
+        return "all_ahead" if m == "min_baseline" else m
     # Price priority. True: a public print strictly THROUGH our price (a sell below our bid, a buy above our ask) means the
     # level we rest on has been consumed, so the order fills in full, as in the core queue engines. The print's volume is
     # not charged to the shared budget. False (default, legacy): the print only burns queue and fills what is left.
     fill_through_prints: bool = False
+    # Queue model v2 (step 8), opt-in; only with fill_through_prints. False (default): a print strictly through our price fills the order in full. True: the fill is
+    # limited by the print's volume (one budget shared by every order the print went through): what a print can really have executed at a level it passed through.
+    through_print_volume_limited: bool = False
+    # Price priority on the book. True: once the opposite best quote is at or through our price (best ask <= our bid, best bid
+    # >= our ask) on an event that reached the exchange after our order did, the order fills in full at its own price as a
+    # maker fill (cause "opposite_cross"), as hftbacktest's exchange models do. A real resting order would have traded with that
+    # quote. False (default, legacy): no fill from the book alone; a crossed level is only removed by the book's uncross.
+    opposite_cross_fills: bool = False
+    # v1.1 step 8, opt-in (0 = off, the behaviour above, unchanged). > 0 (needs opposite_cross_fills): a cross is only a fill when a public print
+    # that reaches the order (sell aggressor at or below a bid, buy aggressor at or above an ask; the same test as on_trade) executed on the same
+    # venue within +-this many ms of the crossing event, after the order reached the exchange. A print in the window BEFORE the cross fills the
+    # order at the cross; otherwise the order waits, and the first reaching print in the window AFTER fills it at that print's time (causal: nothing
+    # starts before its evidence). No print: the cross is dropped and has no effect at all (no queue jump, the order stays as it was); the window is
+    # anchored at the FIRST cross of a crossing episode and re-armed only after the book uncrosses. The fill size is the cross's (the order's
+    # remaining size), not capped by the print: the print is evidence, not a volume budget; cause trade_confirmed_cross_before / _after.
+    opposite_cross_confirm_ms: float = 0.0
+    # v1.1 step 9, opt-in (False = the uncapped fill above, unchanged; needs opposite_cross_confirm_ms > 0). True: the print IS a volume budget. A confirmed cross
+    # fills min(order remaining, volume of the reaching prints in the window that no order has used yet). Each buffered print carries the volume it has
+    # left; a fill (cross or ordinary trade rule) consumes it, so one print never fills more than its size in total, across orders and across repeated
+    # looks at a still-crossed book. A partly filled order stays pending until its window ends and is topped up by later reaching prints.
+    opposite_cross_cap_to_print: bool = False
 
 
 @dataclass
@@ -367,12 +463,31 @@ class MakerExecutor:
         self._unknown_rng = None
         self._ids = itertools.count(1)
         self.orders: dict[int, MakerOrder] = {}
+        self.lifecycle: dict[int, LifecycleRecord] = {}        # explicit REJECTED / UNKNOWN / ... states by in-flight order id
+        self._lc_by_maker: dict[int, LifecycleRecord] = {}
+        self.lifecycle_counts: dict[str, int] = {}
         self.orders_placed = 0
         self.orders_filled = 0
         self.orders_cancelled = 0
         self.amends_requested = 0
         self.amends_rejected_postonly = 0
+        # Observation only (steps 6-7 of the execution-layer brief): when on, every maker Fill carries `obs`. Reads state, draws nothing, writes nothing the model uses.
+        # Queue model v2: with own_overlay the print volume our own fills consumed is recorded per (venue, side, price) and dropped at the next
+        # public update of that level (a depth event or a snapshot). It is a ledger of OUR consumption; the public book is never touched.
+        self.own_overlay = False
+        self.print_overlay: dict[tuple, float] = {}
+        self._uq_fit = None
+        self._uq_draws = 0
+        self._settings_hash = None
+        self._lq: dict[tuple, "LevelQueue"] = {}           # cohort mode: one level queue per (venue, side, price)
+        self._cohort_ahead: dict[int, float] = {}          # cohort mode: queue ahead per own order after the current public event
+        self.cohort_log: list[dict] = []                   # cohort mode: counterfactual projections (bounded)
+        self.obs_enabled = False
+        self._obs_trig: dict = {}
+        self._obs_qb: dict[int, tuple[float, float]] = {}      # maker order id -> (queue ahead, event volume offered) just before its fill
         self._explained: dict[str, dict[tuple, deque]] = {"trade": {}, "delta": {}}
+        self.cross_log: list[dict] = []                    # opposite_cross_confirm_ms: one row per resolved cross (confirmed before / after, dropped); bounded
+        self._cx_prints: dict[str, deque] = {}             # opposite_cross_confirm_ms: recent public prints per venue [ct, event_ts, price, sign, gross, left] (left = volume no fill has used yet)
         # Aggregate counters, all in base-asset units unless named *_events.
         self.diag: dict[str, float] = {k: 0.0 for k in (
             "trade_events", "trade_volume_observed", "trade_volume_credited_to_depth", "trade_volume_net",
@@ -382,7 +497,85 @@ class MakerExecutor:
             "fills_from_trade", "fills_from_delta", "fills_from_snapshot", "fills_from_through_print",
             "evidence_front_marks", "evidence_suppressed_fill_qty", "evidence_confirmed_fill_qty")}
 
+    def _settings_sha(self) -> str:
+        if self._settings_hash is None:
+            import dataclasses
+            import hashlib
+            import json
+            self._settings_hash = hashlib.sha256(json.dumps(dataclasses.asdict(self.config), sort_keys=True, default=str).encode()).hexdigest()
+        return self._settings_hash
+
+    def _obs_begin(self, kind: str, **kw) -> None:
+        self._obs_qb.clear()
+        self._obs_trig = {"kind": kind, **kw}
+
     # ── Trade / depth de-duplication ────────────────────────────────
+
+    # ── cohort mode helpers (queue_model == "cohort") ──
+    def _cohort_on(self) -> bool:
+        return self.config.queue_model == "cohort"
+
+    @staticmethod
+    def _lqk(order: "MakerOrder") -> tuple:
+        return (order.venue, "bid" if order.side == Side.BID else "ask", round(order.price, 8))
+
+    def _lq_drop(self, order: "MakerOrder") -> None:
+        key = self._lqk(order)
+        lq = self._lq.get(key)
+        if lq is None:
+            return
+        lq.remove_own(order.order_id)
+        if not lq.has_own:
+            if len(self.cohort_log) < 20000:
+                self.cohort_log.extend(lq.log)
+            del self._lq[key]
+
+    def _cohort_rebase(self, orders: list, displayed: float, now: float, note: str) -> None:
+        """Counterfactual projection at a settled update boundary, once per level: the displayed external size is the truth about the public book."""
+        lq = self._lq.get(self._lqk(orders[0]))
+        if lq is None:
+            return
+        cfg = self.config
+        lq.expire_provisional(now - cfg.dedupe_window_s)
+        lq.rebase_external(displayed, now, cfg.cohort_age, cfg.cohort_hazard_theta, note)
+        for o in orders:
+            self._cohort_ahead[o.order_id] = lq.ahead(o.order_id)
+
+    def _cohort_trade(self, eligible: list, volume: float, now: float, fee_bps: float, is_synthetic: bool) -> list:
+        """One print, one budget, one traversal per level: the print goes through the cohorts and our orders in queue order."""
+        cfg = self.config
+        fills: list = []
+        by_key: dict[tuple, list] = {}
+        for o in eligible:
+            by_key.setdefault(self._lqk(o), []).append(o)
+        for key, orders in by_key.items():
+            lq = self._lq.get(key)
+            if lq is None:
+                continue
+            qb = {o.order_id: o.queue_ahead for o in orders}
+            got = lq.consume_print(volume)
+            for o in sorted(orders, key=lambda x: (x.placed_ts, x.order_id)):
+                if self.obs_enabled:
+                    self._obs_qb[o.order_id] = (qb[o.order_id], volume)
+                try:
+                    o.queue_ahead = lq.ahead(o.order_id)
+                except KeyError:
+                    o.queue_ahead = 0.0
+                self.diag["trade_volume_to_queue_ahead"] += max(0.0, qb[o.order_id] - o.queue_ahead)
+                q = got.get(o.order_id, 0.0)
+                if q > 1e-12 and cfg.trade_fill_share > 0:
+                    f = self._fill_from(o, q / cfg.trade_fill_share, now, cfg.trade_fill_share, "trade", fee_bps, is_synthetic, cause="trade")
+                    if f is not None:
+                        fills.append(f)
+                        self.diag["trade_volume_to_fills"] += f.qty
+                lq.sync_own(o.order_id, o.remaining)
+        return fills
+
+    def reset_credits(self, venue: str) -> None:
+        """Connection epoch change (reconnect, feed reset, snapshot with ledger_epoch): credit from the old epoch can never explain a new print."""
+        for kind in self._explained:
+            for k in [k for k in self._explained[kind] if k[0] == venue]:
+                del self._explained[kind][k]
 
     def _take(self, kind: str, key: tuple, now: float, want: float) -> float:
         credits = self._explained[kind].get(key)
@@ -391,6 +584,10 @@ class MakerExecutor:
         horizon = now - self.config.dedupe_window_s
         while credits and credits[0][0] < horizon:
             credits.popleft()
+        if self.config.ledger_epoch and len(credits) > 1:
+            self.diag["ledger_ambiguous"] = self.diag.get("ledger_ambiguous", 0.0) + 1.0
+            self._obs_trig["ambiguous"] = True
+            self._obs_trig["competing_credits"] = [[round(now - c[0], 6), c[1]] for c in credits]       # age (s) and quantity of every pending credit that could explain this decrease
         taken = 0.0
         while credits and taken < want - 1e-12:
             use = min(credits[0][1], want - taken)
@@ -432,6 +629,8 @@ class MakerExecutor:
         arrival_ts: float | None = None,
     ) -> MakerOrder:
         level_size = self._level_size(book, side, price, tick_size)
+        if self.config.queue_model == "cohort":                   # exact price only: a coarse tick estimate must not pick a neighbouring level's size
+            level_size = book.level_size("bid" if side == Side.BID else "ask", price)
         touch = book.best_bid if side == Side.BID else book.best_ask
         rel_ticks = 0
         if tick_size > 0 and touch > 0:
@@ -454,7 +653,7 @@ class MakerExecutor:
                 self.diag["absent_level_inside_depth"] = self.diag.get("absent_level_inside_depth", 0) + 1          # legitimately empty: queue 0
             else:
                 queue_unknown = True
-                initial_q = self._unknown_queue_draw()
+                initial_q = self._unknown_queue_draw(venue, price, touch, tick_size)
                 self.diag["absent_level_outside_depth_unknown"] = self.diag.get("absent_level_outside_depth_unknown", 0) + 1
                 self.diag["unknown_queue_assigned_total"] = self.diag.get("unknown_queue_assigned_total", 0) + initial_q
         order = MakerOrder(
@@ -477,6 +676,15 @@ class MakerExecutor:
         )
         self.orders[order.order_id] = order
         self.orders_placed += 1
+        if self.config.queue_model == "cohort":
+            from .queue_v2.cohort import LevelQueue
+            key = self._lqk(order)
+            lq = self._lq.get(key)
+            if lq is None or not lq.has_own:
+                lq = self._lq[key] = LevelQueue(initial_q, now, self.config.cohort_unknown_age_s)
+            elif not level_was_absent:
+                lq.rebase_external(level_size, now, self.config.cohort_age, self.config.cohort_hazard_theta, "placement")
+            order.queue_ahead = order.initial_queue_ahead = lq.join(order.order_id, size)
         self._settle_queue(order)
         return order
 
@@ -490,8 +698,18 @@ class MakerExecutor:
         deepest = lv[-1][0]
         return price >= deepest - 1e-12 if side == Side.BID else price <= deepest + 1e-12
 
-    def _unknown_queue_draw(self) -> float:
+    def _unknown_queue_draw(self, venue: str = "", price: float = 0.0, touch: float = 0.0, tick: float = 0.0) -> float:
         cfg = self.config
+        if cfg.unknown_queue_dist == "fitted":
+            if self._uq_fit is None:
+                from .queue_v2.unknown_queue import UnknownQueueFit
+                self._uq_fit = UnknownQueueFit.load(cfg.unknown_queue_fit)
+            d = int(round(abs(price - touch) / tick)) if tick > 0 and touch > 0 else 1
+            if not any(b["median"] is not None for b in self._uq_fit.venues.get(venue, {"buckets": []})["buckets"]):
+                self.diag["unknown_queue_fit_missing_venue_used_floor"] = self.diag.get("unknown_queue_fit_missing_venue_used_floor", 0.0) + 1.0
+                return cfg.unknown_queue_floor if cfg.unknown_queue_fallback < 0 else cfg.unknown_queue_fallback
+            self._uq_draws += 1
+            return max(cfg.unknown_queue_floor, self._uq_fit.draw(venue, d, cfg.unknown_queue_seed * 1_000_003 + self._uq_draws))
         if cfg.unknown_queue_dist == "floor" or cfg.unknown_queue_median <= 0.0:
             return cfg.unknown_queue_floor
         if self._unknown_rng is None:
@@ -503,6 +721,11 @@ class MakerExecutor:
         order = self.orders.pop(order_id, None)
         if order is None:
             return None
+        if self._lq:
+            self._lq_drop(order)
+        rec = self._lc_by_maker.get(order_id)
+        if rec is not None:
+            rec.cancelled_ts = now
         self._record_outcome(order, end_ts=now)
         self.orders_cancelled += 1
         return order
@@ -515,6 +738,8 @@ class MakerExecutor:
         cancel followed by a new order). The replacement is checked like any new passive order: with `postonly`, a price that
         would take liquidity against `book` (the exchange-time book at the amend's arrival, supplied by the caller) is rejected,
         and then nothing rests. The strategy in this backtester never amends, so this path has no effect on any result."""
+        if self.config.queue_model == "cohort":
+            raise NotImplementedError("amend is not supported with queue_model='cohort'")
         old = self.orders.get(order_id)
         if old is None:
             return AmendResult(None, False, False, "unknown_order")
@@ -535,6 +760,73 @@ class MakerExecutor:
             if o is not None:
                 out.append(o)
         return out
+
+    # ── explicit lifecycle: REJECTED (D-01) and UNKNOWN (D-02) ───────────────────────────────────────
+    # Bookkeeping in the shared vocabulary of order_state_machine; it moves no fill, queue position or timer.
+
+    def _lc_note(self, rec: LifecycleRecord, ts: float, state: str, source: str, reason: str = "") -> None:
+        rec.history.append((ts, state, source, reason))
+        self.lifecycle_counts[state] = self.lifecycle_counts.get(state, 0) + 1
+
+    def lc_submit(self, inflight_id: int, venue: str, ts: float, source: str = "modelled") -> LifecycleRecord:
+        rec = self.lifecycle.get(inflight_id)
+        if rec is None:
+            rec = self.lifecycle[inflight_id] = LifecycleRecord(inflight_id=inflight_id, venue=venue)
+            self._lc_note(rec, ts, "submitted", source)
+        return rec
+
+    def lc_accept(self, inflight_id: int, order: MakerOrder, ts: float, source: str = "modelled") -> None:
+        rec = self.lc_submit(inflight_id, order.venue, ts, source)
+        rec.maker_id, rec.order, rec.state = order.order_id, order, "resting"
+        self._lc_by_maker[order.order_id] = rec
+        self._lc_note(rec, ts, "resting", source)
+
+    def lc_unknown(self, inflight_id: int, since: float, until: float | None, source: str = "injected", reason: str = "ack_lost") -> None:
+        """No answer to the submit by `since` (the ack timeout). Settled at `until` by a status query or a late ack; None = never within the data.
+        Entered from SUBMITTED only (R4): an order that already carries evidence is not made unknown."""
+        rec = self.lifecycle.get(inflight_id)
+        if rec is None or rec.state == "rejected":
+            return
+        rec.unknown_since, rec.unknown_until = since, until
+        self._lc_note(rec, since, "unknown", source, reason)
+
+    def lc_reject(self, inflight_id: int, ts: float, reason: str, source: str = "modelled", venue: str = "") -> bool:
+        """The venue refused the order. Returns True when it had already filled (D-06): the fill is a fact and is KEPT, the order stays
+        PARTIALLY_FILLED and an alarm is counted once; False for an ordinary terminal REJECTED."""
+        rec = self.lc_submit(inflight_id, venue, ts, source)
+        filled = rec.order.filled_qty if rec.order is not None else 0.0
+        if filled > 1e-12:
+            if not rec.reject_after_fill:
+                rec.reject_after_fill = True
+                self._lc_note(rec, ts, "reject_after_fill_alarm", source, reason)
+            return True
+        rec.state, rec.reject_ts, rec.reject_reason = "rejected", ts, reason
+        self._lc_note(rec, ts, "rejected", source, reason)
+        return False
+
+    def lifecycle_state(self, inflight_id: int, now: float | None = None) -> str | None:
+        """State in the shared vocabulary at `now` (None = after everything recorded). UNKNOWN holds from unknown_since until unknown_until."""
+        rec = self.lifecycle.get(inflight_id)
+        if rec is None:
+            return None
+        t = float("inf") if now is None else now
+        if rec.state == "rejected":
+            return "rejected"
+        if rec.unknown_since is not None and rec.unknown_since <= t and (rec.unknown_until is None or t < rec.unknown_until):
+            return "unknown"
+        o = rec.order
+        if o is None:
+            return "submitted"
+        eps = 1e-9
+        if o.filled_qty >= o.size - eps:
+            return "filled"
+        if rec.cancelled_ts is not None and rec.cancelled_ts <= t:
+            return "cancelled"
+        if o.cancel_requested_ts is not None and o.cancel_requested_ts <= t:
+            return "cancel_requested"
+        if o.filled_qty > eps:
+            return "partially_filled"
+        return "resting"
 
     def live_orders(self, venue: str | None = None) -> list[MakerOrder]:
         if venue is None:
@@ -567,17 +859,31 @@ class MakerExecutor:
         confirm_ids: set[int] = set()
         if cfg.fill_evidence in _TRADE_CONFIRM_MODES:
             confirm_ids = self._confirming_orders(venue, price, sign, now, ct, event_ts)
+        cx_ids: set[int] = set()
+        cx_rec = None
+        if cfg.opposite_cross_confirm_ms > 0.0:
+            # BEFORE the netting early return below: a print netted against a depth credit is still the evidence a cross needs.
+            cx_rec = [ct, event_ts, price, sign, gross_volume, gross_volume]
+            self._cx_prints.setdefault(venue, deque()).append(cx_rec)
+            cx_ids = self._cx_pending_hits(venue, price, sign, now, ct, event_ts)
         if cfg.dedupe_trade_depth:
             key = (venue, "bid" if sign < 0 else "ask", round(price, 8))
             credited = self._take("delta", key, ct, volume)
             volume -= credited
+            if self._lq and credited > 1e-12:
+                lq = self._lq.get(key)
+                if lq is not None:
+                    lq.reclassify(credited)                      # book-first: the decrease already applied was an execution at the head
             self.diag["trade_volume_credited_to_depth"] += credited
             self._add("trade", key, ct, volume)
-            if volume <= 1e-12 and not confirm_ids:
+            if volume <= 1e-12 and not confirm_ids and not cx_ids:
                 return []
+        if self.obs_enabled:
+            self._obs_begin("trade", price=price, gross=gross_volume, credited=gross_volume - volume, net=volume, sign=sign, event_ts=event_ts,
+                            ambiguous=bool(gross_volume - volume > 1e-12 or confirm_ids), synthetic=is_synthetic)
         self.diag["trade_volume_net"] += volume
         fills: list[Fill] = []
-        eligible, pre, through, confirmed = [], [], [], []
+        eligible, pre, through, confirmed, cx_orders = [], [], [], [], []
         for order in list(self.orders.values()):
             if order.venue != venue or not order.is_live or now + 1e-12 < order.active_ts:
                 continue
@@ -585,6 +891,9 @@ class MakerExecutor:
             reaches = ((sign < 0 and order.side == Side.BID and price <= order.price + 1e-12)
                        or (sign > 0 and order.side == Side.ASK and price >= order.price - 1e-12))
             if not reaches:
+                continue
+            if order.order_id in cx_ids:
+                cx_orders.append(order)             # waiting on this print since its cross: filled below, once, and not again by the ordinary rule
                 continue
             if cfg.dedupe_trade_depth and abs(price - order.price) <= 1e-9 * max(1.0, abs(price)):
                 order.trade_vol_since_obs += volume
@@ -596,16 +905,63 @@ class MakerExecutor:
                 confirmed.append(order)
             else:
                 eligible.append(order)
-        for order in through:
-            order.queue_ahead = 0.0
-            f = self._fill_from(order, order.remaining / max(cfg.trade_fill_share, 1e-12), now, cfg.trade_fill_share,
-                                "trade", fee_bps, is_synthetic, cause="trade_through")
+        for order in cx_orders:
+            cap = cfg.opposite_cross_cap_to_print
+            qty_cap = None
+            if cap:
+                qty_cap = min(order.remaining, cx_rec[5])
+                if qty_cap <= 1e-12:
+                    continue                                   # this print has been used up by an earlier fill: the order keeps waiting
+            else:
+                order.cross_state, order.cross_gap = None, False
+                order.queue_ahead = 0.0
+            self.diag.setdefault("fills_from_cross", 0.0)
+            self.diag["cross_confirmed_after"] = self.diag.get("cross_confirmed_after", 0.0) + 1.0
+            self._cx_note(order, "confirmed_after", print_ts=ct, print_price=price, print_volume=gross_volume)
+            if self.obs_enabled:
+                self._obs_trig["cross_confirm"] = {"direction": "print_after_cross", "cross_ts": order.cross_ts, "print_ts": ct, "print_price": price, "print_volume": gross_volume}
+            if gross_volume + 1e-12 < order.remaining:
+                self.diag["cross_print_smaller_than_fill"] = self.diag.get("cross_print_smaller_than_fill", 0.0) + 1.0
+            f = self._fill_from(order, order.remaining, now, 1.0, "cross", fee_bps, is_synthetic, cause="trade_confirmed_cross_after", qty_cap=qty_cap)
             if f is not None:
                 fills.append(f)
+                if cap:
+                    cx_rec[5] -= f.qty
+                    if order.remaining <= 1e-12:
+                        order.cross_state, order.cross_gap = None, False   # fully filled; a partial fill stays pending until its window ends
+        through_budget = gross_volume
+        for order in through:
+            if self.obs_enabled:
+                self._obs_qb[order.order_id] = (order.queue_ahead, gross_volume)
+            if self._lq:
+                lq = self._lq.get(self._lqk(order))
+                if lq is not None:
+                    lq.clear_ahead(order.order_id)
+            order.queue_ahead = 0.0
+            avail = order.remaining / max(cfg.trade_fill_share, 1e-12)
+            if cfg.through_print_volume_limited:
+                avail = min(avail, max(through_budget, 0.0))
+            f = self._fill_from(order, avail, now, cfg.trade_fill_share, "trade", fee_bps, is_synthetic, cause="trade_through")
+            if f is not None:
+                if cfg.through_print_volume_limited and cfg.trade_fill_share > 0:
+                    through_budget -= f.qty / cfg.trade_fill_share
+                fills.append(f)
                 self.diag["fills_from_through_print"] += f.qty
+        if self._lq and pre:
+            seen = set()
+            for order in pre:
+                k = self._lqk(order)
+                if k not in seen and k in self._lq:
+                    seen.add(k)
+                    self._lq[k].cancel_head_external(volume)
         for order in pre:
-            drained = min(order.queue_ahead, volume)
-            order.queue_ahead -= drained
+            if self._lq and self._lqk(order) in self._lq:
+                new = self._lq[self._lqk(order)].ahead(order.order_id)
+                drained = max(0.0, order.queue_ahead - new)
+                order.queue_ahead = new
+            else:
+                drained = min(order.queue_ahead, volume)
+                order.queue_ahead -= drained
             self.diag["pre_arrival_event_drains"] += 1
             self.diag["pre_arrival_queue_drained"] += drained
         if confirmed:
@@ -614,6 +970,8 @@ class MakerExecutor:
             confirmed.sort(key=lambda o: (o.placed_ts, o.order_id))
             budget = gross_volume
             for order in confirmed:
+                if self.obs_enabled:
+                    self._obs_qb[order.order_id] = (order.queue_ahead, budget)
                 cap = cfg.evidence_fill_fraction * order.front_decrease if cfg.fill_evidence == "trade_confirm+fractional" else None
                 f = self._fill_from(order, budget, now, cfg.trade_fill_share, "trade", fee_bps, is_synthetic,
                                     cause="trade_after_front", qty_cap=cap)
@@ -625,6 +983,9 @@ class MakerExecutor:
                         budget -= f.qty / cfg.trade_fill_share
                     if budget <= 1e-12:
                         break
+        if self._lq and eligible:
+            fills += self._cohort_trade(eligible, volume, now, fee_bps, is_synthetic)
+            eligible = []
         share = cfg.share_trade_volume
         if share:
             eligible.sort(key=lambda o: (-o.price if o.side == Side.BID else o.price, o.placed_ts, o.order_id))
@@ -643,6 +1004,9 @@ class MakerExecutor:
                 remaining -= absorbed
                 if remaining <= 1e-12:
                     break
+        if cx_rec is not None and cfg.opposite_cross_cap_to_print:
+            used = sum(f.qty for f in fills if not (f.cause or "").startswith("trade_confirmed_cross"))
+            cx_rec[5] = max(0.0, cx_rec[5] - used)           # the ordinary rules spent part of this print: a later cross cannot spend it again
         return fills
 
     def on_delta(
@@ -655,6 +1019,10 @@ class MakerExecutor:
         and charges the share that was ahead of us."""
         cfg = self.config
         ct = self._credit_time(now, event_ts)
+        if self.own_overlay:
+            self.print_overlay.pop((venue, "buy" if side.startswith("b") else "sell", price), None)
+        if self.obs_enabled:
+            self._obs_begin("delta", price=price, side=side, new_size=new_size, event_ts=event_ts, ambiguous=True)
         fills: list[Fill] = []
         want = Side.BID if side.startswith("b") else Side.ASK
         at_level = []
@@ -666,8 +1034,13 @@ class MakerExecutor:
             if abs(price - order.price) > max(1e-12, 0.5 * tick_size):
                 continue
             at_level.append(order)
-        proportional = cfg.effective_cancel_model in ("proportional", "power")
+        if cfg.queue_model == "cohort":              # a level is a price: a coarse tick estimate must never merge two adjacent levels into one queue
+            at_level = [o for o in at_level if abs(o.price - price) <= 1e-9 * max(1.0, abs(price))]
+        proportional = cfg.effective_cancel_model in ("proportional", "power", "behind_first", "ahead_first") or cfg.queue_model == "cohort"
         power_n = cfg.cancel_power_n if cfg.effective_cancel_model == "power" else 1.0
+        if self._lq and at_level:
+            self._cohort_ahead = {}
+            self._cohort_rebase(at_level, new_size, now, "delta")
         if proportional:
             shrinks = {o.order_id: o.level_now - new_size for o in at_level if o.level_now > new_size}
         else:
@@ -694,7 +1067,7 @@ class MakerExecutor:
                 if proportional:
                     f = self._consume_proportional(order, shrink, order.level_now, now, cfg.delta_fill_share, "delta", fee_bps, can_fill,
                                                    power_n=power_n, cause="delta_vanish" if new_size <= 1e-12 else "delta_share",
-                                                   credit_ts=ct)
+                                                   credit_ts=ct, model=cfg.effective_cancel_model)
                 else:
                     f = self._consume(order, shrink, now, cfg.delta_fill_share, "delta", fee_bps, can_fill=can_fill,
                                       cause="delta_vanish" if new_size <= 1e-12 else "delta_share", credit_ts=ct)
@@ -723,13 +1096,29 @@ class MakerExecutor:
         With dedupe_trade_depth, the part of the shrink that public trades at this price already accounted for (and that
         has not been matched to a delta) is not drained a second time."""
         cfg = self.config
+        if cfg.ledger_epoch:
+            self.reset_credits(venue)
+        if self.own_overlay:
+            for k in [k for k in self.print_overlay if k[0] == venue]:
+                del self.print_overlay[k]
+        if self.obs_enabled:
+            self._obs_begin("snapshot", event_ts=event_ts, ambiguous=True)
         fills: list[Fill] = []
+        if self._lq:
+            self._cohort_ahead = {}
+            groups: dict[tuple, list] = {}
+            for o in self.orders.values():
+                if o.venue == venue and o.is_live and now + 1e-12 >= o.active_ts:
+                    groups.setdefault(self._lqk(o), []).append(o)
+            for grp in groups.values():
+                self._cohort_rebase(grp, book.level_size("bid" if grp[0].side == Side.BID else "ask", grp[0].price), now, "snapshot")
+        cohort = bool(self._lq)
         for order in list(self.orders.values()):
             if order.venue != venue or not order.is_live or now + 1e-12 < order.active_ts:
                 continue
             curr = self._level_size(book, order.side, order.price, tick_size)
-            if order.observed_level_size > curr:
-                shrink = order.observed_level_size - curr
+            if (order.level_now if cohort else order.observed_level_size) > curr:
+                shrink = (order.level_now if cohort else order.observed_level_size) - curr
                 self.diag["snapshot_shrink_total"] += shrink
                 if cfg.dedupe_trade_depth and cfg.snapshot_trade_explain:
                     explained = min(shrink, order.trade_vol_since_obs)
@@ -751,6 +1140,165 @@ class MakerExecutor:
             order.observed_level_size = min(order.observed_level_size, curr)
             order.level_now = curr
         return fills
+
+    def on_opposite_cross(
+        self, venue: str, book: OrderBook, now: float, fee_bps: float, event_ts: float | None = None,
+    ) -> list[Fill]:
+        """MakerConfig.opposite_cross_fills: fill every live order on `venue` whose price the opposite best quote has reached.
+
+        Called after each book update. An event that executed at the exchange before the order arrived cannot fill it (the
+        PostOnly check at arrival covers a book that was already crossed then); the book stays crossed until a later event,
+        which is checked again."""
+        if not self.config.opposite_cross_fills:
+            return []
+        if self.obs_enabled:
+            self._obs_begin("opposite_cross", event_ts=event_ts, ambiguous=False)
+        bb, ba = book.best_bid, book.best_ask          # 0.0 for an empty side. Only the opposite side is needed: the book's
+        fills: list[Fill] = []                          # uncross may just have removed our own side's levels.
+        for order in list(self.orders.values()):
+            if order.venue != venue or not order.is_live or now + 1e-12 < order.active_ts:
+                continue
+            tol = 1e-9 * max(1.0, abs(order.price))
+            crossed = (0.0 < ba <= order.price + tol) if order.side == Side.BID else (bb > 0.0 and bb >= order.price - tol)
+            confirm_ms = self.config.opposite_cross_confirm_ms
+            if confirm_ms > 0.0 and not crossed and order.cross_state is not None:
+                # The book uncrossed: the next cross is a new episode with its own window. A wait that is still inside its window survives the
+                # uncross (a print can come after the quote moved away); an expired wait is dropped now.
+                if order.cross_state == "pending" and self._credit_time(now, event_ts) <= order.cross_deadline + 1e-12:
+                    order.cross_gap = True
+                else:
+                    if order.cross_state == "pending":
+                        self.diag["cross_dropped"] = self.diag.get("cross_dropped", 0.0) + 1.0
+                        self._cx_note(order, "dropped")
+                    order.cross_state, order.cross_gap = None, False
+            if not crossed or self._pre_arrival(order, event_ts):
+                continue
+            cause = "opposite_cross"
+            if confirm_ms > 0.0:
+                ct = self._credit_time(now, event_ts)
+                if order.cross_state == "pending":
+                    if ct <= order.cross_deadline + 1e-12:
+                        continue
+                    self.diag["cross_dropped"] = self.diag.get("cross_dropped", 0.0) + 1.0
+                    self._cx_note(order, "dropped")
+                    if not order.cross_gap:
+                        order.cross_state = "dropped"       # one unbroken crossing episode: its single window has passed
+                        continue
+                    order.cross_state, order.cross_gap = None, False   # the book uncrossed in between: this is a new episode
+                elif order.cross_state == "dropped":
+                    continue
+                if self.config.opposite_cross_cap_to_print:
+                    items = self._cx_lookback_all(order, ct, confirm_ms / 1000.0)
+                    avail = sum(it[5] for it in items)
+                    if avail <= 1e-12:
+                        order.cross_state, order.cross_ts, order.cross_deadline, order.cross_gap = "pending", ct, ct + confirm_ms / 1000.0, False
+                        self.diag["cross_armed"] = self.diag.get("cross_armed", 0.0) + 1.0
+                        self._cx_note(order, "armed")
+                        continue
+                    qty = min(order.remaining, avail)
+                    need = qty
+                    for it in items:                           # oldest first; each print is spent once, whoever spends it
+                        take = min(it[5], need)
+                        it[5] -= take
+                        need -= take
+                        if need <= 1e-12:
+                            break
+                    order.cross_ts = ct
+                    self._cx_note(order, "confirmed_before", print_ts=items[0][0], print_price=items[0][2], print_volume=avail, filled=qty)
+                    self.diag["cross_confirmed_before"] = self.diag.get("cross_confirmed_before", 0.0) + 1.0
+                    if avail + 1e-12 < order.remaining:
+                        self.diag["cross_print_smaller_than_fill"] = self.diag.get("cross_print_smaller_than_fill", 0.0) + 1.0
+                    if self.obs_enabled:
+                        self._obs_trig["cross_confirm"] = {"direction": "print_before_cross", "cross_ts": ct, "print_ts": items[0][0], "print_price": items[0][2], "print_volume": avail}
+                    self.diag.setdefault("fills_from_cross", 0.0)      # queue_ahead is left alone: a capped fill does not give the rest of the order the front of the queue
+                    f = self._fill_from(order, order.remaining, now, 1.0, "cross", fee_bps, False, cause="trade_confirmed_cross_before", qty_cap=qty)
+                    if f is not None:
+                        fills.append(f)
+                    if order.remaining > 1e-12:                # partly filled: wait out the window for the rest
+                        order.cross_state, order.cross_deadline, order.cross_gap = "pending", ct + confirm_ms / 1000.0, False
+                    else:
+                        order.cross_state, order.cross_gap = None, False
+                    continue
+                prior = self._cx_lookback(order, ct, confirm_ms / 1000.0)
+                if prior is None:
+                    order.cross_state, order.cross_ts, order.cross_deadline = "pending", ct, ct + confirm_ms / 1000.0
+                    self.diag["cross_armed"] = self.diag.get("cross_armed", 0.0) + 1.0
+                    self._cx_note(order, "armed")
+                    continue
+                cause = "trade_confirmed_cross_before"
+                order.cross_ts = ct
+                self._cx_note(order, "confirmed_before", print_ts=prior[0], print_price=prior[2], print_volume=prior[4])
+                self.diag["cross_confirmed_before"] = self.diag.get("cross_confirmed_before", 0.0) + 1.0
+                if prior[4] + 1e-12 < order.remaining:
+                    self.diag["cross_print_smaller_than_fill"] = self.diag.get("cross_print_smaller_than_fill", 0.0) + 1.0
+                if self.obs_enabled:
+                    self._obs_trig["cross_confirm"] = {"direction": "print_before_cross", "cross_ts": ct, "print_ts": prior[0], "print_price": prior[2], "print_volume": prior[4]}
+                order.cross_state, order.cross_gap = None, False
+            order.queue_ahead = 0.0
+            self.diag.setdefault("fills_from_cross", 0.0)
+            f = self._fill_from(order, order.remaining, now, 1.0, "cross", fee_bps, False, cause=cause)
+            if f is not None:
+                fills.append(f)
+        return fills
+
+    def _cx_note(self, order: MakerOrder, outcome: str, **kw) -> None:
+        if len(self.cross_log) < 20000:
+            self.cross_log.append({"venue": order.venue, "order_id": order.order_id, "price": order.price, "cross_ts": order.cross_ts, "outcome": outcome, **kw})
+
+    @staticmethod
+    def _cx_reaches(order: MakerOrder, price: float, sign: int) -> bool:
+        return ((sign < 0 and order.side == Side.BID and price <= order.price + 1e-12)
+                or (sign > 0 and order.side == Side.ASK and price >= order.price - 1e-12))
+
+    def _cx_lookback(self, order: MakerOrder, ct: float, window_s: float):
+        """Newest print on the order's venue within window_s BEFORE (or at) ct that reaches the order and executed after the order reached the exchange."""
+        buf = self._cx_prints.get(order.venue)
+        if not buf:
+            return None
+        for item in reversed(buf):
+            if item[0] > ct + 1e-12:
+                continue
+            if ct - item[0] > window_s + 1e-12:
+                break
+            if self._cx_reaches(order, item[2], item[3]) and not self._pre_arrival(order, item[1]):
+                return item
+        return None
+
+    def _cx_lookback_all(self, order: MakerOrder, ct: float, window_s: float) -> list:
+        """opposite_cross_cap_to_print: every print within window_s before ct that reaches the order, executed after it arrived, and has volume left (oldest first)."""
+        buf = self._cx_prints.get(order.venue)
+        out = []
+        if not buf:
+            return out
+        for item in reversed(buf):
+            if item[0] > ct + 1e-12:
+                continue
+            if ct - item[0] > window_s + 1e-12:
+                break
+            if item[5] > 1e-12 and self._cx_reaches(order, item[2], item[3]) and not self._pre_arrival(order, item[1]):
+                out.append(item)
+        out.reverse()
+        return out
+
+    def _cx_pending_hits(self, venue: str, price: float, sign: int, now: float, ct: float, event_ts: float | None) -> set[int]:
+        """Orders waiting on a print since their cross that this print reaches inside their window; expired waits are marked dropped."""
+        out: set[int] = set()
+        buf = self._cx_prints.get(venue)
+        if buf:
+            horizon = ct - 2.0 * self.config.opposite_cross_confirm_ms / 1000.0 - 1.0
+            while buf and buf[0][0] < horizon:
+                buf.popleft()
+        for order in self.orders.values():
+            if order.cross_state != "pending" or order.venue != venue or not order.is_live or now + 1e-12 < order.active_ts:
+                continue
+            if ct > order.cross_deadline + 1e-12:
+                self.diag["cross_dropped"] = self.diag.get("cross_dropped", 0.0) + 1.0
+                self._cx_note(order, "dropped")
+                order.cross_state, order.cross_gap = (None, False) if order.cross_gap else ("dropped", False)
+                continue
+            if ct + 1e-12 >= order.cross_ts and self._cx_reaches(order, price, sign) and not self._pre_arrival(order, event_ts):
+                out.add(order.order_id)
+        return out
 
     def mark_adverse(self, venue: str, book: OrderBook, now: float, tick_size: float) -> None:
         """Record when the market first traded through a resting order — the
@@ -774,9 +1322,16 @@ class MakerExecutor:
         `volume` is charged to the queue ahead of this order (the 'all_ahead' rule when called for a depth decrease)."""
         if volume <= 0 or not order.is_live:
             return None
+        if self.obs_enabled:
+            self._obs_qb[order.order_id] = (order.queue_ahead, volume)
 
         available = volume
-        if order.queue_ahead > 0:
+        if self._lq and source != "trade" and order.order_id in self._cohort_ahead:
+            drained = max(0.0, order.queue_ahead - self._cohort_ahead[order.order_id])
+            order.queue_ahead -= drained
+            available -= drained
+            self._settle_queue(order)
+        elif order.queue_ahead > 0:
             drained = min(order.queue_ahead, available)
             order.queue_ahead -= drained
             available -= drained
@@ -789,7 +1344,7 @@ class MakerExecutor:
 
     def _consume_proportional(
         self, order: MakerOrder, shrink: float, prev_level: float, now: float, fill_share: float, source: str, fee_bps: float,
-        can_fill: bool, power_n: float = 1.0, cause: str | None = None, credit_ts: float | None = None,
+        can_fill: bool, power_n: float = 1.0, cause: str | None = None, credit_ts: float | None = None, model: str = "power",
     ) -> Fill | None:
         """Unattributed depth decrease, split between the queue ahead of us and the volume behind us: only the share that
         was ahead advances us. With power_n == 1 the share is ahead / level_before ('proportional'); otherwise
@@ -798,15 +1353,23 @@ class MakerExecutor:
         The feed carries no order ids, so we do not know who cancelled. A fill is possible only once no queue is left ahead."""
         if shrink <= 0 or not order.is_live:
             return None
+        if self.obs_enabled:
+            self._obs_qb[order.order_id] = (order.queue_ahead, shrink)
         ahead = order.queue_ahead
-        if ahead <= 0:
-            frac = 0.0
-        elif power_n == 1.0:
-            frac = min(1.0, ahead / max(prev_level, 1e-12))
+        if self._lq and order.order_id in self._cohort_ahead:
+            drained = max(0.0, ahead - self._cohort_ahead[order.order_id])      # the cohort queue already moved; the common tail subtracts it
+        elif model in ("behind_first", "ahead_first"):
+            from .queue_v2.cancel_models import cancel_ahead
+            drained = cancel_ahead(model, shrink, ahead, max(prev_level - ahead, 0.0))
         else:
-            behind = max(prev_level - ahead, 0.0)
-            frac = (ahead ** power_n) / (ahead ** power_n + behind ** power_n)
-        drained = min(order.queue_ahead, shrink * frac)
+            if ahead <= 0:
+                frac = 0.0
+            elif power_n == 1.0:
+                frac = min(1.0, ahead / max(prev_level, 1e-12))
+            else:
+                behind = max(prev_level - ahead, 0.0)
+                frac = (ahead ** power_n) / (ahead ** power_n + behind ** power_n)
+            drained = min(order.queue_ahead, shrink * frac)
         order.queue_ahead -= drained
         self._settle_queue(order)
         if cause == "delta_vanish" and can_fill and (self.config.vanish_clears_queue or self.config.fill_evidence in _WHOLE_RULE_MODES):
@@ -892,6 +1455,9 @@ class MakerExecutor:
 
         order.remaining -= qty
         order.filled_qty += qty
+        if self.own_overlay and source == "trade" and fill_share > 0:
+            k = (order.venue, order.side_str, order.price)
+            self.print_overlay[k] = self.print_overlay.get(k, 0.0) + qty / fill_share
         self.diag[f"fills_from_{source}"] += qty
         if order.first_fill_ts is None:
             order.first_fill_ts = now
@@ -902,6 +1468,8 @@ class MakerExecutor:
             order.trade_fill_qty += qty
         elif source == "delta":
             order.delta_fill_qty += qty
+        elif source == "cross":
+            order.cross_fill_qty += qty
         else:
             order.snapshot_fill_qty += qty
 
@@ -912,9 +1480,43 @@ class MakerExecutor:
             fee=fee, is_taker=False, order_id=order.order_id, signal_id=order.signal_id,
             is_synthetic=is_synthetic, cause=cause or source,
         )
+        if self.obs_enabled:
+            qb, offered = self._obs_qb.pop(order.order_id, (order.queue_ahead, None))
+            trig = self._obs_trig
+            flags = []
+            if order.queue_unknown:
+                flags += ["queue_unknown", "outside_captured_depth"]          # set exactly when the level was absent AND outside the captured depth
+            elif order.level_was_absent and self.config.unknown_queue_model == "legacy":
+                flags.append("queue_proxy")                                    # min_queue_ahead stands in for an absent level
+            alternates = []                                                    # guide s4: where the association is ambiguous the alternate reading is KEPT with the fill, not only flagged
+            if trig.get("ambiguous") or source in ("delta", "snapshot"):
+                flags.append("ambiguous_trade_depth")                          # volume attributed to us without one causal print
+            if source in ("delta", "snapshot"):
+                alternates.append({"scenario": "depletion_was_cancellation_not_execution", "own_fill_qty": 0.0,
+                                   "basis": "a level decrease with no matched print is not proof of an execution; under this reading the order is not filled at this event"})
+            if trig.get("competing_credits"):
+                alternates.append({"scenario": "decrease_explained_by_a_different_pending_print", "competing_credits_age_s_qty": trig["competing_credits"],
+                                   "basis": "several pending prints could explain this decrease; the engine consumed the oldest first (FIFO); another association changes which print is left over for later depletions"})
+            fill.obs = {"cause": cause or source, "source": source, "trigger": dict(trig), "queue_before": qb, "queue_after": order.queue_ahead,
+                        "queue_at_placement": order.initial_queue_ahead, "level_size_at_placement": order.observed_level_size,
+                        "level_now": order.level_now, "volume_offered": offered if offered is not None else trig.get("gross"),
+                        "volume_consumed_by_queue": (qb - order.queue_ahead) if qb is not None else None,
+                        "volume_consumed_by_fill": qty / fill_share if fill_share > 0 else None,
+                        "netting_credit": trig.get("credited", 0.0), "cancel_model": self.config.effective_cancel_model,
+                        "fill_evidence": self.config.fill_evidence, "dedupe_trade_depth": bool(self.config.dedupe_trade_depth),
+                        "flags": flags, "alternates": alternates, "association_robust": not alternates, "synthetic": is_synthetic, "remaining_after": order.remaining,
+                        # step 9 provenance: model ids are labels of THIS model (never native exchange ids), the three clocks, the source type, the settings hash
+                        "order_model_id": f"qv2:{order.venue}:{order.order_id}", "id_kind": "model_label_not_native",
+                        "arrival_ts": order.arrival_ts, "match_ts": trig.get("event_ts"), "report_ts": now,
+                        "source_type": "synthetic_flow" if is_synthetic else {"trade": "print", "delta": "depth_decrease", "snapshot": "snapshot_shrink",
+                                                                              "cross": "opposite_cross"}.get(source, source),
+                        "queue_model": self.config.queue_model, "cohort_age": self.config.cohort_age if self.config.queue_model == "cohort" else None,
+                        "model_settings_sha256": self._settings_sha()}
 
         if not order.is_live:
             self.orders.pop(order.order_id, None)
+            if self._lq:
+                self._lq_drop(order)
             # Skip training label only when the FIRST fill was synthetic — that
             # corrupts the time-to-fill timestamp (first_fill_ts = synthetic event time).
             # A real trade that later completes a partially-synthetic order is still a

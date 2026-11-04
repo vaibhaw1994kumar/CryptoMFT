@@ -13,7 +13,9 @@ decision_status:                         # carried into every result's release_i
   unwind_max_attempts: DECISION_PENDING_CALIBRATION
   p_fail: PLACEHOLDER_NOT_MEASURED
 product_fee_consistency: true            # MANDATORY: fee presets must be perp presets
-latency_preset: colocated_both           # CALIBRATED (ASSUMED until ollog measurements replace it)
+latency_preset: singapore                # ASSUMED (host co-located with Bybit, ~35 ms to Binance) until ollog measurements replace it.
+                                         # Owner decision 2026-11-02: was colocated_both, which config.py calls physically impossible
+                                         # (sensitivity upper bound only); every v1 result before 2026-11-02 used colocated_both.
 fee_presets:
   bybit: bybit_perp_mm
   binance: binance_perp_vip0
@@ -23,7 +25,12 @@ enforce_book_state: true                 # MANDATORY (WP4)
 trade_dedupe: set                        # MANDATORY (native ids when present)
 delta_uses_book_size: true               # MANDATORY (depth-size fix)
 cancel_time_basis: exchange              # MANDATORY (D-03)
-postonly_reject_model: "on"              # modelled PostOnly rejects at exchange time
+postonly_reject_model: "on"              # MANDATORY (lifecycle task 5): modelled PostOnly rejects at exchange time, arrival = decision + sampled ENTRY latency
+calibration:                             # perp lifecycle calibration (ollog TESTNET runs from the Mac); refused if its product is not perp
+  file: config/lifecycle_calibration_perp_bybit.json
+  venue: bybit                           # the maker venue; its entry-latency grid ('all' = REST round trip / 2, local clock only) feeds ack_latency
+  period: all
+  source: MEASURED_TESTNET_FROM_MAC      # NOT mainnet and NOT VM -> exchange; see the report for what this does and does not establish
 arb:
   profile: perp_perp_maker_taker_v1
   mode: maker_taker
@@ -53,8 +60,10 @@ maker:
   dedupe_trade_depth: true               # MANDATORY
   exchange_time_eligibility: true        # MANDATORY (causal fills)
   level_creator_trade_only: false        # LEGACY_COMPAT (opt-in)
+  opposite_cross_fills: true             # CALIBRATED — PROVISIONAL: price priority, a resting order fills in full once the opposite best quote
+                                         # reaches its price (hftbacktest probe cross-check 2026-11-03; owner decision 2026-11-04)
 timing:                                  # WP3; numbers ASSUMED from the latency preset until calibrated
-  from_latency_preset: colocated_both
+  from_latency_preset: singapore         # same preset as latency_preset (owner decision 2026-11-02)
   equal_time_policy: market_first
   dead_feed_s: 5.0                       # MANDATORY
   truth_books: true                      # MANDATORY
@@ -101,3 +110,20 @@ margin:                                  # MANDATORY in a perp profile; tiers AS
       tiers:
         - {max_notional: 50000.0, initial_rate: 0.02, maintenance_rate: 0.01}
         - {max_notional: 500000.0, initial_rate: 0.05, maintenance_rate: 0.025}
+
+execution:                               # canonical execution layer, phase 0: values that reproduce today's behaviour exactly
+  pairing: maker_taker                   # maker_taker | maker_maker (phase 3, experimental) | taker_taker; must equal arb.mode
+  price_cap_required: true               # CALIBRATED until the cap decision (brief step 11): every non-unwind intent carries a worst price and each child stays inside it
+  one_hedge_child: enforce               # MANDATORY (never 'off'): the canonical contract; a ghost child blocks a second one until it is resolved (4h.4)
+  risk_reservation: enforce              # MANDATORY (never 'off'): atomic check-and-reserve of primary exposure (4h.2)
+  primary:
+    tactic: PASSIVE
+    placement: deep                      # touch | improve | deep. deep = the price the CONDITIONAL edge requires (inside the spread): today's behaviour
+    price_rule: conditional_edge
+    reprice: none                        # a resting order is removed only by max_age_s / cancel, never repriced today
+  hedge:
+    tactic: IOC_CAPPED
+    cap: touch_slack                     # today's cap: hedge-venue touch +/- max(arb.max_walk_bps, 5) bps, re-taken on every attempt
+    slack_bps_floor: 5.0
+  unwind:
+    tactic: MARKET_BANDED                # the unwind price band is hedge_faults.unwind_band_bps

@@ -1,0 +1,152 @@
+# perp_perp_maker_taker_v1_1 = perp_perp_maker_taker_v1 (kept frozen as the reference) + the audit's integrity ladder (L3 audit decisions, 2026-11-04).
+# Seven cumulative switches, in this order, each measured in v1_1_switch_ladder_report.html; everything else is byte-for-byte v1.
+#   1 data manifest gate + truncation count (applied by the runner: --data-manifest; the path is not a profile key)   2 trade_dedupe: multiset
+#   3 maker.ledger_epoch   4 own_impact: overlay   5 book_tape_repair: false   6 fitted unknown queue (floor 0, flagged fallback 25)
+#   7 evidence-required fills (vanish_clears_queue: false, fill_evidence: trade_confirm)   8 maker.opposite_cross_confirm_ms: 500 (cross fills need a reaching print within +-500 ms; 2026-11-04 owner step).
+# Step 9 (owner, 2026-11-04, after the review of the step-8 reports): five corrections, each an opt-in switch, all on here:
+#   9a arb.expected_hedge_move_bps_{bid,ask} are estimated from MARKET DATA only (Binance mid move 0-1 s after each Bybit print on our side, TRAIN days; new_backtest/market_hedge_move.py), never from
+#      simulated fills (the runner supplies the number; the profile alone carries 0)   9b arb.round_quotes_to_tick (bids down, asks up; the runner declares the venue ticks)
+#   9c maker.opposite_cross_cap_to_print: a confirmed cross fills at most the reaching prints' volume, each print spent once   9d arb.maker_venues is NOT set here (a data-dependent choice: the March runner
+#      sets ["bybit"] because Binance March-2024 has no depth)   9e hedge_arrival_book: truth (the hedge executes on the venue-truth book at its arrival, for every dataset).
+# Queue parameters remain a SPOT PRIOR, perp-unvalidated (decision E), and say so in every result.
+# perp_perp_maker_taker_v1 — passive leg on one USDT-perp venue, taker hedge on the other, dispatched on the maker fill.
+# Every switch is classified (see src/new_backtest/profiles.py SWITCHES): MANDATORY controls cannot be disabled here; CALIBRATED
+# numbers name their source; LEGACY_COMPAT switches exist only so legacy_v0 stays reachable. Values marked PROVISIONAL / PLACEHOLDER /
+# ASSUMED are not yet calibrated and are reported as such in every result (release_identity).
+name: perp_perp_maker_taker_v1_1
+description: v1.1 = v1 + integrity ladder (manifest gate, multiset dedupe, ledger epoch, own-impact overlay, no tape repair, fitted unknown queue, evidence-required fills); perp-perp maker/taker arb, fill-triggered hedge, conditional edge, timing model, book states, margin, breaker, recovery
+product: perp
+decision_status:                         # carried into every result's release_identity
+  net_ceiling_multiple: DECISION_PENDING_CALIBRATION
+  fill_headroom_base: DECISION_PENDING_CALIBRATION   # value is the assistant's starting choice
+  breaker: DECISION_PENDING_CALIBRATION
+  unwind_band_bps: DECISION_PENDING_CALIBRATION
+  unwind_max_attempts: DECISION_PENDING_CALIBRATION
+  p_fail: PLACEHOLDER_NOT_MEASURED
+  queue_parameters: SPOT_PRIOR_PERP_UNVALIDATED   # decision E: calibrated on Bybit SPOT orders, never validated on the perp target
+  data_manifest: REQUIRED_AT_RUN                  # ladder step 1: the runner supplies the manifest path; a truncated day needs a written reason
+  unknown_queue_fit: PER_DAY_FILE_FROM_STRICTLY_EARLIER_DAYS   # ladder step 6: the runner supplies the day's fit; the profile alone cannot run a fitted queue
+product_fee_consistency: true            # MANDATORY: fee presets must be perp presets
+latency_preset: singapore                # ASSUMED (host co-located with Bybit, ~35 ms to Binance) until ollog measurements replace it.
+                                         # Owner decision 2026-11-02: was colocated_both, which config.py calls physically impossible
+                                         # (sensitivity upper bound only); every v1 result before 2026-11-02 used colocated_both.
+fee_presets:
+  bybit: bybit_perp_mm
+  binance: binance_perp_vip0
+hedge_arrival_book: truth                # v1.1 step 9e: a hedge / retry IOC executes against the venue-truth book at its arrival time (v1 keeps the strategy's view book); one setting for every dataset
+valuation: common_timestamp              # MANDATORY (R11)
+own_impact: overlay                     # v1.1 step 4: own taker consumption lives in a shadow overlay; the public book is never mutated by an own fill (consume_liquidity stays on)
+book_tape_repair: false                  # v1.1 step 5: the public book is not lowered from the trade tape (no double depletion when the depth decrease comes first)
+equity_bridge: raise                     # MANDATORY
+enforce_book_state: true                 # MANDATORY (WP4)
+trade_dedupe: multiset                   # MANDATORY (native ids when present). v1.1 step 2: id-less data drops only repeats ACROSS files, never genuine identical prints
+delta_uses_book_size: true               # MANDATORY (depth-size fix)
+cancel_time_basis: exchange              # MANDATORY (D-03)
+postonly_reject_model: "on"              # MANDATORY (lifecycle task 5): modelled PostOnly rejects at exchange time, arrival = decision + sampled ENTRY latency
+calibration:                             # perp lifecycle calibration (ollog TESTNET runs from the Mac); refused if its product is not perp
+  file: config/lifecycle_calibration_perp_bybit.json
+  venue: bybit                           # the maker venue; its entry-latency grid ('all' = REST round trip / 2, local clock only) feeds ack_latency
+  period: all
+  source: MEASURED_TESTNET_FROM_MAC      # NOT mainnet and NOT VM -> exchange; see the report for what this does and does not establish
+arb:
+  profile: perp_perp_maker_taker_v1
+  mode: maker_taker
+  dispatch_mode: fill_triggered          # MANDATORY
+  maker_passive_side: bid
+  min_net_edge_bps: 1.0
+  maker_max_age_s: 15.0                  # MANDATORY: order lifetime
+  count_pending_exposure: true           # MANDATORY
+  count_unknown_exposure: true           # MANDATORY
+  net_ceiling_multiple: 1.0              # MANDATORY — hard net ceiling 1x max_position_base (DECISION_PENDING_CALIBRATION)
+  fill_headroom_base: 0.25               # SEPARATE fill headroom on top of the ceiling, base units at max_position_base=1 (STARTING VALUE chosen
+                                         # by the assistant: 25% of one position, not specified by the owner; the size sweeps scale it with size)
+  p_fail: 0.07                           # PLACEHOLDER — NOT MEASURED (assumed; a replay with no injected failures cannot measure it); sensitivity in the report
+  loss_fail_bps: 7.8                     # CALIBRATED (hedge-failure study)
+  round_quotes_to_tick: true             # v1.1 step 9b: the quote is rounded onto the venue's price grid before the improve-the-touch check and the edge (the runner supplies arb.venue_ticks)
+  expected_hedge_move_bps_bid: 0.0       # CALIBRATED: set per run by the runner from MARKET DATA on the TRAIN days (v1.1 step 9a; v1 used legacy_v0 fills), 0 = no information
+  expected_hedge_move_bps_ask: 0.0
+maker:
+  min_queue_ahead: 25.0                  # LEGACY floor, superseded by unknown_queue_model below
+  unknown_queue_model: depth_aware       # CALIBRATED (WP4)
+  unknown_queue_dist: fitted             # v1.1 step 6: fitted on strictly earlier days (the runner supplies unknown_queue_fit per day)
+  unknown_queue_fit: ""                   # PER DAY: set by the runner; empty here on purpose
+  unknown_queue_floor: 0.0               # no universal floor on a fitted draw
+  unknown_queue_fallback: 25.0           # used, and COUNTED (unknown_queue_fit_missing_venue_used_floor), only where the fit has no data for the venue
+  cancel_model: proportional             # CALIBRATED (fill-evidence study 2026-10-30)
+  vanish_clears_queue: false             # v1.1 step 7: a vanished level alone never fills an order
+  fill_evidence: trade_confirm           # v1.1 step 7: every fill that rests on a depth decrease or a snapshot shrink needs a confirming print within evidence_window_ms
+  ledger_epoch: true                     # v1.1 step 3: a snapshot / reset invalidates old netting credit; ambiguous associations are flagged
+  evidence_window_ms: 20.0
+  share_trade_volume: true               # MANDATORY
+  dedupe_trade_depth: true               # MANDATORY
+  exchange_time_eligibility: true        # MANDATORY (causal fills)
+  level_creator_trade_only: false        # LEGACY_COMPAT (opt-in)
+  opposite_cross_fills: true             # CALIBRATED — PROVISIONAL: price priority, a resting order fills in full once the opposite best quote
+                                         # reaches its price (hftbacktest probe cross-check 2026-11-03; owner decision 2026-11-04)
+  opposite_cross_confirm_ms: 500.0       # v1.1 step 8: a cross is a fill only if a reaching print on the SAME venue executed within +-500 ms (before: fills at the cross; after: at the print); else dropped, no side effect
+  opposite_cross_cap_to_print: true      # v1.1 step 9c: a confirmed cross fills min(remaining, the reaching prints' unused volume); one print never fills more than its size in total
+timing:                                  # WP3; numbers ASSUMED from the latency preset until calibrated
+  from_latency_preset: singapore         # same preset as latency_preset (owner decision 2026-11-02)
+  equal_time_policy: market_first
+  dead_feed_s: 5.0                       # MANDATORY
+  truth_books: true                      # MANDATORY
+  clock:
+    host_offset_ns: 0                    # ASSUMED (no clock record for the Jan-2022 collector)
+    uncertainty_ns: 0
+    source: ASSUMED
+breaker:                                 # MANDATORY — DECISION_PENDING_CALIBRATION: starting values given by the owner 2026-11-01
+  consecutive_failures: 3                # 3 consecutive hedge FAILURES (one per hedge chain: a rejected hedge and its retries count once)
+  failure_rate_window_n: 20              # failures in the last 20 hedge chains ...
+  failure_rate_thresh: 0.05              # ... above 5% (i.e. 2 or more of 20; needs a full window of 20)
+  trip_on_failed_unwind: true            # any unwind whose attempts are exhausted
+  net_exposure_s: 5.0                    # |net| != 0 continuously for more than 5 s
+  unknown_order_s: 2.0                   # an order UNKNOWN (ack timeout expired, unresolved) for more than 2 s
+  trip_on_gateway_down: true             # a venue's gateway silent for heartbeat_timeout_s
+  heartbeat_timeout_s: 10.0              # ASSUMED (not specified by the owner): the engine default
+  tripped_unwind_retries: 10             # unwind sends still allowed while tripped (engine default)
+# Reset is MANUAL ONLY: nothing in the simulator or the strategy clears a tripped breaker (bt.reset_breaker() is an operator action).
+hedge_faults:                            # the response policy (recovery), not injected faults
+  response: retry_unwind                 # MANDATORY (not the legacy oracle)
+  max_retries: 2
+  retry_backoff_s: 0.25
+  entry_guard: true
+  unwind_band_bps: 15.0                  # price-banded unwind, 15 bps (DECISION_PENDING_CALIBRATION)
+  unwind_max_attempts: 3                 # 3 unwind sends per failed hedge chain, then the persistent ALARM (DECISION_PENDING_CALIBRATION)
+  unknown_query_max_attempts: 3
+margin:                                  # MANDATORY in a perp profile; tiers ASSUMED, prefunded capital per venue
+  check_every_s: 1.0
+  flatten_other_venue: true
+  venues:
+    bybit:
+      initial_capital: 1000.0
+      mode: cross
+      liquidation_fee_bps: 10.0
+      source: ASSUMED
+      tiers:
+        - {max_notional: 50000.0, initial_rate: 0.02, maintenance_rate: 0.01}
+        - {max_notional: 500000.0, initial_rate: 0.05, maintenance_rate: 0.025}
+    binance:
+      initial_capital: 1000.0
+      mode: cross
+      liquidation_fee_bps: 10.0
+      source: ASSUMED
+      tiers:
+        - {max_notional: 50000.0, initial_rate: 0.02, maintenance_rate: 0.01}
+        - {max_notional: 500000.0, initial_rate: 0.05, maintenance_rate: 0.025}
+
+execution:                               # canonical execution layer, phase 0: values that reproduce today's behaviour exactly
+  pairing: maker_taker                   # maker_taker | maker_maker (phase 3, experimental) | taker_taker; must equal arb.mode
+  price_cap_required: true               # CALIBRATED until the cap decision (brief step 11): every non-unwind intent carries a worst price and each child stays inside it
+  one_hedge_child: enforce               # MANDATORY (never 'off'): the canonical contract; a ghost child blocks a second one until it is resolved (4h.4)
+  risk_reservation: enforce              # MANDATORY (never 'off'): atomic check-and-reserve of primary exposure (4h.2)
+  primary:
+    tactic: PASSIVE
+    placement: deep                      # touch | improve | deep. deep = the price the CONDITIONAL edge requires (inside the spread): today's behaviour
+    price_rule: conditional_edge
+    reprice: none                        # a resting order is removed only by max_age_s / cancel, never repriced today
+  hedge:
+    tactic: IOC_CAPPED
+    cap: touch_slack                     # today's cap: hedge-venue touch +/- max(arb.max_walk_bps, 5) bps, re-taken on every attempt
+    slack_bps_floor: 5.0
+  unwind:
+    tactic: MARKET_BANDED                # the unwind price band is hedge_faults.unwind_band_bps

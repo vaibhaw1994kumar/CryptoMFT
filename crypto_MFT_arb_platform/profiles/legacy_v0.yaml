@@ -37,3 +37,20 @@ maker:
   level_creator_trade_only: false
 hedge_faults:
   response: legacy
+
+execution:                               # canonical execution layer, phase 0: reproduces legacy_v0 exactly (exempt from the MANDATORY check)
+  pairing: maker_taker
+  price_cap_required: true
+  one_hedge_child: count                 # legacy behaviour kept bit for bit: violations are counted, never refused
+  risk_reservation: count
+  primary:
+    tactic: PASSIVE
+    placement: deep                      # confirmed from arb_strategy: legacy rests at the price the NAIVE edge requires (max_bid), not at the touch
+    price_rule: naive_edge
+    reprice: none
+  hedge:
+    tactic: IOC_CAPPED
+    cap: touch_slack
+    slack_bps_floor: 5.0
+  unwind:
+    tactic: MARKET_BANDED

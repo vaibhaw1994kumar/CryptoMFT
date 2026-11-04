@@ -143,6 +143,8 @@ class HedgeFaultConfig:
     outages: tuple[Outage, ...] = ()
     outage_on_fill_s: float = 0.0
     outage_on_fill_kind: str = "gateway"
+    outage_on_fill_venue: str = "hedge"     # which venue goes dark at a maker fill: "hedge" (the hedge venue, the original behaviour) | "maker" (the venue that filled)
+    ack_unknown_scope: str = "both"         # which orders ack_unknown_prob applies to: "both" | "hedge" | "maker" (the random draws are taken either way)
     outage_policy: str = "blackhole"
     ack_timeout_s: float = 2.0          # how long the strategy waits for an unacknowledged order before it treats it as lost
     local_reject_s: float = 0.0         # a send that fails locally is known after this long
@@ -194,6 +196,8 @@ class HedgeFaultConfig:
             raise ValueError(f"response must be one of {RESPONSES}")
         if self.outage_on_fill_kind not in OUTAGE_KINDS:
             raise ValueError(f"outage_on_fill_kind must be one of {OUTAGE_KINDS}")
+        if self.outage_on_fill_venue not in ("hedge", "maker") or self.ack_unknown_scope not in ("both", "hedge", "maker"):
+            raise ValueError("outage_on_fill_venue must be 'hedge' or 'maker'; ack_unknown_scope must be 'both', 'hedge' or 'maker'")
         if self.max_retries < 0:
             raise ValueError("max_retries must be >= 0")
         if self.unwind_band_bps < 0.0 or not (0.0 <= self.unknown_query_fail_prob <= 1.0) or self.unknown_query_max_attempts < 1:
@@ -223,6 +227,7 @@ class HedgeFaultConfig:
             "seed": self.seed, "reject_prob": self.reject_prob, "delay_prob": self.delay_prob, "extra_delay_s": self.extra_delay_s,
             "partial_prob": self.partial_prob, "partial_fraction": self.partial_fraction, "n_static_outages": len(self.outages),
             "outage_on_fill_s": self.outage_on_fill_s, "outage_on_fill_kind": self.outage_on_fill_kind,
+            "outage_on_fill_venue": self.outage_on_fill_venue, "ack_unknown_scope": self.ack_unknown_scope,
             "outage_policy": self.outage_policy, "ack_timeout_s": self.ack_timeout_s, "local_reject_s": self.local_reject_s,
             "response": self.response, "max_retries": self.max_retries, "retry_backoff_s": self.retry_backoff_s,
             "entry_guard": self.entry_guard, "unwind_max_attempts": self.unwind_max_attempts, "unwind_band_bps": self.unwind_band_bps,

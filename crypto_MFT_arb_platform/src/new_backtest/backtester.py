@@ -44,10 +44,16 @@ from .config import (
     LATENCY_PRESETS, VenueSpec, make_venues, max_position_for,
 )
 from .cross_venue_feed import CrossVenueFeed, check_coverage
-from .event_loader import BOOK, DELTA, TRADE, delta_fields, snapshot_levels, trade_fields
+from .event_loader import BOOK, DELTA, TRADE, delta_fields, reset_truncation, snapshot_levels, trade_fields, truncation_report
 from .fill_engine import Fill, MakerConfig, MakerExecutor, MakerOrder, TakerExecutor
 from .fill_model import EmpiricalFillModel
 from .circuit_breaker import CircuitBreaker, CircuitBreakerConfig
+from .execution.observation import ObservationLog, touch_doc, trade_identity
+from .execution.reconcile import ExecutionReconciliationError, reconcile
+from .execution.risk import RiskLimits
+from .execution.intent import RiskRefused
+from .execution import ExecutionConfig, ExecutionLayer, Role
+from .execution.ioc_runtime import IocRuntime
 from .hedge_faults import DisconnectGen, ExposureTracker, HedgeFaultConfig, Outage
 from .margin_model import MarginModel, MarginModelConfig
 from .timing import FixedOffsetAligner, Timelines, TimingConfig, feed_state
@@ -81,6 +87,24 @@ class ArbBacktestConfig:
     venue_state: VenueStateConfig = field(default_factory=VenueStateConfig)
 
     consume_liquidity: bool = True
+    # Queue model v2 (opt-in; the defaults are the legacy behaviour, bit-identical).
+    #   book_tape_repair  False: OrderBook.on_trade() changes nothing; the book is rebuilt from book messages only.
+    #   event_order       "capture": equal timestamps ordered by exchange time, local receive time, record position (no ordering by kind).
+    #   own_impact        "overlay": our own taker consumption (and maker print budget) lives in a shadow overlay cleared at the next public update
+    #                     of that price level; the reconstructed public book is never mutated by an own fill. "legacy": consume_liquidity mutates it.
+    # Queue model v2: maker-only analysis mode. "maker_only": the strategy and the hedge are switched off and the orders in `scheduled_orders` are injected through the SAME path
+    # a strategy order takes (_fire -> PASSIVE intent -> risk group -> _send_leg -> latency -> maker.place -> the fill model). Each item is (release_ts, side, price, qty); price is a
+    # number (an exact limit price) or "touch" | "improve" | "second", taken from the maker venue's book when the order is released. The order is sent with release_ts as its arrival
+    # time (zero flight) unless analysis_entry_s is set. max_event_ts stops the replay at the end of the real book window; gate_class labels the run in its result.
+    analysis_mode: str = ""
+    scheduled_orders: tuple = ()
+    analysis_entry_s: float | None = 0.0
+    max_event_ts: float | None = None
+    gate_class: str = ""
+    skip_snapshot_venues: tuple = ()    # venues whose book_snapshots are ignored (e.g. placeholder snapshots, manifest placeholder_snapshots); book from deltas only
+    book_tape_repair: bool = True
+    event_order: str = "legacy"
+    own_impact: str = "legacy"
     include_deltas: bool = True
     # How duplicate trade records are removed when several collector files overlap: "set" (legacy: any repeat of a
     # record within 3 s is dropped, which also drops genuine identical prints inside one file) or "multiset" (only
@@ -112,6 +136,9 @@ class ArbBacktestConfig:
     # (QualityGate REJECTED). A written justification here runs it anyway; the
     # justification and the gate decisions are recorded in the result.
     allow_rejected_data: str | None = None
+    # Queue model v2 step 1 (opt-in): path of out/queue_v2/manifest.json. A day with a truncated gzip stream blocks the run unless allow_rejected_data
+    # carries a written reason; the manifest hash and the reason are recorded in the result (data_manifest).
+    data_manifest: str | None = None
     # Directory of funding-rate history JSONL files (e.g. data/funding/).
     # When set, perpetual funding payments are settled during replay and
     # reported as funding_paid in ArbBacktestResult.  None = not modelled.
@@ -175,6 +202,19 @@ class ArbBacktestConfig:
     require_explicit_size: bool = False
     # Task 3 (opt-in): circuit breaker. None = disabled and replay is identical to before.
     circuit_breaker: CircuitBreakerConfig | None = None
+    # Canonical execution layer (profile `execution:` block). None = the phase-0 defaults, which reproduce the engine's behaviour.
+    execution: ExecutionConfig | None = None
+    # Hedge capture (opt-in, off by default, no effect on a replay): per hedge attempt the decision-time view touch, the reversion-filtered
+    # fundamental, the arrival-book touch and the outcome, plus the hedge venue's arrival-book path around each decision. Feeds
+    # scripts/fit_flicker.py and the offline evaluator of the execution layer's capped-IOC policy (phase 1).
+    # Steps 6-7 of the execution-layer brief (observation only; no decision reads them): per maker order at placement and at fill, the
+    # queue / imbalance / touch picture and the fill record (execution/observation.py). maker_observations.jsonl is written with output_dir.
+    record_maker_obs: bool = True
+    record_hedge_attempts: bool = False
+    # The book a hedge / retry IOC executes against when hedge faults are configured (the v1 path, _execute_hedge_with_faults):
+    # "view" (default, unchanged) = the strategy's view book at processing time; "truth" = the venue-truth book at the arrival's
+    # exchange time (_arrival_book), as the unfaulted path already does. Phase 1-lite runs every cell with "truth".
+    hedge_arrival_book: str = "view"
 
 
 @dataclass
@@ -287,6 +327,21 @@ class ArbBacktestResult:
     model_settings: dict = field(default_factory=dict)
     # Hedge-leg report: failure counters, the inventory path, per-signal cash flows. Empty unless hedge_faults or record_exposure is set.
     hedge_report: dict = field(default_factory=dict)
+    # Canonical execution layer report: intents by state, children by tactic, one-hedge-child violations, resolved config + hash.
+    execution_report: dict = field(default_factory=dict)
+    # Independent reconciliation of the fill journal against the ledger (execution/reconcile.py, strategy_contract 4h.5).
+    execution_reconciliation: dict = field(default_factory=dict)
+    # Observation only (steps 6-7): counts, fill causes, uncertainty flags, and how much liquidity our own taker fills removed from the view book.
+    maker_observations: dict = field(default_factory=dict)
+    # Queue model v2 step 1: the manifest gate (days, truncation, override reason, manifest hash); empty when data_manifest is not set.
+    data_manifest: dict = field(default_factory=dict)
+    data_integrity: dict = field(default_factory=dict)            # truncated input files counted by the loader (audit decision A); reporting only
+    markout_by_venue_role: dict = field(default_factory=dict)     # markout_summary split by "<venue>/<maker|taker>"; the pooled markout_summary is unchanged
+    queue_parameter_status: str = ""                              # audit decision E: perp queue parameters are a spot prior, not validated on the target product
+    # Maker-only analysis mode: {mode, gate_class, scheduled, fired, skipped{reason: n}}; empty for a normal run.
+    analysis: dict = field(default_factory=dict)
+    # Hedge capture (ArbBacktestConfig.record_hedge_attempts): {'attempts': [...], 'paths': [...], 'window_s': ...}; empty otherwise.
+    hedge_capture: dict = field(default_factory=dict)
     # Order events and fills counted by kind and source ("historical" | "modelled" | "injected"); see order_events.py.
     order_event_summary: dict = field(default_factory=dict)
     # PostOnly model counters (checks, rejects by side, notice delays, fallbacks) and the ack-latency source in use.
@@ -470,15 +525,20 @@ class CrossVenueArbBacktester:
             self.timelines = Timelines(config.timing)
             self._install_timing()
             if self._truth_on:
-                self.truth_books = {v: OrderBook(v, config.pair, self.venue_specs[v].delta_semantics) for v in config.venues}
+                self.truth_books = {v: OrderBook(v, config.pair, self.venue_specs[v].delta_semantics, tape_repair=config.book_tape_repair,
+                                                 own_overlay=config.own_impact == "overlay") for v in config.venues}
         self.books: dict[str, OrderBook] = {
-            v: OrderBook(v, config.pair, self.venue_specs[v].delta_semantics)
+            v: OrderBook(v, config.pair, self.venue_specs[v].delta_semantics, tape_repair=config.book_tape_repair,
+                         own_overlay=config.own_impact == "overlay")
             for v in config.venues
         }
         self.states: dict[str, VenueState] = {
             v: VenueState(v, config.venue_state) for v in config.venues
         }
         self.tick_size: dict[str, float] = {v: 0.0 for v in config.venues}
+        self._tick_declared: dict[str, float] = {v: float(t) for v, t in (config.arb.venue_ticks or {}).items() if v in self.tick_size and t > 0}
+        self.tick_size.update(self._tick_declared)                  # opt-in (ArbConfig.venue_ticks): a declared tick replaces the inferred one
+        self._tick_checked: set[str] = set()
 
         self.fill_model = EmpiricalFillModel()
         if config.warm_start_fill_events:
@@ -511,8 +571,9 @@ class CrossVenueArbBacktester:
             config.pair, self.venue_specs, config.arb,
             fill_model_v1=fill_model_v1,
         )
-        self.taker = TakerExecutor(consume_liquidity=config.consume_liquidity)
+        self.taker = TakerExecutor(consume_liquidity=config.consume_liquidity, own_impact=config.own_impact)
         self.maker = MakerExecutor(self.fill_model, config.maker)
+        self.maker.own_overlay = config.own_impact == "overlay"
         self.pending = PendingOrderQueue()
         self.markouts = MarkoutTracker(config.markout_horizons_s)
         self.inventory = InventoryBook()
@@ -594,6 +655,38 @@ class CrossVenueArbBacktester:
         self._dyn_outages: list[Outage] = []
         self._now = 0.0
         self.hedge: Counter[str] = Counter()
+        # No execution block: the phase-0 defaults, with the pairing that matches arb.mode (taker_taker callers need no profile).
+        self.xl = ExecutionLayer(config.execution or ExecutionConfig(pairing=config.arb.mode), instrument=config.pair,
+                                 dispatch_mode=config.arb.dispatch_mode)
+        self.xl.set_risk(self._risk_limits, lambda: self.inventory.base)
+        self._maker_to_intent: dict[int, str] = {}      # resting maker order id -> the primary intent that sent it
+        self._fill_src = ""                             # journal kind of the fill being booked when it is not a child order's
+        self.exec_reconciliation: dict = {}
+        if self.xl.cfg.pairing == "maker_maker":
+            raise NotImplementedError("execution.pairing maker_maker is built in phase 3 of the execution layer")
+        if self.xl.cfg.pairing != config.arb.mode:
+            raise ValueError(f"execution.pairing {self.xl.cfg.pairing!r} differs from arb.mode {config.arb.mode!r}")
+        self._primary_intent: dict[int, object] = {}        # signal id -> its primary (maker or first taker) intent
+        self._rec = bool(config.record_hedge_attempts)
+        if config.hedge_arrival_book not in ("view", "truth"):
+            raise ValueError(f"hedge_arrival_book must be 'view' or 'truth', not {config.hedge_arrival_book!r}")
+        self.data_manifest_doc: dict = {}                         # the manifest gate verdict (set in run() when data_manifest is configured)
+        self._sched = None                                       # maker-only analysis: the schedule of injected orders (set in run())
+        self.analysis: dict = {}
+        self._obs_on = bool(config.record_maker_obs)            # steps 6-7: observation only, see execution/observation.py
+        self.obs = ObservationLog()
+        self.maker.obs_enabled = self._obs_on
+        self._obs_decision: dict[int, dict] = {}                # signal id -> the touches at the decision
+        self._cur_ev = None                                     # the public event being applied (the trigger of a maker fill)
+        self._ioc = self._build_ioc(config)                                          # the capped-IOC hedge policy (phase 1); None = phase-0 hedge
+        self.ioc_plans: list[dict] = []
+        self._touch_hist: dict[str, deque] = {v: deque() for v in config.venues}     # (host ts, bid, ask) of the strategy view, last 3 s
+        self._path_ring: dict[str, deque] = {v: deque() for v in config.venues}      # arrival-book updates (key ts, bids, asks), last 3 s
+        self._cap_until: dict[str, float] = {v: -1e18 for v in config.venues}
+        self._cap_copied: dict[str, float] = {v: -1e18 for v in config.venues}
+        self._decision: dict[int, dict] = {}
+        self.hedge_attempt_rows: list[dict] = []
+        self.hedge_paths: dict[str, list] = {v: [] for v in config.venues}
         self.legging_rows: list[dict] = []          # one row per resolved MAKER_TAKER signal with a maker fill (see _legging_report)
         self.signal_log: list[dict] = []            # every fired signal with its naive and conditional edge (capped like the trade log)
         self.hedge_events: list[dict] = []
@@ -632,6 +725,7 @@ class CrossVenueArbBacktester:
         return self.latency.aligner.to_host(ex)
 
     def _apply_event(self, ev) -> None:
+        self._cur_ev = ev
         book = self.books[ev.venue]
         state = self.states[ev.venue]
         spec = self.venue_specs[ev.venue]
@@ -653,6 +747,12 @@ class CrossVenueArbBacktester:
                 return
             if self.tick_size[ev.venue] <= 0:
                 self.tick_size[ev.venue] = _infer_tick(bids, asks)
+            if ev.venue in self._tick_declared and ev.venue not in self._tick_checked:
+                self._tick_checked.add(ev.venue)
+                tk = self._tick_declared[ev.venue]
+                off = [float(l[0]) for l in list(bids) + list(asks) if abs(float(l[0]) / tk - round(float(l[0]) / tk)) > 1e-6]
+                if off:
+                    raise ValueError(f"declared tick {tk} of {ev.venue} does not fit the first snapshot's prices (e.g. {off[:3]}): the declaration is wrong")
             book.apply_snapshot(bids, asks, now)
             self._record_mark(ev.venue, now)
             state.on_book(book, now)
@@ -707,6 +807,12 @@ class CrossVenueArbBacktester:
             ):
                 self._on_fill(f)
 
+        if self.maker.config.opposite_cross_fills:
+            for f in self.maker.on_opposite_cross(ev.venue, book, now, spec.fees.maker_bps, event_ts=ets):
+                self._on_fill(f)
+
+        if (self._rec or self._ioc is not None) and book.ready:
+            self._rec_view(ev.venue, now, book)
         if self._track_mids and book.ready:
             hist = self._mid_hist[ev.venue]
             hist.append((now, book.mid))
@@ -784,12 +890,15 @@ class CrossVenueArbBacktester:
 
     # ── Order dispatch ───────────────────────────────────────────────────────
 
-    def _send_leg(self, leg: ArbLeg, signal: ArbSignal, now: float, *, is_hedge: bool = False, role: str = "",
+    def _send_leg(self, leg: ArbLeg, signal: ArbSignal, now: float, *, intent, is_hedge: bool = False, role: str = "",
                   attempt: int = 0, origin_id: int = 0) -> None:
+        tactic = self.xl.check(intent, leg)        # the layer's price-cap / venue / one-hedge-child checks; raises before any engine state changes
         self._order_ids += 1
         flight = self.latency.entry_delay(leg.venue)           # always drawn, so the latency stream is the same with every switch
         if self.timelines is not None:
             flight = self.timelines.sample_s(leg.venue, "entry")   # WP3: one entry timeline for taker and passive legs; no ack-source draw
+        if self._sched is not None and self.config.analysis_entry_s is not None:
+            flight = self.config.analysis_entry_s                  # maker-only analysis: the scheduled release time IS the arrival time (draws above are still taken)
         from_ack_source = not leg.is_taker and not role and self.ack.active and self.timelines is None
         if from_ack_source:
             flight = self.ack.sample_s()                       # passive order: send-to-arrival from the calibrated / fixed source (it has its own scale)
@@ -807,8 +916,11 @@ class CrossVenueArbBacktester:
             signal_id=signal.signal_id,
             expected_price=leg.expected_price,
             expected_edge_bps=signal.net_edge_bps,
-            is_hedge=is_hedge, role=role, attempt=attempt, origin_id=origin_id or self._order_ids,
+            is_hedge=is_hedge, role=role, attempt=attempt, origin_id=origin_id or self._order_ids, intent_id=intent.intent_id,
         )
+        self.xl.child_sent(intent, order.order_id, order.origin_id, tactic, now)
+        if self._rec and is_hedge:
+            self._rec_decision(order, now)
         if is_hedge:
             self.hedge["hedges_sent"] += 1
         self.events.emit(now, "order_sent", leg.venue, source="modelled", order_id=order.order_id, signal_id=signal.signal_id,
@@ -821,6 +933,240 @@ class CrossVenueArbBacktester:
                 return
         self.pending.enqueue(order)
         self.orders_sent += 1
+
+    # ── hedge capture (opt-in; record_hedge_attempts) ─────────────────────────
+    def _rec_view(self, venue: str, now: float, book: OrderBook) -> None:
+        """Strategy-view touch history (host time) and, for the path the hedge matches against, the top-5 book after every update.
+        Hedge orders match against the strategy view (`_execute_hedge_with_faults`, `_execute_arrival`), so the view is the path."""
+        h = self._touch_hist[venue]
+        h.append((now, book.best_bid, book.best_ask))
+        while h and h[0][0] < now - 3.0:
+            h.popleft()
+        if not self._rec:
+            return
+        ent = (now, book.levels("bid", 5), book.levels("ask", 5))
+        ring = self._path_ring[venue]
+        ring.append(ent)
+        while ring and ring[0][0] < now - 3.0:
+            ring.popleft()
+        if now <= self._cap_until[venue] and now > self._cap_copied[venue]:
+            self.hedge_paths[venue].append(ent)
+            self._cap_copied[venue] = now
+
+    def _rec_decision(self, order: InFlightOrder, now: float) -> None:
+        """A hedge is decided (sent): the view touch, the reversion-filtered fundamental (median of the touch over the last 0.25 s)
+        and the 1 s range, then open a capture window of the venue's book path [now - 1 s, now + 10 s]."""
+        v = order.venue
+        book = self.books[v]
+        ctx = self._decision_ctx(v, now)
+        self._decision[order.order_id] = {"decision_ts": now, "dec_bid": book.best_bid, "dec_ask": book.best_ask,
+                                          "fund_bid": ctx["fund_bid"], "fund_ask": ctx["fund_ask"], "vol_bps_1s": ctx["vol"]}
+        self._cap_until[v] = max(self._cap_until[v], now + 10.0)
+        for ent in self._path_ring[v]:
+            if ent[0] >= now - 1.0 and ent[0] > self._cap_copied[v]:
+                self.hedge_paths[v].append(ent)
+                self._cap_copied[v] = ent[0]
+        if now > self._cap_copied[v]:                    # a quiet book: record the state the decision saw, so a later arrival always finds a book
+            self.hedge_paths[v].append((now, book.levels("bid", 5), book.levels("ask", 5)))
+            self._cap_copied[v] = now
+
+    def _decision_ctx(self, venue: str, now: float) -> dict:
+        """What the strategy can see at decision time on `venue`: the reversion-filtered fundamental (median of the view touch over the
+        last 0.25 s), the 1 s range of the view mid in bps, the clock hour. Never reads the venue-truth book."""
+        book = self.books[venue]
+        h = self._touch_hist[venue]
+        recent = [(b, a) for t, b, a in h if t >= now - 0.25] or [(book.best_bid, book.best_ask)]
+        bids = sorted(b for b, _ in recent)
+        asks = sorted(a for _, a in recent)
+        mids = [(b + a) / 2.0 for t, b, a in h if t >= now - 1.0 and b > 0 and a > 0]
+        vol = ((max(mids) - min(mids)) / (sum(mids) / len(mids)) * 1e4) if len(mids) >= 2 else 0.0
+        return {"fund_bid": bids[len(bids) // 2], "fund_ask": asks[len(asks) // 2], "vol": vol, "hour": int(now % 86400 // 3600)}
+
+    # ── capped-IOC hedge policy (execution layer phase 1) ─────────────────────
+    def _build_ioc(self, config: ArbBacktestConfig):
+        hc = self.xl.cfg.hedge
+        if hc.get("policy") != "capped_ioc_dp":
+            return None
+        if self.faults is None or self.faults.response == "legacy":
+            raise ValueError("execution.hedge.policy capped_ioc_dp needs a hedge response policy (hedge_faults.response retry / retry_unwind)")
+        if config.arb.dispatch_mode != "fill_triggered":
+            raise ValueError("execution.hedge.policy capped_ioc_dp works the fill-triggered hedge only")
+        if hc.get("cap", "touch_slack") not in ("touch_slack", "conditional_edge_breakeven"):
+            raise ValueError(f"execution.hedge.cap {hc.get('cap')!r}: touch_slack | conditional_edge_breakeven")
+        path = Path(hc["flicker_model"])
+        if not path.is_absolute():
+            path = Path(__file__).resolve().parents[2] / path
+        return IocRuntime(flicker_path=path, set_name=hc.get("flicker_set") or f"for_{config.start_date}",
+                          v0_bps=float(hc.get("v0_bps", -config.arb.loss_fail_bps)), phi=float(hc.get("urgency_phi", 0.0)),
+                          deadline_s=float(hc.get("deadline_s", 2.0)), attempts_cfg=hc.get("attempts", "from_latency"),
+                          cap_buffer_bps=float(hc.get("cap_buffer_bps", 0.0)), price_model=hc.get("price_model", "limit"),
+                          max_attempts_cap=int(hc.get("max_attempts_cap", 8)), min_p_at_cap=float(hc.get("min_p_at_cap", 0.02)),
+                          venues=tuple(hc.get("policy_venues", ("binance",))))
+
+    def _ioc_cycle_s(self, venue: str) -> float:
+        """One attempt cycle as the engine plays it: entry latency + the report back + the retry backoff."""
+        lat = self.venue_specs[venue].latency
+        return (lat.entry_ms + lat.feed_ms) / 1000.0 + self.faults.retry_backoff_s
+
+    def _ioc_leg(self, hedge: ArbLeg, hit, now: float, attempt: int):
+        """The attempt's leg under the policy: (leg, plan), or (None, None) when the cap is unreachable. Cap rule touch_slack is
+        re-taken from the touch on every attempt (phase-0 behaviour); conditional_edge_breakeven is fixed for the intent."""
+        if self.xl.cfg.hedge.get("cap", "touch_slack") == "touch_slack" and attempt > 0:
+            self.xl.retarget(hit, self._hedge_cap(hedge), qty=hedge.qty, reason="retry reprice",
+                             touch=hedge_touch(self.books[hedge.venue], hedge.side), max_walk_bps=self.config.arb.max_walk_bps)
+        ctx = self._decision_ctx(hedge.venue, now)
+        fund = ctx["fund_bid"] if hedge.side == "sell" else ctx["fund_ask"]
+        cyc = self._ioc_cycle_s(hedge.venue)
+        plan = self._ioc.plan(side=hedge.side, fundamental=fund, worst_price=hit.worst_price, attempts_left=hit.meta["attempts_total"] - attempt,
+                              hour=ctx["hour"], vol_bps=ctx["vol"], fee_bps=self.venue_specs[hedge.venue].fees.taker_bps, q=hit.qty, cycle_s=cyc)
+        if len(self.ioc_plans) < 50_000:
+            self.ioc_plans.append({"intent_id": hit.intent_id, "attempt": attempt, "side": hedge.side, "ts": now, "fundamental": fund,
+                                   "worst_price": hit.worst_price, "touch": hedge_touch(self.books[hedge.venue], hedge.side),
+                                   "offset_bps": None if plan is None else plan.offset_bps, "limit": None if plan is None else plan.limit,
+                                   "p_fill": None if plan is None else plan.p_fill, "clipped": None if plan is None else plan.clipped,
+                                   "law": None if plan is None else (plan.law_level, plan.law_n), "unreachable": plan is None})
+        if plan is None:
+            return None, None
+        return replace(hedge, limit_price=plan.limit), plan
+
+    def _ioc_send_first(self, hedge: ArbLeg, sig: ArbSignal, fill: Fill, send_ts: float, parent) -> None:
+        hc = self.xl.cfg.hedge
+        if hc.get("cap", "touch_slack") == "touch_slack":
+            worst = self._hedge_cap(hedge)
+        else:
+            worst = self._ioc.break_even_cap(hedge.side, fill.price, self.venue_specs[fill.venue].fees.maker_bps,
+                                             self.venue_specs[hedge.venue].fees.taker_bps)
+        total = self._ioc.attempts(self._ioc_cycle_s(hedge.venue))
+        hit = self.xl.open_intent(role=Role.HEDGE, side=hedge.side, qty=hedge.qty, venues=(hedge.venue,), worst_price=worst, now=send_ts,
+                                  signal_id=sig.signal_id, parent=parent, parent_filled_qty=parent.filled_qty if parent is not None else 0.0,
+                                  urgency="urgent", deadline_ts=send_ts + self._ioc.deadline_s, reason="hedge after maker fill (capped IOC)")
+        hit.meta.update({"policy": "capped_ioc_dp", "attempts_total": total, "fill_price": fill.price})
+        leg, _ = self._ioc_leg(hedge, hit, send_ts, attempt=0)
+        if leg is None:                                   # the cap is unreachable at decision time: straight to the ladder, counted
+            self.hedge["hedge_cap_unreachable"] += 1
+            probe = self._probe_order(sig, fill.qty, send_ts, is_hedge=True)
+            probe.intent_id = hit.intent_id
+            self.xl.bind_origin(probe.origin_id, Role.HEDGE, hit)
+            self._hedge_failed(probe, send_ts + self.faults.local_reject_s, "hedge_cap_unreachable")
+            return
+        self._send_leg(leg, sig, send_ts, is_hedge=True, intent=hit)
+
+    def _rec_attempt(self, order: InFlightOrder, now: float, ab: OrderBook, outcome, *, qty: float | None = None) -> None:
+        d = self._decision.get(order.order_id, {})
+        if len(self.hedge_attempt_rows) >= 200_000:
+            return
+        fill = outcome.fill if (outcome.filled and outcome.fill is not None) else None
+        self.hedge_attempt_rows.append({
+            "intent_id": order.intent_id, "order_id": order.order_id, "signal_id": order.signal_id, "attempt": order.attempt,
+            "side": order.side, "venue": order.venue, "qty": order.qty if qty is None else qty, "limit": order.limit_price,
+            "decision_ts": d.get("decision_ts", order.sent_ts), "arrival_ts": order.release_ts, "processed_ts": now,
+            "dec_bid": d.get("dec_bid"), "dec_ask": d.get("dec_ask"), "fund_bid": d.get("fund_bid"), "fund_ask": d.get("fund_ask"),
+            "vol_bps_1s": d.get("vol_bps_1s"), "hour_utc": int(order.sent_ts % 86400 // 3600),
+            "arr_bid": ab.best_bid, "arr_ask": ab.best_ask, "arr_bid_sz": ab.best_bid_size, "arr_ask_sz": ab.best_ask_size,
+            "filled_qty": fill.qty if fill is not None else 0.0, "vwap": fill.price if fill is not None else None,
+            "reason": "" if fill is not None and fill.qty >= (order.qty if qty is None else qty) - 1e-9 else getattr(outcome, "reason", ""),
+            "fault": order.fault, "ghost": order.ghost})
+
+    # ── observation only (steps 6-7): nothing below is read by the engine ──────────────────────────────────────────────
+    def _touches(self, venue: str) -> dict:
+        return {v: touch_doc(self.books[v]) for v in self.config.venues}
+
+    def _obs_place(self, order: InFlightOrder, mo, book: OrderBook, now: float) -> None:
+        tick = self.tick_size[order.venue]
+        near = Side.BID if order.side == "buy" else Side.ASK
+        far = Side.ASK if order.side == "buy" else Side.BID
+        lvl = mo.observed_level_size
+        dec = self._obs_decision.get(order.signal_id) or {}
+        self.obs.add("maker_place", {
+            "ts": now, "maker_order_id": mo.order_id, "inflight_id": order.order_id, "intent_id": order.intent_id, "signal_id": order.signal_id,
+            "venue": order.venue, "side": order.side, "price": order.limit_price, "size": order.qty,
+            "queue_ahead": mo.queue_ahead, "level_size": lvl, "relative_queue_position": (mo.queue_ahead / lvl) if lvl > 0 else None,
+            "near_side_size_at_price": lvl, "opposite_side_size_at_price": self.maker._level_size(book, far, order.limit_price, tick),
+            "queue_unknown": mo.queue_unknown, "level_was_absent": mo.level_was_absent, "relative_to_touch_ticks": mo.relative_to_touch_ticks,
+            "touch": self._touches(order.venue), "hedge_touch_at_decision": dec.get("hedge_touch"), "decision_ts": dec.get("ts")})
+
+    def _obs_fill(self, fill: Fill, intent_id: str) -> None:
+        ev, ob = self._cur_ev, dict(fill.obs or {})
+        trig = dict(ob.pop("trigger", None) or {})
+        if fill.is_synthetic:
+            trig["kind"] = "synthetic"
+        elif getattr(ev, "kind", None) == TRADE and trig.get("kind") == "trade":
+            trig.update(trade_identity(ev.payload))
+        book, tick = self.books[fill.venue], self.tick_size[fill.venue]
+        near = Side.BID if fill.side == "buy" else Side.ASK
+        far = Side.ASK if fill.side == "buy" else Side.BID
+        lvl = ob.get("level_now") or 0.0
+        qb = ob.get("queue_before")
+        dec = self._obs_decision.get(fill.signal_id) or {}
+        self.obs.add("maker_fill", {
+            "ts": fill.ts, "maker_order_id": fill.order_id, "intent_id": intent_id, "signal_id": fill.signal_id, "venue": fill.venue,
+            "side": fill.side, "price": fill.price, "qty": fill.qty,
+            "relative_queue_position_at_fill": (qb / lvl) if (qb is not None and lvl > 0) else None,
+            "near_side_size_at_price": self.maker._level_size(book, near, fill.price, tick),
+            "opposite_side_size_at_price": self.maker._level_size(book, far, fill.price, tick),
+            "touch": self._touches(fill.venue), "hedge_touch_at_decision": dec.get("hedge_touch"), "trigger": trig, "fill": ob})
+
+    def _obs_hedge_arrival(self, order: InFlightOrder, now: float) -> None:
+        dec = self._obs_decision.get(order.signal_id) or {}
+        self.obs.add("hedge_arrival", {
+            "ts": now, "signal_id": order.signal_id, "intent_id": order.intent_id, "venue": order.venue, "side": order.side, "qty": order.qty,
+            "limit_price": order.limit_price, "attempt": order.attempt, "sent_ts": order.sent_ts, "touch_at_arrival": touch_doc(self.books[order.venue]),
+            "touch_at_decision": dec.get("hedge_touch"), "decision_ts": dec.get("ts")})
+
+    def _obs_hedge_book_used(self, order: InFlightOrder, used: OrderBook, now: float) -> None:
+        """The book the hedge really matched against: under WP3 truth books it is the venue-truth book at the arrival's exchange time, not the strategy's delayed view."""
+        view = self.books[order.venue]
+        self.obs.add("hedge_book_used", {"ts": now, "signal_id": order.signal_id, "intent_id": order.intent_id, "venue": order.venue, "attempt": order.attempt,
+                                         "book": "view" if used is view else "venue_truth", "touch_used": touch_doc(used), "touch_view": touch_doc(view)})
+
+    def _obs_summary(self) -> dict:
+        return self.obs.summary(self.taker) if self._obs_on else {}
+
+    def _exec_reconcile(self, cash_pnl: float) -> dict:
+        """4h.5: rebuild cash / base / fees from the layer's fill journal alone and compare with the ledger. Raises
+        ExecutionReconciliationError unless equity_bridge == "warn" (the same switch as the equity bridge)."""
+        funding = self.settler.report()["by_venue"] if self.settler else {}
+        doc = reconcile(fills=self.xl.fills, intents=self.xl.intents,
+                        fee_bps={v: (self.venue_specs[v].fees.maker_bps, self.venue_specs[v].fees.taker_bps) for v in self.config.venues},
+                        liquidation_fee_bps={v: c.liquidation_fee_bps for v, c in self.margin_model.cfg.venues.items()} if self.margin_model is not None else None,
+                        inventory_base=dict(self.inventory.base), inventory_cash=dict(self.inventory.cash), fees_paid=self.fees_paid,
+                        funding_by_venue=dict(funding), trade_log=self.trade_log, cash_pnl=cash_pnl,
+                        truncated=len(self.trade_log) >= self.config.max_trade_log or bool(self.xl.counts.get("fills_truncated")),
+                        mode=self.xl.cfg.one_hedge_child)
+        leaked = self.xl.leaked_reservations()
+        doc["reservations_leaked"] = leaked
+        if leaked:
+            doc["ok"] = False
+            doc.setdefault("problems", {})["reservation_leak"] = [{"intents": leaked[:20]}]
+        if not doc["ok"] and self.config.equity_bridge != "warn":
+            raise ExecutionReconciliationError(f"execution reconciliation failed: {json.dumps(doc['problems'], default=str)[:1500]}")
+        return doc
+
+    def _execution_report(self) -> dict:
+        rep = self.xl.report()
+        if self._ioc is not None:
+            rep["ioc"] = {"counts": dict(self._ioc.counts), "law_levels": dict(self._ioc.levels), "set": self._ioc.set_name,
+                          "deadline_s": self._ioc.deadline_s, "cap_buffer_bps": self._ioc.cap_buffer_bps, "phi": self._ioc.phi,
+                          "price_model": self._ioc.price_model, "plans": self.ioc_plans[:20000]}
+        return rep
+
+    def _breakeven_cap(self, hedge: ArbLeg, fill: Fill) -> float:
+        """execution.hedge.cap breakeven_plus_buffer: the hedge price at which the maker fill and its hedge net zero after the maker fee
+        (maker venue) and the taker fee (hedge venue), moved execution.hedge.cap_buffer_bps against us. The maker fills at its own quote
+        price, so this is the break-even of the edge priced at quote time. A sell hedge (after a maker buy) may not go below it, a buy
+        hedge may not go above it."""
+        fees = (self.venue_specs[fill.venue].fees.maker_bps + self.venue_specs[hedge.venue].fees.taker_bps) / 1e4
+        buf = float(self.xl.cfg.hedge.get("cap_buffer_bps", 0.0)) / 1e4
+        if hedge.side == "sell":
+            return fill.price * (1.0 + fees) * (1.0 - buf)
+        return fill.price * (1.0 - fees) * (1.0 + buf)
+
+    def _hedge_cap(self, hedge: ArbLeg) -> float:
+        """The hedge intent's worst price under cap rule `touch_slack`, computed here from the hedge venue's touch and ArbConfig,
+        independently of the strategy's own limit (ArbStrategy.hedge_leg): the layer then checks one against the other."""
+        book = self.books[hedge.venue]
+        touch = book.best_ask if hedge.side == "buy" else book.best_bid
+        return self.xl.touch_slack_cap(hedge.side, touch, self.config.arb.max_walk_bps)
 
     @staticmethod
     def _chain_of(order: InFlightOrder) -> int:
@@ -840,17 +1186,42 @@ class CrossVenueArbBacktester:
                 return True
         return False
 
+    def _risk_limits(self) -> RiskLimits:
+        """The layer's reservation limits, from the same ArbConfig fields as ArbStrategy._inventory_room (read at call time)."""
+        a = self.config.arb
+        cap = a.max_venue_imbalance_base or (a.net_ceiling_multiple * a.max_position_base + a.fill_headroom_base)
+        net = (a.max_net_base_hard + a.fill_headroom_base) if a.max_net_base_hard is not None else \
+            a.max_position_base * a.net_ceiling_multiple + a.fill_headroom_base
+        return RiskLimits(venue_cap=cap, net_ceiling=net)
+
     def _fire(self, signal: ArbSignal, now: float) -> None:
         if self._spot_inventory_blocks(signal):
             return
+        specs = [dict(side=leg.side, qty=leg.qty, venues=(leg.venue,), worst_price=leg.limit_price,
+                      reason="taker leg" if leg.is_taker else "maker leg") for leg in signal.legs]
+        try:
+            intents = self.xl.open_primary_group(specs, now=now, signal_id=signal.signal_id)    # check + reserve, all legs or none
+        except RiskRefused:
+            self.hedge["signals_refused_by_risk"] += 1
+            return
         tracker = self._trackers[signal.signal_id] = _SignalTracker(signal, len(signal.legs))
-        for leg in signal.legs:
-            self._send_leg(leg, signal, now)
+        for leg, it in zip(signal.legs, intents):
+            self._primary_intent.setdefault(signal.signal_id, it)
+            if not leg.is_taker:                                # PASSIVE placement: `deep` (both profiles today) sends the strategy's price unchanged
+                bk = self.books[leg.venue]
+                px = self.xl.passive_price(leg.side, bk.best_bid, bk.best_ask, self.tick_size[leg.venue], leg.limit_price)
+                if px is not None and px != leg.limit_price:
+                    leg = replace(leg, limit_price=px)
+            self._send_leg(leg, signal, now, intent=it)
         self._funding_predicted += signal.qty * max(signal.buy_price, 0.0) * self.config.arb.funding_holding_bps / 10_000.0
         self.signal_log.append({"signal_id": signal.signal_id, "ts": now, "mode": signal.mode, "buy_venue": signal.buy_venue, "sell_venue": signal.sell_venue,
                                 "qty": signal.qty, "gross_edge_bps": signal.gross_edge_bps, "net_edge_bps": signal.net_edge_bps,
                                 "naive_edge_bps": signal.naive_edge_bps, "conditional_edge_bps": signal.conditional_edge_bps, "edge_ref": signal.edge_ref,
                                 "maker_side": (("bid" if signal.legs[0].side == "buy" else "ask") if signal.mode == MAKER_TAKER and signal.legs else None)})
+        if self._obs_on and signal.mode == MAKER_TAKER:
+            self._obs_decision[signal.signal_id] = {"ts": now, "hedge_venue": signal.hedge_venue, "maker_venue": signal.maker_venue,
+                                                    "hedge_touch": touch_doc(self.books[signal.hedge_venue]),
+                                                    "maker_touch": touch_doc(self.books[signal.maker_venue])}
         if signal.mode == MAKER_TAKER and self.config.arb.dispatch_mode == "simultaneous":
             # Method B, for comparison only: the full-size hedge goes out with the maker order. If the maker never fills, the
             # hedge is an orphan position (counted in _maybe_resolve and unwound by the residual policy).
@@ -860,7 +1231,11 @@ class CrossVenueArbBacktester:
                 tracker.legs_outstanding += 1
                 tracker.hedge_first_sent_ts = now
                 self.hedge["hedges_sent_before_fill"] += 1
-                self._send_leg(hedge, signal, now, is_hedge=True)
+                parent = self._primary_intent.get(signal.signal_id)
+                hit = self.xl.open_intent(role=Role.HEDGE, side=hedge.side, qty=hedge.qty, venues=(hedge.venue,), worst_price=self._hedge_cap(hedge),
+                                          now=now, signal_id=signal.signal_id, parent=parent, parent_filled_qty=0.0, urgency="urgent",
+                                          reason="hedge sent with the maker order (dispatch_mode simultaneous)")
+                self._send_leg(hedge, signal, now, is_hedge=True, intent=hit)
             else:
                 self.hedge["hedge_leg_unavailable"] += 1
 
@@ -875,6 +1250,9 @@ class CrossVenueArbBacktester:
         tracker = self._trackers.get(order.signal_id)
         book = self.books[order.venue]
         spec = self.venue_specs[order.venue]
+        self.xl.child_closed(order.order_id)            # an IOC is consumed on arrival; a ghost closes in _execute_ghost
+        if self._obs_on and order.is_hedge and order.role != "unwind":
+            self._obs_hedge_arrival(order, now)
 
         if order.role == "unwind":
             self._execute_unwind(order, tracker, now)
@@ -893,21 +1271,27 @@ class CrossVenueArbBacktester:
                     tracker.legs_outstanding -= 1
                     self._maybe_resolve(order.signal_id, now)
                 return
+            ab = self._arrival_book(order)
+            if self._obs_on and order.is_hedge:
+                self._obs_hedge_book_used(order, ab, now)
             outcome = self.taker.execute(
-                book=self._arrival_book(order), side=order.side, qty=order.qty,
+                book=ab, side=order.side, qty=order.qty,
                 limit_price=order.limit_price, fee_bps=spec.fees.taker_bps,
                 now=now, expected_price=order.expected_price,
                 signal_id=order.signal_id,
             )
+            if self._rec and order.is_hedge:
+                self._rec_attempt(order, now, ab, outcome)
             if outcome.filled and outcome.fill is not None:
                 self.orders_filled += 1
+                self.xl.note_filled(self.xl.intents.get(order.intent_id), outcome.fill.qty)
                 if order.is_hedge:
                     self.hedge["hedges_filled"] += 1
                     self.hedge["hedge_flight_s_sum"] += now - order.sent_ts
                     if tracker is not None:
                         tracker.hedge_last_fill_ts = now
                         tracker.hedge_fill_qty += outcome.fill.qty
-                self._on_fill(outcome.fill, tracker)
+                self._on_fill(outcome.fill, tracker, intent_id=order.intent_id, child_id=order.order_id)
             else:
                 self.orders_missed += 1
                 self.miss_reasons[outcome.reason] += 1
@@ -977,6 +1361,10 @@ class CrossVenueArbBacktester:
             arrival_ts=order.release_ts,
         )
         self._maker_to_signal[maker_order.order_id] = order.signal_id
+        self._maker_to_intent[maker_order.order_id] = order.intent_id
+        if self._obs_on:
+            self._obs_place(order, maker_order, book, now)
+        self.maker.lc_accept(order.order_id, maker_order, now, "modelled")
         if self._breaker is not None and self._breaker.is_tripped():
             self._request_cancel(maker_order, now, "breaker_trip")      # r12: it landed after the trip: cancel it straight away
         self.events.emit(now, "order_resting", order.venue, source="modelled", order_id=order.order_id, signal_id=order.signal_id,
@@ -986,6 +1374,7 @@ class CrossVenueArbBacktester:
             # venue query answers. Fills in that window are reported only then.
             until = order.release_ts + self.faults.ack_timeout_s + self.faults.unknown_resolve_s
             self._maker_unknown_until[maker_order.order_id] = until
+            self.maker.lc_unknown(order.order_id, order.release_ts + self.faults.ack_timeout_s, until, "injected", "ack_lost")
             self.hedge["unknown_orders"] += 1
             self.events.emit(order.release_ts, "order_unknown", order.venue, source="injected", order_id=order.order_id,
                              signal_id=order.signal_id, reason="ack_lost")
@@ -1008,6 +1397,8 @@ class CrossVenueArbBacktester:
     def _maker_rejected(self, order: InFlightOrder, reason: str, decision_ts: float, *, injected: bool) -> None:
         """A passive order was refused: no fill, no queue position, no conversion. The slot stays occupied until the notice."""
         notice_at = decision_ts + self._notice_s(order.venue)
+        self.maker.lc_submit(order.order_id, order.venue, order.sent_ts, "modelled")
+        self.maker.lc_reject(order.order_id, decision_ts, reason, "injected" if injected else "modelled", order.venue)
         self._order_ids += 1
         self.pending.enqueue(InFlightOrder(
             release_ts=notice_at, order_id=self._order_ids, venue=order.venue, side=order.side, qty=order.qty,
@@ -1017,6 +1408,26 @@ class CrossVenueArbBacktester:
                          signal_id=order.signal_id, side=order.side, qty=order.qty, price=order.limit_price, reason=reason)
         if injected:
             self.hedge["maker_orders_rejected_injected"] += 1
+
+    def venue_reject_notice(self, maker_order_id: int, ts: float, reason: str = "venue_reject", *, source: str = "injected") -> str:
+        """A reject report for a passive order that was already accepted (D-01 reject_after_partial_fill).
+
+        If any of it has filled, the fill is KEPT and booked as usual, the order stays PARTIALLY_FILLED and one alarm is counted (OMS02 D-06,
+        REJECT_AFTER_FILL_ALARM); otherwise the order is REJECTED and leaves the book. Returns the resulting lifecycle state. Nothing in a normal
+        run calls this: it exists so the scenario can be expressed and so an injected or historical venue reject has a defined effect."""
+        rec = self.maker._lc_by_maker.get(maker_order_id)
+        if rec is None:
+            raise KeyError(f"no lifecycle record for maker order {maker_order_id}")
+        already = rec.reject_after_fill
+        kept = self.maker.lc_reject(rec.inflight_id, ts, reason, source, rec.venue)
+        if kept:
+            if not already:                                   # once per order, as in OMS02 (REJECT_AFTER_FILL_ALARM)
+                self.hedge["reject_after_fill_alarms"] += 1
+                self.events.emit(ts, "reject_after_fill_alarm", rec.venue, source=source, order_id=rec.inflight_id, reason=reason)
+        else:
+            self.maker.cancel(maker_order_id, ts)
+            self.events.emit(ts, "order_rejected", rec.venue, source=source, order_id=rec.inflight_id, reason=reason)
+        return self.maker.lifecycle_state(rec.inflight_id) or ""
 
     def _resolve_postonly(self, venue: str, ets: float | None, now: float) -> None:
         """Check the waiting passive orders of `venue` against the book as it is BEFORE the event now being applied.
@@ -1056,7 +1467,7 @@ class CrossVenueArbBacktester:
 
     # ── Fill handling ────────────────────────────────────────────────────────
 
-    def _on_fill(self, fill: Fill, tracker: _SignalTracker | None = None, chain: int = 0) -> None:
+    def _on_fill(self, fill: Fill, tracker: _SignalTracker | None = None, chain: int = 0, intent_id: str = "", child_id: int = 0) -> None:
         if tracker is None:
             tracker = self._trackers.get(fill.signal_id)
         # Every fill the backtester produces is derived from market data and assumptions: "modelled". `chain` names the injected
@@ -1070,7 +1481,7 @@ class CrossVenueArbBacktester:
             self.margin_model.note_fill(fill.venue, fill.qty if fill.side == "buy" else -fill.qty, fill.price, self.inventory)
         self.fees_paid += fill.fee
         self.traded_notional += fill.notional
-        self.markouts.record_fill(fill.ts, fill.venue, fill.side, fill.price, fill.qty)
+        self.markouts.record_fill(fill.ts, fill.venue, fill.side, fill.price, fill.qty, "taker" if fill.is_taker else "maker")
 
         if fill.slippage_bps:
             self.slippage_sum += fill.slippage_bps
@@ -1094,6 +1505,8 @@ class CrossVenueArbBacktester:
                     hb = self.books[sig.hedge_venue]
                     tracker.hedge_px_at_fill = (hb.best_bid if sig.hedge_side == "sell" else hb.best_ask) if hb.ready else None
                 tracker.maker_last_fill_ts = fill.ts
+                parent_intent = self._primary_intent.get(sig.signal_id)
+                self.xl.note_filled(parent_intent, fill.qty)
                 simultaneous = self.config.arb.dispatch_mode == "simultaneous"
                 if simultaneous:
                     hedge, send_ts = None, fill.ts                 # Method B: the full-size hedge already went out with the maker order
@@ -1112,7 +1525,21 @@ class CrossVenueArbBacktester:
                     tracker.legs_outstanding += 1
                     if tracker.hedge_first_sent_ts is None:
                         tracker.hedge_first_sent_ts = send_ts
-                    self._send_leg(hedge, sig, send_ts, is_hedge=True)
+                    if self._ioc is not None and hedge.venue in self._ioc.venues:
+                        self._ioc_send_first(hedge, sig, fill, send_ts, parent_intent)
+                    else:
+                        fixed = self.xl.cfg.hedge.get("cap") == "breakeven_plus_buffer"
+                        if fixed:                          # phase 1-lite: one fixed limit for the chain, from the maker fill price
+                            hedge = replace(hedge, limit_price=self._breakeven_cap(hedge, fill))
+                        hit = self.xl.open_intent(role=Role.HEDGE, side=hedge.side, qty=hedge.qty, venues=(hedge.venue,),
+                                                  worst_price=hedge.limit_price if fixed else self._hedge_cap(hedge),
+                                                  now=send_ts, signal_id=sig.signal_id, parent=parent_intent,
+                                                  parent_filled_qty=parent_intent.filled_qty if parent_intent is not None else 0.0,
+                                                  urgency="urgent", reason="hedge after maker fill")
+                        if fixed:
+                            hit.meta.update({"policy": "breakeven_plus_buffer", "fill_price": fill.price})
+                            self.hedge["hedges_fixed_cap"] += 1
+                        self._send_leg(hedge, sig, send_ts, is_hedge=True, intent=hit)
                 else:
                     # No hedge could be built (hedge venue book not ready / no bid). The original code then leaves the
                     # signal unresolved until the end of data, with the maker fill sitting naked in the inventory.
@@ -1128,6 +1555,13 @@ class CrossVenueArbBacktester:
                 if fill.order_id not in self.maker.orders:
                     tracker.maker_resting = False
 
+        # Fill journal for the independent reconciliation (record-only): the intent that sent the order, or an explicit kind.
+        kind = "synthetic" if fill.is_synthetic else {"liquidation": "margin_liquidation", "flatten": "margin_flatten"}.get(self._fill_kind or "", self._fill_src or "child")
+        self.xl.note_fill({"ts": fill.ts, "order_id": fill.order_id, "intent_id": intent_id or self._maker_to_intent.get(fill.order_id, "") if kind == "child" else "",
+                           "kind": kind, "venue": fill.venue, "side": fill.side, "qty": fill.qty, "price": fill.price, "fee": fill.fee,
+                           "taker": fill.is_taker, "signal_id": fill.signal_id, "child_id": child_id})
+        if self._obs_on and not fill.is_taker:
+            self._obs_fill(fill, intent_id or self._maker_to_intent.get(fill.order_id, ""))
         if len(self.trade_log) < self.config.max_trade_log:
             notional = fill.qty * fill.price
             self.trade_log.append({
@@ -1150,6 +1584,7 @@ class CrossVenueArbBacktester:
             return
 
         self._trackers.pop(signal_id, None)
+        self.xl.settle_signal(signal_id, now)
         self.signals_completed += 1
         sig_ = tracker.signal
         if sig_.mode == MAKER_TAKER and self.config.arb.dispatch_mode == "simultaneous":
@@ -1211,6 +1646,12 @@ class CrossVenueArbBacktester:
             self.signals_both_missed += 1
 
     def _unwind(self, tracker: _SignalTracker, imbalance: float, now: float) -> None:
+        if self._sched is not None:                              # maker-only analysis: there is no hedge, so there is nothing to flatten (and no taker fill may touch the book)
+            self.hedge["analysis_unwind_skipped"] += 1
+            return
+        self._unwind_impl(tracker, imbalance, now)
+
+    def _unwind_impl(self, tracker: _SignalTracker, imbalance: float, now: float) -> None:
         """Flatten the leftover from a half-filled signal at market.
 
         Charged to unhedged_loss rather than buried in PnL: leg risk is the
@@ -1224,6 +1665,8 @@ class CrossVenueArbBacktester:
         venue = sig.buy_venue if imbalance > 0 else sig.sell_venue
         book = self.books[venue]
         qty = abs(imbalance)
+        self.xl.note_instant(role="flatten", side="sell" if imbalance > 0 else "buy", qty=qty, venue=venue, now=now,
+                             signal_id=sig.signal_id, reason="legacy instant unwind")
         # This flatten is instant and latency-free: it trades at the touch of the moment the strategy learns of the miss.
         self.hedge["instant_unwinds"] += 1
         self.hedge["instant_unwind_qty"] += qty
@@ -1244,7 +1687,11 @@ class CrossVenueArbBacktester:
             self.orders_filled += 1
             f = outcome.fill
             self.unhedged_loss += abs(f.price - ref) * f.qty  # fee goes to fees_paid via _on_fill
-            self._on_fill(f)
+            self._fill_src = "instant_unwind"
+            try:
+                self._on_fill(f)
+            finally:
+                self._fill_src = ""
             if f.qty < qty - 1e-9:
                 self.hedge["instant_unwind_partial"] += 1
                 self.hedge["instant_unwind_not_done_qty"] += qty - f.qty
@@ -1497,9 +1944,10 @@ class CrossVenueArbBacktester:
             self.hedge["restart_downtime_s"] += f.restart_s
             self.events.emit(ts, "restart", fill.venue, source="modelled", signal_id=fill.signal_id, reason=f"down {f.restart_s:g}s")
             ts = end
-        if f.outage_on_fill_s > 0 and self._active_outage(sig.hedge_venue, ts) is None:
+        dark = sig.hedge_venue if f.outage_on_fill_venue == "hedge" else fill.venue
+        if f.outage_on_fill_s > 0 and self._active_outage(dark, ts) is None:
             self._dyn_outages = [o for o in self._dyn_outages if o.end_ts > self._now - 3600.0]
-            self._dyn_outages.append(Outage(sig.hedge_venue, ts, ts + f.outage_on_fill_s, f.outage_on_fill_kind))
+            self._dyn_outages.append(Outage(dark, ts, ts + f.outage_on_fill_s, f.outage_on_fill_kind))
             self.hedge["outages_triggered_by_fills"] += 1
         return ts
 
@@ -1527,6 +1975,7 @@ class CrossVenueArbBacktester:
             self._hedge_failed(order, now + f.ack_timeout_s, "fault_outage_" + f.outage_policy)
             if f.outage_policy == "ghost":
                 self.pending.enqueue(replace(order, release_ts=out.end_ts + flight, ghost=True))
+                self.xl.child_ghosted(order.order_id, out.end_ts + flight)
             else:
                 self.hedge["blackholed_orders"] += 1
             return True
@@ -1561,7 +2010,7 @@ class CrossVenueArbBacktester:
                 elif fast and u_fast < f.fast_move_reject_prob:
                     order.fault = "reject"
                     self.hedge["fast_move_hedge_rejects"] += 1
-                elif u_unknown < f.ack_unknown_prob:
+                elif u_unknown < f.ack_unknown_prob and f.ack_unknown_scope != "maker":
                     order.fault = "unknown"
                 if fast:
                     self.hedge["hedges_sent_in_fast_move"] += 1
@@ -1595,7 +2044,7 @@ class CrossVenueArbBacktester:
             return True
         if u_reject < dict(f.reject_prob_by_venue).get(order.venue, 0.0):
             order.fault = "reject"
-        elif u_unknown < f.ack_unknown_prob:
+        elif u_unknown < f.ack_unknown_prob and f.ack_unknown_scope != "hedge":
             order.fault = "unknown"
         return False
 
@@ -1604,10 +2053,11 @@ class CrossVenueArbBacktester:
         self.pending.enqueue(InFlightOrder(
             release_ts=release_ts, order_id=self._order_ids, venue=order.venue, side=order.side, qty=order.qty,
             limit_price=order.limit_price, is_taker=True, sent_ts=order.sent_ts, signal_id=order.signal_id, kind="recover", tag=tag,
-            is_hedge=order.is_hedge, role=order.role, attempt=attempt, origin_id=order.origin_id or order.order_id))
+            is_hedge=order.is_hedge, role=order.role, attempt=attempt, origin_id=order.origin_id or order.order_id, intent_id=order.intent_id))
 
     def _hedge_failed(self, order: InFlightOrder, detect_ts: float, reason: str) -> None:
         """The hedge (or an unwind / retry) did not do its job. The strategy reacts at `detect_ts`, not before."""
+        self.xl.child_closed(order.order_id)
         origin = order.origin_id or order.order_id
         ev = self._hedge_open.get(origin)
         first_failure_of_chain = ev is None
@@ -1635,6 +2085,7 @@ class CrossVenueArbBacktester:
         self._enqueue_timer(order, detect_ts, "failed:" + reason, order.attempt)
 
     def _finish_leg(self, order: InFlightOrder, tracker: _SignalTracker | None, now: float, outcome: str) -> None:
+        self.xl.child_closed(order.order_id)
         ev = self._hedge_open.get(order.origin_id or order.order_id)
         if ev is not None and ev["outcome"] is None:
             ev["outcome"] = outcome
@@ -1688,8 +2139,14 @@ class CrossVenueArbBacktester:
             return
         retryable = order.role == "unwind" or (order.is_hedge and f.response in ("retry", "retry_unwind"))
         limit = (f.unwind_max_attempts - 1) if (order.role == "unwind" and f.unwind_max_attempts is not None) else f.max_retries
+        if order.is_hedge and order.role != "unwind" and self._ioc is not None:
+            pit = self.xl.intent_for(order.origin_id or order.order_id, Role.HEDGE)
+            if pit is not None and pit.meta.get("policy") == "capped_ioc_dp":
+                limit = pit.meta["attempts_total"] - 1                  # the DP's attempt count replaces max_retries
+                if pit.deadline_ts is not None and t0 + f.retry_backoff_s > pit.deadline_ts:
+                    limit = -1                                         # past the deadline: no further attempt, the ladder goes to the unwind
         if retryable and order.attempt < limit:
-            self._enqueue_timer(order, t0 + f.retry_backoff_s, "retry_send", order.attempt + 1)
+            self._enqueue_timer(order, self._retry_ts(order, t0 + f.retry_backoff_s), "retry_send", order.attempt + 1)
             return
         if order.is_hedge and f.response in ("unwind", "retry_unwind"):
             self._send_unwind(order, tracker, t0)
@@ -1717,6 +2174,22 @@ class CrossVenueArbBacktester:
             self.hedge["alarms_reset"] += 1
         self.alarm = None
 
+    def _ghost_wait_ts(self, order: InFlightOrder) -> float | None:
+        """Under one_hedge_child=enforce: when the strategy may learn the outcome of a hedge child that is still live at the venue
+        (a ghost), i.e. its release time plus the acknowledgement delay. None = nothing to wait for (4h.4)."""
+        if self.xl.cfg.one_hedge_child != "enforce" or not order.is_hedge or order.role == "unwind":
+            return None
+        hit = self.xl.intent_for(order.origin_id or order.order_id, Role.HEDGE)
+        rel = self.xl.ghost_release_ts(hit) if hit is not None else None
+        return None if rel is None else rel + self.venue_specs[order.venue].latency.feed_ms / 1000.0
+
+    def _retry_ts(self, order: InFlightOrder, ts: float) -> float:
+        wait = self._ghost_wait_ts(order)
+        if wait is not None and wait > ts:
+            self.hedge["retries_deferred_for_ghost"] += 1
+            return wait
+        return ts
+
     def _resend(self, order: InFlightOrder, tracker: _SignalTracker | None, t0: float) -> None:
         if tracker is None:
             return
@@ -1724,14 +2197,49 @@ class CrossVenueArbBacktester:
         if order.role == "unwind":
             self._send_unwind(order, tracker, t0, attempt=order.attempt)
             return
+        if self.xl.cfg.one_hedge_child == "enforce":
+            wait = self._ghost_wait_ts(order)
+            if wait is not None and wait > t0:                  # the first child is still live at the venue: no second one yet
+                self.hedge["retries_deferred_for_ghost"] += 1
+                self._enqueue_timer(order, wait, "retry_send", order.attempt)
+                return
+            hit0 = self.xl.intent_for(order.origin_id or order.order_id, Role.HEDGE)
+            if hit0 is not None:
+                left = hit0.qty - hit0.filled_qty
+                if left <= 1e-9:                                # the ghost executed: the hedge is complete, nothing to retry
+                    self.hedge["retries_cancelled_hedged_by_ghost"] += 1
+                    self._finish_leg(order, tracker, t0, "hedged_by_ghost")
+                    return
+                order = replace(order, qty=min(order.qty, left))
         hedge = self.strategy.hedge_leg(sig, order.qty, self.books[sig.hedge_venue])
         if hedge is None:
             self.hedge["hedge_leg_unavailable"] += 1
             self._hedge_failed(self._probe_order(sig, order.qty, t0, is_hedge=True, attempt=order.attempt, origin_id=order.origin_id),
                                t0 + self.faults.local_reject_s, "hedge_unavailable")
             return
+        hit = self.xl.intent_for(order.origin_id or order.order_id, Role.HEDGE)
+        fixed = hit is not None and hit.meta.get("policy") == "breakeven_plus_buffer"
+        if fixed:                               # phase 1-lite: the retry re-sends the chain's fixed limit, never re-taken from the touch
+            hedge = replace(hedge, limit_price=hit.worst_price)
+        policy = fixed or (hit is not None and hit.meta.get("policy") == "capped_ioc_dp")
+        if policy and not fixed:
+            hedge, _ = self._ioc_leg(hedge, hit, t0, attempt=order.attempt)
+            if hedge is None:                   # the cap is unreachable now: no send; the failure goes down the same ladder
+                self.hedge["hedge_cap_unreachable"] += 1
+                probe = self._probe_order(sig, order.qty, t0, is_hedge=True, attempt=order.attempt, origin_id=order.origin_id)
+                probe.intent_id = hit.intent_id
+                self._hedge_failed(probe, t0 + self.faults.local_reject_s, "hedge_cap_unreachable")
+                return
         self.hedge["retries_sent"] += 1
-        self._send_leg(hedge, sig, t0, is_hedge=True, attempt=order.attempt, origin_id=order.origin_id)
+        if hit is None:                         # the first attempt could not even be built, so no intent was opened for the chain
+            parent = self._primary_intent.get(sig.signal_id)
+            hit = self.xl.open_intent(role=Role.HEDGE, side=hedge.side, qty=hedge.qty, venues=(hedge.venue,), worst_price=self._hedge_cap(hedge), now=t0,
+                                      signal_id=sig.signal_id, parent=parent, parent_filled_qty=parent.filled_qty if parent is not None else 0.0,
+                                      urgency="urgent", reason="hedge retry")
+        elif not policy:
+            self.xl.retarget(hit, self._hedge_cap(hedge), qty=hedge.qty, reason="retry reprice",
+                             touch=hedge_touch(self.books[hedge.venue], hedge.side), max_walk_bps=self.config.arb.max_walk_bps)
+        self._send_leg(hedge, sig, t0, is_hedge=True, attempt=order.attempt, origin_id=order.origin_id, intent=hit)
 
     def _send_unwind(self, failed: InFlightOrder, tracker: _SignalTracker, t0: float, attempt: int = 0) -> None:
         """Trade the unhedged maker fill back on the maker venue as a real order (sell back a filled bid, buy back a filled ask):
@@ -1755,7 +2263,15 @@ class CrossVenueArbBacktester:
                      expected_price=book.mid if book.ready else (sig.buy_price if side == "sell" else sig.sell_price),
                      fee_bps=self.venue_specs[venue].fees.taker_bps)
         self.hedge["unwinds_sent"] += 1
-        self._send_leg(leg, sig, t0, role="unwind", attempt=attempt, origin_id=failed.origin_id)
+        cap = limit if (band > 0.0 and book.ready) else None          # an unbounded legacy unwind carries no worst price
+        self.xl.escalate(self.xl.intent_for(failed.origin_id or failed.order_id, Role.HEDGE), t0, "unwind sent")
+        uit = self.xl.intent_for(failed.origin_id or failed.order_id, Role.UNWIND)
+        if uit is None:
+            uit = self.xl.open_intent(role=Role.UNWIND, side=side, qty=failed.qty, venues=(venue,), worst_price=cap, now=t0,
+                                      signal_id=sig.signal_id, urgency="urgent", reason="unwind of an unhedged maker fill")
+        else:
+            self.xl.retarget(uit, cap, qty=failed.qty, reason="unwind retry reprice")
+        self._send_leg(leg, sig, t0, role="unwind", attempt=attempt, origin_id=failed.origin_id, intent=uit)
 
     def _execute_unwind(self, order: InFlightOrder, tracker: _SignalTracker | None, now: float) -> None:
         book = self.books[order.venue]
@@ -1767,9 +2283,10 @@ class CrossVenueArbBacktester:
         if out.filled and out.fill is not None:
             self.orders_filled += 1
             done = out.fill.qty
+            self.xl.note_filled(self.xl.intents.get(order.intent_id), done)
             if ref > 0:
                 self.unhedged_loss += abs(out.fill.price - ref) * done
-            self._on_fill(out.fill, tracker, chain=order.origin_id or order.order_id)
+            self._on_fill(out.fill, tracker, chain=order.origin_id or order.order_id, intent_id=order.intent_id, child_id=order.order_id)
             self.hedge["unwind_filled_qty"] += done
         ev = self._hedge_open.get(order.origin_id or order.order_id)
         if ev is not None:
@@ -1783,6 +2300,7 @@ class CrossVenueArbBacktester:
 
     def _execute_ghost(self, order: InFlightOrder, now: float) -> None:
         """A hedge the strategy had written off is delivered at reconnect and fills if the book allows: an over-hedge."""
+        self.xl.child_closed(order.order_id)
         book = self.books[order.venue]
         out = self.taker.execute(
             book=book, side=order.side, qty=order.qty, limit_price=order.limit_price,
@@ -1795,7 +2313,8 @@ class CrossVenueArbBacktester:
             ev = self._hedge_open.get(order.origin_id or order.order_id)
             if ev is not None:
                 ev["ghost_qty"] += out.fill.qty
-            self._on_fill(out.fill, chain=order.origin_id or order.order_id)
+            self.xl.note_filled(self.xl.intents.get(order.intent_id), out.fill.qty, now)
+            self._on_fill(out.fill, chain=order.origin_id or order.order_id, intent_id=order.intent_id, child_id=order.order_id)
         else:
             self.hedge["ghost_misses"] += 1
 
@@ -1806,17 +2325,21 @@ class CrossVenueArbBacktester:
             self._hedge_failed(order, order.release_ts + self._ack_s(order.venue), "fault_rejected")
             return
         qty = order.qty * order.partial_fraction if order.fault == "partial" else order.qty
+        ab = self._arrival_book(order) if self.config.hedge_arrival_book == "truth" else self.books[order.venue]
         outcome = self.taker.execute(
-            book=self.books[order.venue], side=order.side, qty=qty, limit_price=order.limit_price,
+            book=ab, side=order.side, qty=qty, limit_price=order.limit_price,
             fee_bps=self.venue_specs[order.venue].fees.taker_bps, now=now, expected_price=order.expected_price,
             signal_id=order.signal_id)
+        if self._rec:
+            self._rec_attempt(order, now, ab, outcome, qty=qty)
         done = 0.0
         if outcome.filled and outcome.fill is not None:
             self.orders_filled += 1
             done = outcome.fill.qty
+            self.xl.note_filled(self.xl.intents.get(order.intent_id), done)
             self.hedge["hedges_filled"] += 1
             self.hedge["hedge_flight_s_sum"] += now - order.sent_ts
-            self._on_fill(outcome.fill, tracker, chain=self._chain_of(order))
+            self._on_fill(outcome.fill, tracker, chain=self._chain_of(order), intent_id=order.intent_id, child_id=order.order_id)
             if (self._breaker is not None and done >= order.qty - 1e-9 and order.attempt == 0
                     and self._hedge_open.get(order.origin_id or order.order_id) is None):
                 # r12: only a clean first-attempt hedge counts as a success (resets the consecutive-failure run)
@@ -2103,10 +2626,67 @@ class CrossVenueArbBacktester:
         self._cancel_watch.clear()
         self._cancel_acks.clear()
 
+    def _setup_maker_only(self) -> None:
+        cfg = self.config
+        if len(cfg.venues) < 1:
+            raise ValueError("analysis_mode='maker_only' needs a maker venue (the first venue); further venues only feed the replay (parity checks), they are never ordered on")
+        if cfg.analysis_mode != "maker_only":
+            raise ValueError(f"analysis_mode must be '' or 'maker_only', got {cfg.analysis_mode!r}")
+        self.strategy.evaluate = lambda *a, **k: None            # no strategy signals
+        self.strategy.hedge_leg = lambda *a, **k: None           # no hedge
+        self._sched = sorted(cfg.scheduled_orders, key=lambda o: o[0])
+        self._sched_i = 0
+        self._sched_n = 0
+        self.analysis = {"mode": cfg.analysis_mode, "gate_class": cfg.gate_class, "scheduled": len(self._sched), "fired": 0, "skipped": {}}
+
+    def _fire_scheduled(self, now: float) -> None:
+        """Release every scheduled order whose release time has been reached, at its OWN release time (before the engine lands in-flight orders for `now`)."""
+        venue = self.config.venues[0]
+        while self._sched_i < len(self._sched) and self._sched[self._sched_i][0] <= now:
+            ts, side, price, qty = self._sched[self._sched_i]
+            self._sched_i += 1
+            book = self.books[venue]
+            tick = self.tick_size[venue]
+
+            def skip(why: str) -> None:
+                self.analysis["skipped"][why] = self.analysis["skipped"].get(why, 0) + 1
+            if not book.ready:
+                skip("book_not_ready"); continue
+            if isinstance(price, str):
+                bl, al = book.levels("bid", 3), book.levels("ask", 3)
+                if price == "touch":
+                    price = book.best_bid if side == "buy" else book.best_ask
+                elif price == "improve":
+                    if not (book.best_ask - book.best_bid > tick * 1.5):
+                        skip("no_room_to_improve"); continue
+                    price = round(book.best_bid + tick, 8) if side == "buy" else round(book.best_ask - tick, 8)
+                elif price == "second":
+                    lv = bl if side == "buy" else al
+                    if len(lv) < 2:
+                        skip("no_second_level"); continue
+                    price = lv[1][0]
+                else:
+                    raise ValueError(f"unknown scheduled price rule {price!r}")
+            leg = ArbLeg(venue=venue, side=side, qty=qty, limit_price=price, is_taker=False, expected_price=price, fee_bps=0.0)
+            self._sched_n += 1
+            sig = ArbSignal(signal_id=self._sched_n, ts=ts, buy_venue=venue, sell_venue=venue, qty=qty, gross_edge_bps=0.0, fee_bps=0.0, net_edge_bps=0.0, legs=[leg],
+                            mode=MAKER_TAKER, buy_price=price, sell_price=price)
+            self.strategy.signals += 1
+            self.analysis["fired"] += 1
+            self._fire(sig, ts)
+
     def run(self) -> ArbBacktestResult:
         cfg = self.config
+        if cfg.analysis_mode:
+            self._setup_maker_only()
+        self.data_manifest_doc: dict = {}
+        if cfg.data_manifest:
+            from .data_manifest import gate
+            self.data_manifest_doc = gate(cfg.data_manifest, tuple(cfg.venues), cfg.pair, cfg.start_date, cfg.end_date, cfg.allow_rejected_data,
+                                          skipped_snapshot_venues=tuple(cfg.skip_snapshot_venues))
         virtual_clock.install_virtual_clock(0.0)
         virtual_clock.reset(0.0)
+        reset_truncation()
         wall_start = virtual_clock.real_time()
 
         coverage = check_coverage(
@@ -2120,6 +2700,8 @@ class CrossVenueArbBacktester:
             quality_preflight=True,
             quality_report_only=_preflight_override(cfg) is not None,
             trade_dedupe=cfg.trade_dedupe,
+            event_order=cfg.event_order,
+            skip_snapshots=tuple(cfg.skip_snapshot_venues),
         )
 
         now = 0.0
@@ -2128,6 +2710,10 @@ class CrossVenueArbBacktester:
                 if cfg.max_events is not None and self.events_processed >= cfg.max_events:
                     break
                 now = ev.receive_ts
+                if cfg.max_event_ts is not None and now > cfg.max_event_ts:
+                    break
+                if self._sched is not None:
+                    self._fire_scheduled(now)
                 virtual_clock.set_now(now)
                 self.events_processed += 1
                 self.events_by_venue[ev.venue] += 1
@@ -2374,6 +2960,8 @@ class CrossVenueArbBacktester:
                    last_marks=dict(mids), stale_mark_inflation=last_mark_equity - common_timestamp_equity)
         mtm = ending_equity  # legacy alias
         self.equity_bridge = self._equity_bridge(open_pos_value, ending_equity, val)
+        self.xl.finalize(getattr(self, "_now", 0.0) or 0.0)
+        self.exec_reconciliation = self._exec_reconcile(self.inventory.total_cash)
         self.valuation_doc = val
 
         # Task 5 — cash_pnl: direct ledger reading (fees already deducted in cash_delta).
@@ -2409,6 +2997,8 @@ class CrossVenueArbBacktester:
             with open(trades_path, "w", encoding="utf-8") as fh:
                 for row in self.trade_log:
                     fh.write(json.dumps(row, sort_keys=True) + "\n")
+            if self._obs_on:
+                self.obs.write_jsonl(out / "maker_observations.jsonl")
             if cfg.record_order_events:
                 order_events_path = str(out / "order_events.jsonl")
                 with open(order_events_path, "w", encoding="utf-8") as fh:
@@ -2449,6 +3039,15 @@ class CrossVenueArbBacktester:
             funding_report=self.settler.report() if self.settler else {},
             alarms=list(self.alarms),
             alarm_active=self.alarm,
+            execution_report=self._execution_report(),
+            execution_reconciliation=self.exec_reconciliation,
+            maker_observations=self._obs_summary(),
+            data_manifest=self.data_manifest_doc,
+            data_integrity=truncation_report(),
+            queue_parameter_status=("SPOT_PRIOR_PERP_UNVALIDATED: the queue/cancel/fill-evidence parameters were calibrated on Bybit SPOT PostOnly orders (2026-04) and have no perp (target-product) validation"
+                                    if any("perp" in str(f) for f in self.product_by_venue.values()) else ""),
+            analysis=self.analysis,
+            hedge_capture=({"attempts": self.hedge_attempt_rows, "paths": self.hedge_paths, "decision_window_s": 0.25} if self._rec else {}),
             release_identity=cfg.release_identity,
             product_by_venue=dict(self.product_by_venue),
             strategy_validation_label=("UNVALIDATED STRATEGY - mechanics only" if any(p == "spot" for p in self.product_by_venue.values()) else ""),
@@ -2472,6 +3071,7 @@ class CrossVenueArbBacktester:
             book_stats={v: b.stats() for v, b in self.books.items()},
             maker_stats=self.maker.stats(),
             markout_summary=self.markouts.summary(),
+            markout_by_venue_role=self.markouts.summary_by_venue_role(),
             miss_reasons=dict(self.miss_reasons),
             coverage={k: list(v) for k, v in coverage.items()},
             fill_log_path=fill_log_path,
@@ -2530,6 +3130,7 @@ class CrossVenueArbBacktester:
             "exchange_time_eligibility": m.exchange_time_eligibility, "fill_through_prints": m.fill_through_prints,
             "queue_stress_multiplier": m.queue_stress_multiplier, "min_queue_ahead": m.min_queue_ahead,
             "trade_dedupe": self.config.trade_dedupe,
+            **({"opposite_cross_fills": True} if m.opposite_cross_fills else {}),    # listed only when on: default output unchanged
         }
 
     def _lifetime_report(self) -> dict[str, float]:
@@ -2569,6 +3170,11 @@ def _data_quality(feed, cfg: ArbBacktestConfig) -> dict:
         "override": ({"justification": override, "rejected_venues": rejected}
                      if override is not None else None),
     }
+
+
+def hedge_touch(book: OrderBook, side: str) -> float:
+    """The touch a hedge of this side executes against: the bid for a sell, the ask for a buy."""
+    return book.best_bid if side == "sell" else book.best_ask
 
 
 def _infer_tick(bids, asks) -> float:

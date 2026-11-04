@@ -104,20 +104,30 @@ def run_oms(events) -> Outcome:
 
 # ── backtester maker lifecycle ───────────────────────────────────────────────
 
-def run_maker(events, *, cfg_kw=None) -> Outcome:
+def run_maker(events, *, cfg_kw=None, unknown_model=False) -> Outcome:
     """Drive one resting buy through MakerExecutor and the backtester's own expiry/cancel code (Harness of
     tests/test_maker_order_lifetime.py). Event times are used as replay times. A cancel request is expressed the only way the
-    backtester knows it: a lifetime (ArbConfig.maker_max_age_s) that expires at the request time, followed by one cancel latency."""
+    backtester knows it: a lifetime (ArbConfig.maker_max_age_s) that expires at the request time, followed by one cancel latency.
+
+    Explicit states (task 6): with postonly_reject_model="on" a REJECT before any fill is a PostOnly refusal at arrival (D-01) and a REJECT after a
+    fill is a venue reject notice (bt.venue_reject_notice: the fill is kept, one alarm, PARTIALLY_FILLED). With unknown_model=True a TIMEOUT is an
+    ack that never came (HedgeFaultConfig.ack_unknown_prob=1, ack_timeout_s, unknown_resolve_s from the script): the order is UNKNOWN until the first
+    later piece of evidence arrives (D-02). The end state is read from MakerExecutor.lifecycle_state, not inferred from counters."""
     from new_backtest.event_loader import TRADE
+    from new_backtest.hedge_faults import HedgeFaultConfig
     from test_maker_order_lifetime import BINANCE, BYBIT, Harness
 
     kinds = {e.kind for e in events}
     cfg_kw = dict(cfg_kw or {})
     po_on = cfg_kw.get("postonly_reject_model") == "on"
-    for k, why in ((Kind.REJECT, "the simulator has no exchange rejection of a passive order"),
-                   (Kind.TIMEOUT, "the simulator has no acknowledgement, so no acknowledgement timeout and no unknown state"),
+    ordered = sorted(events, key=lambda x: x.arrive)
+    first_fill = next((e.arrive for e in ordered if e.kind == Kind.FILL), None)
+    rej = next((e for e in ordered if e.kind == Kind.REJECT), None)
+    late_reject = rej is not None and first_fill is not None and rej.arrive > first_fill
+    for k, why in ((Kind.REJECT, "the simulator has no exchange rejection of a passive order (postonly_reject_model is off)"),
+                   (Kind.TIMEOUT, "the simulator has no acknowledgement, so no acknowledgement timeout and no unknown state (unknown_model off)"),
                    (Kind.RECONCILE, "the simulator has no venue query")):
-        if k in kinds and not (k == Kind.REJECT and po_on and Kind.FILL not in kinds):
+        if k in kinds and not (k == Kind.REJECT and po_on) and not (k == Kind.TIMEOUT and unknown_model):
             raise NotRepresentable(why)
     submit = next(e for e in events if e.kind == Kind.SUBMIT)
     ack = next((e for e in events if e.kind == Kind.ACK), None)
@@ -126,48 +136,69 @@ def run_maker(events, *, cfg_kw=None) -> Outcome:
     cconf = next((e for e in events if e.kind == Kind.CANCEL_CONFIRM), None)
     ttl = (creq.ts - place_t) if creq is not None else 0.0
     cancel_s = (cconf.arrive - creq.ts) if (creq is not None and cconf is not None) else 1e6
+    faults = None
+    to = next((e for e in ordered if e.kind == Kind.TIMEOUT), None)
+    if to is not None:
+        later = [e.arrive for e in ordered if e.arrive > to.arrive and e.kind in (Kind.ACK, Kind.FILL, Kind.REJECT, Kind.CANCEL_CONFIRM, Kind.RECONCILE)]
+        faults = HedgeFaultConfig(ack_unknown_prob=1.0, ack_timeout_s=to.ts - place_t, unknown_resolve_s=(min(later) - to.ts) if later else 1e6)
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
-        h = Harness(ttl=ttl if ttl > 0 else 0.0, entry_s=max(0.001, place_t - submit.arrive), cancel_s=cancel_s, queue=0.0, max_live=4, cfg_kw=cfg_kw)
+        h = Harness(ttl=ttl if ttl > 0 else 0.0, entry_s=max(0.001, place_t - submit.arrive), cancel_s=cancel_s, queue=0.0, max_live=4, cfg_kw=cfg_kw, faults=faults)
         h.bt.latency.aligner.samples = 1                   # exchange times usable (offset 0)
         h.book(-1.0, BYBIT)
         h.book(-1.0, BINANCE)
-        # A reject is expressed the one way this simulator knows: a PostOnly order priced at the best ask (101.0) when it arrives.
-        h.send_maker(submit.arrive, qty=SIZE, price=101.0 if Kind.REJECT in kinds else 100.0)
+        # A reject before any fill is expressed the one way this simulator knows: a PostOnly order priced at the best ask (101.0) when it arrives.
+        h.send_maker(submit.arrive, qty=SIZE, price=101.0 if (Kind.REJECT in kinds and not late_reject) else 100.0)
+        if po_on:
+            # with the PostOnly model on, an arrival is accepted or refused when the feed delivers the first event stamped at/after it: a benign
+            # buy-side print far above the book (it can fill nothing) stands for that event
+            h.event(place_t, TRADE, BYBIT, {"price": 150.0, "volume": 0.001, "side": "b"}, exchange_ts=place_t)
         have = 0.0
         for e in sorted(events, key=lambda x: x.arrive):
             if e.kind in (Kind.SUBMIT, Kind.ACK):
                 h.advance(e.arrive)
+            elif e.kind == Kind.REJECT and late_reject:
+                h.advance(e.arrive)
+                mo = next(iter(h.bt.maker.orders.values()), None)
+                if mo is not None:
+                    h.bt.venue_reject_notice(mo.order_id, e.arrive, "venue_reject", source="injected")
             elif e.kind == Kind.FILL:
                 h.advance(e.arrive)
                 want = e.cum * SIZE - have
-                if want > EPS and h.resting:
+                if want > EPS and (h.resting or (po_on and not h.bt.maker.lifecycle_counts.get("rejected"))):
+                    # with the PostOnly model on the order rests only once the feed delivers its first event, which is this trade
                     h.sell_trade(e.arrive, BYBIT, volume=want, price=100.0, exchange_ts=e.ts)
-                    have = h.resting[0].filled_qty if h.resting else e.cum * SIZE
+                    have = sum(r["qty"] for r in h.bt.trade_log if r["venue"] == BYBIT and not r["taker"])
                 else:
                     h.advance(e.arrive)
             else:
                 h.advance(e.arrive)
         last = max(e.arrive for e in events) + 1.0
         if po_on or cfg_kw.get("cancel_time_basis") == "exchange":
-            h.event(last, TRADE, BYBIT, {"price": 50.0, "volume": 0.001, "side": "s"}, exchange_ts=last)   # a venue event: the check runs before it
+            h.event(last, TRADE, BYBIT, {"price": 150.0, "volume": 0.001, "side": "b"}, exchange_ts=last)   # a venue event: the check runs before it
         h.advance(last + 1.0)
         bt = h.bt
         rows = [r for r in bt.trade_log if r["venue"] == BYBIT and not r["taker"]]
         fills = [r["qty"] / SIZE for r in rows]
         booked = sum(fills)
         booked_at = [r["ts"] for r in rows]
-        if h.resting:
-            o = h.resting[0]
-            state = State.CANCEL_REQUESTED if o.cancel_requested_ts is not None else (State.PARTIALLY_FILLED if o.filled_qty > EPS else State.RESTING)
-        elif booked >= 1.0 - EPS:
-            state = State.FILLED
-        elif bt.lifetime["cancels_applied"] > 0:
-            state = State.CANCELLED
-        elif bt.po["rejects"] > 0:
-            state = State.REJECTED
-        elif any(True for _ in bt.pending.in_flight()):
-            state = State.SUBMITTED
+        inflight = next(iter(bt.maker.lifecycle), None)
+        explicit = bt.maker.lifecycle_state(inflight, last + 1.0) if inflight is not None else None
+        if explicit is not None:
+            state = State(explicit)                 # the executor's own explicit state (task 6), in the shared vocabulary
         else:
-            state = State.SUBMITTED
+            if h.resting:
+                o = h.resting[0]
+                state = State.CANCEL_REQUESTED if o.cancel_requested_ts is not None else (State.PARTIALLY_FILLED if o.filled_qty > EPS else State.RESTING)
+            elif booked >= 1.0 - EPS:
+                state = State.FILLED
+            elif bt.lifetime["cancels_applied"] > 0:
+                state = State.CANCELLED
+            elif bt.po["rejects"] > 0:
+                state = State.REJECTED
+            elif any(True for _ in bt.pending.in_flight()):
+                state = State.SUBMITTED
+            else:
+                state = State.SUBMITTED
+
         return Outcome.of(state, booked, fills, booked_at)

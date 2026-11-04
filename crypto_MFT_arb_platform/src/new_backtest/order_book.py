@@ -75,12 +75,22 @@ class OrderBook:
         "_bid_conf", "_ask_conf",
         # WP4 book state
         "state", "seq_last", "gaps", "seq_duplicates", "captured_depth_bid", "captured_depth_ask", "recovering_since",
+        # queue model v2 (opt-in, defaults reproduce the legacy book): tape repair switch and the own-fill shadow overlay
+        "tape_repair", "own_overlay", "overlay_bid", "overlay_ask",
     )
 
     def __init__(
         self, venue: str, pair: str,
         delta_semantics: str = "hybrid", max_levels: int = 200,
+        tape_repair: bool = True, own_overlay: bool = False,
     ) -> None:
+        # tape_repair=False: on_trade() mutates nothing (the book is rebuilt from book messages only). Default True = legacy.
+        # own_overlay=True: our own taker consumption is recorded in overlay_bid / overlay_ask (price -> qty taken), never in the
+        # public levels; walk() subtracts it; a public update of that price level (or a snapshot) clears it.
+        self.tape_repair = tape_repair
+        self.own_overlay = own_overlay
+        self.overlay_bid: dict[float, float] = {}
+        self.overlay_ask: dict[float, float] = {}
         self.venue = venue
         self.pair = pair
         self.delta_semantics = delta_semantics
@@ -280,6 +290,8 @@ class OrderBook:
 
     def apply_snapshot(self, bids, asks, ts: float) -> None:
         """Full replace. Resyncs any drift accumulated from deltas."""
+        self.overlay_bid.clear()
+        self.overlay_ask.clear()
         self._bids.clear()
         self._asks.clear()
         self._bid_heap.clear()
@@ -337,6 +349,8 @@ class OrderBook:
         book = self._bids if is_bid else self._asks
         et = event_type.lower()
         current = book.get(price, 0.0)
+        if self.own_overlay:
+            (self.overlay_bid if is_bid else self.overlay_ask).pop(price, None)       # a public update of this level ends our shadow consumption of it
 
         if et in ("delete", "remove"):
             new_size = 0.0
@@ -381,6 +395,15 @@ class OrderBook:
         if price <= 0 or volume <= 0:
             return
         self.trades_applied += 1
+        if not self.tape_repair:
+            return
+        if self.own_overlay:                                                           # the repair is a public update of every level it touches
+            if sign > 0:
+                for p in [p for p in self.overlay_ask if p <= price + 1e-12]:
+                    del self.overlay_ask[p]
+            else:
+                for p in [p for p in self.overlay_bid if p >= price - 1e-12]:
+                    del self.overlay_bid[p]
         if sign > 0:
             # Lifted asks: anything strictly below the print is gone.
             for p in list(self._sorted_asks()):
@@ -500,7 +523,7 @@ class OrderBook:
 
     # ── Taker execution ──────────────────────────────────────────────────────
 
-    def walk(self, side: str, qty: float, limit_price: float | None = None) -> WalkResult:
+    def walk(self, side: str, qty: float, limit_price: float | None = None, takes: list | None = None) -> WalkResult:
         """Price `qty` against this side without mutating the book.
 
         side="ask" consumes asks (we are buying); side="bid" consumes bids (we
@@ -513,6 +536,7 @@ class OrderBook:
         buying = side.startswith("a")
         prices, book = (self._sorted_asks(), self._asks) if buying \
             else (self._sorted_bids(), self._bids)
+        ov = (self.overlay_ask if buying else self.overlay_bid) if self.own_overlay else None
 
         remaining = qty
         notional = 0.0
@@ -521,6 +545,8 @@ class OrderBook:
 
         for price in prices:
             size = book.get(price, 0.0)
+            if ov:
+                size -= ov.get(price, 0.0)
             if size <= 0:
                 continue
             if limit_price is not None:
@@ -533,6 +559,8 @@ class OrderBook:
             remaining -= take
             levels += 1
             worst = price
+            if takes is not None:
+                takes.append((price, take))
             if remaining <= 1e-12:
                 break
 
@@ -576,6 +604,17 @@ class OrderBook:
             else:
                 setter(price, size - remaining)
                 remaining = 0.0
+        return result
+
+    def consume_overlay(self, side: str, qty: float, limit_price: float | None = None) -> WalkResult:
+        """walk() that records what it took in the shadow overlay instead of removing it from the public levels (own_overlay=True)."""
+        if not self.own_overlay:
+            raise ValueError("consume_overlay needs OrderBook(own_overlay=True)")
+        takes: list = []
+        result = self.walk(side, qty, limit_price, takes)
+        ov = self.overlay_ask if side.startswith("a") else self.overlay_bid
+        for price, take in takes:
+            ov[price] = ov.get(price, 0.0) + take
         return result
 
     # ── Diagnostics ──────────────────────────────────────────────────────────

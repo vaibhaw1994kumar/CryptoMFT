@@ -70,7 +70,7 @@ class LegTimingTests(unittest.TestCase):
         fees = {v: (s.fees.maker_bps, s.fees.taker_bps) for v, s in h.bt.venue_specs.items()}
         self.assertEqual(fees, {BYBIT: (FEE_PRESETS["bybit_perp_mm"].maker_bps, FEE_PRESETS["bybit_perp_mm"].taker_bps),
                                 BINANCE: (FEE_PRESETS["binance_perp_vip0"].maker_bps, FEE_PRESETS["binance_perp_vip0"].taker_bps)})
-        text = (ROOT / "scripts" / "run_sol_wf.py").read_text()
+        text = (ROOT.parent / "discarded" / "v1.0" / "scripts" / "run_sol_wf.py").read_text()
         self.assertIn('bybit_fee_preset="bybit_perp_', text)
         self.assertIn('binance_fee_preset="binance_perp_', text)
 

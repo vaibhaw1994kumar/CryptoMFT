@@ -199,6 +199,50 @@ def _scan_day(
     }
 
 
+def _cached_scan_day(root: Path, venue: str, pair: str, day: str, loader_stats: dict[str, int]) -> dict[str, int]:
+    """_scan_day with an optional on-disk cache (env NEW_BACKTEST_PREFLIGHT_CACHE=<dir>).
+
+    The scan is a pure function of the day's book files and of the scanning code, so its raw defect counts can be reused by the runs of a grid that
+    replay the same day. The key covers the venue/pair/day, the name, size and mtime of every book snapshot/event file of that day and the source of
+    the scanner itself; thresholds are applied afterwards, so the gate is evaluated exactly as without the cache. No env var: no cache, no change."""
+    import hashlib
+    import inspect
+    import json
+    import os
+
+    cache_dir = os.environ.get("NEW_BACKTEST_PREFLIGHT_CACHE")
+    if not cache_dir:
+        return _scan_day(root, venue, pair, day, loader_stats)
+    from .event_loader import venue_root
+    h = hashlib.sha256(f"{venue}|{pair}|{day}|{_QUALITY_SOURCE}".encode())
+    h.update(inspect.getsource(_BookAccumulator).encode())
+    h.update(inspect.getsource(_scan_day).encode())
+    vr = venue_root(root, venue)
+    for stream in ("book_snapshots", "book_events"):
+        d = vr / stream / f"pair={pair}" / f"date={day}"
+        if d.is_dir():
+            for f in sorted(d.glob("*.jsonl.gz")):
+                st = f.stat()
+                h.update(f"{stream}/{f.name}:{st.st_size}:{st.st_mtime_ns}".encode())
+    path = Path(cache_dir) / f"preflight_{venue}_{pair}_{day}_{h.hexdigest()[:20]}.json"
+    if path.exists():
+        try:
+            doc = json.loads(path.read_text())
+            loader_stats.update(doc["loader_stats"])
+            return {k: int(v) for k, v in doc["day_counts"].items()}
+        except Exception:
+            pass
+    counts = _scan_day(root, venue, pair, day, loader_stats)
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        tmp = path.with_suffix(".tmp")
+        tmp.write_text(json.dumps({"day_counts": counts, "loader_stats": dict(loader_stats), "key": h.hexdigest()}))
+        tmp.replace(path)
+    except OSError:
+        pass
+    return counts
+
+
 # ── Public API ────────────────────────────────────────────────────────────────
 
 def run_preflight(
@@ -250,7 +294,7 @@ def run_preflight(
     root = Path(data_root)
     for day in _day_range(start_day, end_day):
         loader_stats: dict[str, int] = {}
-        day_counts = _scan_day(root, venue, pair, day, loader_stats)
+        day_counts = _cached_scan_day(root, venue, pair, day, loader_stats)
         for k, v in day_counts.items():
             counts[k] = counts.get(k, 0) + v
         counts["duplicates_dropped"] += loader_stats.get("duplicates_dropped", 0)
