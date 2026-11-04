@@ -30,6 +30,10 @@ Do not edit these:
 - `crypto_MFT_arb_platform/src/crypto_stat_arb/advanced_backtest/`: the older backtester
 - `out/**/snap*/`: frozen code snapshots used by runs
 
+## Target
+
+One platform. Every rule lives once in `src/crypto_stat_arb`, and backtest and live both call it. `new_backtest` imports the core; the core never imports `new_backtest`. Queue v2 and the fill engine move to the core but run only behind the simulated adapter. Read `out/integration/single_platform_plan.md` and `core_backtest_integration_prompt.md` before moving any feature.
+
 ## Core map
 
 There are two parallel stacks. `new_backtest` uses only `crypto_stat_arb.quality` from the core, so a fix in one stack does not reach the other.
@@ -38,6 +42,9 @@ There are two parallel stacks. `new_backtest` uses only `crypto_stat_arb.quality
 |---|---|---|
 | Orders / lifecycle | `oms.py` | `fill_engine.py`, `execution/layer.py`, `order_state_machine.py` (spec, compared by tests) |
 | Order book | `orderbook.py`, `book_gate.py` | `order_book.py`, `queue_v2/rebuild.py` |
+| Maker fill simulation | `maker_sim.py`, `maker_engine.py`, `sim_engine/` (C++), used by paper and `simulate-maker` | `fill_engine.py` `MakerExecutor` + `queue_v2/`, used by all arb backtests |
+| Cancellation model | none named (book update caps queue ahead) | `queue_v2/cancel_models.py`, `MakerConfig.cancel_model` |
+| Fill prediction | none | `fill_model.py`, `fill_model_v1.py` (holds V1 and V2), `fill_model_queue.py`, `fill_model_deep.py` |
 | Risk | `risk.py`, `rate_limits.py` | `execution/risk.py`, `circuit_breaker.py` |
 | Ledger / economics | `ledger.py`, `economics.py`, `economics_gate.py` | `valuation.py`, `execution/reconcile.py` |
 | Funding | `funding.py`, `funding_history.py` | `funding_settler.py` |
@@ -55,7 +62,7 @@ Backtester only:
 - Faults: `hedge_faults.py`, `fault_presets.py`; PostOnly: `postonly.py`
 - Fill models: `fill_model*.py`, `fill_label.py`; hedge move: `market_hedge_move.py`
 
-Other packages: `src/trading_platform_poc/` has its own `oms.py`, `order_book.py` and `risk.py` (the live engine on the VM). `src/hft_platform_kit/` is the kit layer.
+Out of scope: `src/trading_platform_poc/`, except `opportunity.py` and its tests, whose logic is ported into the core and not copied. `crypto_stat_arb` is the only live stack. `src/hft_platform_kit/` is the kit layer.
 
 Key docs: `docs/strategy_contract.md` (the strategy rules), `docs/economic_ledger.md`, `docs/execution_realism.md`.
 
