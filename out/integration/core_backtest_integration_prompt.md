@@ -1,6 +1,7 @@
 TASK: Run the backtester in tandem with the core platform, first on synthetic data, so we know the whole system works together and no feature exists in only one place by accident.
 
-Repo: /Users/vaibhav/Documents/Newproject/crypto_MFT_arb_platform, branch integration-2026-11-01.
+Repo: /Users/vaibhav/Documents/Newproject/crypto_MFT_arb_platform.
+Two git repos: outer (Newproject, branch integration-2026-11-01) and core (src/crypto_stat_arb, branch consolidate-new-backtest). Both have the tag restore-before-core-integration.
 Backtester: src/new_backtest/. Core: src/crypto_stat_arb/.
 Read Newproject/CLAUDE.md first and follow it. It holds the file map and the working rules.
 
@@ -13,7 +14,7 @@ WHAT IS ALREADY KNOWN (verify, do not assume)
 
 PRECONDITIONS. If any fails, STOP and say so.
 - No other session is editing this tree and no jobs are running on it.
-- The owner has made a restore point (a commit or tag) of the current tree. Do not make it yourself without the go-ahead.
+- Restore points exist: tag restore-before-core-integration in BOTH repos (done 5 Nov). Confirm it is there.
 - legacy_v0 and perp_perp_maker_taker_v1 stay byte-identical throughout. v1.1 stays identical unless a step says otherwise and the owner approved it.
 
 GUARDRAILS

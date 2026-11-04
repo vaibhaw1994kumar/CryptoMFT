@@ -18,7 +18,11 @@ Before writing any new file:
 
 ## Where the code lives
 
-Working copy: `crypto_MFT_arb_platform/` (git root is the parent, `Newproject/`; branch `integration-2026-11-01`).
+Working copy: `crypto_MFT_arb_platform/`. There are TWO git repos:
+- Outer repo, root `Newproject/`, branch `integration-2026-11-01`: backtester, tests, scripts, profiles.
+- Core repo, root `crypto_MFT_arb_platform/src/crypto_stat_arb/`, branch `consolidate-new-backtest`: all core files. The outer repo does not track it, so core changes must be committed there.
+
+New files in `crypto_MFT_arb_platform/profiles/`, `config/` and `docs/` are ignored by `.gitignore` and need `git add -f`.
 
 Do not edit these:
 - `Newproject/src/`, `Newproject/tests/`, `Newproject/scripts/`: an older tree, not the working copy
