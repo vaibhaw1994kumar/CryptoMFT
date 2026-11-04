@@ -737,6 +737,11 @@ def build_arg_parser() -> argparse.ArgumentParser:
     p.add_argument("--max-clip-notional", type=float, default=25_000.0)
     p.add_argument("--max-position-base", type=float, default=0.0,
                    help="0 => per-pair default from config.MAX_POSITION_BASE")
+    p.add_argument("--min-queue-ahead", type=float, default=0.0,
+                   dest="min_queue_ahead",
+                   help="MakerConfig.min_queue_ahead: queue-depth floor for absent "
+                        "price levels (base-asset units). 0 = no floor (default). "
+                        "Calibrate from the p25 of observed present-level depths.")
     p.add_argument("--no-toxic-gate", action="store_true")
     p.add_argument("--no-consume", action="store_true",
                    help="do not remove liquidity our own taker orders consumed")
@@ -766,7 +771,8 @@ def config_from_args(args) -> ArbBacktestConfig:
         start_date=args.start_date, end_date=args.end_date,
         max_events=args.max_events, latency_preset=args.latency_preset,
         bybit_fee_preset=args.bybit_fees, binance_fee_preset=args.binance_fees,
-        arb=arb, consume_liquidity=not args.no_consume,
+        arb=arb, maker=MakerConfig(min_queue_ahead=args.min_queue_ahead),
+        consume_liquidity=not args.no_consume,
         include_deltas=not args.no_deltas, seed=args.seed,
         output_dir=args.output_dir,
         warm_start_fill_events=args.warm_start_fill_events,

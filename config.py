@@ -319,7 +319,7 @@ def load_config(path: Path) -> tuple[AppConfig, dict]:
             allow_risk_reducing_under_stop=bool(
                 residual_config.get("allow_risk_reducing_under_stop", True)
             ),
-            max_unwind_attempts=int(residual_config.get("max_unwind_attempts", 2)),
+            max_unwind_attempts=int(residual_config.get("max_unwind_attempts", 3)),
             max_one_sided_notional=d(
                 residual_config.get("max_one_sided_notional", "Infinity")
             ),

@@ -33,8 +33,10 @@ Usage::
 """
 from __future__ import annotations
 
+import json
 import math
 from dataclasses import dataclass, field
+from pathlib import Path
 
 
 # ── Bucket helpers ────────────────────────────────────────────────────────────
@@ -91,28 +93,60 @@ class QueueReactiveFillEstimator:
     min_cell_count:
         Minimum fill count before a cell's own rate is used; otherwise falls
         back to the global rate.
+    horizon_s:
+        The gate horizon this model was fitted for.  The gate in
+        CrossVenueArbStrategy checks ``model.horizon_s == cfg.fill_gate_horizon_s``
+        before calling ``predict()``.
+    trained_until_ts:
+        Epoch seconds of the last training label used, i.e. the earliest
+        timestamp at which this model may be applied without look-ahead.
+        The leakage guard in CrossVenueArbBacktester raises ValueError if
+        this value exceeds the eval window's start epoch.  Must be set to the
+        actual boundary of the calibration data — never to 0.0 as a sentinel
+        to bypass the guard.
     """
     min_cell_count: float = 5.0
+    horizon_s: float = 5.0
+    trained_until_ts: float = 0.0
 
     _cells: dict[tuple[str, str, str], _RateCell] = field(
         default_factory=dict, init=False, repr=False,
     )
     _global: _RateCell = field(default_factory=_RateCell, init=False, repr=False)
 
-    def fit(self, records) -> None:
+    def fit(
+        self,
+        records,
+        gate_horizon_s: float | None = None,
+        trained_until_ts: float = 0.0,
+    ) -> None:
         """Fit Poisson rates from a list of FillLabelRecord.
 
-        Each record represents one (order, horizon) pair; the exposure time is
-        horizon_s (the full horizon, since cancelled orders are already filtered
-        to h <= their lifetime by the fill_engine's censoring logic).
+        Only records whose ``horizon_s`` matches ``gate_horizon_s`` (or
+        ``self.horizon_s`` when not supplied) are used, so the fitted rate
+        corresponds to the horizon the gate will query at runtime.
+
+        Each record contributes one unit of exposure (the full horizon) and
+        one fill event when ``r.filled`` is True.
+
+        ``trained_until_ts`` must be set to the epoch boundary of the
+        calibration window (the start of the evaluation period).  Pass 0.0
+        only when the model is known to be untrained; never pass it to
+        silence the leakage guard in CrossVenueArbBacktester.
         """
         from .fill_label import FillLabelRecord  # noqa: PLC0415
+
+        if gate_horizon_s is not None:
+            self.horizon_s = float(gate_horizon_s)
+        self.trained_until_ts = trained_until_ts
 
         self._cells.clear()
         self._global = _RateCell()
 
         for r in records:
             if not isinstance(r, FillLabelRecord):
+                continue
+            if r.horizon_s != int(self.horizon_s):
                 continue
             depth_ratio = r.local_depth / max(r.local_depth_baseline, 1e-9)
             key = (
@@ -153,14 +187,63 @@ class QueueReactiveFillEstimator:
         local_depth: float,
         local_depth_baseline: float,
         spread_pct: float,
-        horizon_s: float,
+        horizon_s: float | None = None,
+        **_kwargs,  # absorbs extra features (short_vol, trade_sign, …) from gate caller
     ) -> float:
-        """Return P(filled by horizon_s) for an order with the given state."""
+        """Return P(filled by horizon_s) for an order with the given state.
+
+        Extra keyword arguments are silently ignored so the model can be called
+        via the same ``model.predict(**feat)`` interface used by FillModelV1,
+        where ``feat`` may contain features this Poisson model does not use.
+        When ``horizon_s`` is omitted, ``self.horizon_s`` is used.
+        """
+        h = horizon_s if horizon_s is not None else self.horizon_s
         depth_ratio = local_depth / max(local_depth_baseline, 1e-9)
         lam = self._get_rate(queue_ahead, depth_ratio, spread_pct)
         if lam <= 0.0:
             return 0.0
-        return 1.0 - math.exp(-lam * horizon_s)
+        return 1.0 - math.exp(-lam * h)
+
+    def save_json(self, path: "str | Path") -> None:
+        """Persist the fitted model to a JSON file."""
+        cells_out = {}
+        for (q, d, s), cell in self._cells.items():
+            cells_out[f"{q}|{d}|{s}"] = {
+                "total_exposure_s": cell.total_exposure_s,
+                "fill_count": cell.fill_count,
+            }
+        data = {
+            "version": "queue_reactive_v1",
+            "horizon_s": self.horizon_s,
+            "trained_until_ts": self.trained_until_ts,
+            "min_cell_count": self.min_cell_count,
+            "global_exposure_s": self._global.total_exposure_s,
+            "global_fill_count": self._global.fill_count,
+            "cells": cells_out,
+        }
+        Path(path).parent.mkdir(parents=True, exist_ok=True)
+        Path(path).write_text(json.dumps(data, indent=2), encoding="utf-8")
+
+    @classmethod
+    def load_json(cls, path: "str | Path") -> "QueueReactiveFillEstimator":
+        """Load a previously saved model."""
+        data = json.loads(Path(path).read_text(encoding="utf-8"))
+        obj = cls(
+            min_cell_count=data.get("min_cell_count", 5.0),
+            horizon_s=data.get("horizon_s", 5.0),
+            trained_until_ts=data.get("trained_until_ts", 0.0),
+        )
+        obj._global = _RateCell(
+            total_exposure_s=data.get("global_exposure_s", 0.0),
+            fill_count=data.get("global_fill_count", 0.0),
+        )
+        for key_str, cell_data in data.get("cells", {}).items():
+            q, d, s = key_str.split("|")
+            obj._cells[(q, d, s)] = _RateCell(
+                total_exposure_s=cell_data["total_exposure_s"],
+                fill_count=cell_data["fill_count"],
+            )
+        return obj
 
     def bucket_summary(self) -> dict[str, dict]:
         """Return per-bucket rate stats for diagnostics."""

@@ -124,6 +124,9 @@ class LoggedOrderEvent:
     # How long the order was observable: fill_time_s for fills, cancel_time_s for cancels.
     # Used by IPCW censoring weights in FillModelV1.fit().
     observation_time_s: float = 0.0
+    # True when the price level was absent from the book at placement time.
+    # Used to segment absent-level vs present-level fill rates and to validate D2.
+    level_was_absent: bool = False
 
 
 @dataclass(frozen=True)

@@ -107,6 +107,14 @@ class ArbConfig:
     fill_gate_horizon_s: int = 15
     # Stage 4: adverse-selection gate (FillModelV2 only; 1.0 = disabled)
     max_adverse_prob: float = 1.0
+    # TTF gate: skip if E[TTF] > max_ttf_s.  Reduces inventory lock-up in slow
+    # markets.  0.0 = disabled.  Typical value: 8.0 (seconds).
+    max_ttf_s: float = 0.0
+    # Cross-venue temporal coherence: reject if the two books' last_update_ts
+    # differ by more than this threshold.  Prevents comparing prices that were
+    # never simultaneously actionable (e.g. Bybit at T vs Binance at T-490ms).
+    # 0.0 = disabled.  Default 0.2 s is half the per-venue max_book_age_s.
+    max_cross_venue_skew_s: float = 0.2
 
 
 @dataclass
@@ -193,6 +201,8 @@ class CrossVenueArbStrategy:
             "maker_limit": 0,
             "low_fill_prob": 0,   # Phase 1 gate: P(fill) < min_fill_prob
             "high_adverse_prob": 0,  # Stage 4 gate: P(adverse) > max_adverse_prob
+            "slow_ttf": 0,           # TTF gate: E[TTF] > max_ttf_s
+            "cross_venue_skew": 0,   # cross-venue coherence: |ts_buy - ts_sell| > max_cross_venue_skew_s
         }
         self.evaluations = 0
         self.signals = 0
@@ -308,6 +318,16 @@ class CrossVenueArbStrategy:
         cfg = self.config
         buy_book, sell_book = books[buy_venue], books[sell_venue]
         buy_fees, sell_fees = self.venues[buy_venue].fees, self.venues[sell_venue].fees
+
+        # Cross-venue temporal coherence: both books must have been updated
+        # within max_cross_venue_skew_s of each other.  Without this gate a
+        # stale Binance book (T-490ms) is compared against a fresh Bybit book
+        # (T), giving a spread that was never simultaneously actionable.
+        if cfg.max_cross_venue_skew_s > 0.0:
+            skew = abs(buy_book.last_update_ts - sell_book.last_update_ts)
+            if skew > cfg.max_cross_venue_skew_s:
+                self.rejects["cross_venue_skew"] += 1
+                return None
 
         if cfg.mode == MAKER_TAKER:
             return self._evaluate_maker_taker(
@@ -454,6 +474,9 @@ class CrossVenueArbStrategy:
                 p_fill = pred.p_fill
                 if cfg.max_adverse_prob < 1.0 and pred.p_adverse > cfg.max_adverse_prob:
                     self.rejects["high_adverse_prob"] += 1
+                    return None
+                if cfg.max_ttf_s > 0.0 and pred.e_ttf > cfg.max_ttf_s:
+                    self.rejects["slow_ttf"] += 1
                     return None
             else:
                 p_fill = model.predict(**feat)

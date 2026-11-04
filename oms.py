@@ -280,6 +280,8 @@ class OMS:
         self._report_deadlines: dict[str, list] = {}
         self._requery_orders: set[str] = set()
         self._reject_after_fill_alarmed: set[str] = set()
+        # UNWIND_EXHAUSTED_ALARM: parent_id -> alarm payload. Persistent: blocks new risk until reset_unwind_exhausted_alarm().
+        self.unwind_exhausted_alarms: dict[str, dict[str, object]] = {}
         self._late_fill_alerted: set[str] = set()
         self._residual_breach_since: dict[str, int] = {}
         self._residual_next_check: dict[str, int] = {}
@@ -318,6 +320,17 @@ class OMS:
             if order.filled_quantity > 0
             and any(row.get("state") == ExecutionEventType.REJECTED.value for row in order.state_updates)
         )
+        # An unwind-exhausted alarm survives a restart until an operator resets it (the plan store keeps both events).
+        if self.plan_store is not None:
+            for parent_id in self.plans:
+                active: dict[str, object] | None = None
+                for event in self.plan_store.events(parent_id):
+                    if event["event_type"] == "UNWIND_EXHAUSTED_ALARM":
+                        active = dict(event["payload"], ts_ns=event["ts_ns"])
+                    elif event["event_type"] == "UNWIND_EXHAUSTED_ALARM_RESET":
+                        active = None
+                if active is not None:
+                    self.unwind_exhausted_alarms[parent_id] = active
         # Registered before recovery replays fills, so rebuilt fills consume too;
         # reservations are only rehydrated (and then consumed) further below.
         ledger.trade_fill_listeners.append(self._consume_reservation)
@@ -1285,6 +1298,47 @@ class OMS:
                     callback_type=callback.event_type.value,
                 )
 
+    def _unwind_attempts_allowed(self, plan: ParentPlan) -> int:
+        # A flatten plan keeps trying (bounded) until flat: it is closing exposure
+        # a venue liquidation left behind, not a strategy residual.
+        policy = self.residual_policy
+        return (
+            max(policy.max_unwind_attempts, self.FLATTEN_MAX_ATTEMPTS) if plan.inherited_base
+            else policy.max_unwind_attempts
+        )
+
+    def _raise_unwind_exhausted_alarm(self, plan: ParentPlan, ts_ns: int) -> None:
+        """Every unwind attempt is spent and the residual is still out of bound: a persistent alarm, never a success.
+
+        Raised once per plan, only when no unwind order is still working (a live or pending one may yet reduce the residual).
+        New risk is refused while any alarm is active; only reset_unwind_exhausted_alarm() clears it."""
+        if plan.parent_id in self.unwind_exhausted_alarms:
+            return
+        allowed = self._unwind_attempts_allowed(plan)
+        if plan.unwind_attempts < allowed or self._open_unwind_orders(plan) or self.router.has_pending_parent(plan.parent_id):
+            return
+        payload: dict[str, object] = {
+            "residual_base": str(plan.residual_base), "unwind_attempts": plan.unwind_attempts,
+            "attempts_allowed": allowed, "max_residual_base": str(self.residual_policy.max_residual_base),
+        }
+        self.unwind_exhausted_alarms[plan.parent_id] = dict(payload, ts_ns=ts_ns)
+        self.realism_counters["unwind_exhausted_alarms"] = self.realism_counters.get("unwind_exhausted_alarms", 0) + 1
+        self.ledger.record("UNWIND_EXHAUSTED_ALARM", ts_ns, parent_id=plan.parent_id, **payload)
+        self._persist(plan, ts_ns, "UNWIND_EXHAUSTED_ALARM", **payload)
+
+    def reset_unwind_exhausted_alarm(self, ts_ns: int, operator: str, parent_id: str | None = None) -> list[str]:
+        """Operator action: clear the unwind-exhausted alarm of one plan (or all). The residual itself is not touched."""
+        if not operator:
+            raise ValueError("an operator must be named to reset an unwind-exhausted alarm")
+        cleared = [parent_id] if parent_id is not None else sorted(self.unwind_exhausted_alarms)
+        for pid in cleared:
+            if self.unwind_exhausted_alarms.pop(pid, None) is None:
+                raise KeyError(pid)
+            self.ledger.record("UNWIND_EXHAUSTED_ALARM_RESET", ts_ns, parent_id=pid, operator=operator)
+            if pid in self.plans:
+                self._persist(self.plans[pid], ts_ns, "UNWIND_EXHAUSTED_ALARM_RESET", operator=operator)
+        return cleared
+
     def _execute_residual_unwind(
         self, plan: ParentPlan, ts_ns: int,
         books: dict[tuple[str, str], OrderBook],
@@ -1313,12 +1367,7 @@ class OMS:
         if elapsed_ns >= policy.max_residual_age_ns:
             urgency = UnwindUrgency.AGGRESSIVE
         venues = self._unwind_venues(plan)
-        # A flatten plan keeps trying (bounded) until flat: it is closing exposure
-        # a venue liquidation left behind, not a strategy residual.
-        attempts_allowed = (
-            max(policy.max_unwind_attempts, self.FLATTEN_MAX_ATTEMPTS) if plan.inherited_base
-            else policy.max_unwind_attempts
-        )
+        attempts_allowed = self._unwind_attempts_allowed(plan)
         for venue in venues:
             if plan.unwind_attempts >= attempts_allowed:
                 break
@@ -1623,6 +1672,7 @@ class OMS:
                     max_residual_age_ns=self.residual_policy.max_residual_age_ns,
                     unwind_attempts=plan.unwind_attempts,
                 )
+                self._raise_unwind_exhausted_alarm(plan, ts_ns)
                 self._escalate_residual_breach(plan, ts_ns)
                 return plan
             if self.router.has_pending_parent(plan.parent_id):
@@ -2562,6 +2612,16 @@ class OMS:
             )
             return self._close_without_exposure(
                 plan, now, PlanState.REJECTED, "residual_breach_hold"
+            )
+        if self.unwind_exhausted_alarms:
+            self.realism_counters["new_risk_held_unwind_exhausted"] = self.realism_counters.get("new_risk_held_unwind_exhausted", 0) + 1
+            self.ledger.record(
+                "NEW_RISK_HELD_UNWIND_EXHAUSTED", now,
+                parent_id=parent_id, opportunity_id=opportunity.opportunity_id,
+                alarmed_parent_ids=sorted(self.unwind_exhausted_alarms),
+            )
+            return self._close_without_exposure(
+                plan, now, PlanState.REJECTED, "unwind_exhausted_alarm"
             )
         if self.eligibility_policy is not None:
             decision = self.eligibility_policy.evaluate(books, now)

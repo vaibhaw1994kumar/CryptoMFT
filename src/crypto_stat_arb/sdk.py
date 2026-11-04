@@ -84,8 +84,8 @@ class BacktestAPI:
     def _config(self, spec: AdvancedBacktestSpec):
         if self.mode != RuntimeMode.BACKTEST:
             raise RuntimeError("advanced backtesting is available only in BACKTEST mode")
-        from .advanced_backtest.arb_strategy import ArbConfig
-        from .advanced_backtest.backtester import ArbBacktestConfig
+        from new_backtest.arb_strategy import ArbConfig
+        from new_backtest.backtester import ArbBacktestConfig
 
         return ArbBacktestConfig(
             pair=spec.pair.upper(),
@@ -120,8 +120,8 @@ class BacktestAPI:
         )
 
     def run(self, spec: AdvancedBacktestSpec) -> dict[str, Any]:
-        from .advanced_backtest.backtester import CrossVenueArbBacktester
-        from .advanced_backtest import virtual_clock
+        from new_backtest.backtester import CrossVenueArbBacktester
+        from new_backtest import virtual_clock
 
         try:
             return asdict(CrossVenueArbBacktester(self._config(spec)).run())
@@ -134,9 +134,9 @@ class BacktestAPI:
         self, spec: AdvancedBacktestSpec, pairs: Iterable[str], *,
         two_pass: bool | None = None,
     ) -> dict[str, Any]:
-        from .advanced_backtest.arb_strategy import MAKER_TAKER
-        from .advanced_backtest.batch_backtest import run_batch
-        from .advanced_backtest import virtual_clock
+        from new_backtest.arb_strategy import MAKER_TAKER
+        from new_backtest.batch_backtest import run_batch
+        from new_backtest import virtual_clock
 
         config = self._config(spec)
         if spec.output_dir is None:

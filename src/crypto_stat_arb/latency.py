@@ -197,7 +197,7 @@ def profile_from_venue_spec(venue: str, spec: Any) -> VenueLatencyProfile:
 
 
 def latency_preset_names() -> tuple[str, ...]:
-    from .advanced_backtest.config import LATENCY_PRESETS
+    from new_backtest.config import LATENCY_PRESETS
 
     return tuple(sorted(LATENCY_PRESETS))
 
@@ -283,7 +283,7 @@ class LatencyModel:
 def latency_model_from_preset(
     preset: str, venues: tuple[str, ...], *, seed: int = 0
 ) -> LatencyModel:
-    from .advanced_backtest.config import LATENCY_PRESETS
+    from new_backtest.config import LATENCY_PRESETS
 
     try:
         specs = LATENCY_PRESETS[preset]

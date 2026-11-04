@@ -486,14 +486,18 @@ class FillModelV2:
         )
 
 
-def load_fill_model(path: "str | Path") -> "FillModelV1 | FillModelV2":
-    """Load a FillModelV1 or FillModelV2 from a JSON checkpoint (auto-detected).
+def load_fill_model(path: "str | Path"):
+    """Load a fill-gate model from a JSON checkpoint (auto-detected by version).
 
-    Files with ``"version": 2`` or a ``"per_horizon"`` key load as FillModelV2.
-    All other files (including legacy V1 files without a version key) load as
-    FillModelV1.
+    Dispatch table:
+        ``"version": "queue_reactive_v1"`` → QueueReactiveFillEstimator
+        ``"version": 2``  or ``"per_horizon"`` key → FillModelV2
+        anything else (including no version key) → FillModelV1
     """
     data = json.loads(Path(path).read_text(encoding="utf-8"))
+    if data.get("version") == "queue_reactive_v1":
+        from .fill_model_queue import QueueReactiveFillEstimator  # noqa: PLC0415
+        return QueueReactiveFillEstimator.load_json(path)
     if data.get("version", 1) >= 2 or "per_horizon" in data:
         return FillModelV2.load_json(path)
     return FillModelV1.load_json(path)

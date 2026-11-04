@@ -58,7 +58,7 @@ class ResidualPolicy:
     unwind_urgency: UnwindUrgency = UnwindUrgency.NORMAL
     unwind_price_slippage_bps: Decimal = Decimal("10")
     allow_risk_reducing_under_stop: bool = True
-    max_unwind_attempts: int = 2
+    max_unwind_attempts: int = 3          # 2026-11-02 owner decision: 3, as the v1 profile (was 2); exhaustion -> UNWIND_EXHAUSTED_ALARM
     max_one_sided_notional: Decimal = Decimal("Infinity")
     # While any plan is in residual breach no new risk is admitted; if the
     # breach is still open after ``kill_after_ns`` the kill switch trips.

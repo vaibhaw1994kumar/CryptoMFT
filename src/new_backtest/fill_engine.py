@@ -156,8 +156,10 @@ class MakerOrder:
     regime_bucket: LambdaBucket = LambdaBucket.CALM
 
     observed_level_size: float = 0.0
+    level_was_absent: bool = False     # True when _level_size() returned 0.0 at placement
     filled_qty: float = 0.0
     first_fill_ts: float | None = None
+    first_fill_is_synthetic: bool = False  # True when the very first fill came from synthetic flow
     adverse_ts: float | None = None
     trade_fill_qty: float = 0.0
     delta_fill_qty: float = 0.0
@@ -180,6 +182,15 @@ class MakerConfig:
     snapshot_fill_share: float = 0.05
     queue_stress_multiplier: float = 1.0    # >1 assumes more size ahead of us
     fill_horizons_s: tuple[int, ...] = (1, 5, 15)
+    # Minimum queue depth assumed at placement when _level_size() returns zero
+    # (absent price level in the book).  Zero means "no orders ahead" — fills
+    # on the first touching trade, which is optimistic for liquid instruments.
+    # Units: base-asset quantity, same scale as order size and level sizes.
+    # Calibrate from observed time-to-first-fill distributions by venue/pair.
+    # Interaction with queue_stress_multiplier: the effective queue at placement
+    # is max(level_size * queue_stress_multiplier, min_queue_ahead).  It is a
+    # floor for absent levels only, not a blanket override of the multiplier.
+    min_queue_ahead: float = 0.0
 
 
 class MakerExecutor:
@@ -224,12 +235,20 @@ class MakerExecutor:
             rel_ticks = int(round(delta / tick_size))
             rel_ticks = max(-3, min(3, rel_ticks))
 
+        level_was_absent = level_size == 0.0
         initial_q = level_size * max(0.0, self.config.queue_stress_multiplier)
+        # Apply min_queue_ahead as a floor only when the price level is absent
+        # from the book (level_size == 0).  On a genuine empty level, queue = 0
+        # is correct for FIFO.  When the level is absent due to data granularity
+        # or a stale book, min_queue_ahead provides a conservative proxy depth.
+        if level_was_absent and self.config.min_queue_ahead > 0.0:
+            initial_q = self.config.min_queue_ahead
         order = MakerOrder(
             order_id=next(self._ids), venue=venue, pair=pair, symbol=symbol,
             side=side, price=price, size=size, remaining=size,
             queue_ahead=initial_q, initial_queue_ahead=initial_q,
             placed_ts=now, active_ts=active_ts, signal_id=signal_id,
+            level_was_absent=level_was_absent,
             relative_to_touch_ticks=rel_ticks,
             local_depth=state.top_depth,
             local_depth_baseline=state.top_depth_baseline,
@@ -306,7 +325,11 @@ class MakerExecutor:
                 f = self._consume(order, prev - new_size, now, self.config.delta_fill_share, "delta", fee_bps)
                 if f is not None:
                     fills.append(f)
-            order.observed_level_size = new_size
+            # Never increase observed_level_size: orders that join the level
+            # after our placement arrive behind us in the FIFO queue.  Allowing
+            # the tracked size to grow upward would incorrectly trigger fills
+            # when those behind-us orders later cancel or trade.
+            order.observed_level_size = min(order.observed_level_size, new_size)
         return fills
 
     def on_snapshot(
@@ -323,7 +346,8 @@ class MakerExecutor:
                                   self.config.snapshot_fill_share, "snapshot", fee_bps)
                 if f is not None:
                     fills.append(f)
-            order.observed_level_size = curr
+            # Same invariant as on_delta: never increase observed_level_size.
+            order.observed_level_size = min(order.observed_level_size, curr)
         return fills
 
     def mark_adverse(self, venue: str, book: OrderBook, now: float, tick_size: float) -> None:
@@ -364,6 +388,7 @@ class MakerExecutor:
         order.filled_qty += qty
         if order.first_fill_ts is None:
             order.first_fill_ts = now
+            order.first_fill_is_synthetic = is_synthetic
         if is_synthetic:
             order.synthetic_fill_qty += qty
         elif source == "trade":
@@ -383,10 +408,11 @@ class MakerExecutor:
 
         if not order.is_live:
             self.orders.pop(order.order_id, None)
-            # Skip training label if synthetic flow touched this order at any point.
-            # Synthetic qty on first_fill_ts corrupts time-to-fill labels even when
-            # a real trade completes the order later.
-            if order.synthetic_fill_qty == 0:
+            # Skip training label only when the FIRST fill was synthetic — that
+            # corrupts the time-to-fill timestamp (first_fill_ts = synthetic event time).
+            # A real trade that later completes a partially-synthetic order is still a
+            # valid observation; excluding it was overly conservative.
+            if not order.first_fill_is_synthetic:
                 self._record_outcome(order)
             self.orders_filled += 1
         return fill
@@ -425,22 +451,27 @@ class MakerExecutor:
         else:
             terminal_reason = "cancel"
 
-        # life_s: how long the order was observable.
+        # life_s: how long the order was observable, measured from active_ts (the
+        # moment the order landed at the exchange after entry latency).  Using
+        # placed_ts (strategy decision time) inflates TTF by the entry latency.
         # For fills: time-to-first-fill (fill_ts is finite).
         # For cancels: end_ts is the cancel timestamp; fall back to fill_ts if
         #   partially filled (partial_then_cancel), else None if neither is known.
+        t0 = order.active_ts  # exchange-arrival time; equals placed_ts + entry_latency
         if fill_ts < math.inf:
-            life_s: float | None = fill_ts - order.placed_ts
+            life_s: float | None = fill_ts - t0
         elif end_ts is not None:
-            life_s = end_ts - order.placed_ts
+            life_s = end_ts - t0
         else:
             life_s = None
 
         for horizon in self.config.fill_horizons_s:
-            filled_by_h = fill_ts - order.placed_ts <= horizon
-            # Censoring guard: skip h when the order ended before h and did not fill.
-            if not filled_by_h and life_s is not None and life_s < horizon:
-                continue
+            filled_by_h = fill_ts - t0 <= horizon
+            # observation_time_s: how long this order was observable.
+            # For fills: time-to-first-fill. For cancels: cancel_time_s.
+            # When neither is known (life_s is None), use the horizon itself as a
+            # conservative upper bound (order was alive at least until h).
+            obs_time = life_s if life_s is not None else float(horizon)
 
             self.fill_model.record_order_event(
                 LoggedOrderEvent(
@@ -458,13 +489,15 @@ class MakerExecutor:
                     regime_bucket=order.regime_bucket,
                     horizon_s=horizon,
                     filled=filled_by_h,
-                    price_moved_through=(adverse_ts - order.placed_ts) <= horizon,
+                    price_moved_through=(adverse_ts - t0) <= horizon,
                     filled_qty=order.filled_qty,
                     fill_ratio=ratio,
                     trade_fill_qty=order.trade_fill_qty,
                     book_event_fill_qty=order.delta_fill_qty,
                     snapshot_fill_qty=order.snapshot_fill_qty,
                     terminal_reason=terminal_reason,
+                    observation_time_s=obs_time,
+                    level_was_absent=order.level_was_absent,
                 )
             )
 
