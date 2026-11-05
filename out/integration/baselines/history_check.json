@@ -1,0 +1,6 @@
+{
+ "legacy_v0 2022-01-05 vs Phase 0 execution-layer gate runs (2 Nov), the legacy reference": "byte-identical files and identical result fields",
+ "legacy_v0 2022-01-13 vs Phase 0 execution-layer gate runs (2 Nov), the legacy reference": "byte-identical files and identical result fields",
+ "perp_perp_maker_taker_v1_1 2022-01-05 vs step 9 January runs (4 Nov, snapshot snap_qv2i)": "byte-identical files and identical result fields",
+ "perp_perp_maker_taker_v1_1 2022-01-13 vs step 9 January runs (4 Nov, snapshot snap_qv2i)": "byte-identical files and identical result fields"
+}

@@ -118,7 +118,7 @@ KEEP-SIM = moves to `crypto_stat_arb/simulation/`, runs only behind the simulate
 |---|---|---|
 | Cash ledger, equity bridge, common-timestamp valuation | `valuation.py`, backtester | CORE-OWNS (ECO06); port the common-timestamp check |
 | Fill journal, rebuild books from journal | `execution/reconcile.py` | MOVE as an independent check |
-| Fees and rebates by product | `config.py`, core `fees.py` | CORE-OWNS. Bybit maker is -0.5 bps in the backtest and +2.0 bps in the core config (Step 0). Owner's rates match the core config: headline +2.0, -0.5 only as a scenario (ECO01). |
+| Fees and rebates by product | `config.py`, core `fees.py` | CORE-OWNS. Bybit maker is -0.5 bps in the backtest and +2.0 bps in the core config (Step 0). Owner confirms a rebate: headline -0.5, +2.0 as the conservative scenario (ECO01). The core config must be changed to match. |
 | Funding on real schedule and mark, not mid | core `funding.py`, `funding_settler.py` | CORE-OWNS; March needs funding data |
 | Margin, tiers, liquidation | core `margin.py`, `margin_model.py` | CORE-OWNS |
 | Markouts by venue and role | `latency_model.py` tracker, core `tca.py` | MOVE to core metrics using the requirements definition |
@@ -144,19 +144,21 @@ D. One runtime: `QueueAwareVenueAdapter`, the strategy on the SDK, old vs new pa
 E. Risk gate, breaker pause vs trip, flatten on trip, ghost hedge fix, pairing, venue selector. Not built in Phase 0.
 F. Clean up, then paper, testnet and a mainnet adapter under the requirements' stage gates.
 
+Naming: phases 0 and A-F here are integration phases. The "Phase 0" and "Gate 0" in `canonical_execution_layer_simplified.html` are that design's step 1, already done in `new_backtest/execution`. Its later steps map as follows: step 3 (pairing, venue selector, risk gate) is phase E here. Steps 4 (phase 1-lite hedge limit sweep) and 5 (Albers features) run after phase F on the shared code, as strategy work. The adaptive hedge limit stays deferred.
+
 ## 6. Decisions for the owner
 
 1. Decided 5 Nov: `crypto_stat_arb` is the only live stack. `trading_platform_poc` is out of scope.
 2. Decided 5 Nov: `MakerExecutor` + queue v2 is the reference; the C++ engine stays as a parity test.
 3. Is slower replay acceptable? Core uses `Decimal`; `fill_engine.py` uses floats, and one March day already takes about 2.5 hours. Measure at step 4 before committing.
 
-4. Exact SOLUSDT fee rates. Binance per owner, 5 Nov: maker 2.0 bps (1.8 in BNB), taker 5.0 bps (4.5 in BNB). These equal the standard base tier and the existing presets `binance_perp_vip0` and `binance_perp_bnb`, not public VIP 9 (about 0 / 1.7 bps), so confirm they come from the account, and whether fees are paid in BNB. Bybit per owner, 5 Nov: maker 2.0 bps, taker 5.5 bps, which equal the base tier and preset `bybit_perp_vip0`, with no rebate. Until shown otherwise, headline runs use `bybit_perp_vip0` + `binance_perp_vip0` (7.0 bps per maker-hedge pair; 6.5 with BNB taker), not `bybit_perp_mm` (-0.5 bps, 4.5 bps per pair), which becomes a scenario. All v1.1 results so far used `bybit_perp_mm`. Confirm the figures are the account's own SOLUSDT rates, then label them verified with the date.
+4. Exact SOLUSDT fee rates. Owner confirms a Bybit maker rebate, remembered as -0.5 bps. Headline: `bybit_perp_mm` + `binance_perp_vip0` (4.5 bps per maker-hedge pair), which v1.1 already uses. `bybit_perp_vip0` is the conservative scenario (7.0 bps per pair). Open: the exact rebate, the Bybit taker rate, and the Binance tier. Figures given on 5 Nov (Binance 2.0/5.0, Bybit 2.0/5.5) equal public base rates, while the owner reports VIP 9; public VIP 9 on Binance is about 0/1.7 bps. Label verified with the date once taken from the account.
 5. Decided 5 Nov: `opportunity.py` logic is ported into the core. The file itself is not copied, and the rest of `trading_platform_poc` stays out of scope.
 
 ## 7. Not established
 
 - Section 4 uses names, docstrings, imports and targeted reads. The first matrix confirmed the main gaps, but it lacks the row-by-row maker simulator comparison and the fill models, and its rows A8, A9, P5 and B4 are partly unverified.
-- Crossed-book counts are measured; the transient-message explanation is a hypothesis.
+- Crossed books: transient inside one message in all 35,902 messages of three 20-minute Bybit March slices. Message grouping by identical timestamps is an assumption, and the effect on signals and fills is not measured yet.
 - Requirements: `Minimal Requirements v2.1` (17 Aug) covers risk, reconciliation and monitoring, with gates AT-01 to AT-14; checklist in `requirements_checklist.md`. The 15 Oct PDF has 5 pages, but the 29 Oct review cites 15 Oct groups `STR`, `CLK` and `SIM` that are not in it, and `SDK01-07` where the PDF stops at SDK05. A longer version may exist.
 - The L3 guide, full and simplified execution design, Minimal Requirements and 29 Oct review are now in `out/integration/reports/`.
 - `MINIMUM_REQUIREMENTS.md` describes `trading_platform_poc/minreq/`, which is out of scope. Traceability says the core also meets MR-01 to MR-17; that is unverified.

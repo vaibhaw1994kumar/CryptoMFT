@@ -1,0 +1,17 @@
+{
+ "2024-03-08": {
+  "alone_wall_s": 212,
+  "in_parallel_wall_s": 264,
+  "events": 6007999,
+  "signals": 0,
+  "fills": 0
+ },
+ "2024-03-11": {
+  "alone_wall_s": 378,
+  "in_parallel_wall_s": 517,
+  "events": 10035188,
+  "signals": 2,
+  "fills": 1
+ },
+ "note": "v1.1 2-hour March slice, one replay alone on an 8-core 8 GB Mac. 03-08 has 0 signals (times feed and book handling only); 03-11 has 2 signals and 1 fill (exercises the strategy, fill engine and execution layer, so it is the Phase A reference). In-parallel = 3 replays at once."
+}

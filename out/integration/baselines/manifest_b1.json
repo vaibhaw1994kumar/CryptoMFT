@@ -1,0 +1,302 @@
+{
+ "jan/legacy_v0/2022-01-05": {
+  "files": {
+   "trades.jsonl": "c78fbbc6e58e1196a225fe04ff46576b1264489694e743a9723d236b034a0c21",
+   "fill_events.jsonl": "b85faef9aba7005df81ff2039212c5d6e27721e7ae06900a5ed6f841344ef036",
+   "fill_bucket_stats.json": "cdecd1eee571d655db72144cf777b3efb18c0e7cccd9ada275ffb399af15317c",
+   "model_settings.json": "ec920fc828298357b87cb49f2919303bff1adc3c91c5c742a8e719d244a15010"
+  },
+  "summary_sha256": "457b041c5d107ea006bbf1378bb41586016478cd7c9f2cbc411e6d4b421d1790",
+  "result": {
+   "signals": 51,
+   "fills": 49,
+   "orders_sent": 100,
+   "fees_paid": 4.230458610223081,
+   "gross_pnl": 4.61047874675778,
+   "cash_pnl": 0.3800391365346627,
+   "ending_equity_common_timestamp": 17.535039136534692,
+   "final_inventory": {
+    "bybit": -2.0,
+    "binance": 2.0
+   },
+   "traded_notional": 13929.47118726144
+  },
+  "wall_s": 784.06281208992,
+  "events_processed": null
+ },
+ "jan/legacy_v0/2022-01-13": {
+  "files": {
+   "trades.jsonl": "2c5dd48caba8b807484e19734b1d0296f3a307b4c91985771de60c4ff10345c2",
+   "fill_events.jsonl": "2a205e150faa600190afd4f796cd3663c5154c7aa98e22b9f4027f6d2d2f235e",
+   "fill_bucket_stats.json": "53ad66db1c599f43d0f0803bb066ee82a677a5550b2bc175ea0555e09f1d7859",
+   "model_settings.json": "ec920fc828298357b87cb49f2919303bff1adc3c91c5c742a8e719d244a15010"
+  },
+  "summary_sha256": "c5e8aafc51c75103bd49b511f0300a545f69ba57cf526affe61e01150ca5f82f",
+  "result": {
+   "signals": 127,
+   "fills": 131,
+   "orders_sent": 258,
+   "fees_paid": 10.618023218077758,
+   "gross_pnl": 10.755510461072676,
+   "cash_pnl": 0.13750124299446043,
+   "ending_equity_common_timestamp": 10.302501242994424,
+   "final_inventory": {
+    "bybit": -2.0,
+    "binance": 2.0
+   },
+   "traded_notional": 35240.97056499868
+  },
+  "wall_s": 1116.9911658763885,
+  "events_processed": null
+ },
+ "jan/perp_perp_maker_taker_v1/2022-01-05": {
+  "files": {
+   "trades.jsonl": "d8da5e7bd74b02aa67929dae9e8e7926a1afa77d22beaed699bf3a79b00f184c",
+   "fill_events.jsonl": "edd7ec1ad9dc5b8aabefeb7d301c709c2cbaafb8f10456b1de4561405ce61dee",
+   "fill_bucket_stats.json": "ebe697381d078c4b202c8e4c898873f1c3c09423d56b021e7bdaa7ede3cb4af7",
+   "model_settings.json": "73719d67e0765f5d69a55829ab27fb6043b26ebb48a498fadbf00ef278a9910c"
+  },
+  "summary_sha256": "7e92d274c20b901fbb697e9b827f0d7aef78fa18ebf36cc858bcf7e871926da5",
+  "result": {
+   "signals": 41,
+   "fills": 36,
+   "orders_sent": 77,
+   "fees_paid": 2.9007361300199914,
+   "gross_pnl": 3.6573187788000254,
+   "cash_pnl": 0.7565924612800927,
+   "ending_equity_common_timestamp": 0.7534674612801098,
+   "final_inventory": {
+    "bybit": -1.25,
+    "binance": 1.25
+   },
+   "traded_notional": 9559.454081221202
+  },
+  "wall_s": 831.4217290878296,
+  "events_processed": null
+ },
+ "jan/perp_perp_maker_taker_v1/2022-01-13": {
+  "files": {
+   "trades.jsonl": "076baab8d2aed986e655748bad9015111356fc49a422bb3de705619967c5b70c",
+   "fill_events.jsonl": "d202e3f4bbb1a21626f6fc71a122e51ae1598db5224d9fd4095eb5f8da2f76f9",
+   "fill_bucket_stats.json": "510a96ba718c7ee829ed7d2500dbb18007f57be9642b701699952e58d97a1d79",
+   "model_settings.json": "73719d67e0765f5d69a55829ab27fb6043b26ebb48a498fadbf00ef278a9910c"
+  },
+  "summary_sha256": "39bc2f84a436c9fb521f88413e51e2c1a65f0721e2cad5bd1bffb558bd63366b",
+  "result": {
+   "signals": 65,
+   "fills": 66,
+   "orders_sent": 131,
+   "fees_paid": 4.859570982525119,
+   "gross_pnl": 6.800520191230996,
+   "cash_pnl": 1.9409579587058374,
+   "ending_equity_common_timestamp": 1.844082958705826,
+   "final_inventory": {
+    "bybit": -1.25,
+    "binance": 1.25
+   },
+   "traded_notional": 16101.508456166039
+  },
+  "wall_s": 1240.9897680282593,
+  "events_processed": null
+ },
+ "jan/perp_perp_maker_taker_v1_1/2022-01-05": {
+  "files": {
+   "trades.jsonl": "e3b293e97c88f2d86ffec8bbb087bd0394735f1965e2cd2136d53214065fc863",
+   "fill_events.jsonl": "568d8f857f0e0d8e814a5dbe7c8e02041ae4eac839ba9825e3472a0ffd5a1937",
+   "fill_bucket_stats.json": "c882e979b4469fe1de06e9e052e5b4c9825efa77329d3812e2ffc10643af97e5",
+   "model_settings.json": "0f8ea1b7815e4f0176601b442c3257947ca65abcc48ecaf92cf8969751a47e4b"
+  },
+  "summary_sha256": "7c462399c6f1bee197c7ff0ac0d99f5841a6f90fcb16d659caaaf2ee573ce6a7",
+  "result": {
+   "signals": 15,
+   "fills": 3,
+   "orders_sent": 18,
+   "fees_paid": 0.198970755,
+   "gross_pnl": 0.1953500000000133,
+   "cash_pnl": -0.0036109425000461215,
+   "ending_equity_common_timestamp": -0.0067359425000290685,
+   "final_inventory": {
+    "bybit": -1.25,
+    "binance": 1.25
+   },
+   "traded_notional": 557.78165
+  },
+  "wall_s": 831.8661930561066,
+  "events_processed": null
+ },
+ "jan/perp_perp_maker_taker_v1_1/2022-01-13": {
+  "files": {
+   "trades.jsonl": "6a1643739aada931cc1a1f5b1335ddbc58ea06ef3a704577da1a39ae79b53553",
+   "fill_events.jsonl": "649b911dece69b5e4935df7da72830f24b6fdb8913f10e822f2e413552579021",
+   "fill_bucket_stats.json": "9f9edc90a7d2cb64c02b899ecc49a8b1e5af510b10350a9244d3822c53cf085c",
+   "model_settings.json": "0f8ea1b7815e4f0176601b442c3257947ca65abcc48ecaf92cf8969751a47e4b"
+  },
+  "summary_sha256": "9339ee72977b4ec226876587d853ef1a344f2392db93c34eca90d1b27540c0e4",
+  "result": {
+   "signals": 60,
+   "fills": 21,
+   "orders_sent": 81,
+   "fees_paid": 1.5536168375000006,
+   "gross_pnl": 0.9465000000000146,
+   "cash_pnl": -0.607108087499995,
+   "ending_equity_common_timestamp": -0.7039830875000064,
+   "final_inventory": {
+    "bybit": -1.25,
+    "binance": 1.25
+   },
+   "traded_notional": 5084.314999999998
+  },
+  "wall_s": 1243.1657919883728,
+  "events_processed": null
+ },
+ "mar/legacy_v0/2024-03-08": {
+  "files": {
+   "trades.jsonl": "290c8fddd12891cc832fe5f5bd58d5bfdc78f04790967c6eb1fa1954edfe527b",
+   "fill_events.jsonl": "c1531070a6f85e6e930fdd6af8b44469cb6b0480ddbe56591695ae465504f27c",
+   "fill_bucket_stats.json": "e413b04abdd59ad979235acc75af40dc053291083b7824f7b1b46c42005650d6",
+   "model_settings.json": "e5e28d95fb69e53910ff92a624a773f49d50269a6f6fb7337187ee97d7d8243d"
+  },
+  "summary_sha256": "143a8f52367d025e4cc61343c0ad8ff9b438becc4c9a6e03d0643602c78b754a",
+  "result": {
+   "signals": 13,
+   "fills": 12,
+   "orders_sent": 24,
+   "fees_paid": 0.9464015410380736,
+   "gross_pnl": 0.1945553161473299,
+   "cash_pnl": 0.5914221751092441,
+   "ending_equity_common_timestamp": 0.5464221751092282,
+   "final_inventory": {
+    "bybit": -1.0,
+    "binance": 1.0
+   },
+   "traded_notional": 3175.081582516147
+  },
+  "wall_s": 256.18283009529114,
+  "events_processed": 5966962
+ },
+ "mar/legacy_v0/2024-03-11": {
+  "files": {
+   "trades.jsonl": "2305afd9cafaf7669ecc94dd8574324d5bdc3327e5ad3fd07565bc2ec1dcc580",
+   "fill_events.jsonl": "209de0fffbe7fe0e1974edfb7d077dd935578b723178fcd200ea6518b63f4be0",
+   "fill_bucket_stats.json": "31e6b9b02512d507fd0263e3c23a891e8c08279fa17dc3ef792312c6dc13f305",
+   "model_settings.json": "e5e28d95fb69e53910ff92a624a773f49d50269a6f6fb7337187ee97d7d8243d"
+  },
+  "summary_sha256": "0ef8663e0f7e5971adb638dd84278690644f3d98233d579c39d67b22bdd1f71a",
+  "result": {
+   "signals": 63,
+   "fills": 61,
+   "orders_sent": 124,
+   "fees_paid": 4.076026818356246,
+   "gross_pnl": 3.4519398644935966,
+   "cash_pnl": -5.360380193862483,
+   "ending_equity_common_timestamp": -5.360380193862452,
+   "final_inventory": {
+    "bybit": 2.220446049250313e-16,
+    "binance": 0.0
+   },
+   "traded_notional": 13783.244650864486
+  },
+  "wall_s": 451.96920919418335,
+  "events_processed": 9931125
+ },
+ "mar/perp_perp_maker_taker_v1/2024-03-08": {
+  "files": {
+   "trades.jsonl": "41a585e91fc4cfdc3a406fd8076c907c358ff0e8771c94734c0f8e8d11a9a35c",
+   "fill_events.jsonl": "79d367ee949f9d0278dc9e016651d354c5131a7bf49b61ecc4a19d994bc64538",
+   "fill_bucket_stats.json": "95ba33d8b26ca59f20936273ad79aebec24de3988920cba865113648c3f54a27",
+   "model_settings.json": "6f1a3b8a34f2de16fd7efbce258f0a68fcfaf9238a875383a831cc8bad4a2dfd"
+  },
+  "summary_sha256": "65057477b2ff56dd3cbf917863b28cb4a2f9810debb2225875d247a89aa6a885",
+  "result": {
+   "signals": 8,
+   "fills": 3,
+   "orders_sent": 12,
+   "fees_paid": 0.2377816596743625,
+   "gross_pnl": 0.13853476275420462,
+   "cash_pnl": -0.09924689692016386,
+   "ending_equity_common_timestamp": -0.05424689692014795,
+   "final_inventory": {
+    "bybit": 1.0,
+    "binance": -1.0
+   },
+   "traded_notional": 863.5174652372458
+  },
+  "wall_s": 249.30889701843262,
+  "events_processed": 5966962
+ },
+ "mar/perp_perp_maker_taker_v1/2024-03-11": {
+  "files": {
+   "trades.jsonl": "005c3d26755dc3a8dc14e8d753521ebe232e5ddac314ee39650e8e00dba3a242",
+   "fill_events.jsonl": "13575b9613972eec50d5d461dd6bce8d794d1289280164b3b6bfd6be639faa86",
+   "fill_bucket_stats.json": "b27e2f342c3209d7ad918c127985756e5a7a8b02df96af71b359760a6f25a95a",
+   "model_settings.json": "6f1a3b8a34f2de16fd7efbce258f0a68fcfaf9238a875383a831cc8bad4a2dfd"
+  },
+  "summary_sha256": "71fa5d0850a759eb52ed6ae54e3b1f80fa31bc5c200971170f7060d3e4860873",
+  "result": {
+   "signals": 39,
+   "fills": 20,
+   "orders_sent": 63,
+   "fees_paid": 1.3160554431370883,
+   "gross_pnl": 0.35253220922585626,
+   "cash_pnl": -0.9635232339112747,
+   "ending_equity_common_timestamp": -0.9610232339112486,
+   "final_inventory": {
+    "bybit": -1.25,
+    "binance": 1.25
+   },
+   "traded_notional": 4396.685387790774
+  },
+  "wall_s": 496.2486836910248,
+  "events_processed": 9931125
+ },
+ "mar/perp_perp_maker_taker_v1_1/2024-03-08": {
+  "files": {
+   "trades.jsonl": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+   "fill_events.jsonl": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+   "fill_bucket_stats.json": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+   "model_settings.json": "1188e30c57080cbda60e7988f455eaf3d493db1ef8b28034359aa1f1f8c51787"
+  },
+  "summary_sha256": "6ac61747b4aaf2bbea121f0394481cc82a01a245412124a57d013e33a45de54f",
+  "result": {
+   "signals": 0,
+   "fills": 0,
+   "orders_sent": 0,
+   "fees_paid": 0.0,
+   "gross_pnl": 0.0,
+   "cash_pnl": 0.0,
+   "ending_equity_common_timestamp": 0.0,
+   "final_inventory": {
+    "bybit": 0.0,
+    "binance": 0.0
+   },
+   "traded_notional": 0.0
+  },
+  "wall_s": 264.2737727165222,
+  "events_processed": 6007999
+ },
+ "mar/perp_perp_maker_taker_v1_1/2024-03-11": {
+  "files": {
+   "trades.jsonl": "e8e671fb13be415345400a14ca34cac8ef54d23ed750a278ae8c27f8be569ded",
+   "fill_events.jsonl": "c85e9ab3058539f4de100250784fcf6d77aa0c876ec0428b9d4be413ef012938",
+   "fill_bucket_stats.json": "c8d07ed0b5a34cf5a17b80fb93a72a4cd0bdca9f726e1749aa2c28256993b841",
+   "model_settings.json": "1188e30c57080cbda60e7988f455eaf3d493db1ef8b28034359aa1f1f8c51787"
+  },
+  "summary_sha256": "06e7d3d85833f05ee7e17f6f032b6b69dfa8ee8c7b75961460987e119042e2ae",
+  "result": {
+   "signals": 2,
+   "fills": 1,
+   "orders_sent": 3,
+   "fees_paid": 0.06352865,
+   "gross_pnl": 0.007000000000005002,
+   "cash_pnl": -0.056528649999989966,
+   "ending_equity_common_timestamp": -0.058528649999999516,
+   "final_inventory": {
+    "bybit": 1.0,
+    "binance": -1.0
+   },
+   "traded_notional": 282.341
+  },
+  "wall_s": 517.2512493133545,
+  "events_processed": 10035188
+ }
+}

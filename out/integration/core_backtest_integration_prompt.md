@@ -21,16 +21,16 @@ TARGET LAYOUT in src/crypto_stat_arb/
 Adjust a name only with a stated reason.
 
 GATE 1 DECISIONS (owner)
-1. Proposal 4A, the accounting-only shadow, approved, with new_backtest/core_shadow.py as the one new file. Delete it when Phase B ends.
+1. Proposal 4A, the accounting-only shadow, approved, with new_backtest/core_shadow.py as the one new file, not the selftest-only alternative. Delete it when Phase B ends.
 2. Proposal 4B, the deferred hedge child, approved for Phase C.
-3. Reference maker simulator: MakerExecutor + queue v2. Keep the C++ engine as a parity test only.
-4. trading_platform_poc/opportunity.py is back in scope as a source. Port its fill-triggered path, leg recovery and reconciliation into the core OMS/EMS. Do NOT copy the file: it brings its own Order model, async coordinator and store, which would make a third OMS. Read tests/platform_kit/test_opportunity_fill_triggered.py and test_opportunity_hardening.py and carry their cases over. The rest of the package stays out of scope.
+3. Reference maker simulator: MakerExecutor + queue v2. Keep the C++ engine as a parity test only. `sim_engine/*.py`, fill_model_deep.py and fill_model_queue.py (nothing produces its model file) go to discarded/ in Phase F.
+4. trading_platform_poc/opportunity.py is back in scope as a source. Port its fill-triggered path, leg recovery and reconciliation into the core OMS/EMS. Do NOT copy the file: it brings its own Order model, async coordinator and store, which would make a third OMS. Read tests/platform_kit/test_opportunity_fill_triggered.py and test_opportunity_hardening.py and carry their cases over. The rest of the package stays out of scope. This replaces the earlier message telling you to skip opportunity.py; the matrix itself stays as it is.
 5. Requirements decide conflicts: query before replace (OMS03), invalidate on gaps (DAT05), lot and minimum checks (REF04), revalidate at dispatch (EMS01).
-6. Book: apply each exchange message as one unit, then count and validate crossed books the core's way at message end. New behaviour goes behind a v1_2 switch; v1.1 stays identical.
-7. Keep BT market_first for equal timestamps, recorded in the run manifest as a model difference.
+6. Port order as in matrix section 5 is approved. Book: apply each exchange message as one unit, then count and validate crossed books the core's way at message end. Do not invalidate the book on a mid-message cross. The message-atomic book and query before replace change results, so both go behind a v1_2 switch; v1.1 stays identical.
+7. Equal timestamps (P5): keep BT market_first as the one simulator rule, recorded in the run manifest. The core's cancel-first tie rule goes when maker_sim retires. Live has no tie: the exchange decides.
 8. Risk limits: report both base quantity and USDT notional. The core keeps notional limits and adds base limits in Phase E.
-9. Fees: headline bybit_perp_vip0 + binance_perp_vip0 (Bybit 2.0/5.5, Binance 2.0/5.0 bps, BNB 1.8/4.5). bybit_perp_mm is a scenario. The owner still has to confirm these are the account's own rates, so label them ASSUMED until then.
-10. Legacy_v0 and v1 results stay as reference, labelled as containing fills without trades.
+9. Fees: do not ask for a tier per data period; the account did not trade those periods. The question is the rate we will trade on. Owner confirms a Bybit maker rebate. Headline: bybit_perp_mm (maker -0.5 bps, taker 5.5) + binance_perp_vip0 (2.0/5.0; BNB 1.8/4.5), which is what v1.1 already uses, so v1.1 needs no fee change. bybit_perp_vip0 (+2.0 maker) is the conservative scenario (ECO01). Label all rates ASSUMED until the owner gives the account's own SOLUSDT figures: the rebate size and the Binance tier are unconfirmed. In Phase B, the core FeeSchedule and config/perp_research.json must carry the same rates, because the core config still says Bybit maker +2.0.
+10. Legacy_v0 and v1 results stay as reference, labelled as containing fills without trades (C9); they are never headline numbers.
 11. Leave the 37 uncommitted core deletions alone unless the owner says otherwise. Do not stage them.
 12. Dead modules move to discarded/<version>/ in Phase F.
 
@@ -48,7 +48,8 @@ GUARDRAILS
 
 PHASE 0: Baseline and scenarios
 - Record byte-level baselines: trade log, fill events, result, for legacy_v0, v1 and v1.1 on 2022-01-05, 2022-01-13 and one 2-hour March slice.
-- Write 12 deterministic two-venue scenarios, with expected orders, fills, position, fees, funding and cash worked out by hand first: clean fill and hedge; maker partial; maker never fills; hedge rejected, retry, unwind; lost ack then ghost fill at reconnect; cancel race; PostOnly reject; funding across settlement; risk refusal; breaker trip with position open; margin stress to liquidation; restart with an open position. Reuse tests/synthetic_days.py, the Harness in tests/test_perp_arb_legs.py and selftest.py. State which ones today's code cannot express. Include review Demonstrations 1, 3 and 4.
+- Run the parity tests the matrix only quoted: tests/test_order_state_parity.py and tests/test_maker_executor_engine_parity.py, and report the result.
+- Write 12 deterministic two-venue scenarios, with expected orders, fills, position, fees, funding and cash worked out by hand first: clean fill and hedge; maker partial; maker never fills; hedge rejected, retry, unwind; lost ack then ghost fill at reconnect; cancel race; PostOnly reject; funding across settlement; risk refusal; breaker trip with position open; margin stress to liquidation; restart with an open position. Reuse tests/synthetic_days.py, the Harness in tests/test_perp_arb_legs.py and selftest.py. State which ones today's code cannot express. Include review Demonstrations 1, 3 and 4. Add a scenario for a crash between "persisted" and "sent" (OMS03), which has no test today.
 GATE: owner reviews.
 
 PHASE A: Move shared code into the core, no logic change
@@ -60,16 +61,23 @@ GATE.
 PHASE B: Shared accounting, fees and book rules
 - Build the accounting shadow (matrix 4A) and sort every difference: BUG_BACKTEST, BUG_CORE or BY_DESIGN. Then switch the backtester to the core's FeeSchedule, funding, margin and ledger. Port common-timestamp valuation into the core. Retire funding_settler, margin_model and fee presets.
 - Behind v1_2: message-atomic book with crossed-book counting by the core rule, gap handling, tick/lot/minimum checks, query before replace.
+- Make signals and maker queue updates run after a whole message, not after each delta. The touch differs from the end-of-message touch on 18-22% of deltas. Measure what half-applied messages did to signals and fills: v1.1 vs v1_2, one change at a time.
+- Extend the crossed-book measurement beyond three 20-minute Bybit slices: more hours and days, and January. Prove the message boundary from the data, since identical exchange_ts and local_ts as one message is an assumption. Binance March is best bid/ask only; say so.
+- Margin: settle A9, where the backtester never liquidates a position above its last tier and the core treats it as a breach. The core rule wins unless the requirements say otherwise.
 - Measure Decimal cost at the simulator boundary. Keep floats inside the simulator if needed and record that in the manifest.
 GATE.
 
 PHASE C: Core fill-triggered hedging
 - Add FILL_TRIGGERED (matrix 4B), porting behaviour from opportunity.py and backtester._on_fill: deferred hedge child, atomic package reservation, hedge for the filled quantity, one live hedge child, unknown block, EMS01 revalidation, durable send per OMS03. Settle the rule for a second partial fill while a hedge is in flight.
+- EMS01 is unmet in both stacks: a request queued for rate limits is later sent against the book captured when it was queued. At release, re-check price, freshness and limits, and expire it when the opportunity has passed. This covers every queued route, not only hedges.
+- Add the skipped risk check mutation here: risk is not in the Phase B shadow.
+- The hedging work already exists: port it, do not reinvent it. Sources: backtester._on_fill and the hedge retry/unwind paths, execution/layer.py, execution/reconcile.py, hedge_faults.py, circuit_breaker.py, fill_engine.py lifecycle records, and the core's residual, unwind, alarm and deadline paths in oms.py. Reports to read: hedge_failure_study_report, hedge_failure_deep_dive_report, lifecycle_realism_report, perp_lifecycle_report, perp_mechanics_report.
+- Rule-versus-simulation split: rules go into core OMS/EMS (partial-fill hedging, retry, unwind, UNKNOWN, ghost handling, recovery, reconciliation). Injected failures stay in simulation/. Every failure case in those reports must become a scenario that passes through the core path, with the old result shown beside it. Where a report's behaviour conflicts with OMS03, the requirement wins.
 - DETERMINISTIC_SEQUENTIAL stays the default, with all its tests green.
 GATE.
 
 PHASE D: One runtime
-- Build QueueAwareVenueAdapter on VenueExecutionAdapter, adding an on_trade hook beside on_book_update. Move the arb strategy to the SDK protocol. TradingSession runs it in backtest and paper.
+- Build QueueAwareVenueAdapter on VenueExecutionAdapter, adding an on_trade hook beside on_book_update. Move the arb strategy to the SDK protocol. TradingSession runs it in backtest and paper. DeterministicVenueAdapter resting fills come from a book cross, not a print (F9), so they must not carry the arb maker leg; keep that adapter for taker fills only.
 - Parity: same synthetic data, then March slices and January days, old path vs new. Every difference is explained or recorded in the run manifest.
 GATE.
 
