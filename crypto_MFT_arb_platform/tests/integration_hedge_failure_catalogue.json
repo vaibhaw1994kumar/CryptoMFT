@@ -1,0 +1,878 @@
+{
+ "title": "Hedge-failure case catalogue: the Phase C acceptance list",
+ "source": "Built in Phase 0 (5 Nov 2026) from hedge_failure_study_report (HS), hedge_failure_deep_dive_report (HD), lifecycle_realism_report (LR), perp_lifecycle_report (PL), perp_mechanics_report (PM). Code and tests are as of the phase0-gate tag.",
+ "how_to_read": "Each case lists where the backtester and the core handle it today, with the tests that pin it, and the scenario in tests/test_integration_scenarios.py (S1-S19) or the existing test that covers it. A test prefixed with ~ is related, not a direct test. Test names were checked to exist, not to cover the claim: treat the list as the Phase C acceptance list to confirm, case by case, when each is run through the core path with the old result shown beside it. Decisions (5 Nov): unwind band stays 15 bps in v1.1 and becomes one core setting labelled DECISION_PENDING_CALIBRATION in Phase C; the 5 s breaker rule and the 30 s residual-breach rule stay separate settings, evidence from the fault runs goes to Phase E.",
+ "cases": [
+  {
+   "id": "H01",
+   "case": "Hedge rejected at the exchange and carried (no response: study option)",
+   "reports": [
+    "HS",
+    "PM"
+   ],
+   "backtester": {
+    "code": "backtester.py _hedge_failed 2058 / _handle_recover 2097 (response none)",
+    "tests": [
+     "test_hedge_failures.py::test_a_rejected_hedge_is_carried_when_the_response_is_none"
+    ]
+   },
+   "core": {
+    "code": "no carry option: a failed leg goes to the residual path, oms.py _assess_legging_risk 1149 / _execute_residual_unwind 1342; residual bound holds new risk",
+    "tests": [
+     "test_oms.py::test_out_of_bound_residual_cannot_close_when_unwind_fails"
+    ]
+   },
+   "scenario": "existing test + S04",
+   "note": "Carry is a study option only; the core never carries by choice."
+  },
+  {
+   "id": "H02",
+   "case": "Hedge rejected, response unwind: sell back on the maker venue, with latency, at the book of arrival",
+   "reports": [
+    "HS",
+    "PM"
+   ],
+   "backtester": {
+    "code": "backtester.py _send_unwind 2244 / _execute_unwind 2276",
+    "tests": [
+     "test_hedge_failures.py::test_unwind_response_sells_back_on_the_maker_venue_after_detection_and_entry_latency_at_the_book_of_that_moment"
+    ]
+   },
+   "core": {
+    "code": "oms.py _execute_residual_unwind 1342, reduce-only, price band _unwind_price 1218",
+    "tests": [
+     "test_oms.py::test_failed_leg_dispatches_reduce_only_unwind_and_finishes_flat"
+    ]
+   },
+   "scenario": "S04",
+   "note": "Same job, two implementations. Band: backtester 15 bps (profile), core 10 bps (ResidualPolicy default): a decision for Phase C."
+  },
+  {
+   "id": "H03",
+   "case": "Hedge rejected, retried twice 0.25 s apart, then unwound",
+   "reports": [
+    "HS",
+    "PM",
+    "PL"
+   ],
+   "backtester": {
+    "code": "backtester.py _handle_recover retry_send, _resend 2193",
+    "tests": [
+     "test_hedge_failures.py::test_retries_then_unwind"
+    ]
+   },
+   "core": {
+    "code": "none: the core never retries the same leg; it goes straight to unwind (attempts bounded, max 3)",
+    "tests": []
+   },
+   "scenario": "S04",
+   "note": "GAP in the core: retry-before-unwind exists only in the backtester. Port it (Phase C), after a query (OMS03)."
+  },
+  {
+   "id": "H04",
+   "case": "A retry gets through after a short gateway outage",
+   "reports": [
+    "HS"
+   ],
+   "backtester": {
+    "code": "backtester.py _resend",
+    "tests": [
+     "test_hedge_failures.py::test_a_retry_that_gets_through_hedges_the_position"
+    ]
+   },
+   "core": {
+    "code": "none (see H03)",
+    "tests": []
+   },
+   "scenario": "existing test",
+   "note": "Same gap as H03."
+  },
+  {
+   "id": "H05",
+   "case": "Legacy instant flatten: unwinds at the touch with no latency and cannot fail (the oracle)",
+   "reports": [
+    "HS"
+   ],
+   "backtester": {
+    "code": "backtester.py _unwind / _unwind_impl 1648-1654 (response legacy)",
+    "tests": [
+     "test_hedge_failures.py::test_the_legacy_response_flattens_instantly_at_the_touch_with_no_latency"
+    ]
+   },
+   "core": {
+    "code": "none (real unwinds only)",
+    "tests": []
+   },
+   "scenario": "existing test",
+   "note": "SIM_ONLY oracle, forbidden in the perp profile; legacy_v0 keeps it. Retire with legacy_v0, not before."
+  },
+  {
+   "id": "H06",
+   "case": "Hedge sent late (1 s, 5 s, 30 s) and missing if the book moves through its limit",
+   "reports": [
+    "HS"
+   ],
+   "backtester": {
+    "code": "backtester.py _inject_send_faults 1954 (delay), _execute_hedge_with_faults 2321 (failed_price_moved)",
+    "tests": [
+     "test_hedge_failures.py::test_when_the_book_moves_through_the_hedge_limit_during_the_delay_the_hedge_misses_and_the_response_takes_over"
+    ]
+   },
+   "core": {
+    "code": "no injection (simulation only); the rule that matters is the residual age deadline, oms.py",
+    "tests": [
+     "test_oms.py::test_residual_age_deadline_escalates_unwind_to_market"
+    ]
+   },
+   "scenario": "S16 (a) and (b)",
+   "note": "Injection stays in simulation/. The core has an age deadline the backtester lacks (it has the 5 s breaker rule instead)."
+  },
+  {
+   "id": "H07",
+   "case": "The hedge fills only partly and the rest fails like a rejection",
+   "reports": [
+    "HS",
+    "PM",
+    "PL"
+   ],
+   "backtester": {
+    "code": "backtester.py _execute_hedge_with_faults (partial_fraction)",
+    "tests": [
+     "test_hedge_failures.py::test_partial_hedge_fill_unwinds_the_remainder"
+    ]
+   },
+   "core": {
+    "code": "oms.py residual of a partly filled leg, unwound; bound check",
+    "tests": [
+     "test_execution_realism.py::test_residual_exactly_at_the_cap_still_triggers_unwind",
+     "test_residual_exposure.py::test_carried_residual_counts_against_legging_exposure"
+    ]
+   },
+   "scenario": "S17",
+   "note": "SAME rule: unwind the unhedged remainder."
+  },
+  {
+   "id": "H08",
+   "case": "Hedge sent into a gateway outage, lost (blackhole), strategy acts after the ack timeout",
+   "reports": [
+    "HS",
+    "PM",
+    "PL"
+   ],
+   "backtester": {
+    "code": "backtester.py _inject_send_faults (policy blackhole), _active_outage 1718",
+    "tests": [
+     "test_hedge_failures.py::test_blackhole_the_order_is_lost_and_the_strategy_finds_out_after_the_ack_timeout"
+    ]
+   },
+   "core": {
+    "code": "oms.py check_order_deadlines 2077: query the venue, never resend; unanswered queries time out and trip the kill switch",
+    "tests": [
+     "test_execution_realism.py::test_lost_report_is_queried_before_hedging_and_never_resent",
+     "test_execution_realism.py::test_unanswered_queries_time_out_block_close_and_trip_kill_switch"
+    ]
+   },
+   "scenario": "S18 (today pinned; target fails today)",
+   "note": "CONFLICT: the backtester unwinds after the timeout without a query; the core queries first. OMS03: the core rule wins."
+  },
+  {
+   "id": "H09",
+   "case": "Ghost: the written-off hedge is delivered at reconnect and over-hedges",
+   "reports": [
+    "HS",
+    "HD",
+    "PM",
+    "PL"
+   ],
+   "backtester": {
+    "code": "backtester.py _execute_ghost 2301; layer.py child_ghosted",
+    "tests": [
+     "test_hedge_failures.py::test_ghost_the_written_off_hedge_lands_at_reconnect_and_over_hedges"
+    ]
+   },
+   "core": {
+    "code": "no ghost concept; query-before-replace prevents it; a fill that reveals itself after the plan closed trips the kill switch once",
+    "tests": [
+     "test_execution_realism.py::test_late_fill_after_close_trips_the_kill_switch_once_only"
+    ]
+   },
+   "scenario": "S05 (target fails today)",
+   "note": "Open defect (peak 3x on 2022-01-05). Requirement wins: Phase E must keep it within 1x."
+  },
+  {
+   "id": "H10",
+   "case": "Outage with policy queue: delivered at reconnect, the strategy just waits",
+   "reports": [
+    "HS"
+   ],
+   "backtester": {
+    "code": "backtester.py _inject_send_faults (policy queue)",
+    "tests": [
+     "test_hedge_failures.py::test_queue_the_order_is_delivered_at_reconnect_and_the_strategy_just_waits"
+    ]
+   },
+   "core": {
+    "code": "the core's only queue is the rate-limit queue (execution.py process_throttled 1274)",
+    "tests": []
+   },
+   "scenario": "existing test",
+   "note": "EMS01 gap: the core sends a queued request against the book captured at queue time (Phase C fix)."
+  },
+  {
+   "id": "H11",
+   "case": "Send into an outage fails locally and is known at once (policy reject)",
+   "reports": [
+    "HS"
+   ],
+   "backtester": {
+    "code": "backtester.py _inject_send_faults (policy reject)",
+    "tests": [
+     "test_hedge_failures.py::test_reject_the_send_fails_locally_and_is_known_at_once"
+    ]
+   },
+   "core": {
+    "code": "execution.py route(): book_unavailable / book_not_tradable, venue suspended -> REJECTED",
+    "tests": [
+     "test_failure_injection.py::test_new_risk_on_the_invalid_venue_is_refused_by_the_oms_and_restored_after_recovery"
+    ]
+   },
+   "scenario": "existing test",
+   "note": "SAME outcome."
+  },
+  {
+   "id": "H12",
+   "case": "Outage on the maker venue holds the fill report, so the hedge goes late",
+   "reports": [
+    "HS",
+    "PM",
+    "PL"
+   ],
+   "backtester": {
+    "code": "backtester.py _maker_fill_faults 1922",
+    "tests": [
+     "test_hedge_failures.py::test_an_outage_on_the_maker_venue_holds_back_the_fill_report_and_so_the_hedge"
+    ]
+   },
+   "core": {
+    "code": "report deadlines: the fill is found by a venue query (check_order_deadlines)",
+    "tests": [
+     "test_oms_order_tracking.py::test_changes_that_happened_while_disconnected_are_recovered_and_booked_once"
+    ]
+   },
+   "scenario": "existing test",
+   "note": "SAME idea."
+  },
+  {
+   "id": "H13",
+   "case": "Both feed and gateway dark: the strategy is blind and opens nothing",
+   "reports": [
+    "HS",
+    "PM"
+   ],
+   "backtester": {
+    "code": "backtester.py _feed_dark 1902, signals blocked",
+    "tests": [
+     "test_hedge_failures.py::test_full_outage_means_the_strategy_is_blind_gateway_outage_does_not"
+    ]
+   },
+   "core": {
+    "code": "book_gate.py BookIntegrityGate: suspend, cancel, venue RISK_REDUCING_ONLY",
+    "tests": [
+     "test_failure_injection.py::test_new_risk_on_the_invalid_venue_is_refused_by_the_oms_and_restored_after_recovery"
+    ]
+   },
+   "scenario": "S14",
+   "note": "SAME intent; the core keeps risk-reducing flow alive on an invalid book, the backtester's unwinds ignore book state (matrix B4)."
+  },
+  {
+   "id": "H14",
+   "case": "Entry guard: no new signal while a gateway is known down",
+   "reports": [
+    "HS"
+   ],
+   "backtester": {
+    "code": "hedge_faults.py entry_guard 154; backtester.py signal gate",
+    "tests": [
+     "test_hedge_failures.py::test_entry_guard_stops_new_signals_during_a_gateway_outage_that_covers_the_whole_run"
+    ]
+   },
+   "core": {
+    "code": "venue_is_suspended / route eligibility",
+    "tests": [
+     "test_failure_injection.py::test_new_risk_on_the_invalid_venue_is_refused_by_the_oms_and_restored_after_recovery",
+     "test_failure_injection.py::test_binance_healthy_bybit_invalid"
+    ]
+   },
+   "scenario": "existing test",
+   "note": "The backtester needs the connectivity monitor to know; the core gets it from route status."
+  },
+  {
+   "id": "H15",
+   "case": "Lost acknowledgement on the hedge: the order executes, the strategy is UNKNOWN, resolved by a query, never a retry",
+   "reports": [
+    "PM",
+    "PL",
+    "HD"
+   ],
+   "backtester": {
+    "code": "backtester.py unknown_resolved timer in _handle_recover 2111; fill_engine.py lc_unknown 784",
+    "tests": [
+     "test_fault_layer.py::test_a_lost_ack_on_a_hedge_is_resolved_by_query_not_by_a_retry"
+    ]
+   },
+   "core": {
+    "code": "oms.py _resolve_order_state 2213 (TIMED_OUT; a later venue fact clears it, D-04)",
+    "tests": [
+     "test_oms_order_tracking.py::test_when_the_venue_says_it_executed_the_fill_is_booked_once_and_nothing_is_resent",
+     "test_oms_order_tracking.py::test_only_a_venue_answer_of_unknown_order_turns_the_ambiguity_into_a_rejection"
+    ]
+   },
+   "scenario": "S19",
+   "note": "SAME rule; the one place the backtester already follows OMS03."
+  },
+  {
+   "id": "H16",
+   "case": "UNKNOWN status queries fail repeatedly: bounded attempts, then a persistent alarm",
+   "reports": [
+    "PM"
+   ],
+   "backtester": {
+    "code": "backtester.py _handle_recover (unknown_query_fail_prob, unknown_query_max_attempts)",
+    "tests": [
+     "test_wp6_risk_recovery.py::test_unknown_status_query_failures_are_bounded_then_alarm"
+    ]
+   },
+   "core": {
+    "code": "oms.py check_order_deadlines: max_queries, then TIMED_OUT and kill switch",
+    "tests": [
+     "test_execution_realism.py::test_unanswered_queries_time_out_block_close_and_trip_kill_switch",
+     "test_oms_order_tracking.py::test_unanswerable_venue_keeps_the_order_unresolved_trips_the_kill_switch_and_holds_the_reservation"
+    ]
+   },
+   "scenario": "existing tests",
+   "note": "Different escalation (alarm vs kill switch): a decision for Phase C."
+  },
+  {
+   "id": "H17",
+   "case": "Lost ack on a passive (maker) order: fill report held until reconciliation",
+   "reports": [
+    "LR",
+    "PL"
+   ],
+   "backtester": {
+    "code": "backtester.py/fill_engine.py ack_unknown on the maker venue",
+    "tests": [
+     "test_fault_layer.py::test_a_lost_ack_on_a_passive_order_holds_back_the_fill_report_until_reconciliation"
+    ]
+   },
+   "core": {
+    "code": "same query path as H15",
+    "tests": [
+     "~test_oms_order_tracking.py::test_an_order_missing_from_the_venue_listing_is_not_assumed_cancelled"
+    ]
+   },
+   "scenario": "existing test",
+   "note": "SAME rule; the cited core test is related (an unlisted order is chased, not assumed gone), not a direct lost-ack-on-a-passive-order test."
+  },
+  {
+   "id": "H18",
+   "case": "Unwind attempts exhausted: persistent alarm, no new risk until an operator resets it",
+   "reports": [
+    "HD",
+    "PM",
+    "PL"
+   ],
+   "backtester": {
+    "code": "backtester.py _raise_alarm 2162, alarms, reset_alarm",
+    "tests": [
+     "test_wp6_risk_recovery.py::test_unwind_exhaustion_raises_a_persistent_alarm_that_blocks_new_risk_until_reset",
+     "test_r12_breaker.py::test_three_unwind_sends_then_alarm_and_a_failed_unwind_trip"
+    ]
+   },
+   "core": {
+    "code": "oms.py _raise_unwind_exhausted_alarm 1310; survives a restart",
+    "tests": [
+     "test_oms_unwind_alarm.py::test_exhausted_unwinds_raise_one_persistent_alarm_and_the_plan_is_not_a_success",
+     "test_oms_unwind_alarm.py::test_the_alarm_survives_a_restart_and_its_reset_does_too"
+    ]
+   },
+   "scenario": "existing tests",
+   "note": "SAME behaviour; core adds restart persistence."
+  },
+  {
+   "id": "H19",
+   "case": "Failed unwind: the hedge is rejected AND the maker venue is dark, so the unwinds are lost",
+   "reports": [
+    "PL",
+    "PM"
+   ],
+   "backtester": {
+    "code": "fault_presets.py conditional_scenario failed_unwind; backtester.py unwind budget",
+    "tests": [
+     "test_r12_breaker.py::test_attempt_limit_is_independent_of_hedge_retries"
+    ]
+   },
+   "core": {
+    "code": "oms.py residual stays open, breach escalates",
+    "tests": [
+     "test_oms.py::test_out_of_bound_residual_cannot_close_when_unwind_fails"
+    ]
+   },
+   "scenario": "existing tests",
+   "note": "SAME outcome."
+  },
+  {
+   "id": "H20",
+   "case": "Unwind price band (15 bps) and attempt budget (3)",
+   "reports": [
+    "PM"
+   ],
+   "backtester": {
+    "code": "hedge_faults.py unwind_band_bps, unwind_max_attempts",
+    "tests": [
+     "test_wp6_risk_recovery.py::test_unwind_is_price_banded_when_configured"
+    ]
+   },
+   "core": {
+    "code": "execution.py ResidualPolicy unwind_price_slippage_bps (10), max_unwind_attempts 3",
+    "tests": [
+     "test_oms.py::test_passive_unwind_is_cancelled_and_escalated_at_deadline"
+    ]
+   },
+   "scenario": "existing tests",
+   "note": "Assumed numbers differ (15 vs 10 bps)."
+  },
+  {
+   "id": "H21",
+   "case": "Residual left open silently after the last unwind attempt (old OMS gap)",
+   "reports": [
+    "HD"
+   ],
+   "backtester": {
+    "code": "n/a",
+    "tests": []
+   },
+   "core": {
+    "code": "fixed by the unwind-exhausted alarm (H18)",
+    "tests": [
+     "test_oms_unwind_alarm.py::test_the_alarm_refuses_new_risk_until_an_operator_resets_it"
+    ]
+   },
+   "scenario": "see H18",
+   "note": "Closed in the core on 2 Nov."
+  },
+  {
+   "id": "H22",
+   "case": "Residual breach unresolved for 30 s trips the kill switch",
+   "reports": [
+    "HD"
+   ],
+   "backtester": {
+    "code": "no: the backtester's breaker trips on |net| != 0 for more than 5 s",
+    "tests": [
+     "test_wp6_risk_recovery.py::test_breaker_call_sites_run_and_the_net_exposure_trigger_trips"
+    ]
+   },
+   "core": {
+    "code": "oms.py _escalate_residual_breach (kill_after_ns)",
+    "tests": [
+     "test_execution_realism.py::test_residual_breach_holds_new_risk_and_escalates_to_kill"
+    ]
+   },
+   "scenario": "existing tests",
+   "note": "CONFLICT in the number (5 s vs 30 s) and the mechanism. A decision for Phase E."
+  },
+  {
+   "id": "H23",
+   "case": "Circuit breaker, six triggers: consecutive failures, failure rate, failed unwind, net exposure time, UNKNOWN age, gateway down",
+   "reports": [
+    "HD",
+    "PM",
+    "PL"
+   ],
+   "backtester": {
+    "code": "circuit_breaker.py; backtester.py _breaker_poll 1736",
+    "tests": [
+     "test_r12_breaker.py::test_count_window_needs_a_full_window_and_fires_strictly_above_the_threshold",
+     "test_r12_breaker.py::test_an_outage_trips_after_the_heartbeat_timeout_and_a_short_one_does_not",
+     "test_r12_breaker.py::test_unknown_is_stamped_when_the_ack_timeout_expires_not_on_arrival"
+    ]
+   },
+   "core": {
+    "code": "no breaker class: kill switches only (risk.py activate_kill_switch 439)",
+    "tests": []
+   },
+   "scenario": "S10 (one trigger); others existing tests",
+   "note": "GAP in the core (Phase E): breaker with pause vs trip."
+  },
+  {
+   "id": "H24",
+   "case": "Cancel every resting maker order on a trip; fills inside the cancel window are kept and hedged",
+   "reports": [
+    "PM"
+   ],
+   "backtester": {
+    "code": "backtester.py _breaker_trip_check 2488",
+    "tests": [
+     "test_r12_breaker.py::test_trip_cancels_the_resting_order_after_one_cancel_latency_even_without_a_lifetime",
+     "test_r12_breaker.py::test_a_fill_inside_the_cancel_window_is_kept_and_hedged"
+    ]
+   },
+   "core": {
+    "code": "oms.py cancel_open_orders 524 on the kill switch (risk-reducing preserved)",
+    "tests": [
+     "test_oms.py::test_pm_kill_cancels_queued_orders_and_reconciles_before_recovery"
+    ]
+   },
+   "scenario": "S10",
+   "note": "SAME."
+  },
+  {
+   "id": "H25",
+   "case": "Flatten the open position when the breaker trips",
+   "reports": [
+    "(plan,",
+    "not",
+    "a",
+    "report",
+    "case)"
+   ],
+   "backtester": {
+    "code": "none",
+    "tests": []
+   },
+   "core": {
+    "code": "oms.py open_flatten_plan 757 (after a liquidation)",
+    "tests": [
+     "test_margin_tiers.py::test_flatten_resumes_after_a_restart"
+    ]
+   },
+   "scenario": "S10b NOT_EXPRESSIBLE",
+   "note": "Phase E builds it."
+  },
+  {
+   "id": "H26",
+   "case": "Hedge sent in a fast move is rejected (stress)",
+   "reports": [
+    "PL",
+    "PM"
+   ],
+   "backtester": {
+    "code": "backtester.py _inject_send_faults (fast_move_reject_prob)",
+    "tests": [
+     "test_fault_layer.py::test_a_hedge_sent_in_a_fast_move_is_rejected_and_one_in_a_calm_market_is_not"
+    ]
+   },
+   "core": {
+    "code": "injection only; the real consequence is a reject (H02)",
+    "tests": []
+   },
+   "scenario": "existing test",
+   "note": "Stays in simulation/."
+  },
+  {
+   "id": "H27",
+   "case": "Per-venue reject probability (rate limit, errors), applied once to hedges",
+   "reports": [
+    "LR",
+    "PL"
+   ],
+   "backtester": {
+    "code": "hedge_faults.py reject_prob_by_venue, venue_reject_applies_to_hedges",
+    "tests": [
+     "test_fault_layer.py::test_a_per_venue_reject_probability_hits_only_that_venue",
+     "test_perp_fault_presets.py::test_stressed_hedge_reject_probability_is_applied_once"
+    ]
+   },
+   "core": {
+    "code": "ExecutionEventType.REJECTED with a reason; no retryable/non-retryable classification",
+    "tests": []
+   },
+   "scenario": "existing tests",
+   "note": "GAP: venue_semantics_perp.py (reject-code table) is backtester-only; the plan moves it beside the adapters."
+  },
+  {
+   "id": "H28",
+   "case": "PostOnly reject at arrival (D-01)",
+   "reports": [
+    "LR",
+    "PL"
+   ],
+   "backtester": {
+    "code": "postonly.py would_cross; backtester.py _resolve_postonly 1432",
+    "tests": [
+     "test_postonly_reject.py::test_crossing_on_arrival_is_rejected_on_both_sides"
+    ]
+   },
+   "core": {
+    "code": "execution.py 694-702; maker_sim.py _on_arrival",
+    "tests": [
+     "test_order_state_parity.py::test_matches_specification[reject-oms]"
+    ]
+   },
+   "scenario": "S07",
+   "note": "SAME rule."
+  },
+  {
+   "id": "H29",
+   "case": "Reject after a fill: the fill is kept, the order reads partial, one alarm (D-06)",
+   "reports": [
+    "LR",
+    "PM"
+   ],
+   "backtester": {
+    "code": "fill_engine.py lc_reject 793; backtester.py venue_reject_notice 1412",
+    "tests": [
+     "test_order_state_parity.py::test_matches_specification[reject_after_partial_fill-maker_perp]"
+    ]
+   },
+   "core": {
+    "code": "oms.py _resolve_order_state; REJECT_AFTER_FILL_ALARM",
+    "tests": [
+     "test_order_state_parity.py::test_matches_specification[reject_after_partial_fill-oms]"
+    ]
+   },
+   "scenario": "parity test",
+   "note": "SAME."
+  },
+  {
+   "id": "H30",
+   "case": "A fill after the cancel request, and a fill delivered after the cancel took effect (D-03)",
+   "reports": [
+    "LR",
+    "PL"
+   ],
+   "backtester": {
+    "code": "backtester.py _apply_cancel 2515; cancel_time_basis",
+    "tests": [
+     "test_fault_layer.py::test_exchange_time_basis_keeps_it_and_books_it_exactly_once",
+     "test_fault_layer.py::test_receive_time_basis_drops_the_late_delivered_fill_the_legacy_behaviour"
+    ]
+   },
+   "core": {
+    "code": "oms.py ingest_order_update: the largest cumulative fill wins, kept after CANCELLED",
+    "tests": [
+     "test_oms_order_tracking.py::test_a_fill_reported_after_the_cancel_is_kept_and_applied_exactly_once"
+    ]
+   },
+   "scenario": "S06",
+   "note": "SAME in the perp profile."
+  },
+  {
+   "id": "H31",
+   "case": "Ack timeout to UNKNOWN (D-02), a late ack clears it (D-04), cancel pending (D-05)",
+   "reports": [
+    "LR",
+    "PL"
+   ],
+   "backtester": {
+    "code": "fill_engine.py lifecycle records",
+    "tests": [
+     "test_order_state_parity.py::test_matches_specification[ack_timeout_then_ack-maker_perp]",
+     "test_order_state_parity.py::test_matches_specification[cancel_pending_at_end-maker_perp]"
+    ]
+   },
+   "core": {
+    "code": "oms.py OMS02 states",
+    "tests": [
+     "test_order_state_parity.py::test_matches_specification[ack_timeout_then_ack-oms]",
+     "test_order_state_parity.py::test_matches_specification[cancel_pending_at_end-oms]"
+    ]
+   },
+   "scenario": "parity tests",
+   "note": "SAME in the perp column; six legacy xfails are the known differences."
+  },
+  {
+   "id": "H32",
+   "case": "Duplicate fill reports, out-of-order updates, disconnect then fills in the gap",
+   "reports": [
+    "LR"
+   ],
+   "backtester": {
+    "code": "fill_engine.py / order_state_machine.py (spec)",
+    "tests": [
+     "test_order_state_parity.py::test_matches_specification[duplicate_fill_report-maker_perp]",
+     "test_order_state_parity.py::test_matches_specification[disconnect_then_fills_in_gap-maker_perp]",
+     "test_order_state_parity.py::test_matches_specification[out_of_order_updates-maker_perp]"
+    ]
+   },
+   "core": {
+    "code": "oms.py ingest_order_update (duplicate suppressed, cumulative reports converted)",
+    "tests": [
+     "test_oms_order_tracking.py::test_cumulative_reports_are_converted_to_incremental_fills",
+     "test_oms_order_tracking.py::test_an_acknowledgement_or_stale_partial_arriving_after_the_fill_cannot_regress_the_order"
+    ]
+   },
+   "scenario": "parity tests",
+   "note": "SAME."
+  },
+  {
+   "id": "H33",
+   "case": "Position cap ignores pending orders; the 2x net ceiling; UNKNOWN exposure not counted",
+   "reports": [
+    "HS",
+    "LR",
+    "HD",
+    "PM"
+   ],
+   "backtester": {
+    "code": "backtester.py _pending_exposure 2540, arb_strategy._inventory_room; count_pending_exposure, count_unknown_exposure, net_ceiling_multiple",
+    "tests": [
+     "test_wp6_risk_recovery.py::test_net_ceiling_multiple_one_limits_the_stack_to_the_documented_limit",
+     "test_wp6_risk_recovery.py::test_gross_long_limit_counts_pending_buys"
+    ]
+   },
+   "core": {
+    "code": "risk.py reserve (package legs reserved until reconciled), carried residual counts",
+    "tests": [
+     "test_residual_exposure.py::test_carried_residual_counts_against_legging_exposure",
+     "test_residual_exposure.py::test_new_risk_is_blocked_while_carried_residual_is_at_the_limit"
+    ]
+   },
+   "scenario": "S09, S05 (reserve half)",
+   "note": "Units differ (base vs notional). The reserve works with the profile's two switches and is empty with the legacy settings."
+  },
+  {
+   "id": "H34",
+   "case": "Hedge cannot be built (hedge book not ready): the fill sits naked",
+   "reports": [
+    "HS"
+   ],
+   "backtester": {
+    "code": "backtester.py _on_fill, hedge_leg_unavailable 1546",
+    "tests": [
+     "test_hedge_failures.py::test_no_hedge_could_be_built_legacy_leaves_the_signal_hanging_and_the_new_response_handles_it"
+    ]
+   },
+   "core": {
+    "code": "execution.py route(): book_unavailable -> rejected child -> unwind",
+    "tests": []
+   },
+   "scenario": "existing test",
+   "note": "SAME outcome; counted in both."
+  },
+  {
+   "id": "H35",
+   "case": "realized_pnl is wrong when hedges fail (the unwind never reaches gross P&L); marking a carried position",
+   "reports": [
+    "HS"
+   ],
+   "backtester": {
+    "code": "backtester.py _equity_bridge 2799 (raises on mismatch); valuation.py",
+    "tests": [
+     "test_hedge_failures.py::test_every_hedge_rejected_the_whole_run_unwinds_and_the_ledger_balances"
+    ]
+   },
+   "core": {
+    "code": "ledger.py equity = opening + realized + unrealized - fees + funding",
+    "tests": [
+     "test_residual_exposure.py::test_open_residual_is_marked_not_booked_as_cash"
+    ]
+   },
+   "scenario": "S04, S16-S18 (cash), S01",
+   "note": "Fixed in the backtester by the ledger bridge; Phase B shadow compares the two."
+  },
+  {
+   "id": "H36",
+   "case": "Process restart with a fill awaiting its hedge (modelled: dark 60 s, hedge only when back)",
+   "reports": [
+    "PM",
+    "PL"
+   ],
+   "backtester": {
+    "code": "hedge_faults.py restart_s / restart_at_fills; backtester.py _maker_fill_faults 1937",
+    "tests": [
+     "test_r12_breaker.py::test_the_fill_that_precedes_a_restart_is_hedged_only_when_the_process_is_back"
+    ]
+   },
+   "core": {
+    "code": "RestartCoordinator, plan store, plan recovery",
+    "tests": [
+     "test_restart_resilience.py::test_process_restart_recovers_open_orders_without_duplicate_dispatch"
+    ]
+   },
+   "scenario": "S12 and S15 (core)",
+   "note": "The backtester only models the dark period; the live path was never exercised by it."
+  },
+  {
+   "id": "H37",
+   "case": "Stale or dead feed while risk and cancel deadlines expire between messages",
+   "reports": [
+    "PM"
+   ],
+   "backtester": {
+    "code": "timing.py timer wheel, dead-feed classifier",
+    "tests": [
+     "test_wp3_timing.py::test_lifetime_expires_at_its_own_time_between_sparse_events",
+     "test_wp3_timing.py::test_valid_quiet_and_dead_are_absolute_ages_and_block_accordingly"
+    ]
+   },
+   "core": {
+    "code": "book_gate.py; oms.py advance_time",
+    "tests": [
+     "test_oms.py::test_invalid_feed_cancels_ordinary_risk_but_preserves_unwind",
+     "test_execution_realism.py::test_residual_breach_holds_new_risk_and_escalates_to_kill"
+    ]
+   },
+   "scenario": "S14",
+   "note": "SAME intent."
+  },
+  {
+   "id": "H38",
+   "case": "Margin stress and liquidation with a hedge open",
+   "reports": [
+    "PM"
+   ],
+   "backtester": {
+    "code": "margin_model.py _breaches; backtester.py _margin_step",
+    "tests": [
+     "test_margin_model.py::test_breach_liquidates_at_market_charges_the_fee_and_flattens_the_other_venue"
+    ]
+   },
+   "core": {
+    "code": "margin.py LiquidationEngine; risk.py _tiered_margin_row",
+    "tests": [
+     "test_margin_tiers.py::test_liquidation_fill_survives_a_restart_with_its_type"
+    ]
+   },
+   "scenario": "S11",
+   "note": "Fee and above-last-tier differences are Phase B items (A9, A10)."
+  },
+  {
+   "id": "H39",
+   "case": "Hedge venue priority when one venue is down",
+   "reports": [
+    "HD"
+   ],
+   "backtester": {
+    "code": "none (hedge venue fixed by the signal)",
+    "tests": []
+   },
+   "core": {
+    "code": "execution.py ResidualPolicy.hedge_venue_priority; oms.py _unwind_venues 1245",
+    "tests": [
+     "test_oms.py::test_binding_one_sided_leg_hedges_through_global_and_venue_controls"
+    ]
+   },
+   "scenario": "not a scenario today",
+   "note": "Backtester GAP: venue selector is Phase E."
+  },
+  {
+   "id": "H40",
+   "case": "A hedge in flight when a gateway drops is treated as delivered (stated limit)",
+   "reports": [
+    "HS"
+   ],
+   "backtester": {
+    "code": "not modelled",
+    "tests": []
+   },
+   "core": {
+    "code": "n/a",
+    "tests": []
+   },
+   "scenario": "not a scenario",
+   "note": "Limit of the simulator, not a handler."
+  }
+ ]
+}
