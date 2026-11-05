@@ -1,0 +1,12 @@
+[
+ {
+  "day": "2024-03-11",
+  "side": "buy",
+  "fill_ts": 1710118158.5143,
+  "qty": 1.0,
+  "mid_move_1s_bps": 0.9207679204460221,
+  "hedge_delay_s": 0.03146052360534668,
+  "mid_move_to_hedge_bps": -0.8499396188709284,
+  "hedge_px_vs_touch_at_fill_bps": -0.3541603212939214
+ }
+]

@@ -70,6 +70,7 @@ SWITCHES: tuple[Switch, ...] = (
     Switch("maker.opposite_cross_confirm_ms", "CALIBRATED", note="0 (off) in v1; v1.1 step 8 sets 500: a cross fills only with a reaching print on the same venue within +-500 ms, else it is dropped (EXPLORATORY window)"),
     Switch("maker.opposite_cross_cap_to_print", "CALIBRATED", note="False in v1; v1.1 step 9c sets True: a confirmed cross fills at most the reaching prints' unused volume (EXPLORATORY)"),
     Switch("arb.round_quotes_to_tick", "LEGACY_COMPAT", note="False in v1 (off-grid quotes); v1.1 step 9b sets True: bids round down, asks up, onto the declared venue tick"),
+    Switch("arb.join_touch_on_tick_rounding", "LEGACY_COMPAT", note="False in v1 / v1.1 (a quote rounded onto the touch is refused); v1.2 sets True: it joins the back of the touch queue if the edge at the rounded price passes"),
     Switch("hedge_arrival_book", "LEGACY_COMPAT", note="view in v1 (default); v1.1 step 9e sets truth: hedge IOCs execute on the venue-truth book at arrival"),
     Switch("arb.net_ceiling_multiple", "MANDATORY", note="1.0 in the perp profile — DECISION_PENDING (1x vs fill headroom)"),
     Switch("arb.p_fail", "CALIBRATED", note="PLACEHOLDER 0.07; estimate on training days only"),
@@ -167,7 +168,7 @@ def apply_profile(doc: dict, **overrides):
         raise ProfileError(f"profile {doc.get('name')}: " + "; ".join(bad))
     body = {k: v for k, v in doc.items() if not k.startswith("_") and k not in ("name", "description", "classification", "decision_status",
                                                                                "product_fee_consistency", "timing", "breaker", "margin",
-                                                                               "fee_presets", "calibration", "execution")}
+                                                                               "fee_presets", "calibration", "execution", "hedge_move_calibration")}
     cfg_kw: dict[str, Any] = dict(body)
     cfg_kw["product_fee_consistency"] = bool(doc.get("product_fee_consistency", True))
     for k, v in (doc.get("fee_presets") or {}).items():
@@ -215,9 +216,34 @@ def apply_profile(doc: dict, **overrides):
     cfg = _build(ArbBacktestConfig, cfg_kw, where=f"profile {doc.get('name')}",
                  nested={"arb": ArbConfig, "maker": MakerConfig, "venue_state": VenueStateConfig, "agent_flow": AgentFlowConfig,
                          "ack_latency": AckLatencyConfig})
+    hm = doc.get("hedge_move_calibration")
+    if hm:
+        cfg.arb.expected_hedge_move_bps_bid, cfg.arb.expected_hedge_move_bps_ask, hm_info = load_hedge_move_calibration(doc, hm, cfg.start_date)
     cfg.release_identity = release_identity(cfg, doc)
     cfg.release_identity["latency_sensitivity"] = sensitivity
+    if hm:
+        cfg.release_identity["hedge_move_calibration"] = hm_info
     return cfg
+
+
+def load_hedge_move_calibration(doc: dict, hm: dict, run_start: str) -> tuple[float, float, dict]:
+    """The expected hedge move (bps, bid and ask) a profile pins: a data file whose sha256 the profile records, estimated on TRAIN days that all end before the run starts.
+    Refuses a missing file, a file whose bytes no longer match the recorded hash, and a file with no days or with a day on or after the run's start date."""
+    p = Path(hm["file"])
+    path = p if p.is_absolute() else PLATFORM_DIR / p
+    if not path.exists():
+        raise ProfileError(f"profile {doc.get('name')}: hedge_move_calibration file {path} does not exist")
+    got = hashlib.sha256(path.read_bytes()).hexdigest()
+    if got != hm.get("sha256"):
+        raise ProfileError(f"profile {doc.get('name')}: hedge_move_calibration {path.name} has sha256 {got}, the profile pins {hm.get('sha256')} (file edited after it was pinned)")
+    d = json.loads(path.read_text())
+    days = d.get("days") or []
+    if not days or any(str(x) >= str(run_start) for x in days):
+        raise ProfileError(f"profile {doc.get('name')}: hedge_move_calibration {path.name} must come from TRAIN days strictly before the run start {run_start}; it lists {days}")
+    mv = d["expected_hedge_move_bps"]
+    return float(mv["bid"]), float(mv["ask"]), {"file": str(path), "sha256": got, "days": days, "horizon_s": d.get("horizon_s"),
+                                                "n": {k: (d.get("stats", {}).get(k) or {}).get("n") for k in ("bid", "ask")},
+                                                "method": d.get("method")}
 
 
 # Latency presets that cannot exist in production (config.py: nobody is co-located with both venues). A non-legacy profile refuses

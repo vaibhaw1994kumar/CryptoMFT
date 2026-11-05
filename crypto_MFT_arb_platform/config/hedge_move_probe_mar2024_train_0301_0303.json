@@ -1,0 +1,39 @@
+{
+ "label": "hedge move from the PROBE (resting 1 SOL Bybit bid at the strategy quote depth, v1.1 fill rules, Binance mid move 0-1 s after each probe fill); TRAIN days only; EXPLORATORY (B0.2, owner decision 5 Nov 2026)",
+ "method": "PROBE: one 1 SOL Bybit bid per 15 s slot at the strategy's quote depth; the Binance mid move over the 1 s AFTER EACH SIMULATED PROBE FILL (the window starts at the fill, not at hedge arrival); bid = change in bps. The probe is bid-only: the ask value is the market-data value, carried over unchanged and unused while maker_passive_side is bid",
+ "pair": "SOLUSDT",
+ "maker_venue": "bybit",
+ "hedge_venue": "binance",
+ "horizon_s": 1.0,
+ "days": [
+  "2024-03-01",
+  "2024-03-02",
+  "2024-03-03"
+ ],
+ "expected_hedge_move_bps": {
+  "bid": -0.7705897215547969,
+  "ask": -0.14602462230064214
+ },
+ "stats": {
+  "bid": {
+   "n": 834,
+   "mean_bps": -0.7705897215547969,
+   "median_bps": -0.7623665382072117,
+   "stdev_bps": 3.2890100384700536,
+   "se_bps": 0.11388910333083732
+  },
+  "ask": {
+   "n": 2450680,
+   "mean_bps": -0.14602462230064214,
+   "median_bps": -0.2,
+   "stdev_bps": 9.04859545095153,
+   "se_bps": 0.005780133494454293
+  }
+ },
+ "provenance": {
+  "probe_file": "queue_v2/hedge_move/probe_result.json",
+  "ask_from": "queue_v2/hedge_move/mar_train_2024-03-01_07.json",
+  "probe_code": "out/queue_v2/qv2_probe.py on the frozen snapshot snap_qv2i",
+  "probe_slices": "00:00-02:00 UTC of 2024-03-01..03"
+ }
+}

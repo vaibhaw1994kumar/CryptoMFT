@@ -1,0 +1,22 @@
+[
+ {
+  "day": "2024-03-09",
+  "side": "buy",
+  "fill_ts": 1709942570.5633001,
+  "qty": 1.0,
+  "mid_move_1s_bps": -0.6899240048721968,
+  "hedge_delay_s": 0.03146052360534668,
+  "mid_move_to_hedge_bps": -0.06899240048741578,
+  "hedge_px_vs_touch_at_fill_bps": 0.0
+ },
+ {
+  "day": "2024-03-11",
+  "side": "buy",
+  "fill_ts": 1710118158.5143,
+  "qty": 1.0,
+  "mid_move_1s_bps": 0.9207679204460221,
+  "hedge_delay_s": 0.03146052360534668,
+  "mid_move_to_hedge_bps": -0.8499396188709284,
+  "hedge_px_vs_touch_at_fill_bps": -0.3541603212939214
+ }
+]

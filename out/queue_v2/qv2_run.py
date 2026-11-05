@@ -21,7 +21,8 @@ from new_backtest.profiles import apply_profile, load_profile, switch_table
 ROOT = Path(os.environ["EXEC_OUT"]).resolve()                       # output root of this label
 TRAIN_ROOT = Path("/Users/vaibhav/Documents/Newproject/out/e2e_perp")   # read-only: pinned training input (legacy_v0 clean replays of 2 Nov)
 ap = argparse.ArgumentParser()
-ap.add_argument("profile"); ap.add_argument("day")
+ap.add_argument("profile", nargs="?", default="perp_perp_maker_taker_v1_1"); ap.add_argument("day")
+ap.add_argument("--reference", action="store_true", help="REFERENCE_ONLY: required to run legacy_v0 or perp_perp_maker_taker_v1 (never for decisions)")
 ap.add_argument("--fee", default="bybit_perp_mm")
 ap.add_argument("--faults", default="clean", choices=("clean", "realistic", "stressed"))
 ap.add_argument("--seed", type=int, default=1)
@@ -29,6 +30,8 @@ ap.add_argument("--latency", default="singapore")
 ap.add_argument("--train", default="")
 ap.add_argument("--allow-rejected-data", default=None)
 a = ap.parse_args()
+if a.profile in ("legacy_v0", "perp_perp_maker_taker_v1") and not a.reference:
+    raise SystemExit(f"{a.profile} is a REFERENCE profile, never for decisions: pass --reference to run it (the default profile is perp_perp_maker_taker_v1_1)")
 tag = f"{a.latency}_{a.fee}_{a.faults}_s{a.seed}" + (("_" + os.environ["EXEC_TAG"]) if os.environ.get("EXEC_TAG") else "")
 out = ROOT / a.profile / tag / a.day
 out.mkdir(parents=True, exist_ok=True)
@@ -168,7 +171,8 @@ summary = {
     "warnings": sorted({str(w.message)[:300] for w in caught}),
     "qv2": {"maker": _json.loads(os.environ.get("QV2_MAKER", "{}")), "cfg": _json.loads(os.environ.get("QV2_CFG", "{}")),
             "markout_summary": r.markout_summary, "markout_by_venue_role": getattr(r, "markout_by_venue_role", None), "maker_observations": r.maker_observations, "data_manifest": r.data_manifest,
-            "maker_stats": r.maker_stats, "maker_diagnostics": r.maker_diagnostics},
+            "maker_stats": r.maker_stats, "maker_diagnostics": r.maker_diagnostics,
+            **({"label": "REFERENCE_ONLY"} if a.reference else {})},
 }
 if getattr(_bt.maker, "cross_log", None):
     (out / "cross_log.json").write_text(json.dumps(_bt.maker.cross_log, indent=1, default=str))        # opposite_cross_confirm_ms: one row per armed / confirmed / dropped cross

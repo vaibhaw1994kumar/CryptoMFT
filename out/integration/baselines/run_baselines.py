@@ -37,7 +37,7 @@ def jobs():
             if prof != "legacy_v0" and day in HM_JAN:
                 env["QV2_HEDGE_MOVE_FILE"] = HM_JAN[day]
             done = RUNS / "jan" / prof / "singapore_bybit_perp_mm_clean_s1_base" / day / "summary.json"
-            out.append((f"jan/{prof}/{day}", done, env, ["python3.12", str(X / "qv2_run.py"), prof, day, "--allow-rejected-data", REASON_JAN]))
+            out.append((f"jan/{prof}/{day}", done, env, ["python3.12", str(X / "qv2_run.py"), prof, day, "--allow-rejected-data", REASON_JAN] + (["--reference"] if prof != "perp_perp_maker_taker_v1_1" else [])))
     for MAR_DAY in MAR_DAYS:
         t1 = calendar.timegm(time.strptime(MAR_DAY, "%Y-%m-%d")) + 7200 + 1.0
         for prof in PROFILES:
@@ -54,7 +54,7 @@ def jobs():
             env.update(QV2_MAKER=json.dumps(mk), QV2_CFG=json.dumps(cfg))
             done = RUNS / "mar" / "base" / prof / MAR_DAY / "summary.json"
             out.append((f"mar/{prof}/{MAR_DAY}", done, env,
-                        ["python3.12", "-I", str(X / "qv2_march_run.py"), prof, MAR_DAY, "--group", "base", "--cell", prof, "--allow-rejected-data", REASON_MAR]))
+                        ["python3.12", "-I", str(X / "qv2_march_run.py"), prof, MAR_DAY, "--group", "base", "--cell", prof, "--allow-rejected-data", REASON_MAR] + (["--reference"] if prof != "perp_perp_maker_taker_v1_1" else [])))
     # Gate-approved additions (owner, 5 Nov). (1) The frozen v1 reference: v1 on 2022-01-13 with its ORIGINAL legacy-trained hedge move (pooled legacy_v0 replays of 01-05..01-10, -1.737 bps bid),
     # which gave 45 fills and cash +1.0734 on every earlier gate. The standard v1 baseline above uses the market-data hedge-move file instead, hence its different count.
     # (2) Faulted v1.1 on 2022-01-13, seed 1, presets realistic and stressed.
@@ -62,7 +62,7 @@ def jobs():
     T13 = "2022-01-05,2022-01-06,2022-01-07,2022-01-08,2022-01-09,2022-01-10"
     envf = {"EXEC_SNAP": str(LIVE), "EXEC_OUT": str(RUNS / "jan"), "EXEC_TAG": "frozen", "QV2_MAKER": "{}", "QV2_CFG": "{}"}
     out.append(("jan/perp_perp_maker_taker_v1@frozen/2022-01-13", RUNS / "jan" / "perp_perp_maker_taker_v1" / "singapore_bybit_perp_mm_clean_s1_frozen" / day / "summary.json", envf,
-                ["python3.12", str(X / "qv2_run.py"), "perp_perp_maker_taker_v1", day, "--train", T13, "--allow-rejected-data", REASON_JAN]))
+                ["python3.12", str(X / "qv2_run.py"), "perp_perp_maker_taker_v1", day, "--train", T13, "--allow-rejected-data", REASON_JAN, "--reference"]))
     for preset in FAULTS:
         env = {"EXEC_SNAP": str(LIVE), "EXEC_OUT": str(RUNS / "jan"), "EXEC_TAG": "base", "QV2_HEDGE_MOVE_FILE": HM_JAN[day],
                "QV2_MAKER": json.dumps({"unknown_queue_fit": str(X / f"unknown_queue_fit_for_{day}.json")}),

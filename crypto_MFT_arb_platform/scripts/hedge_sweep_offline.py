@@ -20,7 +20,10 @@ ap.add_argument("--fee", default="bybit_perp_mm")
 ap.add_argument("--days", default="2022-01-05,2022-01-13")
 ap.add_argument("--flicker", default=str(P / "config" / "flicker_binance_perp.json"))
 ap.add_argument("--out", default=str(P.parent / "out" / "exec_layer" / "sweep_offline.json"))
+ap.add_argument("--reference", action="store_true", help="REFERENCE_ONLY: required, this script reads the frozen v1 profile (never for decisions)")
 a = ap.parse_args()
+if not a.reference:
+    raise SystemExit("hedge_sweep_offline.py uses perp_perp_maker_taker_v1, a REFERENCE profile, never for decisions: pass --reference")
 
 prof = load_profile("perp_perp_maker_taker_v1")
 LOSS = float(prof["arb"].get("loss_fail_bps", 7.8))
@@ -46,7 +49,7 @@ def value(c, r):
     return sgn * (q * (r["vwap"] or 0.0)) + sgn * rem * c["dec_touch"] * (1.0 - sgn * LOSS / 1e4)
 
 
-out = {"label": "OFFLINE_FIRST_ORDER, EXPLORATORY", "fee": a.fee, "loss_fail_bps": LOSS, "days": {}, "cells": [c.__dict__ for c in cells],
+out = {"label": "OFFLINE_FIRST_ORDER, EXPLORATORY, REFERENCE_ONLY", "fee": a.fee, "loss_fail_bps": LOSS, "days": {}, "cells": [c.__dict__ for c in cells],
        "caveat": "slower/failed hedges do not feed back into later signals, breaker trips or the Bybit unwind; arrival latency is re-sampled, paired across cells"}
 for day in a.days.split(","):
     d = Path(a.cap_root) / "perp_perp_maker_taker_v1" / TAG / day

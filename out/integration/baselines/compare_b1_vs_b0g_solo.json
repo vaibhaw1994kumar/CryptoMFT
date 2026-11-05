@@ -1,0 +1,27 @@
+{
+ "A": "b1",
+ "B": "b0g_solo",
+ "ALL_IDENTICAL": true,
+ "runs": {
+  "mar/perp_perp_maker_taker_v1_1/2024-03-11": {
+   "files_identical": {
+    "trades.jsonl": true,
+    "fill_events.jsonl": true,
+    "fill_bucket_stats.json": true,
+    "model_settings.json": true
+   },
+   "summary_differences": [],
+   "identical": true
+  }
+ },
+ "excluded_from_summary_compare": [
+  "wall_s",
+  "wall_seconds_engine",
+  "release_identity",
+  "switch_table",
+  "tag",
+  "trades_path",
+  "fill_log_path",
+  "qv2"
+ ]
+}

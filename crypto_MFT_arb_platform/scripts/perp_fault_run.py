@@ -22,7 +22,10 @@ ap.add_argument("--seed", type=int, default=0); ap.add_argument("--size", type=f
 ap.add_argument("--out-root", required=True); ap.add_argument("--data-root", required=True)
 ap.add_argument("--funding-dir", default=None); ap.add_argument("--pair", default="SOLUSDT")
 ap.add_argument("--no-breaker", action="store_true", help="control: same run with circuit_breaker=None")
+ap.add_argument("--reference", action="store_true", help="REFERENCE_ONLY: required, this script runs the frozen v1 profile (never for decisions)")
 a = ap.parse_args()
+if not a.reference:
+    raise SystemExit("perp_fault_run.py runs perp_perp_maker_taker_v1, a REFERENCE profile, never for decisions: pass --reference")
 out = Path(a.out_root) / a.kind / (a.name + ("_nobreaker" if a.no_breaker else "") + (("_" + os.environ["EXEC_TAG"]) if os.environ.get("EXEC_TAG") else "")) / f"size{a.size:g}" / a.day / f"seed{a.seed}"
 if (out / "summary.json").exists():
     print("exists, skipped", out); sys.exit(0)
@@ -65,7 +68,7 @@ trips = [{"t_of_day_s": t["ts"] - d0, "cause": t["cause"], "net_at_trip": t["net
 mg = r.margin_report or {}
 summary = {
     "kind": a.kind, "name": a.name, "day": a.day, "seed": a.seed, "size_base": a.size, "breaker": "off" if a.no_breaker else "on", "wall_s": time.time() - t0,
-    "profile": "perp_perp_maker_taker_v1", "release_identity": r.release_identity, "sources": sources, "faults": cfg.hedge_faults.as_dict(),
+    "profile": "perp_perp_maker_taker_v1", "label": "REFERENCE_ONLY", "release_identity": r.release_identity, "sources": sources, "faults": cfg.hedge_faults.as_dict(),
     "ack_latency": cfg.ack_latency.__dict__ if hasattr(cfg.ack_latency, "__dict__") else str(cfg.ack_latency),
     "signals": r.signals_generated, "fills": r.orders_filled, "orders_sent": r.orders_sent, "signals_unhedged": r.signals_unhedged, "fees_paid": r.fees_paid,
     "cash_pnl": r.cash_pnl, "ending_equity_common_timestamp": r.ending_equity, "attribution_pnl": r.attribution_pnl, "final_inventory": r.final_inventory,

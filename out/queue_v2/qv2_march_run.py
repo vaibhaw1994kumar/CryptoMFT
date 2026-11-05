@@ -25,7 +25,8 @@ TRAIN_RUNS = E / "runs"
 DATA = os.environ.get("QV2_DATA_ROOT", "/Users/vaibhav/Documents/Newproject/data")
 FEES = {"mm": "bybit_perp_mm", "vip0": "bybit_perp_vip0"}
 ap = argparse.ArgumentParser()
-ap.add_argument("profile"); ap.add_argument("day")
+ap.add_argument("profile", nargs="?", default="perp_perp_maker_taker_v1_1"); ap.add_argument("day")
+ap.add_argument("--reference", action="store_true", help="REFERENCE_ONLY: required to run legacy_v0 or perp_perp_maker_taker_v1 (never for decisions)")
 ap.add_argument("--group", required=True); ap.add_argument("--cell", required=True)
 ap.add_argument("--buffer", default="none")
 ap.add_argument("--fee", default="mm", choices=sorted(FEES))
@@ -35,6 +36,8 @@ ap.add_argument("--train", default="")
 ap.add_argument("--split-file", default=str(E / "split.json"))
 ap.add_argument("--allow-rejected-data", default=None)
 a = ap.parse_args()
+if a.profile in ("legacy_v0", "perp_perp_maker_taker_v1") and not a.reference:
+    raise SystemExit(f"{a.profile} is a REFERENCE profile, never for decisions: pass --reference to run it (the default profile is perp_perp_maker_taker_v1_1)")
 out = RUNS / a.group / a.cell / a.day
 out.mkdir(parents=True, exist_ok=True)
 
@@ -57,7 +60,14 @@ def _hm_training(path, run_day):
 
 training = {"days": [], "status": "none"}
 moves = {"bid": 0.0, "ask": 0.0}
-if a.profile != "legacy_v0" and os.environ.get("QV2_HEDGE_MOVE_FILE"):
+_pinned = doc.get("hedge_move_calibration")
+if _pinned:                          # the profile pins its own hedge-move file (v1_2); the environment must not name another
+    if os.environ.get("QV2_HEDGE_MOVE_FILE") or os.environ.get("QV2_MOVES"):
+        raise SystemExit("this profile pins hedge_move_calibration; QV2_HEDGE_MOVE_FILE / QV2_MOVES must not be set")
+    _pp = Path(_pinned["file"]); _pp = _pp if _pp.is_absolute() else SNAP / _pp
+    moves, training = _hm_training(_pp, a.day)
+    training["sha256_pinned_by_profile"] = _pinned["sha256"]
+elif a.profile != "legacy_v0" and os.environ.get("QV2_HEDGE_MOVE_FILE"):
     moves, training = _hm_training(os.environ["QV2_HEDGE_MOVE_FILE"], a.day)
 elif a.profile != "legacy_v0" and os.environ.get("QV2_MOVES"):
     moves = {k: float(v) for k, v in json.loads(os.environ["QV2_MOVES"]).items()}
@@ -96,17 +106,19 @@ if os.environ.get("QV2_MAKER"):
     cfg.maker = dataclasses.replace(cfg.maker, **_json.loads(os.environ["QV2_MAKER"]))
 for _k, _v in _json.loads(os.environ.get("QV2_CFG", "{}")).items():
     setattr(cfg, _k, _v)
-if os.environ.get("QV2_VENUE_TICKS"):
+if os.environ.get("QV2_VENUE_TICKS") and not _pinned:
     cfg.arb.venue_ticks = {k: float(v) for k, v in json.loads(os.environ["QV2_VENUE_TICKS"]).items()}      # declared per dataset (v1.1 step 9b); the engine checks the first snapshot against it
 for _k, _v in json.loads(os.environ.get("QV2_ARB", "{}")).items():
     setattr(cfg.arb, _k, _v)
-if os.environ.get("QV2_MAKER_VENUES"):
+if os.environ.get("QV2_MAKER_VENUES") and not _pinned:
     cfg.arb.maker_venues = tuple(json.loads(os.environ["QV2_MAKER_VENUES"]))                                # v1.1 step 9d: a data-dependent choice, set by the runner
-cfg.arb.expected_hedge_move_bps_bid = moves["bid"]
-cfg.arb.expected_hedge_move_bps_ask = moves["ask"]
-cfg.arb.block_on_toxic = True
-cfg.arb.max_cross_venue_skew_s = 0.2
-cfg.arb.fill_gate_horizon_s = 5
+if not _pinned:
+    cfg.arb.expected_hedge_move_bps_bid = moves["bid"]
+    cfg.arb.expected_hedge_move_bps_ask = moves["ask"]
+if not _pinned:                      # a profile that pins its run-defining settings (v1_2) carries them itself
+    cfg.arb.block_on_toxic = True
+    cfg.arb.max_cross_venue_skew_s = 0.2
+    cfg.arb.fill_gate_horizon_s = 5
 scenario_desc = None
 if a.scenario != "clean":
     if cfg.hedge_faults is None:
@@ -151,7 +163,9 @@ summary = {
     "data_integrity": getattr(r, "data_integrity", None), "queue_parameter_status": getattr(r, "queue_parameter_status", None),
     "qv2": {"maker": _json.loads(os.environ.get("QV2_MAKER", "{}")), "cfg": _json.loads(os.environ.get("QV2_CFG", "{}")),
             "markout_summary": r.markout_summary, "markout_by_venue_role": getattr(r, "markout_by_venue_role", None), "maker_observations": r.maker_observations,
-            "data_manifest": r.data_manifest, "maker_stats": r.maker_stats, "maker_diagnostics": r.maker_diagnostics},
+            "data_manifest": r.data_manifest, "maker_stats": r.maker_stats, "maker_diagnostics": r.maker_diagnostics,
+            "queue_updates": dict(getattr(_bt.maker, "queue_updates", {})),
+            **({"label": "REFERENCE_ONLY"} if a.reference else {})},
 }
 if getattr(_bt.maker, "cross_log", None):
     (out / "cross_log.json").write_text(json.dumps(_bt.maker.cross_log, indent=1, default=str))

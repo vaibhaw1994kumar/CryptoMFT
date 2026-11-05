@@ -201,6 +201,10 @@ class ArbConfig:
     # error). A quote that no longer improves the touch once rounded is refused (reject "tick_rounding_no_improve"), it does not join the queue.
     round_quotes_to_tick: bool = False
     venue_ticks: dict = field(default_factory=dict)
+    # v1.2 (owner decision B0, 5 Nov), opt-in, needs round_quotes_to_tick. A quote that was inside the spread before rounding and lands ON the touch once rounded joins the back of that
+    # level's queue instead of being refused ("tick_rounding_no_improve"), provided the edge recomputed at the rounded price still passes (else reject "tick_rounding_join_no_edge").
+    # Counted as "tick_rounding_joined_touch" in the rejects dict (a count of signals, not a reject). A quote rounded BELOW the touch is still refused. Both sides.
+    join_touch_on_tick_rounding: bool = False
     # maker_venues: the venues a passive quote may rest on (empty = either, as before). The hedge goes to the other venue.
     maker_venues: tuple = ()
 
@@ -313,6 +317,8 @@ class CrossVenueArbStrategy:
         self.config = config or ArbConfig()
         if self.config.maker_passive_side not in ("bid", "ask", "both"):
             raise ValueError(f"ArbConfig.maker_passive_side must be 'bid', 'ask' or 'both', got {self.config.maker_passive_side!r}")
+        if self.config.join_touch_on_tick_rounding and not self.config.round_quotes_to_tick:
+            raise ValueError("ArbConfig.join_touch_on_tick_rounding needs round_quotes_to_tick")
         if self.config.round_quotes_to_tick:
             missing = [v for v in self.venue_names_cfg(venues) if not (self.config.venue_ticks.get(v, 0.0) > 0.0)]
             if missing:
@@ -635,15 +641,20 @@ class CrossVenueArbStrategy:
 
         # Must be a real improvement on the maker venue's book, and never cross it.
         touch_bid, touch_ask = maker_book.best_bid, maker_book.best_ask
+        joins_touch = False
         if cfg.round_quotes_to_tick:
             was_ok = touch_bid < max_bid < touch_ask
             max_bid = self._quote_to_tick(maker_venue, max_bid, "bid")
-            if abs(max_bid - touch_bid) < 1e-6 * cfg.venue_ticks[maker_venue]:
+            on_touch = abs(max_bid - touch_bid) < 1e-6 * cfg.venue_ticks[maker_venue]
+            if on_touch:
                 max_bid = touch_bid
             if was_ok and not touch_bid < max_bid < touch_ask:
-                self.rejects["tick_rounding_no_improve"] = self.rejects.get("tick_rounding_no_improve", 0) + 1
-                return None
-        if max_bid <= touch_bid or max_bid >= touch_ask:
+                if cfg.join_touch_on_tick_rounding and on_touch:
+                    joins_touch = True                              # rests at the back of the touch level; the edge below is computed at this price
+                else:
+                    self.rejects["tick_rounding_no_improve"] = self.rejects.get("tick_rounding_no_improve", 0) + 1
+                    return None
+        if not joins_touch and (max_bid <= touch_bid or max_bid >= touch_ask):
             self.rejects["no_edge"] += 1
             return None
 
@@ -661,7 +672,10 @@ class CrossVenueArbStrategy:
             net_bps = cond_bps
         self.best_edge_seen_bps = max(self.best_edge_seen_bps, net_bps)
         if net_bps < cfg.min_net_edge_bps:
-            self.rejects["no_edge"] += 1
+            if joins_touch:
+                self.rejects["tick_rounding_join_no_edge"] = self.rejects.get("tick_rounding_join_no_edge", 0) + 1
+            else:
+                self.rejects["no_edge"] += 1
             return None
 
         if taker_book.touch_age_s("bid", now) > cfg.max_touch_age_s:
@@ -721,6 +735,8 @@ class CrossVenueArbStrategy:
                 self.rejects["low_fill_prob"] += 1
                 return None
 
+        if joins_touch:
+            self.rejects["tick_rounding_joined_touch"] = self.rejects.get("tick_rounding_joined_touch", 0) + 1
         slack = hedge_px * cfg.max_walk_bps / 10_000.0
         return ArbSignal(
             signal_id=next(self._ids), ts=now,
@@ -769,15 +785,20 @@ class CrossVenueArbStrategy:
             min_ask = expected_hedge / (1.0 - (required_bps + extra_bps) / 10_000.0)
 
         touch_bid, touch_ask = maker_book.best_bid, maker_book.best_ask
+        joins_touch = False
         if cfg.round_quotes_to_tick:
             was_ok = touch_bid < min_ask < touch_ask
             min_ask = self._quote_to_tick(maker_venue, min_ask, "ask")
-            if abs(min_ask - touch_ask) < 1e-6 * cfg.venue_ticks[maker_venue]:
+            on_touch = abs(min_ask - touch_ask) < 1e-6 * cfg.venue_ticks[maker_venue]
+            if on_touch:
                 min_ask = touch_ask
             if was_ok and not touch_bid < min_ask < touch_ask:
-                self.rejects["tick_rounding_no_improve"] = self.rejects.get("tick_rounding_no_improve", 0) + 1
-                return None
-        if min_ask >= touch_ask or min_ask <= touch_bid:
+                if cfg.join_touch_on_tick_rounding and on_touch:
+                    joins_touch = True
+                else:
+                    self.rejects["tick_rounding_no_improve"] = self.rejects.get("tick_rounding_no_improve", 0) + 1
+                    return None
+        if not joins_touch and (min_ask >= touch_ask or min_ask <= touch_bid):
             self.rejects["no_edge"] += 1
             return None
 
@@ -794,7 +815,10 @@ class CrossVenueArbStrategy:
             net_bps = cond_bps
         self.best_edge_seen_bps = max(self.best_edge_seen_bps, net_bps)
         if net_bps < cfg.min_net_edge_bps:
-            self.rejects["no_edge"] += 1
+            if joins_touch:
+                self.rejects["tick_rounding_join_no_edge"] = self.rejects.get("tick_rounding_join_no_edge", 0) + 1
+            else:
+                self.rejects["no_edge"] += 1
             return None
 
         if taker_book.touch_age_s("ask", now) > cfg.max_touch_age_s:
@@ -842,6 +866,8 @@ class CrossVenueArbStrategy:
                 self.rejects["low_fill_prob"] += 1
                 return None
 
+        if joins_touch:
+            self.rejects["tick_rounding_joined_touch"] = self.rejects.get("tick_rounding_joined_touch", 0) + 1
         return ArbSignal(
             signal_id=next(self._ids), ts=now,
             buy_venue=taker_venue, sell_venue=maker_venue, qty=qty,

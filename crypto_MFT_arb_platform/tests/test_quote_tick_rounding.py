@@ -65,6 +65,38 @@ class TickRoundingTests(unittest.TestCase):
         self.assertIsNone(sig)
         self.assertEqual(strat.rejects.get("tick_rounding_no_improve", 0), 1)
 
+    def test_join_switch_rests_a_bid_rounded_onto_the_touch_at_the_back_of_the_queue(self):
+        books, states = _books(bybit=(100.00, 100.50), binance=(100.20, 100.21))
+        strat = _strategy(round_quotes_to_tick=True, join_touch_on_tick_rounding=True, venue_ticks={BYBIT: 0.5, BINANCE: 0.5})
+        sig = strat._evaluate_maker_taker(BYBIT, BINANCE, books, states, _inv(books), NOW)
+        self.assertIsNotNone(sig)
+        self.assertEqual(sig.legs[0].limit_price, 100.00)                         # the touch itself: no improvement, behind the displayed size
+        self.assertEqual(strat.rejects.get("tick_rounding_joined_touch", 0), 1)
+        self.assertEqual(strat.rejects.get("tick_rounding_no_improve", 0), 0)
+        self.assertGreaterEqual(sig.net_edge_bps, strat.config.min_net_edge_bps)   # the edge at the rounded price passed the same gate
+
+    def test_join_switch_rests_an_ask_rounded_onto_the_touch(self):
+        books, states = _books(bybit=(100.00, 100.50), binance=(100.29, 100.30))
+        strat = _strategy(maker_passive_side="ask", round_quotes_to_tick=True, join_touch_on_tick_rounding=True, venue_ticks={BYBIT: 0.5, BINANCE: 0.5})
+        sig = strat._evaluate_maker_taker_ask(BYBIT, BINANCE, books, states, _inv(books), NOW)
+        self.assertIsNotNone(sig)
+        self.assertEqual(sig.legs[0].limit_price, 100.50)
+        self.assertEqual(strat.rejects.get("tick_rounding_joined_touch", 0), 1)
+        off = _strategy(maker_passive_side="ask", round_quotes_to_tick=True, venue_ticks={BYBIT: 0.5, BINANCE: 0.5})
+        self.assertIsNone(off._evaluate_maker_taker_ask(BYBIT, BINANCE, books, states, _inv(books), NOW))
+        self.assertEqual(off.rejects.get("tick_rounding_no_improve", 0), 1)
+
+    def test_join_switch_does_not_rest_a_quote_that_had_no_room_before_rounding(self):
+        books, states = _books(bybit=(100.00, 100.50), binance=(99.99, 100.00))       # the hedge bid is below our touch: no edge at any price
+        strat = _strategy(round_quotes_to_tick=True, join_touch_on_tick_rounding=True, venue_ticks={BYBIT: 0.5, BINANCE: 0.5})
+        self.assertIsNone(strat._evaluate_maker_taker(BYBIT, BINANCE, books, states, _inv(books), NOW))
+        self.assertEqual(strat.rejects.get("tick_rounding_joined_touch", 0), 0)
+        self.assertEqual(strat.rejects["no_edge"], 1)
+
+    def test_join_switch_needs_round_quotes_to_tick(self):
+        with self.assertRaises(ValueError):
+            _strategy(join_touch_on_tick_rounding=True)
+
     def test_missing_tick_is_an_error(self):
         with self.assertRaises(ValueError):
             _strategy(round_quotes_to_tick=True, venue_ticks={BYBIT: 0.001})

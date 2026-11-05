@@ -138,9 +138,10 @@ The full instructions are in `core_backtest_integration_prompt.md`. One session 
 
 0. Baselines and 12 hand-calculated synthetic scenarios.
 A. Move shared code into the core with no logic change, checked byte-identical.
-B. Shared accounting, fees and book rules, using the accounting shadow, then switching over.
+B0. Owner's open decisions: frame-atomic rebuild check, step 2 diagnosis, ledger feasibility, hedge move from the probe, bid rounded onto the best bid.
+B. Shared accounting, fees and book rules, using the accounting shadow, then switching over. Native-id ledger if feasible. Sensitivity range from full replays, then the v1_2 freeze.
 C. Core fill-triggered hedging, porting behaviour from `opportunity.py` and the backtester.
-D. One runtime: `QueueAwareVenueAdapter`, the strategy on the SDK, old vs new parity.
+D. One runtime: `QueueAwareVenueAdapter`, the strategy on the SDK, old vs new parity, then single-pass shadow queue trackers.
 E. Risk gate, breaker pause vs trip, flatten on trip, ghost hedge fix, pairing, venue selector. Not built in Phase 0.
 F. Clean up, then paper, testnet and a mainnet adapter under the requirements' stage gates.
 
@@ -158,8 +159,10 @@ Naming: phases 0 and A-F here are integration phases. The "Phase 0" and "Gate 0"
 ## 7. Not established
 
 - Section 4 uses names, docstrings, imports and targeted reads. The first matrix confirmed the main gaps, but it lacks the row-by-row maker simulator comparison and the fill models, and its rows A8, A9, P5 and B4 are partly unverified.
+- Step 2 rebuild: Binance January matches 100% of snapshots at the snapshot's own exchange time, so the 88-92% was event order. The January snapshots may be built from the same deltas, so this shows consistency, not independent proof that no update is missing. Independent REST checks exist only for the Oct 2026 mainnet capture.
 - Crossed books: transient inside one message in all 35,902 messages of three 20-minute Bybit March slices. Message grouping by identical timestamps is an assumption, and the effect on signals and fills is not measured yet.
 - Requirements: `Minimal Requirements v2.1` (17 Aug) covers risk, reconciliation and monitoring, with gates AT-01 to AT-14; checklist in `requirements_checklist.md`. The 15 Oct PDF has 5 pages, but the 29 Oct review cites 15 Oct groups `STR`, `CLK` and `SIM` that are not in it, and `SDK01-07` where the PDF stops at SDK05. A longer version may exist.
 - The L3 guide, full and simplified execution design, Minimal Requirements and 29 Oct review are now in `out/integration/reports/`.
 - `MINIMUM_REQUIREMENTS.md` describes `trading_platform_poc/minreq/`, which is out of scope. Traceability says the core also meets MR-01 to MR-17; that is unverified.
-- No mainnet orders exist, so latency, rejects and queues on perps are uncalibrated. Queue parameters are a spot prior. Handled after platform correctness, under the requirements' stages, and required before restricted live (Demonstration 5). Tool: `order_lifecycle_logger/`.
+- No mainnet orders exist, so latency, rejects and queues on perps are uncalibrated. Queue parameters are a spot prior.
+- Latency: the Binance 6-week PDF (received 6 Nov) measures market data delivery only. Binance feed delay fits about 2 ms, which suggests a host next to Binance, while the default preset is singapore at 36 ms. Host location, order ack, cancel and private report latency on both venues, and all Bybit figures, are still missing. The PDF says tick-to-trade is measured separately; those figures are requested. Handled after platform correctness, under the requirements' stages, and required before restricted live (Demonstration 5). Tool: `order_lifecycle_logger/`.

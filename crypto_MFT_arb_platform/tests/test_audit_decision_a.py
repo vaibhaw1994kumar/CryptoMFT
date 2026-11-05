@@ -192,6 +192,37 @@ class ProfileV11(unittest.TestCase):
         self.assertTrue(m.opposite_cross_fills)                                              # inherited from v1 and labelled in the ladder report, not removed
         self.assertEqual(cfg.arb.profile, "perp_perp_maker_taker_v1")                        # the strategy gate only knows the v1 name
 
+    def test_v1_2_differs_from_v1_1_in_exactly_the_join_switch_and_the_run_defining_settings_it_now_carries(self):
+        from new_backtest.profiles import load_profile
+        a, b = self._flat(load_profile("perp_perp_maker_taker_v1_1")), self._flat(load_profile("perp_perp_maker_taker_v1_2"))
+        changed = {k for k in set(a) | set(b) if a.get(k, "<absent>") != b.get(k, "<absent>")}
+        self.assertEqual(changed, {"name", "description", "arb.join_touch_on_tick_rounding", "arb.maker_venues", "arb.venue_ticks.bybit", "arb.venue_ticks.binance", "arb.block_on_toxic",
+                                   "arb.max_cross_venue_skew_s", "arb.fill_gate_horizon_s", "hedge_move_calibration.file", "hedge_move_calibration.sha256",
+                                   "decision_status.hedge_move"})
+
+    def test_the_join_switch_is_on_in_v1_2_and_off_in_v1_1(self):
+        from new_backtest.profiles import apply_profile, load_profile
+        kw = dict(data_root="/nonexistent", pair="SOLUSDT", start_date=DAY, end_date=DAY)
+        self.assertFalse(apply_profile(load_profile("perp_perp_maker_taker_v1_1"), **kw).arb.join_touch_on_tick_rounding)
+        self.assertTrue(apply_profile(load_profile("perp_perp_maker_taker_v1_2"), **{**kw, "start_date": "2024-03-08", "end_date": "2024-03-08"}).arb.join_touch_on_tick_rounding)
+
+    def test_v1_2_pins_its_hedge_move_by_hash_from_train_days_and_a_profile_alone_identifies_the_run(self):
+        import copy
+        from new_backtest.profiles import ProfileError, apply_profile, load_profile
+        doc = load_profile("perp_perp_maker_taker_v1_2")
+        kw = dict(data_root="/nonexistent", pair="SOLUSDT", start_date="2024-03-08", end_date="2024-03-08")
+        a = apply_profile(doc, **kw).arb
+        self.assertAlmostEqual(a.expected_hedge_move_bps_bid, -0.7705897215547969)
+        self.assertEqual((a.maker_venues, a.venue_ticks, a.fill_gate_horizon_s), (("bybit",) if isinstance(a.maker_venues, tuple) else ["bybit"], {"bybit": 0.001, "binance": 0.001}, 5))
+        with self.assertRaises(ProfileError):                                             # a TRAIN day on or after the run's start
+            apply_profile(doc, **{**kw, "start_date": "2024-03-02", "end_date": "2024-03-02"})
+        bad = copy.deepcopy(doc)
+        bad["hedge_move_calibration"]["sha256"] = "0" * 64                                # the pinned file no longer matches its recorded hash
+        with self.assertRaises(ProfileError):
+            apply_profile(bad, **kw)
+        v11 = apply_profile(load_profile("perp_perp_maker_taker_v1_1"), **kw)
+        self.assertEqual(v11.arb.expected_hedge_move_bps_bid, 0.0)                         # v1.1 pins nothing: the runner supplies it, as before
+
     def test_the_integrity_switches_are_registered(self):
         from new_backtest.profiles import SWITCHES
         keys = {s.key for s in SWITCHES}

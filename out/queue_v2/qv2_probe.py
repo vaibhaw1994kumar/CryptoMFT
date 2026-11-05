@@ -7,7 +7,8 @@ import bisect, calendar, dataclasses, glob, gzip, json, math, os, sys, time, war
 from pathlib import Path
 warnings.filterwarnings("ignore")
 X = Path("/Users/vaibhav/Documents/Newproject/out/queue_v2")
-SNAP = X / "snap_qv2i"
+SNAP = Path(os.environ["QV2_SNAP"]) if os.environ.get("QV2_SNAP") else X / "snap_qv2i"       # QV2_SNAP: run another tree (B0: the live tree, for the queue-update counter)
+OUT_TAG = os.environ.get("QV2_PROBE_OUT")
 sys.path.insert(0, str(SNAP / "src"))
 from new_backtest.backtester import CrossVenueArbBacktester
 from new_backtest.profiles import apply_profile, load_profile
@@ -16,7 +17,7 @@ day = sys.argv[1]
 DATA = str(X / "slices_mar2024")
 t0 = calendar.timegm(time.strptime(day, "%Y-%m-%d")); t1 = t0 + 7200
 Q_BPS, TICK, SLOT = 6.546, 0.001, 15.0
-out = X / "hedge_move" / "probe"; out.mkdir(parents=True, exist_ok=True)
+out = Path(OUT_TAG) if OUT_TAG else X / "hedge_move" / "probe"; out.mkdir(parents=True, exist_ok=True)
 run_dir = out / f"run_{day}"; run_dir.mkdir(exist_ok=True)
 
 # Binance L1 on the local clock
@@ -52,7 +53,8 @@ cfg.analysis_mode = "maker_only"; cfg.scheduled_orders = tuple(orders); cfg.max_
 cfg.gate_class = "BYBIT_ONLY_WINDOW"
 cfg.allow_rejected_data = "probe on a 2-hour slice; Bybit book only (Binance is read here as a price series)"
 w0 = time.time()
-r = CrossVenueArbBacktester(cfg).run()
+_bt = CrossVenueArbBacktester(cfg)
+r = _bt.run()
 rows = [json.loads(l) for l in (run_dir / "trades.jsonl").read_text().splitlines() if l.strip()]
 fills = [x for x in rows if not x.get("taker") and x["venue"] == "bybit" and x["side"] == "buy"]
 res, drop = [], 0
@@ -63,6 +65,6 @@ for x in fills:
     m0, m1 = (a[0] + a[1]) / 2, (b[0] + b[1]) / 2
     res.append({"ts": x["ts"], "price": x["price"], "qty": x["qty"], "binance_mid_at_fill": m0, "move_bps": (m1 - m0) / m0 * 1e4})
 summary = {"day": day, "orders_scheduled": len(orders), "fired": r.analysis.get("fired"), "skipped": r.analysis.get("skipped"), "fills": len(fills), "fills_measured": len(res), "dropped": drop,
-           "maker_fill_causes": (r.maker_observations or {}).get("maker_fill_causes"), "q_bps": Q_BPS, "slot_s": SLOT, "wall_s": time.time() - w0, "rows": res}
+           "maker_fill_causes": (r.maker_observations or {}).get("maker_fill_causes"), "queue_updates": dict(getattr(_bt.maker, "queue_updates", {})), "q_bps": Q_BPS, "slot_s": SLOT, "wall_s": time.time() - w0, "rows": res}
 (out / f"{day}.json").write_text(json.dumps(summary, indent=1, default=str))
 print(day, "orders", len(orders), "fills", len(fills), "measured", len(res), "causes", summary["maker_fill_causes"], f"wall {summary['wall_s']:.0f}s", flush=True)

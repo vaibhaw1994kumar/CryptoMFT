@@ -46,7 +46,7 @@ running, k0, t0, ok, bad = [], 0, time.time(), 0, 0
 while todo or running:
     while todo and len(running) < a.workers:
         k, name, d, s, size = todo.pop(0)
-        cmd = ["nice", "-n", str(a.nice), a.python, str(ROOT / "scripts/perp_fault_run.py"), k, name, d, "--seed", str(s), "--size", str(size),
+        cmd = ["nice", "-n", str(a.nice), a.python, str(ROOT / "scripts/perp_fault_run.py"), k, name, d, "--seed", str(s), "--size", str(size), "--reference",
                "--out-root", a.out_root, "--data-root", a.data_root] + (["--funding-dir", a.funding_dir] if a.funding_dir else [])
         log = Path(a.out_root) / "logs"; log.mkdir(parents=True, exist_ok=True)
         lf = open(log / f"{k}_{name}_{d}_s{s}_z{size:g}.log", "w")

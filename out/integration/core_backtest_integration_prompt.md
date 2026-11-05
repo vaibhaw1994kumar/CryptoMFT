@@ -58,14 +58,41 @@ PHASE A: Move shared code into the core, no logic change
 - After each move: full suite, baselines byte-identical. Note the replay speed.
 GATE.
 
+PHASE B0: Owner's open decisions (one session, one change at a time, before Phase B)
+- Frame-atomic rebuild check, first because it touches no strategy: run the rebuild acceptance on the 4 January venue-days (Bybit and Binance, 2022-01-05 and 2022-01-13), with and without frame-atomic application. Report touch match %. No strategy runs.
+- Hedge move: use the probe estimate. Compare it with realised hedge moves on the SELECT slices and report the gap and n. No haircut unless the owner approves one after seeing the gap. Realised hedges in the final setup are about one fill across the four slices, so also run the existing probe on the same SELECT slices and report that n. State that the probe window starts at the fill and is 1 s, not hedge arrival.
+- Bid rounded onto the best bid: new switch. Join at the back of the queue if the edge recomputed at the rounded price still passes; otherwise refuse. Test it. Re-run the four 2-hour slices and report refused vs joined. Profile: on in v1_2 and off in v1.1 (owner decision, 5 Nov), so v1.1 stays the byte-identical control. Results depend on fees, which stay ASSUMED.
+- Queue v2 evidence: in the slice runs and the SELECT probe runs, report under v1.1: % of fills and % of queue-position updates carrying ambiguous_trade_depth, and how many fills came via the exact-price rule (trade_after_front) now that quotes are on the tick grid. Report n; strategy fills are few, so the probe runs are the usable sample. If no counter exists for queue-position updates, add one as observation only, keeping v1.1 outputs byte-identical.
+- Step 2 diagnosis, Binance 01-05 and 01-13, report only, no code changes: re-score the rebuild against each snapshot, also allowing a match with the rebuilt book at any point within +-50 ms and +-200 ms of the snapshot time. If the match reaches about 99%, snapshot timing is the cause: mark step 2 done. If not, list 20 sample mismatches with the surrounding updates and say whether updates look missing.
+- Ledger feasibility, report only: the converted March files on disk carry no trade id, update id or sequence field (data/*/trades and book_events have only timestamps, price, size and side). Find out whether the raw public source files still exist and which ids they hold. State whether anything links a trade to a depth update. A trade id alone removes duplicates; it does not pair a trade with a depth change. Binance March has no depth, so only Bybit matters.
+- Profile roles (owner, 5 Nov): v1 and legacy_v0 are reference only, never for decisions. v1.1 stays the byte-identical control. v1_2 (v1.1 plus approved deliberate changes) is the working profile.
+- Default profile: every runner and script that picks a profile defaults to v1.1 now and to v1_2 once frozen. v1 and legacy_v0 run only with an explicit --reference flag and are labelled REFERENCE_ONLY. Do not change engine config defaults; legacy byte-identity depends on them.
+- Move every setting that defines a run into the profile, for v1_2: maker_venues, venue_ticks, block_on_toxic, max_cross_venue_skew_s, fill_gate_horizon_s, and a pinned hedge-move calibration file with its hash. Today the runner sets these and the profile carries hedge move 0.0, so a profile hash does not identify a run.
+- List v1_2 switches in three groups: simulator-only (fill evidence, queue, ledger), must match in the live path (tick rounding, maker venue, hedge cap, hedge pricing at arrival), and research. Live path means crypto_stat_arb only. Report which the live path lacks. Report only; no live changes. Today's hedge cap is touch_slack; break-even plus buffer is not chosen until the Phase 1-lite sweep.
+- HOLDOUT days stay untouched. All P&L EXPLORATORY.
+GATE.
+
 PHASE B: Shared accounting, fees and book rules
 - Build the accounting shadow (matrix 4A) and sort every difference: BUG_BACKTEST, BUG_CORE or BY_DESIGN. Then switch the backtester to the core's FeeSchedule, funding, margin and ledger. Port common-timestamp valuation into the core. Retire funding_settler, margin_model and fee presets.
 - Behind v1_2: message-atomic book with crossed-book counting by the core rule, gap handling, tick/lot/minimum checks, query before replace.
+- Ledger native ids: deferred by the owner's gate decision. No raw March files exist on the Mac, ambiguous fills are 0.72% (5 of 692), and the depth-driven queue updates depend on the cancel model, which ids would not fix. The 50 ms window stays and is stated in the report. Do not download or build.
 - Make signals and maker queue updates run after a whole message, not after each delta. The touch differs from the end-of-message touch on 18-22% of deltas. Measure what half-applied messages did to signals and fills: v1.1 vs v1_2, one change at a time.
 - Extend the crossed-book measurement beyond three 20-minute Bybit slices: more hours and days, and January. Prove the message boundary from the data, since identical exchange_ts and local_ts as one message is an assumption. Binance March is best bid/ask only; say so.
 - Margin: settle A9, where the backtester never liquidates a position above its last tier and the core treats it as a breach. The core rule wins unless the requirements say otherwise.
 - Measure Decimal cost at the simulator boundary. Keep floats inside the simulator if needed and record that in the manifest.
 GATE.
+
+SENSITIVITY RANGE at the Phase B gate, before the freeze: report v1_2 cash P&L, fills and Bybit maker markout under behind_first, proportional, ahead_first and cohort_uniform, from separate full replays. Headline stays proportional, with min-max beside it. No new engine code.
+
+DATASET SETTINGS: v1_2 is March-only because venue_ticks and the hedge-move file are per dataset. Before the freeze, propose separating strategy rules from a dataset block, with ticks heading to the instrument master (REF03). January reference checks in Phase B use v1.1 plus the switch under test.
+
+RELEASE FREEZE at the Phase B gate, with owner approval: freeze v1_2 after the rounding switch, probe hedge move, message-atomic book and query before replace are in. Release identity: both repos' git hashes, dirty flags, profile hash, code hash, fee snapshot, calibration file hashes, calibration cutoff. Every result carries it. A later behaviour change means a new profile version.
+
+LATENCY EVIDENCE (owner, 6 Nov): Binance_Futures_Latency_6_weeks.pdf measures Binance market data delivery only. It has no order ack, cancel or hedge figures and no Bybit figures, and it says so itself. Depth, Trade and Ticker Tx-to-Client P50 is about 1.4-2.5 ms, P99 about 4-5 ms on Depth, with rare spikes (20 ms Depth, 145 ms Ticker, 1.61 s Trade). The values are hourly maxima of percentiles, not averages. AggTrade, Ticker24h, ForceOrder and MarkPrice figures are excluded: those feeds run on exchange cadence.
+- These figures fit the tokyo preset's Binance feed (2 ms), not the singapore preset's (36 ms). Host location is not stated. Do not change any preset, calibration file or v1.1 until the owner confirms it.
+- Never use a market data figure as entry, ack, cancel or hedge latency.
+- Before Phase B, report only: (a) break down simulated hedge arrival from fill into private report, decision and entry time, and explain why the observed 31 ms is below the singapore preset's expected sum of about 45 ms. (b) Hedge move probe on the 7 TRAIN days at fixed delays of 30, 45, 60, 100, 130 and 200 ms from the fill, plus 1 s, with n, mean and standard error for each. (c) Re-run the four v1_2 slices under the singapore and tokyo presets and report P&L, fills and maker markout. All three are EXPLORATORY.
+- Add a Binance public feed stall to the Phase C scenarios: no Binance update for 1.6 s just after a Bybit fill.
 
 PHASE C: Core fill-triggered hedging
 - Add FILL_TRIGGERED (matrix 4B), porting behaviour from opportunity.py and backtester._on_fill: deferred hedge child, atomic package reservation, hedge for the filled quantity, one live hedge child, unknown block, EMS01 revalidation, durable send per OMS03. Settle the rule for a second partial fill while a hedge is in flight.
@@ -79,6 +106,7 @@ GATE.
 PHASE D: One runtime
 - Build QueueAwareVenueAdapter on VenueExecutionAdapter, adding an on_trade hook beside on_book_update. Move the arb strategy to the SDK protocol. TradingSession runs it in backtest and paper. DeterministicVenueAdapter resting fills come from a book cross, not a print (F9), so they must not carry the arb maker leg; keep that adapter for taker fills only.
 - Parity: same synthetic data, then March slices and January days, old path vs new. Every difference is explained or recorded in the run manifest.
+- Shadow queue trackers: only after the adapter is stable, build a single-pass tracker for all models and add the range to every result. Fills differ by model, so hedges, inventory and later signals differ too: first show it agrees with the full replays, or label it an approximation.
 GATE.
 
 PHASE E: Risk gate, pairing, venue selector

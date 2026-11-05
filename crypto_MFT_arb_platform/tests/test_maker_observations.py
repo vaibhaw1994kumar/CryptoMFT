@@ -104,6 +104,29 @@ class ObservationOnly(unittest.TestCase):
         self.assertEqual(off.bt.obs.rows, [])
         self.assertIsNone(None)
 
+    def _queued(self, obs):
+        from new_backtest.event_loader import DELTA
+        h = Harness(cfg_kw={"record_maker_obs": obs})
+        h.book(0.5, BYBIT, bids=((100.0, 6.0), (99.0, 5.0)), asks=((101.0, 2.0), (102.0, 5.0)))
+        h.book(0.5, BINANCE, bids=((99.5, 3.0), (98.5, 5.0)), asks=((100.5, 1.0), (101.5, 5.0)))
+        h.send_maker(1.0, price=100.0, qty=2.0)                                          # joins 100.0 behind the displayed 6.0
+        h.advance(2.0)
+        h.sell_trade(3.0, BYBIT, volume=1.0, price=100.0)                                # a print moves the queue: a trade update
+        h.event(4.0, DELTA, BYBIT, {"side": "bid", "price": 100.0, "volume": 3.0, "event_type": "update"})   # a depth decrease with no print: a delta update
+        h.advance(5.0)
+        return h
+
+    def test_queue_position_updates_are_counted_with_the_ambiguous_ones_and_only_when_observing(self):
+        on, off = self._queued(True), self._queued(False)
+        qu = on.bt.maker.queue_updates
+        self.assertEqual(qu["trade"]["order_updates"], 1)
+        self.assertEqual(qu["trade"]["ambiguous_order_updates"], 0)                       # one causal print
+        self.assertEqual(qu["delta"]["order_updates"], 1)
+        self.assertEqual(qu["delta"]["ambiguous_order_updates"], 1)                       # a decrease with no matched print
+        self.assertEqual(off.bt.maker.queue_updates, {})
+        self.assertEqual(on.bt.maker.diag, off.bt.maker.diag)                             # observation only: nothing the engine does differs
+        self.assertEqual(on.bt.trade_log, off.bt.trade_log)
+
     def test_fills_carry_no_observation_when_it_is_off(self):
         h = run(False)
         self.assertFalse(h.bt.maker.obs_enabled)

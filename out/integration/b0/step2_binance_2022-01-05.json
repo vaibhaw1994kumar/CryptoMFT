@@ -1,0 +1,43 @@
+{
+ "day": "2022-01-05",
+ "snapshots_scored": 61281,
+ "wall_s": 168.8,
+ "match_pct": {
+  "+-0ms": {
+   "touch_price": 91.519,
+   "touch_price_and_size": 73.088
+  },
+  "+-50ms": {
+   "touch_price": 100.0,
+   "touch_price_and_size": 100.0
+  },
+  "+-200ms": {
+   "touch_price": 100.0,
+   "touch_price_and_size": 100.0
+  }
+ },
+ "misses_at_200ms": {
+  "touch_price": 0,
+  "size_only": 0
+ },
+ "miss_classes_at_200ms": {
+  "price": {
+   "snapshot_touch_absent_from_rebuilt_book": 0,
+   "rebuilt_touch_absent_from_snapshot_top10": 0,
+   "both_present_but_touch_differs": 0
+  },
+  "size": {
+   "size_differs": 0
+  }
+ },
+ "match_offset_ms": {
+  "share_exactly_at_snapshot_time_pct": 100.0,
+  "share_rebuilt_book_reaches_state_after_snapshot_time_pct": 0.0,
+  "share_rebuilt_state_ended_before_snapshot_time_pct": 0.0,
+  "abs_offset_ms_p50": 0.0,
+  "abs_offset_ms_p90": 0.0,
+  "abs_offset_ms_p99": 0.0,
+  "abs_offset_ms_max": 0.0
+ },
+ "samples": []
+}
