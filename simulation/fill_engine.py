@@ -461,11 +461,12 @@ class AmendResult:
 def _count_queue_updates(kind: str):
     """Observation only (B0): count the events after which a resting order's queue_ahead went DOWN (a queue-position update), and how many of them carried the ambiguity flag
     (the event's trigger is marked ambiguous: a depth decrease with no matched print, or a print several pending credits could explain). Reads queue_ahead before and after
-    the call; changes nothing, and only runs when observations are on. Read from MakerExecutor.queue_updates."""
+    the call; changes nothing. It is installed on the instance only while observations are on (the obs_enabled setter), so a run with observations off calls the
+    plain methods. Read from MakerExecutor.queue_updates."""
     def wrap(fn):
         @functools.wraps(fn)
         def inner(self, *a, **kw):
-            if not self.obs_enabled or not self.orders:
+            if not self.orders:
                 return fn(self, *a, **kw)
             before = [(o, o.queue_ahead) for o in self.orders.values()]
             trig0 = self._obs_trig
@@ -486,6 +487,21 @@ def _count_queue_updates(kind: str):
 
 class MakerExecutor:
     """Passive order lifecycle with queue simulation and online fill learning."""
+
+    _QUEUE_UPDATE_HOOKS = (("on_trade", "trade"), ("on_delta", "delta"), ("on_snapshot", "snapshot"))
+
+    @property
+    def obs_enabled(self) -> bool:
+        return self._obs_enabled
+
+    @obs_enabled.setter
+    def obs_enabled(self, on: bool) -> None:
+        self._obs_enabled = bool(on)
+        for name, kind in self._QUEUE_UPDATE_HOOKS:
+            if self._obs_enabled:
+                self.__dict__[name] = functools.partial(_count_queue_updates(kind)(getattr(type(self), name)), self)
+            else:
+                self.__dict__.pop(name, None)
 
     def __init__(
         self,
@@ -878,7 +894,6 @@ class MakerExecutor:
     def _credit_time(self, now: float, event_ts: float | None) -> float:
         return event_ts if (event_ts is not None and self.config.dedupe_time_basis == "exchange") else now
 
-    @_count_queue_updates("trade")
     def on_trade(
         self, venue: str, price: float, volume: float, sign: int, now: float, fee_bps: float,
         is_synthetic: bool = False, event_ts: float | None = None,
@@ -1045,7 +1060,6 @@ class MakerExecutor:
             cx_rec[5] = max(0.0, cx_rec[5] - used)           # the ordinary rules spent part of this print: a later cross cannot spend it again
         return fills
 
-    @_count_queue_updates("delta")
     def on_delta(
         self, venue: str, side: str, price: float, new_size: float, now: float,
         tick_size: float, fee_bps: float, event_ts: float | None = None,
@@ -1124,7 +1138,6 @@ class MakerExecutor:
             order.level_now = new_size
         return fills
 
-    @_count_queue_updates("snapshot")
     def on_snapshot(
         self, venue: str, book: OrderBook, now: float, tick_size: float, fee_bps: float,
         event_ts: float | None = None,
