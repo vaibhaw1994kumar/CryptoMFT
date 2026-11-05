@@ -6,7 +6,7 @@ book (it records the crossing instead) and goes invalid across a declared gap un
 
 Acceptance: between two reference snapshots every variant is rebuilt from deltas only (reset to snapshot k), and compared with snapshot k+1 at its own
 timestamp: touch price and size on both sides, and the top-10 levels (price and size). Variants: the exact book per message, the exact book per frame, and the
-engine's OrderBook with and without tape repair. Run it under both event orders to see what the order of equal timestamps does."""
+engine's OrderBook with and without tape repair, per message and per frame (B0.1). Run it under both event orders to see what the order of equal timestamps does."""
 from __future__ import annotations
 
 import json
@@ -200,6 +200,52 @@ class EngineBook:
     def extra(self): return {"trade_repairs": self.book.trade_repairs, "crossed_events": self.book.crossed_events, "tape_repair": self.tape_repair}
 
 
+class EngineFrame(EngineBook):
+    """The engine's OrderBook with a frame (messages sharing exchange and receive time) applied as one unit: the crossed-book repair runs once, after the last message of the frame,
+    on that last message's side (B0.1 measurement; the engine itself still repairs per message)."""
+    def __init__(self, venue: str, tape_repair: bool) -> None:
+        super().__init__(venue, tape_repair)
+        from ..order_book import OrderBook
+
+        class _FrameBook(OrderBook):
+            __slots__ = ("_defer",)
+
+            def _uncross(self, incoming_side):
+                if not getattr(self, "_defer", False):
+                    super()._uncross(incoming_side)
+
+        self.book = _FrameBook(venue, "X", tape_repair=tape_repair)
+        self.pending: list = []
+        self.key = None
+    def reset(self, bids, asks):
+        self.pending, self.key = [], None
+        super().reset(bids, asks)
+    def delta(self, side, price, size, key):
+        if key != self.key:
+            self.flush()
+            self.key = key
+        self.pending.append((side, price, size, key[0]))
+    def trade(self, price, vol, sign, ts):
+        self.flush()
+        super().trade(price, vol, sign, ts)
+    def flush(self):
+        if not self.pending:
+            return
+        b = self.book
+        crossed_before = b.crossed_events
+        b._defer = True
+        for side, price, size, ts in self.pending:
+            self.ts = ts or self.ts
+            b.apply_delta(side, price / SCALE, size / SCALE, "modify", self.ts)
+        b._defer = False
+        b.crossed_events = crossed_before
+        if b.is_crossed():
+            b.crossed_events += 1
+            b._uncross(self.pending[-1][0])
+        self.pending = []
+
+
 def default_variants(venue: str) -> dict:
     return {"exact_message": ExactMessage(), "exact_frame": ExactFrame(), "engine_tape_repair_on": EngineBook(venue, True),
-            "engine_tape_repair_off": EngineBook(venue, False)}
+            "engine_tape_repair_off": EngineBook(venue, False),
+            "engine_frame_tape_repair_on": EngineFrame(venue, True), "engine_frame_tape_repair_off": EngineFrame(venue, False)}

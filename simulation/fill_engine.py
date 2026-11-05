@@ -25,6 +25,7 @@ during the run and can be warm-started into a second pass.
 """
 from __future__ import annotations
 
+import functools
 import itertools
 import math
 from collections import deque
@@ -457,6 +458,32 @@ class AmendResult:
     reason: str
 
 
+def _count_queue_updates(kind: str):
+    """Observation only (B0): count the events after which a resting order's queue_ahead went DOWN (a queue-position update), and how many of them carried the ambiguity flag
+    (the event's trigger is marked ambiguous: a depth decrease with no matched print, or a print several pending credits could explain). Reads queue_ahead before and after
+    the call; changes nothing, and only runs when observations are on. Read from MakerExecutor.queue_updates."""
+    def wrap(fn):
+        @functools.wraps(fn)
+        def inner(self, *a, **kw):
+            if not self.obs_enabled or not self.orders:
+                return fn(self, *a, **kw)
+            before = [(o, o.queue_ahead) for o in self.orders.values()]
+            trig0 = self._obs_trig
+            out = fn(self, *a, **kw)
+            moved = sum(1 for o, q in before if o.queue_ahead < q - 1e-12)
+            if moved:
+                amb = self._obs_trig is not trig0 and bool(self._obs_trig.get("ambiguous"))
+                row = self.queue_updates.setdefault(kind, {"events": 0, "order_updates": 0, "ambiguous_events": 0, "ambiguous_order_updates": 0})
+                row["events"] += 1
+                row["order_updates"] += moved
+                if amb:
+                    row["ambiguous_events"] += 1
+                    row["ambiguous_order_updates"] += moved
+            return out
+        return inner
+    return wrap
+
+
 class MakerExecutor:
     """Passive order lifecycle with queue simulation and online fill learning."""
 
@@ -491,6 +518,7 @@ class MakerExecutor:
         self.cohort_log: list[dict] = []                   # cohort mode: counterfactual projections (bounded)
         self.obs_enabled = False
         self._obs_trig: dict = {}
+        self.queue_updates: dict[str, dict[str, int]] = {}         # observation only: see _count_queue_updates
         self._obs_qb: dict[int, tuple[float, float]] = {}      # maker order id -> (queue ahead, event volume offered) just before its fill
         self._explained: dict[str, dict[tuple, deque]] = {"trade": {}, "delta": {}}
         self.cross_log: list[dict] = []                    # opposite_cross_confirm_ms: one row per resolved cross (confirmed before / after, dropped); bounded
@@ -850,6 +878,7 @@ class MakerExecutor:
     def _credit_time(self, now: float, event_ts: float | None) -> float:
         return event_ts if (event_ts is not None and self.config.dedupe_time_basis == "exchange") else now
 
+    @_count_queue_updates("trade")
     def on_trade(
         self, venue: str, price: float, volume: float, sign: int, now: float, fee_bps: float,
         is_synthetic: bool = False, event_ts: float | None = None,
@@ -1016,6 +1045,7 @@ class MakerExecutor:
             cx_rec[5] = max(0.0, cx_rec[5] - used)           # the ordinary rules spent part of this print: a later cross cannot spend it again
         return fills
 
+    @_count_queue_updates("delta")
     def on_delta(
         self, venue: str, side: str, price: float, new_size: float, now: float,
         tick_size: float, fee_bps: float, event_ts: float | None = None,
@@ -1094,6 +1124,7 @@ class MakerExecutor:
             order.level_now = new_size
         return fills
 
+    @_count_queue_updates("snapshot")
     def on_snapshot(
         self, venue: str, book: OrderBook, now: float, tick_size: float, fee_bps: float,
         event_ts: float | None = None,
