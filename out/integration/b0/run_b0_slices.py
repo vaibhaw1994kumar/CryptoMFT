@@ -3,7 +3,7 @@ against the LIVE tree, Singapore latency, bybit_perp_mm, clean, size 1, seed 1, 
 cells:  a = v1.1 with the market-data hedge move (control; identical to the Phase A baselines)
         b = v1.1 with the PROBE hedge move                                     (B0.2: the hedge-move change alone)
         c = v1_2 (join the touch when tick rounding lands on it), the PROBE hedge move pinned in the profile, nothing else from the environment   (B0.3: the switch alone, vs cell b)
-usage: run_b0_slices.py CELL [N_PARALLEL]   -> out/integration/b0/runs/CELL/...   Resumable."""
+usage: run_b0_slices.py CELL [N_PARALLEL [PRESET]]   -> out/integration/b0/runs/CELL[_PRESET]/...   Resumable. PRESET singapore (default) or tokyo (labelled LATENCY_SENSITIVITY, B0 follow-up c)."""
 import calendar, json, os, subprocess, sys, time
 from pathlib import Path
 
@@ -12,7 +12,8 @@ LIVE = ROOT / "crypto_MFT_arb_platform"
 X = ROOT / "out" / "queue_v2"
 cell = sys.argv[1]
 n = int(sys.argv[2]) if len(sys.argv) > 2 else 2
-RUNS = ROOT / "out" / "integration" / "b0" / "runs" / cell
+PRESET = sys.argv[3] if len(sys.argv) > 3 else "singapore"
+RUNS = ROOT / "out" / "integration" / "b0" / "runs" / (cell if PRESET == "singapore" else f"{cell}_{PRESET}")
 DAYS = ("2024-03-08", "2024-03-09", "2024-03-10", "2024-03-11")
 REASON = ("exploratory: 2-hour slice; Binance March-2024 has bookTicker (L1) only (manifest EMPTY); funding not settled; makers judged against the tape of the venue they rest on")
 PROF = {"a": "perp_perp_maker_taker_v1_1", "b": "perp_perp_maker_taker_v1_1", "c": "perp_perp_maker_taker_v1_2"}[cell]
@@ -30,7 +31,7 @@ def job(day):
         for k in ("QV2_HEDGE_MOVE_FILE", "QV2_VENUE_TICKS", "QV2_MAKER_VENUES"):
             env.pop(k, None)
     done = RUNS / "base" / PROF / day / "summary.json"
-    return done, env, ["python3.12", "-I", str(X / "qv2_march_run.py"), PROF, day, "--group", "base", "--cell", PROF, "--allow-rejected-data", REASON]
+    return done, env, ["python3.12", "-I", str(X / "qv2_march_run.py"), PROF, day, "--group", "base", "--cell", PROF, "--allow-rejected-data", REASON] + (["--latency-preset", PRESET] if PRESET != "singapore" else [])
 
 
 pending, running = [d for d in DAYS if not job(d)[0].exists()], {}
@@ -42,7 +43,7 @@ while pending or running:
     if pending and len(running) < n:
         d = pending.pop(0)
         _, env, cmd = job(d)
-        log = open(RUNS.parent / f"{cell}_{d}.log", "w")
+        log = open(RUNS.parent / f"{RUNS.name}_{d}.log", "w")
         running[d] = subprocess.Popen(["nice", "-n", "5"] + cmd, env=env, stdout=log, stderr=subprocess.STDOUT, cwd=str(ROOT / "crypto_MFT_arb_platform"))
         print(time.strftime("%T"), "start", cell, d, flush=True)
     time.sleep(5)

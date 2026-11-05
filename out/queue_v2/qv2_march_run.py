@@ -27,6 +27,7 @@ FEES = {"mm": "bybit_perp_mm", "vip0": "bybit_perp_vip0"}
 ap = argparse.ArgumentParser()
 ap.add_argument("profile", nargs="?", default="perp_perp_maker_taker_v1_1"); ap.add_argument("day")
 ap.add_argument("--reference", action="store_true", help="REFERENCE_ONLY: required to run legacy_v0 or perp_perp_maker_taker_v1 (never for decisions)")
+ap.add_argument("--latency-preset", default="singapore", choices=("singapore", "tokyo"), help="singapore is the run default; tokyo only for a labelled latency sensitivity run (no preset is changed)")
 ap.add_argument("--group", required=True); ap.add_argument("--cell", required=True)
 ap.add_argument("--buffer", default="none")
 ap.add_argument("--fee", default="mm", choices=sorted(FEES))
@@ -42,9 +43,9 @@ out = RUNS / a.group / a.cell / a.day
 out.mkdir(parents=True, exist_ok=True)
 
 doc = load_profile(SNAP / "profiles" / f"{a.profile}.yaml")
-doc["latency_preset"] = "singapore"
+doc["latency_preset"] = a.latency_preset
 if isinstance(doc.get("timing"), dict):
-    doc["timing"]["from_latency_preset"] = "singapore"
+    doc["timing"]["from_latency_preset"] = a.latency_preset
 doc.setdefault("fee_presets", {})["bybit"] = FEES[a.fee]
 if a.buffer != "none":
     doc.setdefault("execution", {}).setdefault("hedge", {}).update({"cap": "breakeven_plus_buffer", "cap_buffer_bps": float(a.buffer)})
@@ -165,7 +166,7 @@ summary = {
             "markout_summary": r.markout_summary, "markout_by_venue_role": getattr(r, "markout_by_venue_role", None), "maker_observations": r.maker_observations,
             "data_manifest": r.data_manifest, "maker_stats": r.maker_stats, "maker_diagnostics": r.maker_diagnostics,
             "queue_updates": dict(getattr(_bt.maker, "queue_updates", {})),
-            **({"label": "REFERENCE_ONLY"} if a.reference else {})},
+            **({"label": "REFERENCE_ONLY"} if a.reference else {}), **({"latency_label": "LATENCY_SENSITIVITY"} if a.latency_preset != "singapore" else {})},
 }
 if getattr(_bt.maker, "cross_log", None):
     (out / "cross_log.json").write_text(json.dumps(_bt.maker.cross_log, indent=1, default=str))
