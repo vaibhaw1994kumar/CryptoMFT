@@ -10,9 +10,9 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field, replace
 
+from crypto_stat_arb.simulation.latency_model import BINANCE, BYBIT, DEFAULT_LATENCY_PRESET, LATENCY_PRESETS, VenueLatencySpec  # noqa: F401  (moved in Phase A; re-exported until Phase F)
 
-BYBIT = "bybit"
-BINANCE = "binance"
+
 
 
 # ── Fees ──────────────────────────────────────────────────────────────────────
@@ -37,51 +37,6 @@ FEE_PRESETS: dict[str, FeeSpec] = {
 }
 
 
-# ── Latency ───────────────────────────────────────────────────────────────────
-
-@dataclass(frozen=True)
-class VenueLatencySpec:
-    """One-way latencies in milliseconds.
-
-    feed_ms      market data: exchange match -> our process sees it
-    entry_ms     our order send -> exchange matching engine accepts it
-    cancel_ms    our cancel send -> exchange applies it
-    jitter_ms    std-dev of the lognormal around the mean
-    """
-    feed_ms: float
-    entry_ms: float
-    cancel_ms: float
-    jitter_ms: float
-
-
-# You cannot be co-located with both venues at once. Bybit matching runs out of
-# AWS ap-southeast-1 (Singapore); Binance out of ap-northeast-1 (Tokyo).
-# Tokyo <-> Singapore one-way is ~35ms. That asymmetry is the single biggest
-# driver of cross-exchange arb viability, so it is modelled explicitly.
-LATENCY_PRESETS: dict[str, dict[str, VenueLatencySpec]] = {
-    # Co-located Singapore: fast to Bybit, slow to Binance.
-    "singapore": {
-        BYBIT:   VenueLatencySpec(feed_ms=2.0,  entry_ms=6.0,  cancel_ms=6.0,  jitter_ms=2.5),
-        BINANCE: VenueLatencySpec(feed_ms=36.0, entry_ms=40.0, cancel_ms=40.0, jitter_ms=8.0),
-    },
-    # Co-located Tokyo: fast to Binance, slow to Bybit.
-    "tokyo": {
-        BYBIT:   VenueLatencySpec(feed_ms=36.0, entry_ms=40.0, cancel_ms=40.0, jitter_ms=8.0),
-        BINANCE: VenueLatencySpec(feed_ms=2.0,  entry_ms=6.0,  cancel_ms=6.0,  jitter_ms=2.5),
-    },
-    # Midpoint host (e.g. Hong Kong) — symmetric but slower to both.
-    "neutral": {
-        BYBIT:   VenueLatencySpec(feed_ms=18.0, entry_ms=22.0, cancel_ms=22.0, jitter_ms=6.0),
-        BINANCE: VenueLatencySpec(feed_ms=20.0, entry_ms=24.0, cancel_ms=24.0, jitter_ms=6.0),
-    },
-    # Physically impossible; use only as an upper bound in sensitivity sweeps.
-    "colocated_both": {
-        BYBIT:   VenueLatencySpec(feed_ms=1.0, entry_ms=3.0, cancel_ms=3.0, jitter_ms=1.0),
-        BINANCE: VenueLatencySpec(feed_ms=1.0, entry_ms=3.0, cancel_ms=3.0, jitter_ms=1.0),
-    },
-}
-
-DEFAULT_LATENCY_PRESET = "singapore"
 
 
 # ── Venue ─────────────────────────────────────────────────────────────────────

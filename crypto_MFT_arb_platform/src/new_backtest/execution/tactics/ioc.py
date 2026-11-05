@@ -1,12 +1,5 @@
-from __future__ import annotations
+"""Temporary re-export (Phase A, removed in Phase F): this module now lives in crypto_stat_arb.ems.tactics.ioc. `new_backtest.execution.tactics.ioc` is the same module object."""
+import importlib as _importlib
+import sys as _sys
 
-from ..intent import Role
-from .base import Tactic
-
-
-class IocCapped(Tactic):
-    """IOC limit capped at worst_price. Phase 0: the cap is today's touch +/- slack, so the behaviour is unchanged; the
-    mandatory-cap rule means a hedge without a worst_price is refused (mutation: removing the cap must fail a test)."""
-    name = "IOC_CAPPED"
-    roles = (Role.HEDGE, Role.PRIMARY)       # PRIMARY: taker_taker legs
-    passive = False
+_sys.modules[__name__] = _importlib.import_module("crypto_stat_arb.ems.tactics.ioc")

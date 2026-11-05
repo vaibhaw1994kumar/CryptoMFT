@@ -243,8 +243,16 @@ def _sha_files(paths) -> str:
     return h.hexdigest()
 
 
+# Phase A: engine code that moved into the core still belongs to the release identity. The directories are new core packages; the files are single moved modules.
+CORE_DIR = ENGINE_DIR.parent / "crypto_stat_arb"
+CORE_MOVED_DIRS = ("strategies", "simulation", "ems")
+CORE_MOVED_FILES: tuple[str, ...] = ("order_state_machine.py", "circuit_breaker.py", "valuation.py")
+
+
 def code_hash() -> dict:
     files = [p for p in ENGINE_DIR.glob("*.py")] + [p for p in (ENGINE_DIR / "execution").rglob("*.py")]
+    files += [p for d in CORE_MOVED_DIRS if (CORE_DIR / d).is_dir() for p in sorted((CORE_DIR / d).rglob("*.py"))]
+    files += [CORE_DIR / f for f in CORE_MOVED_FILES if (CORE_DIR / f).is_file()]
     root = ENGINE_DIR.parents[2]
     try:
         rev = subprocess.run(["git", "rev-parse", "--short", "HEAD"], cwd=root, capture_output=True, text=True, timeout=10).stdout.strip()

@@ -99,6 +99,31 @@
   "wall_s": 1240.9897680282593,
   "events_processed": null
  },
+ "jan/perp_perp_maker_taker_v1@clean_s1_frozen/2022-01-13": {
+  "files": {
+   "trades.jsonl": "bd81e19c45f03111eea6445cec531995db57f5bb76c6d777a7155455b2f61afe",
+   "fill_events.jsonl": "0a7599d886fb41415305302016ff508510eb493de6a19391a5e18a0d54781469",
+   "fill_bucket_stats.json": "f8fc5368b29a2f73f8da644855d0222dfa5f0297c955546a6df1ad1424d342b9",
+   "model_settings.json": "73719d67e0765f5d69a55829ab27fb6043b26ebb48a498fadbf00ef278a9910c"
+  },
+  "summary_sha256": "7d4fee41a4ea09cac317c6dd14425797624c9d31d9da7d341c225e34dd484aa3",
+  "result": {
+   "signals": 42,
+   "fills": 45,
+   "orders_sent": 87,
+   "fees_paid": 3.2307896648711023,
+   "gross_pnl": 4.304177505761942,
+   "cash_pnl": 1.073394840890785,
+   "ending_equity_common_timestamp": 0.9958948408907702,
+   "final_inventory": {
+    "bybit": -1.0,
+    "binance": 1.0
+   },
+   "traded_notional": 10694.084061130603
+  },
+  "wall_s": 1178.5173861980438,
+  "events_processed": null
+ },
  "jan/perp_perp_maker_taker_v1_1/2022-01-05": {
   "files": {
    "trades.jsonl": "e3b293e97c88f2d86ffec8bbb087bd0394735f1965e2cd2136d53214065fc863",
@@ -147,6 +172,131 @@
    "traded_notional": 5084.314999999998
   },
   "wall_s": 1243.1657919883728,
+  "events_processed": null
+ },
+ "jan/perp_perp_maker_taker_v1_1@realistic_s1_base/2022-01-13": {
+  "files": {
+   "trades.jsonl": "6a1643739aada931cc1a1f5b1335ddbc58ea06ef3a704577da1a39ae79b53553",
+   "fill_events.jsonl": "649b911dece69b5e4935df7da72830f24b6fdb8913f10e822f2e413552579021",
+   "fill_bucket_stats.json": "9f9edc90a7d2cb64c02b899ecc49a8b1e5af510b10350a9244d3822c53cf085c",
+   "model_settings.json": "bc9865a2ffd439dc963dff1097fa0a345a81cd017ab8bbdf2036a9e478f829a8"
+  },
+  "summary_sha256": "4ae9b27455cd4473d8cc158edd6416fcd7c189a2d38c8224493b56fef6455e6d",
+  "result": {
+   "signals": 60,
+   "fills": 21,
+   "orders_sent": 81,
+   "fees_paid": 1.5536168375000006,
+   "gross_pnl": 0.9465000000000146,
+   "cash_pnl": -0.607108087499995,
+   "ending_equity_common_timestamp": -0.7039830875000064,
+   "final_inventory": {
+    "bybit": -1.25,
+    "binance": 1.25
+   },
+   "traded_notional": 5084.314999999998
+  },
+  "wall_s": 1178.1937699317932,
+  "events_processed": null
+ },
+ "jan/perp_perp_maker_taker_v1_1@realistic_s2_base/2022-01-13": {
+  "files": {
+   "trades.jsonl": "e60428a301c8bd41793e961086ac452a061889b769011bda7910dd92adf8be30",
+   "fill_events.jsonl": "8da96571e487e71639ee5ff433579bcf9a99aa8c31d803adbde4bf085c1735c6",
+   "fill_bucket_stats.json": "94b34bbe735139e0bf57ad0d93ba0f56fb8f46e9081cd118183e9743bc179f86",
+   "model_settings.json": "bc9865a2ffd439dc963dff1097fa0a345a81cd017ab8bbdf2036a9e478f829a8"
+  },
+  "summary_sha256": "26440b82a54beaef56a91c075c1aa6b3259b7d75c1e252ab969f07c0f08e0ae8",
+  "result": {
+   "signals": 19,
+   "fills": 2,
+   "orders_sent": 21,
+   "fees_paid": 0.08104625,
+   "gross_pnl": -0.10100000000001046,
+   "cash_pnl": -0.18206004999998981,
+   "ending_equity_common_timestamp": -0.08906004999997208,
+   "final_inventory": {
+    "bybit": 1.2,
+    "binance": -1.2
+   },
+   "traded_notional": 360.329
+  },
+  "wall_s": 1247.1695711612701,
+  "events_processed": null
+ },
+ "jan/perp_perp_maker_taker_v1_1@stressed_s1_base/2022-01-13": {
+  "files": {
+   "trades.jsonl": "04ec87be0302dec3dac2a4f0bcc6faccd228ff59dd2472d6c8cf90df67bb629e",
+   "fill_events.jsonl": "bd4dc633fa10cff35b5015238d241ce4278e0cb0073a45d1759b0b1cfe795d77",
+   "fill_bucket_stats.json": "67d93627803ae28f9d90eefb820b358088b27f144bd6a2d6734362cd7ee36595",
+   "model_settings.json": "92cae23aba6a46d2c9bf46a2e6b59d603feea67657ed2ad4ff4b684293d86b1d"
+  },
+  "summary_sha256": "0c3643954daf8a87f09b9cebf3c55c22ec58303b6d260a3340f8aa85329a11eb",
+  "result": {
+   "signals": 5,
+   "fills": 1,
+   "orders_sent": 8,
+   "fees_paid": 0.01363625,
+   "gross_pnl": -0.01099999999999568,
+   "cash_pnl": -0.024638549999998816,
+   "ending_equity_common_timestamp": -0.00913854999999586,
+   "final_inventory": {
+    "bybit": 0.2,
+    "binance": -0.2
+   },
+   "traded_notional": 60.619
+  },
+  "wall_s": 1197.121230840683,
+  "events_processed": null
+ },
+ "jan/perp_perp_maker_taker_v1_1@stressed_s2_base/2022-01-13": {
+  "files": {
+   "trades.jsonl": "04ec87be0302dec3dac2a4f0bcc6faccd228ff59dd2472d6c8cf90df67bb629e",
+   "fill_events.jsonl": "76f2c86853bd6097170b4cb808d38173fd52ce608c10dc03cbc58b63172062e2",
+   "fill_bucket_stats.json": "a7fe2f277b31413b724203a25e7587dc1cfbc16bd31214f806323e8ce31baf7c",
+   "model_settings.json": "92cae23aba6a46d2c9bf46a2e6b59d603feea67657ed2ad4ff4b684293d86b1d"
+  },
+  "summary_sha256": "825f69b1915f9f6a3b8eee9156440fe40ab429e5b2ff3508da2d66f11384579c",
+  "result": {
+   "signals": 13,
+   "fills": 1,
+   "orders_sent": 16,
+   "fees_paid": 0.01363625,
+   "gross_pnl": -0.01099999999999568,
+   "cash_pnl": -0.024638549999998816,
+   "ending_equity_common_timestamp": -0.00913854999999586,
+   "final_inventory": {
+    "bybit": 0.2,
+    "binance": -0.2
+   },
+   "traded_notional": 60.619
+  },
+  "wall_s": 1277.6955170631409,
+  "events_processed": null
+ },
+ "jan/perp_perp_maker_taker_v1_1@stressed_s3_base/2022-01-13": {
+  "files": {
+   "trades.jsonl": "04ec87be0302dec3dac2a4f0bcc6faccd228ff59dd2472d6c8cf90df67bb629e",
+   "fill_events.jsonl": "6859ab87a744812a28034457ff4b7aad38c9033f2d5217af9eba10b2e867abd9",
+   "fill_bucket_stats.json": "3d4e4c3d0b2271e2cc76ab32aa54849bbd9f25e2b4445da992904fb7e687b105",
+   "model_settings.json": "92cae23aba6a46d2c9bf46a2e6b59d603feea67657ed2ad4ff4b684293d86b1d"
+  },
+  "summary_sha256": "93bb19e0b53df94c2eeaa9e91989044a38ca90947b494b92c54b904507c64b45",
+  "result": {
+   "signals": 2,
+   "fills": 1,
+   "orders_sent": 5,
+   "fees_paid": 0.01363625,
+   "gross_pnl": -0.01099999999999568,
+   "cash_pnl": -0.024638549999998816,
+   "ending_equity_common_timestamp": -0.00913854999999586,
+   "final_inventory": {
+    "bybit": 0.2,
+    "binance": -0.2
+   },
+   "traded_notional": 60.619
+  },
+  "wall_s": 1278.0721311569214,
   "events_processed": null
  },
  "mar/legacy_v0/2024-03-08": {
