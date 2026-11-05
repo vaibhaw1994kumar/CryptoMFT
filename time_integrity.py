@@ -7,7 +7,7 @@ import json
 from pathlib import Path
 from typing import Any
 
-from new_backtest.latency_model import HostClockAligner
+from .simulation.latency_model import HostClockAligner
 from .models import MarketEvent, utc_now_iso
 
 
