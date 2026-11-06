@@ -111,7 +111,7 @@ if a.allow_rejected_data:
     kw["allow_rejected_data"] = a.allow_rejected_data
 if a.allow_manifest_gap:
     kw["allow_manifest_gap"] = a.allow_manifest_gap
-cfg = apply_profile(doc, **kw)
+cfg = apply_profile(doc, dataset="mar2024", **kw)           # the profile's dataset_settings for this dataset (v1_2: March trade/depth windows), nothing for a profile without them
 if a.cancel_model != "profile":
     cfg.maker = dataclasses.replace(cfg.maker, cancel_model=a.cancel_model)
 import json as _json, os

@@ -227,5 +227,52 @@ class VenueTruthTests(unittest.TestCase):
         self.assertEqual(h.bt.truth_books[BINANCE].best_bid, 99.0)
 
 
+class PlacementBookTests(unittest.TestCase):
+    """Owner 7 Nov: ArbBacktestConfig.placement_book. 'view' (default): a passive order joins the strategy's feed-delayed book. 'truth': the venue-truth book at the arrival's exchange time when it is
+    complete there (the availability test PostOnly uses), the view book otherwise, counted. Fixture: the Bybit bid level at 100 holds 20 at the exchange from 1.004 but the feed delivers that at 1.050,
+    after our bid arrives (1.006); the view still shows no level at 100 (the harness queue floor of 0.5 applies)."""
+    def _bybit_event(self, exchange_ts, receive_ts, size=20.0):
+        from types import SimpleNamespace
+        from new_backtest.event_loader import BOOK
+        return SimpleNamespace(kind=BOOK, venue=BYBIT, pair="BTCUSDT", receive_ts=receive_ts, exchange_ts=exchange_ts,
+                               payload={"bids": [[100.0, size], [99.0, 5.0], [98.0, 5.0]], "asks": [[101.0, 5.0], [102.0, 5.0]]})
+
+    def _run(self, placement, later_event=True):
+        h = Harness(ttl=10.0, cfg_kw={"timing": timing(), "placement_book": placement})
+        h.book(0.5, BYBIT)
+        h.book(0.5, BINANCE)
+        h.bt._truth_ingest(self._bybit_event(1.004, 1.050))
+        if later_event:
+            h.bt._truth_ingest(self._bybit_event(1.010, 1.060))                    # an event stamped after the arrival is already held: the truth book is complete at 1.006
+        h.send_maker(1.0, venue=BYBIT)
+        h.advance(1.1)
+        (o,) = list(h.bt.maker.orders.values())
+        return h, o
+
+    def test_view_is_the_default_and_joins_the_delayed_book(self):
+        h, o = self._run("view")
+        self.assertAlmostEqual(o.queue_ahead, 0.5)
+        self.assertNotIn("placement_truth", h.bt.timing_stats)                         # no counter, no new key in a run that does not use the switch
+
+    def test_truth_joins_the_book_the_exchange_held_at_arrival(self):
+        h, o = self._run("truth")
+        self.assertAlmostEqual(o.queue_ahead, 20.0)
+        self.assertEqual(h.bt.timing_stats["placement_truth"], 1)
+        self.assertEqual(h.bt.timing_stats["placement_truth_level_differs"], 1)
+        self.assertAlmostEqual(h.bt.timing_stats["placement_truth_minus_view_level_sum"], 20.0)
+
+    def test_truth_falls_back_to_the_view_book_when_it_is_not_complete_and_counts_it(self):
+        h, o = self._run("truth", later_event=False)
+        self.assertAlmostEqual(o.queue_ahead, 0.5)
+        self.assertEqual(h.bt.timing_stats["placement_view_fallback_truth_incomplete"], 1)
+        self.assertNotIn("placement_truth", h.bt.timing_stats)
+
+    def test_the_switch_is_validated(self):
+        with self.assertRaises(ValueError):
+            Harness(ttl=10.0, cfg_kw={"timing": timing(), "placement_book": "bogus"})
+        with self.assertRaises(ValueError):
+            Harness(ttl=10.0, cfg_kw={"placement_book": "truth"})                       # needs timing.truth_books
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -233,13 +233,42 @@ class ThroughPrintVolumeLimitedOnly(unittest.TestCase):
         CrossVenueArbBacktester(ArbBacktestConfig(maker=MakerConfig(fill_through_prints=True, through_print_volume_limited=True)))      # the limited version starts
         CrossVenueArbBacktester(ArbBacktestConfig(maker=MakerConfig()))                                                                 # off starts (v1, v1.1)
 
-    def test_v1_2_carries_both_keys_off_until_the_step_8_recheck_is_approved_and_v1_1_has_neither(self):
+    def test_v1_2_carries_both_keys_off_and_v1_1_has_neither(self):
         from new_backtest.profiles import apply_profile, load_profile
         m = load_profile("perp_perp_maker_taker_v1_2")["maker"]
-        self.assertEqual((m["fill_through_prints"], m["through_print_volume_limited"]), (False, False))      # owner 7 Nov: off until the re-check is reported; they only ever go on together
+        self.assertEqual((m["fill_through_prints"], m["through_print_volume_limited"]), (False, False))      # owner 7 Nov: off in v1_2 and off the freeze list; they only ever go on together
         m1 = load_profile("perp_perp_maker_taker_v1_1")["maker"]
         self.assertNotIn("fill_through_prints", m1)
         self.assertNotIn("through_print_volume_limited", m1)
+
+
+class DatasetSettings(unittest.TestCase):
+    """Owner 7 Nov: March Bybit trade/depth windows (dedupe_window_s 0.15 s, evidence_window_ms 50) live in the v1_2 profile's dataset_settings, merged only for the named dataset."""
+    def _maker(self, name, dataset):
+        from new_backtest.profiles import apply_profile, load_profile
+        cfg = apply_profile(load_profile(name), dataset=dataset, data_root="/nonexistent", pair="SOLUSDT", start_date="2024-03-08", end_date="2024-03-08", output_dir="/tmp/x_ds_test")
+        return cfg
+
+    def test_march_gets_the_wider_windows_and_says_so(self):
+        cfg = self._maker("perp_perp_maker_taker_v1_2", "mar2024")
+        self.assertEqual((cfg.maker.dedupe_window_s, cfg.maker.evidence_window_ms), (0.15, 50.0))
+        self.assertEqual(cfg.release_identity["dataset_settings"]["dataset"], "mar2024")
+
+    def test_january_and_an_unnamed_dataset_keep_50_ms_and_20_ms(self):
+        for ds in ("jan2022", None):
+            cfg = self._maker("perp_perp_maker_taker_v1_2", ds)
+            self.assertEqual((cfg.maker.dedupe_window_s, cfg.maker.evidence_window_ms), (0.05, 20.0), ds)
+            self.assertNotIn("dataset_settings", cfg.release_identity)
+
+    def test_a_profile_without_dataset_settings_is_unchanged_by_a_dataset_name(self):
+        a = self._maker("perp_perp_maker_taker_v1_1", "mar2024")
+        b = self._maker("perp_perp_maker_taker_v1_1", None)
+        self.assertEqual(a.maker, b.maker)
+        self.assertNotIn("dataset_settings", a.release_identity)
+
+    def test_the_global_default_is_untouched(self):
+        from new_backtest.fill_engine import MakerConfig
+        self.assertEqual((MakerConfig().dedupe_window_s, MakerConfig().evidence_window_ms), (0.05, 100.0))          # the dataclass defaults: not changed (the profile sets 20 ms itself)
 
 
 if __name__ == "__main__":

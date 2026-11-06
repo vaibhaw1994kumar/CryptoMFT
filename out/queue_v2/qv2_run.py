@@ -90,7 +90,7 @@ if a.allow_rejected_data:
     kw["allow_rejected_data"] = a.allow_rejected_data
 if a.allow_manifest_gap:
     kw["allow_manifest_gap"] = a.allow_manifest_gap
-cfg = apply_profile(doc, **kw)
+cfg = apply_profile(doc, dataset="jan2022", **kw)           # the profile's dataset_settings for this dataset (v1_2: March trade/depth windows), nothing for a profile without them
 if os.environ.get("QV2_VENUE_TICKS"):
     cfg.arb.venue_ticks = {k: float(v) for k, v in json.loads(os.environ["QV2_VENUE_TICKS"]).items()}      # declared per dataset (v1.1 step 9b); the engine checks the first snapshot against it
 if os.environ.get("QV2_MAKER_VENUES"):

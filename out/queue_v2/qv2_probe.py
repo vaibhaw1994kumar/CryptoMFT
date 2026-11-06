@@ -45,7 +45,7 @@ doc.pop("hedge_move_calibration", None)                                         
 doc["latency_preset"] = "singapore"
 if isinstance(doc.get("timing"), dict):
     doc["timing"]["from_latency_preset"] = "singapore"
-cfg = apply_profile(doc, data_root=DATA, pair="SOLUSDT", start_date=day, end_date=day, output_dir=str(run_dir), funding_rate_dir=None, max_trade_log=10 ** 7, equity_bridge="warn", record_exposure=False)
+cfg = apply_profile(doc, dataset="mar2024", data_root=DATA, pair="SOLUSDT", start_date=day, end_date=day, output_dir=str(run_dir), funding_rate_dir=None, max_trade_log=10 ** 7, equity_bridge="warn", record_exposure=False)
 cfg.venues = ("bybit",)
 cfg.hedge_faults = None; cfg.margin = None; cfg.circuit_breaker = None
 cfg.maker = dataclasses.replace(cfg.maker, unknown_queue_fit=str(X / "unknown_queue_fit_mar2024_NONE.json"))
@@ -59,6 +59,14 @@ cfg.gate_class = "BYBIT_ONLY_WINDOW"
 cfg.allow_rejected_data = "probe on a 2-hour slice; Bybit book only (Binance is read here as a price series)"
 w0 = time.time()
 _bt = CrossVenueArbBacktester(cfg)
+decision_state = {}                                                                              # what block_on_toxic would have seen at each decision (observation only: the probe never blocks)
+_orig_fire = _bt._fire
+def _fire_hook(sig, now, _v=cfg.venues[0]):
+    st, bk = _bt.states[_v], _bt.books[_v]
+    decision_state[sig.signal_id] = {"ts": now, "trade_sign": st.trade_sign, "depth_collapse": st.depth_collapse(bk), "regime": st.last_regime.bucket.name,
+                                     "toxic": bool(st.is_toxic(bk, cfg.arb.toxic_trade_sign, cfg.arb.toxic_depth_collapse)), "spread_bps": bk.spread_bps, "flow_volume_2s": st.total_volume}
+    return _orig_fire(sig, now)
+_bt._fire = _fire_hook
 r = _bt.run()
 rows = [json.loads(l) for l in (run_dir / "trades.jsonl").read_text().splitlines() if l.strip()]
 fills = [x for x in rows if not x.get("taker") and x["venue"] == "bybit" and x["side"] == "buy"]
@@ -85,6 +93,7 @@ for x in fills:
         row[f"move_bps_{int(h)}s"] = (mh - m0) / m0 * 1e4 if mh is not None else None
     res.append(row)
 summary = {"day": day, "orders_scheduled": len(orders), "fired": r.analysis.get("fired"), "skipped": r.analysis.get("skipped"), "fills": len(fills), "fills_measured": len(res), "dropped": drop,
-           "maker_fill_causes": (r.maker_observations or {}).get("maker_fill_causes"), "queue_updates": dict(getattr(_bt.maker, "queue_updates", {})), "q_bps": Q_BPS, "slot_s": SLOT, "wall_s": time.time() - w0, "rows": res}
+           "maker_fill_causes": (r.maker_observations or {}).get("maker_fill_causes"), "queue_updates": dict(getattr(_bt.maker, "queue_updates", {})), "q_bps": Q_BPS, "slot_s": SLOT, "wall_s": time.time() - w0, "toxic_thresholds": {"trade_sign": cfg.arb.toxic_trade_sign, "depth_collapse": cfg.arb.toxic_depth_collapse},
+           "decision_state": {str(k): v for k, v in decision_state.items()}, "rows": res}
 (out / f"{day}.json").write_text(json.dumps(summary, indent=1, default=str))
 print(day, "orders", len(orders), "fills", len(fills), "measured", len(res), "causes", summary["maker_fill_causes"], f"wall {summary['wall_s']:.0f}s", flush=True)

@@ -198,7 +198,7 @@ class ProfileV11(unittest.TestCase):
         changed = {k for k in set(a) | set(b) if a.get(k, "<absent>") != b.get(k, "<absent>")}
         self.assertEqual(changed, {"name", "description", "arb.join_touch_on_tick_rounding", "arb.maker_venues", "arb.venue_ticks.bybit", "arb.venue_ticks.binance", "arb.block_on_toxic",
                                    "arb.max_cross_venue_skew_s", "arb.fill_gate_horizon_s", "hedge_move_calibration.file", "hedge_move_calibration.sha256",
-                                   "decision_status.hedge_move", "decision_status.march_stamps", "trust_local_ts.bybit", "trust_local_ts.binance", "maker.depletion_ledger", "maker.fill_through_prints", "maker.through_print_volume_limited", "timing.floors_ms.singapore.binance.entry", "timing.floors_ms.singapore.binance.cancel", "message_atomic_book", "margin.above_last_tier", "hedge_faults.query_before_replace"})
+                                   "decision_status.hedge_move", "decision_status.march_stamps", "placement_book", "dataset_settings.mar2024.maker.dedupe_window_s", "dataset_settings.mar2024.maker.evidence_window_ms", "trust_local_ts.bybit", "trust_local_ts.binance", "maker.depletion_ledger", "maker.fill_through_prints", "maker.through_print_volume_limited", "timing.floors_ms.singapore.binance.entry", "timing.floors_ms.singapore.binance.cancel", "message_atomic_book", "margin.above_last_tier", "hedge_faults.query_before_replace"})
 
     def test_the_join_switch_is_on_in_v1_2_and_off_in_v1_1(self):
         from new_backtest.profiles import apply_profile, load_profile

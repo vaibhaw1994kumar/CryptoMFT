@@ -84,6 +84,7 @@ SWITCHES: tuple[Switch, ...] = (
     Switch("book_tape_repair", "LEGACY_COMPAT", note="engine default True (and in v1): the trade tape lowers book levels, which double-depletes when the depth decrease arrives first; v1.1 sets False"),
     Switch("own_impact", "LEGACY_COMPAT", note="legacy (v1): own taker consumption mutates the public book; overlay (v1.1): a shadow overlay cleared at the next public update of that level"),
     Switch("maker.ledger_epoch", "LEGACY_COMPAT", note="off in v1; v1.1 sets True: a snapshot / reset invalidates old netting credit, ambiguous associations are flagged"),
+    Switch("placement_book", "LEGACY_COMPAT", note="view in v1 / v1.1 (a passive order joins the strategy's feed-delayed book); v1_2 carries the switch: truth = the venue-truth book at the arrival's exchange time, the book PostOnly is judged on, when it is complete there, otherwise the view book (counted)"),
     Switch("trust_local_ts", "CALIBRATED", note="ASSUMED. True on both venues in v1 / v1.1 (a recorded local_ts is the receive time); v1.2 sets False per venue for the March data, whose local stamps are constructed (exchange + exactly 2.000 ms): the latency preset feed delay applies instead, one sample per exchange message"),
     Switch("maker.fill_through_prints", "LEGACY_COMPAT", note="False in v1 / v1.1 (a print through our price only burns queue); v1.2 sets True together with through_print_volume_limited: the order fills when a print goes through its price, limited by the print's volume. True alone (the full version) is refused at startup"),
     Switch("maker.through_print_volume_limited", "LEGACY_COMPAT", note="False in v1 / v1.1; v1.2 True: the through-print fill is limited by the print volume, one budget shared by every order the print went through"),
@@ -155,8 +156,10 @@ def _build(cls, data: dict, *, where: str, nested: dict[str, type] | None = None
     return cls(**kw)
 
 
-def apply_profile(doc: dict, **overrides):
-    """ArbBacktestConfig from a loaded profile. `overrides` are run-specific fields (pair, dates, data_root, output_dir, …)."""
+def apply_profile(doc: dict, dataset: str | None = None, **overrides):
+    """ArbBacktestConfig from a loaded profile. `overrides` are run-specific fields (pair, dates, data_root, output_dir, …).
+    `dataset` names the data the run reads ("mar2024", "jan2022"): the profile's `dataset_settings[dataset]` (owner 7 Nov: e.g. March Bybit's trade/depth windows) is merged over the profile
+    for that dataset only; a profile without an entry for it, and every run that passes no dataset, is unchanged. What was applied is recorded in release_identity."""
     from .arb_strategy import ArbConfig
     from .backtester import ArbBacktestConfig
     from .background_agent_model import AgentFlowConfig
@@ -173,7 +176,12 @@ def apply_profile(doc: dict, **overrides):
         raise ProfileError(f"profile {doc.get('name')}: " + "; ".join(bad))
     body = {k: v for k, v in doc.items() if not k.startswith("_") and k not in ("name", "description", "classification", "decision_status",
                                                                                "product_fee_consistency", "timing", "breaker", "margin",
-                                                                               "fee_presets", "calibration", "execution", "hedge_move_calibration")}
+                                                                               "fee_presets", "calibration", "execution", "hedge_move_calibration", "dataset_settings")}
+    ds_applied = None
+    ds_cfg = ((doc.get("dataset_settings") or {}).get(dataset) if dataset else None)
+    if ds_cfg:
+        body = {**body, **{k: ({**(body.get(k) or {}), **v} if isinstance(v, dict) and isinstance(body.get(k) or {}, dict) else v) for k, v in ds_cfg.items()}}
+        ds_applied = {"dataset": dataset, "applied": ds_cfg}
     cfg_kw: dict[str, Any] = dict(body)
     cfg_kw["product_fee_consistency"] = bool(doc.get("product_fee_consistency", True))
     for k, v in (doc.get("fee_presets") or {}).items():
@@ -226,6 +234,8 @@ def apply_profile(doc: dict, **overrides):
     if hm:
         cfg.arb.expected_hedge_move_bps_bid, cfg.arb.expected_hedge_move_bps_ask, hm_info = load_hedge_move_calibration(doc, hm, cfg.start_date)
     cfg.release_identity = release_identity(cfg, doc)
+    if ds_applied:
+        cfg.release_identity["dataset_settings"] = ds_applied
     cfg.release_identity["latency_sensitivity"] = sensitivity
     if hm:
         cfg.release_identity["hedge_move_calibration"] = hm_info

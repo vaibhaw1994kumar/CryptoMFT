@@ -1,0 +1,23 @@
+{
+ "label": "Binance BID move, quote time -> fill -> +45 ms, probe fills, 7 TRAIN days; EXPLORATORY",
+ "quote_to_fill": {
+  "n": 2035,
+  "mean": -8.316502569311064,
+  "median": -8.336274811682049,
+  "se_day_block": 0.5120139546501328
+ },
+ "fill_to_hedge_45ms": {
+  "n": 2035,
+  "mean": -0.4631005064331946,
+  "median": 0.0,
+  "se_day_block": 0.07881461198163822
+ },
+ "quote_to_hedge_45ms": {
+  "n": 2035,
+  "mean": -8.779603075744259,
+  "median": -8.613395735987952,
+  "se_day_block": 0.5173270741338769
+ },
+ "mean_wait_quote_to_fill_s": 7.266487167156885,
+ "pinned_scalar_bps": -0.488
+}

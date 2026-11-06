@@ -106,6 +106,10 @@ class ArbBacktestConfig:
     # Message-atomic book (v1_2): the deltas of one exchange message (same venue, exchange_ts and receive time, consecutive) are applied as one unit. A cross inside the
     # message is not repaired mid-message (OrderBook.message_atomic); the strategy, the maker queue updates and the touch run once, after the message. Off = per delta.
     message_atomic_book: bool = False
+    # Which book a passive order joins at its arrival (owner 7 Nov). "view" (default, v1 / v1.1): the strategy's feed-delayed book at the time the order is placed. "truth" (v1_2 switch): the
+    # venue-truth book at the arrival's exchange time, the book PostOnly is judged on, when it is complete at that time (_truth_complete_at); otherwise the view book, COUNTED
+    # (timing_stats placement_view_fallback_*). Needs timing.truth_books.
+    placement_book: str = "view"
     # Accounting-only shadow of the core ledger and fee schedule (new_backtest/core_shadow.py, Phase B; removed when Phase B ends). Read only: results are unchanged.
     core_shadow: bool = False
     event_order: str = "legacy"
@@ -443,6 +447,10 @@ class CrossVenueArbBacktester:
             raise ValueError(f"cancel_time_basis must be 'receive' or 'exchange', got {config.cancel_time_basis!r}")
         if config.postonly_notice_s is not None and not config.postonly_notice_s >= 0.0:
             raise ValueError("postonly_notice_s must be >= 0 or None")
+        if config.placement_book not in ("view", "truth"):
+            raise ValueError(f"placement_book must be 'view' or 'truth', got {config.placement_book!r}")
+        if config.placement_book == "truth" and not (config.timing is not None and config.timing.truth_books):
+            raise ValueError("placement_book='truth' needs timing.truth_books")
         bybit_family = _fee_preset_family(config.bybit_fee_preset)
         binance_family = _fee_preset_family(config.binance_fee_preset)
         # WP7: product per venue (from the fee preset family, or the declared product), checked at startup when asked to be.
@@ -1172,7 +1180,7 @@ class CrossVenueArbBacktester:
     def _touches(self, venue: str) -> dict:
         return {v: touch_doc(self.books[v]) for v in self.config.venues}
 
-    def _obs_place(self, order: InFlightOrder, mo, book: OrderBook, now: float) -> None:
+    def _obs_place(self, order: InFlightOrder, mo, book: OrderBook, now: float, extra: dict | None = None) -> None:
         tick = self.tick_size[order.venue]
         near = Side.BID if order.side == "buy" else Side.ASK
         far = Side.ASK if order.side == "buy" else Side.BID
@@ -1184,7 +1192,7 @@ class CrossVenueArbBacktester:
             "queue_ahead": mo.queue_ahead, "level_size": lvl, "relative_queue_position": (mo.queue_ahead / lvl) if lvl > 0 else None,
             "near_side_size_at_price": lvl, "opposite_side_size_at_price": self.maker._level_size(book, far, order.limit_price, tick),
             "queue_unknown": mo.queue_unknown, "level_was_absent": mo.level_was_absent, "relative_to_touch_ticks": mo.relative_to_touch_ticks,
-            "touch": self._touches(order.venue), "hedge_touch_at_decision": dec.get("hedge_touch"), "decision_ts": dec.get("ts")})
+            "touch": self._touches(order.venue), "hedge_touch_at_decision": dec.get("hedge_touch"), "decision_ts": dec.get("ts"), **(extra or {})})
 
     def _obs_fill(self, fill: Fill, intent_id: str) -> None:
         ev, ob = self._cur_ev, dict(fill.obs or {})
@@ -1421,14 +1429,14 @@ class CrossVenueArbBacktester:
                     self._maker_rejected(order, "postonly_reject", order.release_ts, injected=False)
                 else:
                     self.po["accepted"] += 1
-                    self._place_passive(order, now)
+                    self._place_passive(order, now, at_arrival=True)
                 return
             # Arrived at the exchange at release_ts; accepted or rejected against the exchange-time book, which is known only
             # once the feed has delivered the first event stamped at or after that time (see _resolve_postonly).
             self._po_wait[order.venue].append(order)
             self.po["arrivals"] += 1
             return
-        self._place_passive(order, now)
+        self._place_passive(order, now, at_arrival=True)
 
     def _truth_complete_at(self, order: InFlightOrder) -> bool:
         """True when the truth book of the order's venue is known to be complete at the arrival's exchange time: the catch-up
@@ -1440,7 +1448,28 @@ class CrossVenueArbBacktester:
         tb = self.truth_books[order.venue]
         return tb.ready and bool(q) and (getattr(q[0], "exchange_ts", None) or 0.0) > x
 
-    def _place_passive(self, order: InFlightOrder, now: float) -> None:
+    def _placement_book(self, order: InFlightOrder, view: OrderBook, at_arrival: bool) -> tuple[OrderBook, dict]:
+        """placement_book == "truth": the book this order joins. The venue-truth book at the arrival's exchange time when the order is placed AT its arrival and that book is complete there (the
+        availability test PostOnly uses); the view book otherwise, counted by reason. The returned dict goes into the maker_place observation (only with the switch on)."""
+        ts = self.timing_stats
+        tick = self.tick_size[order.venue]
+        side = Side.BID if order.side == "buy" else Side.ASK
+        view_level = self.maker._level_size(view, side, order.limit_price, tick)
+        if not at_arrival:
+            ts["placement_view_fallback_postonly_wait"] += 1                # placed when the post-only wait resolved on a later feed event (the truth book was not complete at the arrival): view book
+            return view, {"placement_book": "view_fallback_postonly_wait", "view_level_size": view_level}
+        if not self._truth_complete_at(order):
+            ts["placement_view_fallback_truth_incomplete"] += 1
+            return view, {"placement_book": "view_fallback_truth_incomplete", "view_level_size": view_level}
+        tb = self.truth_books[order.venue]
+        truth_level = self.maker._level_size(tb, side, order.limit_price, tick)
+        ts["placement_truth"] += 1
+        if abs(truth_level - view_level) > 1e-9:
+            ts["placement_truth_level_differs"] += 1
+            ts["placement_truth_minus_view_level_sum"] += truth_level - view_level
+        return tb, {"placement_book": "truth", "view_level_size": view_level}
+
+    def _place_passive(self, order: InFlightOrder, now: float, at_arrival: bool = False) -> None:
         tracker = self._trackers.get(order.signal_id)
         book = self.books[order.venue]
         if not book.ready:
@@ -1452,11 +1481,14 @@ class CrossVenueArbBacktester:
             return
 
         state = self.states[order.venue]
+        view_book, placement_extra = book, None
+        if self.config.placement_book == "truth":
+            book, placement_extra = self._placement_book(order, view_book, at_arrival)
         maker_order = self.maker.place(
             venue=order.venue, pair=self.config.pair, symbol=self.config.pair,
             side=Side.BID if order.side == "buy" else Side.ASK,
             price=order.limit_price, size=order.qty, book=book,
-            state=state.to_market_state(book, now),
+            state=state.to_market_state(view_book, now),
             regime_bucket=state.regime().bucket, now=now, active_ts=now,
             tick_size=self.tick_size[order.venue], signal_id=order.signal_id,
             arrival_ts=order.release_ts,
@@ -1464,7 +1496,7 @@ class CrossVenueArbBacktester:
         self._maker_to_signal[maker_order.order_id] = order.signal_id
         self._maker_to_intent[maker_order.order_id] = order.intent_id
         if self._obs_on:
-            self._obs_place(order, maker_order, book, now)
+            self._obs_place(order, maker_order, book, now, placement_extra)
         self.maker.lc_accept(order.order_id, maker_order, now, "modelled")
         if self._breaker is not None and self._breaker.is_tripped():
             self._request_cancel(maker_order, now, "breaker_trip")      # r12: it landed after the trip: cancel it straight away

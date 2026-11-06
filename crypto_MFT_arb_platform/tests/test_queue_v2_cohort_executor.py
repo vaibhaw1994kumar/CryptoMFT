@@ -339,5 +339,71 @@ class HazardThetaIsLabelled(unittest.TestCase):
         self.assertFalse([x for x in w if "SPOT_CALIBRATED" in str(x.message)])
 
 
+class ClearAheadKeepsOwnOrdersAhead(unittest.TestCase):
+    """Owner 7 Nov: clearing the queue ahead of an order (cross, vanished level, through print, empty threshold) never removes another own order that rests ahead of it at the same price:
+    that order is filled by the print budget or it stays. Two own orders at one level: A (placed first) and B."""
+
+    def _two(self, **cfg):
+        ex = make_executor(queue_model="cohort", cohort_age="uniform", **{**dict(fill_evidence="off", dedupe_trade_depth=True, share_trade_volume=True, exchange_time_eligibility=True,
+                                                                               vanish_clears_queue=True, min_queue_ahead=0.0), **cfg})
+        book = make_book(bids=[(100.0, 10.0), (99.0, 100.0)])
+        a = place(ex, book, price=100.0, size=3.0, now=1.0)
+        b = place(ex, book, price=100.0, size=3.0, now=1.1)
+        return ex, book, a, b
+
+    def test_the_level_queue_keeps_an_own_order_ahead_and_ignores_an_unknown_id(self):
+        from crypto_stat_arb.simulation.queue_v2.cohort import LevelQueue
+        lq = LevelQueue(10.0, 0.0)
+        lq.join(1, 3.0)
+        lq.join(2, 3.0)
+        lq.clear_ahead(2)
+        self.assertEqual(lq.own_ids(), [1, 2])
+        self.assertAlmostEqual(lq.ahead(1), 0.0)                                         # the external size was ahead of A as well as of B: it is gone for both
+        self.assertAlmostEqual(lq.ahead(2), 3.0)                                         # A (3, its own size) still rests ahead of B
+        lq2 = LevelQueue(10.0, 0.0)
+        lq2.join(1, 3.0)
+        lq2.clear_ahead(99)
+        self.assertAlmostEqual(lq2.ahead(1), 10.0)                                       # unknown id: nothing changes
+
+    def test_a_vanished_level_clears_the_external_size_and_leaves_a_ahead_of_b(self):
+        ex, book, a, b = self._two()
+        delta(ex, book, "bid", 100.0, 0.0, 2.0)
+        lq = _lq(ex)
+        self.assertEqual(lq.own_ids(), [a.order_id, b.order_id])
+        self.assertAlmostEqual(a.queue_ahead, 0.0)
+        self.assertAlmostEqual(b.queue_ahead, 3.0)                                       # A is still ahead of B
+        self.assertEqual(ex.diag.get("cohort_ahead_mismatch_orders", 0), 0)
+        fills = sell_print(ex, book, 100.0, 4.0, 3.0)                                    # the print budget fills A first, then B
+        by = {f.order_id: f.qty for f in fills}
+        self.assertAlmostEqual(by.get(a.order_id, 0.0), 3.0)
+        self.assertAlmostEqual(by.get(b.order_id, 0.0), 1.0)
+        self.assertEqual(ex.diag.get("cohort_ahead_mismatch_orders", 0), 0)
+
+    def test_when_a_is_cancelled_b_moves_up(self):
+        ex, book, a, b = self._two()
+        delta(ex, book, "bid", 100.0, 0.0, 2.0)
+        ex.cancel(a.order_id, 2.5)
+        self.assertAlmostEqual(b.queue_ahead, 0.0)
+        self.assertAlmostEqual(_lq(ex).ahead(b.order_id), 0.0)
+
+    def test_a_through_print_fills_both_orders_in_queue_order_within_the_print_budget(self):
+        ex, book, a, b = self._two(fill_through_prints=True, through_print_volume_limited=True)
+        fills = ex.on_trade(book.venue, 99.0, 4.0, -1, 3.0, 0.0, event_ts=3.0)
+        by = {f.order_id: f.qty for f in fills}
+        self.assertAlmostEqual(sum(by.values()), 4.0)
+        self.assertAlmostEqual(by[a.order_id], 3.0)
+        self.assertAlmostEqual(by[b.order_id], 1.0)
+        self.assertAlmostEqual(_in_step(ex, b), 0.0)
+        self.assertEqual(ex.diag.get("cohort_ahead_mismatch_orders", 0), 0)
+
+    def test_the_scalar_queue_is_unchanged_by_it(self):
+        ex = make_executor(cancel_model="proportional", fill_evidence="off", dedupe_trade_depth=True, share_trade_volume=True, exchange_time_eligibility=True, vanish_clears_queue=True, min_queue_ahead=0.0)
+        book = make_book(bids=[(100.0, 10.0), (99.0, 100.0)])
+        place(ex, book, price=100.0, size=3.0, now=1.0)
+        b = place(ex, book, price=100.0, size=3.0, now=1.1)
+        delta(ex, book, "bid", 100.0, 0.0, 2.0)
+        self.assertAlmostEqual(b.queue_ahead, 0.0)                                       # scalar: zero, as before; the cohort queue is the only one that counts an own order ahead
+
+
 if __name__ == "__main__":  # pragma: no cover
     unittest.main()

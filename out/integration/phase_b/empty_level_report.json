@@ -1,0 +1,2118 @@
+{
+ "label": "item 5: empty-level orders; EXPLORATORY; probe = 7 TRAIN days 00:00-02:00 UTC, v1_2 settings, rule off",
+ "sets": {
+  "probe_mar2024_TRAIN_bybit": {
+   "all": {
+    "orders": 3213,
+    "share_of_orders": null,
+    "filled": 1020,
+    "fill_rate": 0.31746031746031744,
+    "distance_from_own_touch_bps": {
+     "n": 3213,
+     "p10": 5.756522139585457,
+     "median": 8.537644969967099,
+     "p90": 11.317616987203499,
+     "mean": 8.469406210234114
+    },
+    "distance_ticks": {
+     "n": 3213,
+     "p10": 75.00000000001705,
+     "median": 111.00000000001842,
+     "p90": 148.00000000001035,
+     "mean": 110.54995331465952
+    },
+    "spread_bps": {
+     "n": 3213,
+     "p10": 0.07507310243385307,
+     "median": 0.07664332877342125,
+     "p90": 0.15325905377715582,
+     "mean": 0.12924992193566726
+    },
+    "spread_ticks": {
+     "n": 3213,
+     "p10": 0.9999999999763531,
+     "median": 1.0000000000047748,
+     "p90": 2.0000000000095497,
+     "mean": 1.689386865857387
+    },
+    "position": {
+     "behind_touch": 3206,
+     "inside_spread": 3,
+     "at_touch": 4
+    },
+    "rest_s_to_first_fill": {
+     "n": 1020,
+     "p10": 1.5731747150421143,
+     "median": 6.816787958145142,
+     "p90": 13.05433988571167,
+     "mean": 6.981066668501088
+    },
+    "filled_within": {
+     "1s": 58,
+     "5s": 384,
+     "15s": 1020
+    },
+    "fill_cause": {
+     "trade": 823,
+     "trade_confirmed_cross_after": 157,
+     "trade_after_front": 40
+    },
+    "fill_print": {
+     "through": 644,
+     "at_price": 376
+    },
+    "print_size_vs_order": {
+     "n": 1020,
+     "p10": 0.1,
+     "median": 1.0,
+     "p90": 14.0,
+     "mean": 4.465686274509804
+    },
+    "through_depth_ticks": {
+     "n": 644,
+     "p10": 1.0000000000047748,
+     "median": 3.0000000000001137,
+     "p90": 11.000000000024102,
+     "mean": 4.945652173912716
+    },
+    "queue_ahead_at_placement": {
+     "n": 3213,
+     "p10": 0.0,
+     "median": 0.0,
+     "p90": 0.0,
+     "mean": 3.5291316526610643
+    },
+    "markout_1s_bps": {
+     "n": 1020,
+     "mean": -1.0577707252584962,
+     "se": 0.10689745172384865,
+     "median": -0.8437448992550338
+    },
+    "markout_5s_bps": {
+     "n": 1020,
+     "mean": -1.3227862094902925,
+     "se": 0.2237175546121925,
+     "median": -1.0245115462546401
+    },
+    "markout_30s_bps": {
+     "n": 1018,
+     "mean": -1.0934998785011665,
+     "se": 0.5563625237219818,
+     "median": -2.224518872571209
+    }
+   },
+   "venue_bybit": {
+    "orders": 3213,
+    "share_of_orders": null,
+    "filled": 1020,
+    "fill_rate": 0.31746031746031744,
+    "distance_from_own_touch_bps": {
+     "n": 3213,
+     "p10": 5.756522139585457,
+     "median": 8.537644969967099,
+     "p90": 11.317616987203499,
+     "mean": 8.469406210234114
+    },
+    "distance_ticks": {
+     "n": 3213,
+     "p10": 75.00000000001705,
+     "median": 111.00000000001842,
+     "p90": 148.00000000001035,
+     "mean": 110.54995331465952
+    },
+    "spread_bps": {
+     "n": 3213,
+     "p10": 0.07507310243385307,
+     "median": 0.07664332877342125,
+     "p90": 0.15325905377715582,
+     "mean": 0.12924992193566726
+    },
+    "spread_ticks": {
+     "n": 3213,
+     "p10": 0.9999999999763531,
+     "median": 1.0000000000047748,
+     "p90": 2.0000000000095497,
+     "mean": 1.689386865857387
+    },
+    "position": {
+     "behind_touch": 3206,
+     "inside_spread": 3,
+     "at_touch": 4
+    },
+    "rest_s_to_first_fill": {
+     "n": 1020,
+     "p10": 1.5731747150421143,
+     "median": 6.816787958145142,
+     "p90": 13.05433988571167,
+     "mean": 6.981066668501088
+    },
+    "filled_within": {
+     "1s": 58,
+     "5s": 384,
+     "15s": 1020
+    },
+    "fill_cause": {
+     "trade": 823,
+     "trade_confirmed_cross_after": 157,
+     "trade_after_front": 40
+    },
+    "fill_print": {
+     "through": 644,
+     "at_price": 376
+    },
+    "print_size_vs_order": {
+     "n": 1020,
+     "p10": 0.1,
+     "median": 1.0,
+     "p90": 14.0,
+     "mean": 4.465686274509804
+    },
+    "through_depth_ticks": {
+     "n": 644,
+     "p10": 1.0000000000047748,
+     "median": 3.0000000000001137,
+     "p90": 11.000000000024102,
+     "mean": 4.945652173912716
+    },
+    "queue_ahead_at_placement": {
+     "n": 3213,
+     "p10": 0.0,
+     "median": 0.0,
+     "p90": 0.0,
+     "mean": 3.5291316526610643
+    },
+    "markout_1s_bps": {
+     "n": 1020,
+     "mean": -1.0577707252584962,
+     "se": 0.10689745172384865,
+     "median": -0.8437448992550338
+    },
+    "markout_5s_bps": {
+     "n": 1020,
+     "mean": -1.3227862094902925,
+     "se": 0.2237175546121925,
+     "median": -1.0245115462546401
+    },
+    "markout_30s_bps": {
+     "n": 1018,
+     "mean": -1.0934998785011665,
+     "se": 0.5563625237219818,
+     "median": -2.224518872571209
+    }
+   },
+   "empty_level": {
+    "orders": 2971,
+    "share_of_orders": 0.9246809835045129,
+    "filled": 904,
+    "fill_rate": 0.3042746549983171,
+    "distance_from_own_touch_bps": {
+     "n": 2971,
+     "p10": 6.306964581009395,
+     "median": 8.732504947083797,
+     "p90": 11.421650543486663,
+     "mean": 8.754452942867701
+    },
+    "distance_ticks": {
+     "n": 2971,
+     "p10": 82.00000000002206,
+     "median": 114.00000000000432,
+     "p90": 149.0000000000009,
+     "mean": 114.31134298216121
+    },
+    "spread_bps": {
+     "n": 2971,
+     "p10": 0.07506521290193503,
+     "median": 0.07659636397096803,
+     "p90": 0.15144975275684952,
+     "mean": 0.12605965804613817
+    },
+    "spread_ticks": {
+     "n": 2971,
+     "p10": 0.9999999999763531,
+     "median": 1.0000000000047748,
+     "p90": 1.9999999999953388,
+     "mean": 1.6486031639178378
+    },
+    "position": {
+     "behind_touch": 2968,
+     "inside_spread": 3
+    },
+    "rest_s_to_first_fill": {
+     "n": 904,
+     "p10": 1.7801456451416016,
+     "median": 6.963139533996582,
+     "p90": 13.139329671859741,
+     "mean": 7.208225873983012
+    },
+    "filled_within": {
+     "1s": 41,
+     "5s": 319,
+     "15s": 904
+    },
+    "fill_cause": {
+     "trade": 729,
+     "trade_confirmed_cross_after": 135,
+     "trade_after_front": 40
+    },
+    "fill_print": {
+     "through": 566,
+     "at_price": 338
+    },
+    "print_size_vs_order": {
+     "n": 904,
+     "p10": 0.1,
+     "median": 0.9,
+     "p90": 13.7,
+     "mean": 4.16891592920354
+    },
+    "through_depth_ticks": {
+     "n": 566,
+     "p10": 1.0000000000047748,
+     "median": 3.0000000000001137,
+     "p90": 11.000000000024102,
+     "mean": 4.925795053003201
+    },
+    "queue_ahead_at_placement": {
+     "n": 2971,
+     "p10": 0.0,
+     "median": 0.0,
+     "p90": 0.0,
+     "mean": 0.0
+    },
+    "markout_1s_bps": {
+     "n": 904,
+     "mean": -1.064995968445124,
+     "se": 0.1158255821359564,
+     "median": -0.8478921558361616
+    },
+    "markout_5s_bps": {
+     "n": 904,
+     "mean": -1.1990454499487542,
+     "se": 0.23774802153898508,
+     "median": -0.9918290206524358
+    },
+    "markout_30s_bps": {
+     "n": 902,
+     "mean": -0.8503758236704602,
+     "se": 0.5790645441406844,
+     "median": -2.030354259526283
+    }
+   },
+   "behind_queue": {
+    "orders": 242,
+    "share_of_orders": 0.07531901649548708,
+    "filled": 116,
+    "fill_rate": 0.4793388429752066,
+    "distance_from_own_touch_bps": {
+     "n": 242,
+     "p10": 2.9570373598333877,
+     "median": 5.2461908092810745,
+     "p90": 6.6256079748243675,
+     "mean": 4.969927521579634
+    },
+    "distance_ticks": {
+     "n": 242,
+     "p10": 38.000000000010914,
+     "median": 67.00000000000728,
+     "p90": 86.00000000001273,
+     "mean": 64.3719008264467
+    },
+    "spread_bps": {
+     "n": 242,
+     "p10": 0.07515604273194869,
+     "median": 0.07725318572861535,
+     "p90": 0.29301453352226176,
+     "mean": 0.16841634348852247
+    },
+    "spread_ticks": {
+     "n": 242,
+     "p10": 0.9999999999763531,
+     "median": 1.0000000000047748,
+     "p90": 3.9999999999906777,
+     "mean": 2.1900826446276342
+    },
+    "position": {
+     "behind_touch": 238,
+     "at_touch": 4
+    },
+    "rest_s_to_first_fill": {
+     "n": 116,
+     "p10": 0.7628843784332275,
+     "median": 4.206090450286865,
+     "p90": 11.823455095291138,
+     "mean": 5.210791480952296
+    },
+    "filled_within": {
+     "1s": 17,
+     "5s": 65,
+     "15s": 116
+    },
+    "fill_cause": {
+     "trade": 94,
+     "trade_confirmed_cross_after": 22
+    },
+    "fill_print": {
+     "through": 78,
+     "at_price": 38
+    },
+    "print_size_vs_order": {
+     "n": 116,
+     "p10": 0.1,
+     "median": 2.4,
+     "p90": 17.4,
+     "mean": 6.778448275862068
+    },
+    "through_depth_ticks": {
+     "n": 78,
+     "p10": 1.0000000000047748,
+     "median": 3.0000000000001137,
+     "p90": 10.99999999999568,
+     "mean": 5.089743589743297
+    },
+    "queue_ahead_at_placement": {
+     "n": 242,
+     "p10": 3.8,
+     "median": 23.7,
+     "p90": 85.2,
+     "mean": 46.855785123966946
+    },
+    "markout_1s_bps": {
+     "n": 116,
+     "mean": -1.0014636576661566,
+     "se": 0.26217229313207807,
+     "median": -0.5456491091585982
+    },
+    "markout_5s_bps": {
+     "n": 116,
+     "mean": -2.2871107493657297,
+     "se": 0.6541175932786546,
+     "median": -2.0665722247021194
+    },
+    "markout_30s_bps": {
+     "n": 116,
+     "mean": -2.9839989945123486,
+     "se": 1.8788521722866234,
+     "median": -3.706616682411248
+    }
+   },
+   "pos_inside_spread": {
+    "orders": 3,
+    "share_of_orders": 0.0009337068160597573,
+    "filled": 3,
+    "fill_rate": 1.0,
+    "distance_from_own_touch_bps": {
+     "n": 3,
+     "p10": -0.23224667693603948,
+     "median": -0.15606467320131953,
+     "p90": -0.15591745729885087,
+     "mean": -0.1814096024787366
+    },
+    "distance_ticks": {
+     "n": 3,
+     "p10": -2.999999999985903,
+     "median": -2.0000000000095497,
+     "p90": -2.0000000000095497,
+     "mean": -2.3333333333350006
+    },
+    "spread_bps": {
+     "n": 3,
+     "p10": 0.6242392084654466,
+     "median": 0.7795568998574117,
+     "p90": 0.9289435589376334,
+     "mean": 0.7775798890868305
+    },
+    "spread_ticks": {
+     "n": 3,
+     "p10": 8.000000000009777,
+     "median": 9.999999999990905,
+     "p90": 12.000000000000455,
+     "mean": 10.000000000000378
+    },
+    "position": {
+     "inside_spread": 3
+    },
+    "rest_s_to_first_fill": {
+     "n": 3,
+     "p10": 0.7011330127716064,
+     "median": 1.5731747150421143,
+     "p90": 8.39066195487976,
+     "mean": 3.5549898942311606
+    },
+    "filled_within": {
+     "1s": 1,
+     "5s": 2,
+     "15s": 3
+    },
+    "fill_cause": {
+     "trade": 3
+    },
+    "fill_print": {
+     "through": 3
+    },
+    "print_size_vs_order": {
+     "n": 3,
+     "p10": 0.2,
+     "median": 8.4,
+     "p90": 11.9,
+     "mean": 6.833333333333333
+    },
+    "through_depth_ticks": {
+     "n": 3,
+     "p10": 2.0000000000095497,
+     "median": 4.9999999999954525,
+     "p90": 8.99999999998613,
+     "mean": 5.333333333330377
+    },
+    "queue_ahead_at_placement": {
+     "n": 3,
+     "p10": 0.0,
+     "median": 0.0,
+     "p90": 0.0,
+     "mean": 0.0
+    },
+    "markout_1s_bps": {
+     "n": 3,
+     "mean": -2.514488709707539,
+     "se": 1.7396570927761676,
+     "median": -1.7018314026565096
+    },
+    "markout_5s_bps": {
+     "n": 3,
+     "mean": -3.159952449693401,
+     "se": 0.39982758261675244,
+     "median": -3.5833219731634323
+    },
+    "markout_30s_bps": {
+     "n": 3,
+     "mean": 12.212374247578254,
+     "se": 6.374116119157328,
+     "median": 12.866751145332964
+    },
+    "empty_share": 1.0
+   },
+   "pos_at_touch": {
+    "orders": 4,
+    "share_of_orders": 0.0012449424214130097,
+    "filled": 2,
+    "fill_rate": 0.5,
+    "distance_from_own_touch_bps": {
+     "n": 4,
+     "p10": 0.0,
+     "median": 0.0,
+     "p90": 0.0,
+     "mean": 0.0
+    },
+    "distance_ticks": {
+     "n": 4,
+     "p10": 0.0,
+     "median": 0.0,
+     "p90": 0.0,
+     "mean": 0.0
+    },
+    "spread_bps": {
+     "n": 4,
+     "p10": 0.07791954806699329,
+     "median": 0.15635749577798322,
+     "p90": 0.5465654219293762,
+     "mean": 0.21475293533496345
+    },
+    "spread_ticks": {
+     "n": 4,
+     "p10": 0.999999999990564,
+     "median": 1.9999999999953388,
+     "p90": 7.000000000005002,
+     "mean": 2.74999999999892
+    },
+    "position": {
+     "at_touch": 4
+    },
+    "rest_s_to_first_fill": {
+     "n": 2,
+     "p10": 2.1903040409088135,
+     "median": 2.6180176734924316,
+     "p90": 2.6180176734924316,
+     "mean": 2.4041608572006226
+    },
+    "filled_within": {
+     "1s": 0,
+     "5s": 2,
+     "15s": 2
+    },
+    "fill_cause": {
+     "trade_confirmed_cross_after": 1,
+     "trade": 1
+    },
+    "fill_print": {
+     "through": 2
+    },
+    "print_size_vs_order": {
+     "n": 2,
+     "p10": 0.2,
+     "median": 1.2,
+     "p90": 1.2,
+     "mean": 0.7
+    },
+    "through_depth_ticks": {
+     "n": 2,
+     "p10": 10.99999999999568,
+     "median": 30.000000000001137,
+     "p90": 30.000000000001137,
+     "mean": 20.49999999999841
+    },
+    "queue_ahead_at_placement": {
+     "n": 4,
+     "p10": 0.9,
+     "median": 48.0,
+     "p90": 68.8,
+     "mean": 30.675
+    },
+    "markout_1s_bps": {
+     "n": 2,
+     "mean": 0.19444981151515017,
+     "se": 0.3030664767890558,
+     "median": 0.19444981151515017
+    },
+    "markout_5s_bps": {
+     "n": 2,
+     "mean": -1.0176112127503787,
+     "se": 2.647024039014405,
+     "median": -1.0176112127503787
+    },
+    "markout_30s_bps": {
+     "n": 2,
+     "mean": 2.994375009252836,
+     "se": 4.766458017930713,
+     "median": 2.994375009252836
+    },
+    "empty_share": 0.0
+   },
+   "pos_behind_touch": {
+    "orders": 3206,
+    "share_of_orders": 0.9978213507625272,
+    "filled": 1015,
+    "fill_rate": 0.3165938864628821,
+    "distance_from_own_touch_bps": {
+     "n": 3206,
+     "p10": 5.787170999330003,
+     "median": 8.545052262149596,
+     "p90": 11.319185634643743,
+     "mean": 8.488068116746614
+    },
+    "distance_ticks": {
+     "n": 3206,
+     "p10": 75.00000000001705,
+     "median": 111.00000000001842,
+     "p90": 148.00000000001035,
+     "mean": 110.79351216469153
+    },
+    "spread_bps": {
+     "n": 3206,
+     "p10": 0.07506972100374033,
+     "median": 0.0766415665539863,
+     "p90": 0.15229276761719307,
+     "mean": 0.12853657135704882
+    },
+    "spread_ticks": {
+     "n": 3206,
+     "p10": 0.9999999999763531,
+     "median": 1.0000000000047748,
+     "p90": 2.0000000000095497,
+     "mean": 1.6802869619462841
+    },
+    "position": {
+     "behind_touch": 3206
+    },
+    "rest_s_to_first_fill": {
+     "n": 1015,
+     "p10": 1.573371171951294,
+     "median": 6.819842100143433,
+     "p90": 13.05433988571167,
+     "mean": 7.000211537412822
+    },
+    "filled_within": {
+     "1s": 57,
+     "5s": 380,
+     "15s": 1015
+    },
+    "fill_cause": {
+     "trade": 819,
+     "trade_confirmed_cross_after": 156,
+     "trade_after_front": 40
+    },
+    "fill_print": {
+     "through": 639,
+     "at_price": 376
+    },
+    "print_size_vs_order": {
+     "n": 1015,
+     "p10": 0.1,
+     "median": 1.0,
+     "p90": 14.0,
+     "mean": 4.466108374384237
+    },
+    "through_depth_ticks": {
+     "n": 639,
+     "p10": 1.0000000000047748,
+     "median": 3.0000000000001137,
+     "p90": 11.000000000024102,
+     "mean": 4.895148669796246
+    },
+    "queue_ahead_at_placement": {
+     "n": 3206,
+     "p10": 0.0,
+     "median": 0.0,
+     "p90": 0.0,
+     "mean": 3.498565190268247
+    },
+    "markout_1s_bps": {
+     "n": 1015,
+     "mean": -1.0559325844902205,
+     "se": 0.10725624682855979,
+     "median": -0.8451104597803558
+    },
+    "markout_5s_bps": {
+     "n": 1015,
+     "mean": -1.3179574915325294,
+     "se": 0.22473367405188796,
+     "median": -1.006281518866248
+    },
+    "markout_30s_bps": {
+     "n": 1013,
+     "mean": -1.1409760602916366,
+     "se": 0.558216070641066,
+     "median": -2.2794360675148235
+    },
+    "empty_share": 0.925764192139738
+   }
+  },
+  "strategy_jan2022_v1_1": {
+   "all": {
+    "orders": 59,
+    "share_of_orders": null,
+    "filled": 22,
+    "fill_rate": 0.3728813559322034,
+    "distance_from_own_touch_bps": {
+     "n": 59,
+     "p10": -1.4807794823181462,
+     "median": 0.32637075717985986,
+     "p90": 9.080590238366451,
+     "mean": 1.860831487768465
+    },
+    "distance_ticks": {
+     "n": 59,
+     "p10": -9.999999999990905,
+     "median": 1.999999999998181,
+     "p90": 28.000000000002956,
+     "mean": 2.4067796610181325
+    },
+    "spread_bps": {
+     "n": 59,
+     "p10": 0.32862846908397786,
+     "median": 1.9545247247378417,
+     "p90": 6.133483980308215,
+     "mean": 2.788457295688299
+    },
+    "spread_ticks": {
+     "n": 59,
+     "p10": 0.9999999999990905,
+     "median": 8.999999999997499,
+     "p90": 39.99999999999204,
+     "mean": 18.49152542372953
+    },
+    "position": {
+     "behind_touch": 31,
+     "inside_spread": 28
+    },
+    "rest_s_to_first_fill": {
+     "n": 22,
+     "p10": 0.039504051208496094,
+     "median": 2.4484915733337402,
+     "p90": 13.192566394805908,
+     "mean": 4.247334241867065
+    },
+    "filled_within": {
+     "1s": 7,
+     "5s": 15,
+     "15s": 22
+    },
+    "fill_cause": {
+     "trade": 17,
+     "trade_confirmed_cross_after": 5
+    },
+    "fill_print": {
+     "through": 20,
+     "at_price": 2
+    },
+    "print_size_vs_order": {
+     "n": 22,
+     "p10": 0.2,
+     "median": 12.5,
+     "p90": 104.0,
+     "mean": 31.810101010101008
+    },
+    "through_depth_ticks": {
+     "n": 20,
+     "p10": 1.0000000000047748,
+     "median": 7.000000000005002,
+     "p90": 19.99999999998181,
+     "mean": 9.599999999996669
+    },
+    "queue_ahead_at_placement": {
+     "n": 59,
+     "p10": 0.0,
+     "median": 0.0,
+     "p90": 9.2,
+     "mean": 25.296610169491526
+    },
+    "markout_1s_bps": {
+     "n": 0,
+     "mean": null,
+     "se": null,
+     "median": null
+    },
+    "markout_5s_bps": {
+     "n": 0,
+     "mean": null,
+     "se": null,
+     "median": null
+    },
+    "markout_30s_bps": {
+     "n": 0,
+     "mean": null,
+     "se": null,
+     "median": null
+    }
+   },
+   "venue_binance": {
+    "orders": 13,
+    "share_of_orders": null,
+    "filled": 12,
+    "fill_rate": 0.9230769230769231,
+    "distance_from_own_touch_bps": {
+     "n": 13,
+     "p10": -2.833607907743418,
+     "median": -0.6467050378316566,
+     "p90": -0.32347803584107215,
+     "mean": -1.3026867406641538
+    },
+    "distance_ticks": {
+     "n": 13,
+     "p10": -43.00000000000637,
+     "median": -9.999999999990905,
+     "p90": -4.9999999999954525,
+     "mean": -20.076923076918373
+    },
+    "spread_bps": {
+     "n": 13,
+     "p10": 0.6691872720574769,
+     "median": 1.9573940560467908,
+     "p90": 9.222661396575413,
+     "mean": 3.6068962554149424
+    },
+    "spread_ticks": {
+     "n": 13,
+     "p10": 9.999999999990905,
+     "median": 30.000000000001137,
+     "p90": 140.00000000001478,
+     "mean": 55.38461538461748
+    },
+    "position": {
+     "inside_spread": 12,
+     "behind_touch": 1
+    },
+    "rest_s_to_first_fill": {
+     "n": 12,
+     "p10": 0.030647993087768555,
+     "median": 1.1709024906158447,
+     "p90": 4.383037328720093,
+     "mean": 1.6638855934143066
+    },
+    "filled_within": {
+     "1s": 6,
+     "5s": 11,
+     "15s": 12
+    },
+    "fill_cause": {
+     "trade": 10,
+     "trade_confirmed_cross_after": 2
+    },
+    "fill_print": {
+     "through": 12
+    },
+    "print_size_vs_order": {
+     "n": 12,
+     "p10": 1.0,
+     "median": 18.0,
+     "p90": 104.0,
+     "mean": 35.01851851851852
+    },
+    "through_depth_ticks": {
+     "n": 12,
+     "p10": 4.9999999999954525,
+     "median": 9.999999999990905,
+     "p90": 19.99999999998181,
+     "mean": 12.833333333328293
+    },
+    "queue_ahead_at_placement": {
+     "n": 13,
+     "p10": 0.0,
+     "median": 0.0,
+     "p90": 0.0,
+     "mean": 0.0
+    },
+    "markout_1s_bps": {
+     "n": 0,
+     "mean": null,
+     "se": null,
+     "median": null
+    },
+    "markout_5s_bps": {
+     "n": 0,
+     "mean": null,
+     "se": null,
+     "median": null
+    },
+    "markout_30s_bps": {
+     "n": 0,
+     "mean": null,
+     "se": null,
+     "median": null
+    }
+   },
+   "venue_bybit": {
+    "orders": 46,
+    "share_of_orders": null,
+    "filled": 10,
+    "fill_rate": 0.21739130434782608,
+    "distance_from_own_touch_bps": {
+     "n": 46,
+     "p10": -0.6642311524404453,
+     "median": 1.6145698785847122,
+     "p90": 9.859016070196567,
+     "mean": 2.7548692479776835
+    },
+    "distance_ticks": {
+     "n": 46,
+     "p10": -2.0000000000038654,
+     "median": 5.000000000001137,
+     "p90": 30.000000000001137,
+     "mean": 8.760869565217579
+    },
+    "spread_bps": {
+     "n": 46,
+     "p10": 0.32430153556747593,
+     "median": 1.9545247247378417,
+     "p90": 5.642872554064227,
+     "mean": 2.55715932880903
+    },
+    "spread_ticks": {
+     "n": 46,
+     "p10": 0.9999999999990905,
+     "median": 6.000000000000227,
+     "p90": 17.00000000000159,
+     "mean": 8.065217391304675
+    },
+    "position": {
+     "behind_touch": 30,
+     "inside_spread": 16
+    },
+    "rest_s_to_first_fill": {
+     "n": 10,
+     "p10": 1.389538288116455,
+     "median": 7.292156934738159,
+     "p90": 14.796459913253784,
+     "mean": 7.347472620010376
+    },
+    "filled_within": {
+     "1s": 1,
+     "5s": 4,
+     "15s": 10
+    },
+    "fill_cause": {
+     "trade": 7,
+     "trade_confirmed_cross_after": 3
+    },
+    "fill_print": {
+     "through": 8,
+     "at_price": 2
+    },
+    "print_size_vs_order": {
+     "n": 10,
+     "p10": 0.2,
+     "median": 10.0,
+     "p90": 125.0,
+     "mean": 27.96
+    },
+    "through_depth_ticks": {
+     "n": 8,
+     "p10": 0.9999999999990905,
+     "median": 6.000000000000227,
+     "p90": 10.99999999999568,
+     "mean": 4.749999999999233
+    },
+    "queue_ahead_at_placement": {
+     "n": 46,
+     "p10": 0.0,
+     "median": 0.0,
+     "p90": 28.6,
+     "mean": 32.44565217391305
+    },
+    "markout_1s_bps": {
+     "n": 0,
+     "mean": null,
+     "se": null,
+     "median": null
+    },
+    "markout_5s_bps": {
+     "n": 0,
+     "mean": null,
+     "se": null,
+     "median": null
+    },
+    "markout_30s_bps": {
+     "n": 0,
+     "mean": null,
+     "se": null,
+     "median": null
+    }
+   },
+   "empty_level": {
+    "orders": 52,
+    "share_of_orders": 0.8813559322033898,
+    "filled": 20,
+    "fill_rate": 0.38461538461538464,
+    "distance_from_own_touch_bps": {
+     "n": 52,
+     "p10": -1.4807794823181462,
+     "median": -0.32347803584107215,
+     "p90": 5.964017096849236,
+     "mean": 1.5295620661765015
+    },
+    "distance_ticks": {
+     "n": 52,
+     "p10": -9.999999999990905,
+     "median": -0.9999999999990905,
+     "p90": 18.000000000000682,
+     "mean": 0.8653846153856867
+    },
+    "spread_bps": {
+     "n": 52,
+     "p10": 0.3298316209572012,
+     "median": 1.9992669354570747,
+     "p90": 6.133483980308215,
+     "mean": 3.038351189224535
+    },
+    "spread_ticks": {
+     "n": 52,
+     "p10": 0.9999999999990905,
+     "median": 9.000000000003183,
+     "p90": 39.99999999999204,
+     "mean": 20.59615384615479
+    },
+    "position": {
+     "behind_touch": 24,
+     "inside_spread": 28
+    },
+    "rest_s_to_first_fill": {
+     "n": 20,
+     "p10": 0.039504051208496094,
+     "median": 1.8035833835601807,
+     "p90": 8.998141527175903,
+     "mean": 3.3128158926963804
+    },
+    "filled_within": {
+     "1s": 7,
+     "5s": 15,
+     "15s": 20
+    },
+    "fill_cause": {
+     "trade_confirmed_cross_after": 5,
+     "trade": 15
+    },
+    "fill_print": {
+     "through": 18,
+     "at_price": 2
+    },
+    "print_size_vs_order": {
+     "n": 20,
+     "p10": 0.2,
+     "median": 13.0,
+     "p90": 125.0,
+     "mean": 34.73111111111111
+    },
+    "through_depth_ticks": {
+     "n": 18,
+     "p10": 1.0000000000047748,
+     "median": 7.999999999981355,
+     "p90": 19.99999999998181,
+     "mean": 10.22222222221861
+    },
+    "queue_ahead_at_placement": {
+     "n": 52,
+     "p10": 0.0,
+     "median": 0.0,
+     "p90": 0.0,
+     "mean": 0.0
+    },
+    "markout_1s_bps": {
+     "n": 0,
+     "mean": null,
+     "se": null,
+     "median": null
+    },
+    "markout_5s_bps": {
+     "n": 0,
+     "mean": null,
+     "se": null,
+     "median": null
+    },
+    "markout_30s_bps": {
+     "n": 0,
+     "mean": null,
+     "se": null,
+     "median": null
+    }
+   },
+   "behind_queue": {
+    "orders": 7,
+    "share_of_orders": 0.11864406779661017,
+    "filled": 2,
+    "fill_rate": 0.2857142857142857,
+    "distance_from_own_touch_bps": {
+     "n": 7,
+     "p10": 0.6688068485834221,
+     "median": 2.6382613857481427,
+     "p90": 10.859356656492267,
+     "mean": 4.32169004816591
+    },
+    "distance_ticks": {
+     "n": 7,
+     "p10": 2.0000000000038654,
+     "median": 8.000000000004093,
+     "p90": 37.000000000000455,
+     "mean": 13.85714285714487
+    },
+    "spread_bps": {
+     "n": 7,
+     "p10": 0.29349181891528076,
+     "median": 0.32977723547713506,
+     "p90": 2.674869600106462,
+     "mean": 0.9321026579905433
+    },
+    "spread_ticks": {
+     "n": 7,
+     "p10": 0.9999999999990905,
+     "median": 0.9999999999990905,
+     "p90": 7.999999999998408,
+     "mean": 2.857142857141883
+    },
+    "position": {
+     "behind_touch": 7
+    },
+    "rest_s_to_first_fill": {
+     "n": 2,
+     "p10": 13.192566394805908,
+     "median": 13.992469072341919,
+     "p90": 13.992469072341919,
+     "mean": 13.592517733573914
+    },
+    "filled_within": {
+     "1s": 0,
+     "5s": 0,
+     "15s": 2
+    },
+    "fill_cause": {
+     "trade": 2
+    },
+    "fill_print": {
+     "through": 2
+    },
+    "print_size_vs_order": {
+     "n": 2,
+     "p10": 0.2,
+     "median": 5.0,
+     "p90": 5.0,
+     "mean": 2.6
+    },
+    "through_depth_ticks": {
+     "n": 2,
+     "p10": 0.9999999999990905,
+     "median": 6.999999999999318,
+     "p90": 6.999999999999318,
+     "mean": 3.999999999999204
+    },
+    "queue_ahead_at_placement": {
+     "n": 7,
+     "p10": 7.3,
+     "median": 196.5,
+     "p90": 637.8,
+     "mean": 213.21428571428572
+    },
+    "markout_1s_bps": {
+     "n": 0,
+     "mean": null,
+     "se": null,
+     "median": null
+    },
+    "markout_5s_bps": {
+     "n": 0,
+     "mean": null,
+     "se": null,
+     "median": null
+    },
+    "markout_30s_bps": {
+     "n": 0,
+     "mean": null,
+     "se": null,
+     "median": null
+    }
+   },
+   "pos_inside_spread": {
+    "orders": 28,
+    "share_of_orders": 0.4745762711864407,
+    "filled": 15,
+    "fill_rate": 0.5357142857142857,
+    "distance_from_own_touch_bps": {
+     "n": 28,
+     "p10": -1.976479889317201,
+     "median": -0.6484453522673479,
+     "p90": -0.32438043337380784,
+     "mean": -1.0539467443363713
+    },
+    "distance_ticks": {
+     "n": 28,
+     "p10": -28.999999999996362,
+     "median": -3.999999999996362,
+     "p90": -1.0000000000047748,
+     "mean": -10.857142857141712
+    },
+    "spread_bps": {
+     "n": 28,
+     "p10": 0.8942810725419807,
+     "median": 2.9885935346751564,
+     "p90": 9.222661396575413,
+     "mean": 4.091775402658795
+    },
+    "spread_ticks": {
+     "n": 28,
+     "p10": 5.999999999994543,
+     "median": 17.00000000000159,
+     "p90": 140.00000000001478,
+     "mean": 33.03571428571611
+    },
+    "position": {
+     "inside_spread": 28
+    },
+    "rest_s_to_first_fill": {
+     "n": 15,
+     "p10": 0.030647993087768555,
+     "median": 1.389538288116455,
+     "p90": 7.292156934738159,
+     "mean": 2.317432737350464
+    },
+    "filled_within": {
+     "1s": 6,
+     "5s": 13,
+     "15s": 15
+    },
+    "fill_cause": {
+     "trade_confirmed_cross_after": 4,
+     "trade": 11
+    },
+    "fill_print": {
+     "through": 14,
+     "at_price": 1
+    },
+    "print_size_vs_order": {
+     "n": 15,
+     "p10": 0.2,
+     "median": 13.0,
+     "p90": 104.0,
+     "mean": 27.84148148148148
+    },
+    "through_depth_ticks": {
+     "n": 14,
+     "p10": 1.999999999998181,
+     "median": 8.999999999997499,
+     "p90": 19.99999999998181,
+     "mean": 11.499999999996037
+    },
+    "queue_ahead_at_placement": {
+     "n": 28,
+     "p10": 0.0,
+     "median": 0.0,
+     "p90": 0.0,
+     "mean": 0.0
+    },
+    "markout_1s_bps": {
+     "n": 0,
+     "mean": null,
+     "se": null,
+     "median": null
+    },
+    "markout_5s_bps": {
+     "n": 0,
+     "mean": null,
+     "se": null,
+     "median": null
+    },
+    "markout_30s_bps": {
+     "n": 0,
+     "mean": null,
+     "se": null,
+     "median": null
+    },
+    "empty_share": 1.0
+   },
+   "pos_at_touch": {
+    "orders": 0,
+    "share_of_orders": 0.0,
+    "filled": 0,
+    "fill_rate": null,
+    "distance_from_own_touch_bps": {
+     "n": 0,
+     "p10": null,
+     "median": null,
+     "p90": null,
+     "mean": null
+    },
+    "distance_ticks": {
+     "n": 0,
+     "p10": null,
+     "median": null,
+     "p90": null,
+     "mean": null
+    },
+    "spread_bps": {
+     "n": 0,
+     "p10": null,
+     "median": null,
+     "p90": null,
+     "mean": null
+    },
+    "spread_ticks": {
+     "n": 0,
+     "p10": null,
+     "median": null,
+     "p90": null,
+     "mean": null
+    },
+    "position": {},
+    "rest_s_to_first_fill": {
+     "n": 0,
+     "p10": null,
+     "median": null,
+     "p90": null,
+     "mean": null
+    },
+    "filled_within": {
+     "1s": 0,
+     "5s": 0,
+     "15s": 0
+    },
+    "fill_cause": {},
+    "fill_print": {},
+    "print_size_vs_order": {
+     "n": 0,
+     "p10": null,
+     "median": null,
+     "p90": null,
+     "mean": null
+    },
+    "through_depth_ticks": {
+     "n": 0,
+     "p10": null,
+     "median": null,
+     "p90": null,
+     "mean": null
+    },
+    "queue_ahead_at_placement": {
+     "n": 0,
+     "p10": null,
+     "median": null,
+     "p90": null,
+     "mean": null
+    },
+    "markout_1s_bps": {
+     "n": 0,
+     "mean": null,
+     "se": null,
+     "median": null
+    },
+    "markout_5s_bps": {
+     "n": 0,
+     "mean": null,
+     "se": null,
+     "median": null
+    },
+    "markout_30s_bps": {
+     "n": 0,
+     "mean": null,
+     "se": null,
+     "median": null
+    },
+    "empty_share": null
+   },
+   "pos_behind_touch": {
+    "orders": 31,
+    "share_of_orders": 0.5254237288135594,
+    "filled": 7,
+    "fill_rate": 0.22580645161290322,
+    "distance_from_own_touch_bps": {
+     "n": 31,
+     "p10": 0.6688068485834221,
+     "median": 3.2687507428966125,
+     "p90": 10.209458569358526,
+     "mean": 4.493534407088962
+    },
+    "distance_ticks": {
+     "n": 31,
+     "p10": 2.9999999999972715,
+     "median": 10.99999999999568,
+     "p90": 31.000000000000227,
+     "mean": 14.387096774194767
+    },
+    "spread_bps": {
+     "n": 31,
+     "p10": 0.296011248427171,
+     "median": 1.1885659951274876,
+     "p90": 3.8473490285442358,
+     "mean": 1.6112667474568825
+    },
+    "spread_ticks": {
+     "n": 31,
+     "p10": 0.9999999999990905,
+     "median": 4.000000000002046,
+     "p90": 12.999999999999545,
+     "mean": 5.354838709677133
+    },
+    "position": {
+     "behind_touch": 31
+    },
+    "rest_s_to_first_fill": {
+     "n": 7,
+     "p10": 0.694622278213501,
+     "median": 6.984837532043457,
+     "p90": 14.796459913253784,
+     "mean": 8.382837465831212
+    },
+    "filled_within": {
+     "1s": 1,
+     "5s": 2,
+     "15s": 7
+    },
+    "fill_cause": {
+     "trade": 6,
+     "trade_confirmed_cross_after": 1
+    },
+    "fill_print": {
+     "through": 6,
+     "at_price": 1
+    },
+    "print_size_vs_order": {
+     "n": 7,
+     "p10": 0.2,
+     "median": 10.0,
+     "p90": 192.0,
+     "mean": 40.31428571428571
+    },
+    "through_depth_ticks": {
+     "n": 6,
+     "p10": 0.9999999999990905,
+     "median": 6.000000000000227,
+     "p90": 10.99999999999568,
+     "mean": 5.16666666666481
+    },
+    "queue_ahead_at_placement": {
+     "n": 31,
+     "p10": 0.0,
+     "median": 0.0,
+     "p90": 196.5,
+     "mean": 48.145161290322584
+    },
+    "markout_1s_bps": {
+     "n": 0,
+     "mean": null,
+     "se": null,
+     "median": null
+    },
+    "markout_5s_bps": {
+     "n": 0,
+     "mean": null,
+     "se": null,
+     "median": null
+    },
+    "markout_30s_bps": {
+     "n": 0,
+     "mean": null,
+     "se": null,
+     "median": null
+    },
+    "empty_share": 0.7741935483870968
+   }
+  },
+  "strategy_mar2024_v1_2": {
+   "all": {
+    "orders": 7,
+    "share_of_orders": null,
+    "filled": 2,
+    "fill_rate": 0.2857142857142857,
+    "distance_from_own_touch_bps": {
+     "n": 7,
+     "p10": -0.20725102243740345,
+     "median": 0.0,
+     "p90": 2.4184966624743702,
+     "mean": 0.29556639069245577
+    },
+    "distance_ticks": {
+     "n": 7,
+     "p10": -2.999999999985903,
+     "median": 0.0,
+     "p90": 34.99999999999659,
+     "mean": 4.285714285718508
+    },
+    "spread_bps": {
+     "n": 7,
+     "p10": 0.06847556278385858,
+     "median": 0.06963036719607388,
+     "p90": 0.5691074261392005,
+     "mean": 0.17988490610431782
+    },
+    "spread_ticks": {
+     "n": 7,
+     "p10": 1.0000000000047748,
+     "median": 1.0000000000047748,
+     "p90": 7.999999999981355,
+     "mean": 2.571428571428669
+    },
+    "position": {
+     "at_touch": 4,
+     "inside_spread": 2,
+     "behind_touch": 1
+    },
+    "rest_s_to_first_fill": {
+     "n": 2,
+     "p10": 0.11594271659851074,
+     "median": 2.3264424800872803,
+     "p90": 2.3264424800872803,
+     "mean": 1.2211925983428955
+    },
+    "filled_within": {
+     "1s": 1,
+     "5s": 2,
+     "15s": 2
+    },
+    "fill_cause": {
+     "trade_confirmed_cross_after": 1,
+     "trade": 1
+    },
+    "fill_print": {
+     "through": 2
+    },
+    "print_size_vs_order": {
+     "n": 2,
+     "p10": 1.5,
+     "median": 2.1,
+     "p90": 2.1,
+     "mean": 1.8
+    },
+    "through_depth_ticks": {
+     "n": 2,
+     "p10": 2.999999999985903,
+     "median": 24.00000000000091,
+     "p90": 24.00000000000091,
+     "mean": 13.499999999993406
+    },
+    "queue_ahead_at_placement": {
+     "n": 7,
+     "p10": 0.0,
+     "median": 18.6,
+     "p90": 45.4,
+     "mean": 21.2
+    },
+    "markout_1s_bps": {
+     "n": 0,
+     "mean": null,
+     "se": null,
+     "median": null
+    },
+    "markout_5s_bps": {
+     "n": 0,
+     "mean": null,
+     "se": null,
+     "median": null
+    },
+    "markout_30s_bps": {
+     "n": 0,
+     "mean": null,
+     "se": null,
+     "median": null
+    }
+   },
+   "venue_bybit": {
+    "orders": 7,
+    "share_of_orders": null,
+    "filled": 2,
+    "fill_rate": 0.2857142857142857,
+    "distance_from_own_touch_bps": {
+     "n": 7,
+     "p10": -0.20725102243740345,
+     "median": 0.0,
+     "p90": 2.4184966624743702,
+     "mean": 0.29556639069245577
+    },
+    "distance_ticks": {
+     "n": 7,
+     "p10": -2.999999999985903,
+     "median": 0.0,
+     "p90": 34.99999999999659,
+     "mean": 4.285714285718508
+    },
+    "spread_bps": {
+     "n": 7,
+     "p10": 0.06847556278385858,
+     "median": 0.06963036719607388,
+     "p90": 0.5691074261392005,
+     "mean": 0.17988490610431782
+    },
+    "spread_ticks": {
+     "n": 7,
+     "p10": 1.0000000000047748,
+     "median": 1.0000000000047748,
+     "p90": 7.999999999981355,
+     "mean": 2.571428571428669
+    },
+    "position": {
+     "at_touch": 4,
+     "inside_spread": 2,
+     "behind_touch": 1
+    },
+    "rest_s_to_first_fill": {
+     "n": 2,
+     "p10": 0.11594271659851074,
+     "median": 2.3264424800872803,
+     "p90": 2.3264424800872803,
+     "mean": 1.2211925983428955
+    },
+    "filled_within": {
+     "1s": 1,
+     "5s": 2,
+     "15s": 2
+    },
+    "fill_cause": {
+     "trade_confirmed_cross_after": 1,
+     "trade": 1
+    },
+    "fill_print": {
+     "through": 2
+    },
+    "print_size_vs_order": {
+     "n": 2,
+     "p10": 1.5,
+     "median": 2.1,
+     "p90": 2.1,
+     "mean": 1.8
+    },
+    "through_depth_ticks": {
+     "n": 2,
+     "p10": 2.999999999985903,
+     "median": 24.00000000000091,
+     "p90": 24.00000000000091,
+     "mean": 13.499999999993406
+    },
+    "queue_ahead_at_placement": {
+     "n": 7,
+     "p10": 0.0,
+     "median": 18.6,
+     "p90": 45.4,
+     "mean": 21.2
+    },
+    "markout_1s_bps": {
+     "n": 0,
+     "mean": null,
+     "se": null,
+     "median": null
+    },
+    "markout_5s_bps": {
+     "n": 0,
+     "mean": null,
+     "se": null,
+     "median": null
+    },
+    "markout_30s_bps": {
+     "n": 0,
+     "mean": null,
+     "se": null,
+     "median": null
+    }
+   },
+   "empty_level": {
+    "orders": 3,
+    "share_of_orders": 0.42857142857142855,
+    "filled": 2,
+    "fill_rate": 0.6666666666666666,
+    "distance_from_own_touch_bps": {
+     "n": 3,
+     "p10": -0.20725102243740345,
+     "median": -0.14228090518977626,
+     "p90": 2.4184966624743702,
+     "mean": 0.6896549116157301
+    },
+    "distance_ticks": {
+     "n": 3,
+     "p10": -2.999999999985903,
+     "median": -1.999999999981128,
+     "p90": 34.99999999999659,
+     "mean": 10.000000000009853
+    },
+    "spread_bps": {
+     "n": 3,
+     "p10": 0.13819885433215748,
+     "median": 0.27633087859338445,
+     "p90": 0.5691074261392005,
+     "mean": 0.3278790530215808
+    },
+    "spread_ticks": {
+     "n": 3,
+     "p10": 2.0000000000095497,
+     "median": 3.9999999999906777,
+     "p90": 7.999999999981355,
+     "mean": 4.666666666660528
+    },
+    "position": {
+     "inside_spread": 2,
+     "behind_touch": 1
+    },
+    "rest_s_to_first_fill": {
+     "n": 2,
+     "p10": 0.11594271659851074,
+     "median": 2.3264424800872803,
+     "p90": 2.3264424800872803,
+     "mean": 1.2211925983428955
+    },
+    "filled_within": {
+     "1s": 1,
+     "5s": 2,
+     "15s": 2
+    },
+    "fill_cause": {
+     "trade_confirmed_cross_after": 1,
+     "trade": 1
+    },
+    "fill_print": {
+     "through": 2
+    },
+    "print_size_vs_order": {
+     "n": 2,
+     "p10": 1.5,
+     "median": 2.1,
+     "p90": 2.1,
+     "mean": 1.8
+    },
+    "through_depth_ticks": {
+     "n": 2,
+     "p10": 2.999999999985903,
+     "median": 24.00000000000091,
+     "p90": 24.00000000000091,
+     "mean": 13.499999999993406
+    },
+    "queue_ahead_at_placement": {
+     "n": 3,
+     "p10": 0.0,
+     "median": 0.0,
+     "p90": 0.0,
+     "mean": 0.0
+    },
+    "markout_1s_bps": {
+     "n": 0,
+     "mean": null,
+     "se": null,
+     "median": null
+    },
+    "markout_5s_bps": {
+     "n": 0,
+     "mean": null,
+     "se": null,
+     "median": null
+    },
+    "markout_30s_bps": {
+     "n": 0,
+     "mean": null,
+     "se": null,
+     "median": null
+    }
+   },
+   "behind_queue": {
+    "orders": 4,
+    "share_of_orders": 0.5714285714285714,
+    "filled": 0,
+    "fill_rate": 0.0,
+    "distance_from_own_touch_bps": {
+     "n": 4,
+     "p10": 0.0,
+     "median": 0.0,
+     "p90": 0.0,
+     "mean": 0.0
+    },
+    "distance_ticks": {
+     "n": 4,
+     "p10": 0.0,
+     "median": 0.0,
+     "p90": 0.0,
+     "mean": 0.0
+    },
+    "spread_bps": {
+     "n": 4,
+     "p10": 0.06847556278385858,
+     "median": 0.0688352050776134,
+     "p90": 0.06963036719607388,
+     "mean": 0.06888929591637058
+    },
+    "spread_ticks": {
+     "n": 4,
+     "p10": 1.0000000000047748,
+     "median": 1.0000000000047748,
+     "p90": 1.0000000000047748,
+     "mean": 1.0000000000047748
+    },
+    "position": {
+     "at_touch": 4
+    },
+    "rest_s_to_first_fill": {
+     "n": 0,
+     "p10": null,
+     "median": null,
+     "p90": null,
+     "mean": null
+    },
+    "filled_within": {
+     "1s": 0,
+     "5s": 0,
+     "15s": 0
+    },
+    "fill_cause": {},
+    "fill_print": {},
+    "print_size_vs_order": {
+     "n": 0,
+     "p10": null,
+     "median": null,
+     "p90": null,
+     "mean": null
+    },
+    "through_depth_ticks": {
+     "n": 0,
+     "p10": null,
+     "median": null,
+     "p90": null,
+     "mean": null
+    },
+    "queue_ahead_at_placement": {
+     "n": 4,
+     "p10": 18.6,
+     "median": 45.0,
+     "p90": 45.4,
+     "mean": 37.1
+    },
+    "markout_1s_bps": {
+     "n": 0,
+     "mean": null,
+     "se": null,
+     "median": null
+    },
+    "markout_5s_bps": {
+     "n": 0,
+     "mean": null,
+     "se": null,
+     "median": null
+    },
+    "markout_30s_bps": {
+     "n": 0,
+     "mean": null,
+     "se": null,
+     "median": null
+    }
+   },
+   "pos_inside_spread": {
+    "orders": 2,
+    "share_of_orders": 0.2857142857142857,
+    "filled": 1,
+    "fill_rate": 0.5,
+    "distance_from_own_touch_bps": {
+     "n": 2,
+     "p10": -0.20725102243740345,
+     "median": -0.14228090518977626,
+     "p90": -0.14228090518977626,
+     "mean": -0.17476596381358986
+    },
+    "distance_ticks": {
+     "n": 2,
+     "p10": -2.999999999985903,
+     "median": -1.999999999981128,
+     "p90": -1.999999999981128,
+     "mean": -2.4999999999835154
+    },
+    "spread_bps": {
+     "n": 2,
+     "p10": 0.27633087859338445,
+     "median": 0.5691074261392005,
+     "p90": 0.5691074261392005,
+     "mean": 0.4227191523662925
+    },
+    "spread_ticks": {
+     "n": 2,
+     "p10": 3.9999999999906777,
+     "median": 7.999999999981355,
+     "p90": 7.999999999981355,
+     "mean": 5.9999999999860165
+    },
+    "position": {
+     "inside_spread": 2
+    },
+    "rest_s_to_first_fill": {
+     "n": 1,
+     "p10": 0.11594271659851074,
+     "median": 0.11594271659851074,
+     "p90": 0.11594271659851074,
+     "mean": 0.11594271659851074
+    },
+    "filled_within": {
+     "1s": 1,
+     "5s": 1,
+     "15s": 1
+    },
+    "fill_cause": {
+     "trade": 1
+    },
+    "fill_print": {
+     "through": 1
+    },
+    "print_size_vs_order": {
+     "n": 1,
+     "p10": 1.5,
+     "median": 1.5,
+     "p90": 1.5,
+     "mean": 1.5
+    },
+    "through_depth_ticks": {
+     "n": 1,
+     "p10": 24.00000000000091,
+     "median": 24.00000000000091,
+     "p90": 24.00000000000091,
+     "mean": 24.00000000000091
+    },
+    "queue_ahead_at_placement": {
+     "n": 2,
+     "p10": 0.0,
+     "median": 0.0,
+     "p90": 0.0,
+     "mean": 0.0
+    },
+    "markout_1s_bps": {
+     "n": 0,
+     "mean": null,
+     "se": null,
+     "median": null
+    },
+    "markout_5s_bps": {
+     "n": 0,
+     "mean": null,
+     "se": null,
+     "median": null
+    },
+    "markout_30s_bps": {
+     "n": 0,
+     "mean": null,
+     "se": null,
+     "median": null
+    },
+    "empty_share": 1.0
+   },
+   "pos_at_touch": {
+    "orders": 4,
+    "share_of_orders": 0.5714285714285714,
+    "filled": 0,
+    "fill_rate": 0.0,
+    "distance_from_own_touch_bps": {
+     "n": 4,
+     "p10": 0.0,
+     "median": 0.0,
+     "p90": 0.0,
+     "mean": 0.0
+    },
+    "distance_ticks": {
+     "n": 4,
+     "p10": 0.0,
+     "median": 0.0,
+     "p90": 0.0,
+     "mean": 0.0
+    },
+    "spread_bps": {
+     "n": 4,
+     "p10": 0.06847556278385858,
+     "median": 0.0688352050776134,
+     "p90": 0.06963036719607388,
+     "mean": 0.06888929591637058
+    },
+    "spread_ticks": {
+     "n": 4,
+     "p10": 1.0000000000047748,
+     "median": 1.0000000000047748,
+     "p90": 1.0000000000047748,
+     "mean": 1.0000000000047748
+    },
+    "position": {
+     "at_touch": 4
+    },
+    "rest_s_to_first_fill": {
+     "n": 0,
+     "p10": null,
+     "median": null,
+     "p90": null,
+     "mean": null
+    },
+    "filled_within": {
+     "1s": 0,
+     "5s": 0,
+     "15s": 0
+    },
+    "fill_cause": {},
+    "fill_print": {},
+    "print_size_vs_order": {
+     "n": 0,
+     "p10": null,
+     "median": null,
+     "p90": null,
+     "mean": null
+    },
+    "through_depth_ticks": {
+     "n": 0,
+     "p10": null,
+     "median": null,
+     "p90": null,
+     "mean": null
+    },
+    "queue_ahead_at_placement": {
+     "n": 4,
+     "p10": 18.6,
+     "median": 45.0,
+     "p90": 45.4,
+     "mean": 37.1
+    },
+    "markout_1s_bps": {
+     "n": 0,
+     "mean": null,
+     "se": null,
+     "median": null
+    },
+    "markout_5s_bps": {
+     "n": 0,
+     "mean": null,
+     "se": null,
+     "median": null
+    },
+    "markout_30s_bps": {
+     "n": 0,
+     "mean": null,
+     "se": null,
+     "median": null
+    },
+    "empty_share": 0.0
+   },
+   "pos_behind_touch": {
+    "orders": 1,
+    "share_of_orders": 0.14285714285714285,
+    "filled": 1,
+    "fill_rate": 1.0,
+    "distance_from_own_touch_bps": {
+     "n": 1,
+     "p10": 2.4184966624743702,
+     "median": 2.4184966624743702,
+     "p90": 2.4184966624743702,
+     "mean": 2.4184966624743702
+    },
+    "distance_ticks": {
+     "n": 1,
+     "p10": 34.99999999999659,
+     "median": 34.99999999999659,
+     "p90": 34.99999999999659,
+     "mean": 34.99999999999659
+    },
+    "spread_bps": {
+     "n": 1,
+     "p10": 0.13819885433215748,
+     "median": 0.13819885433215748,
+     "p90": 0.13819885433215748,
+     "mean": 0.13819885433215748
+    },
+    "spread_ticks": {
+     "n": 1,
+     "p10": 2.0000000000095497,
+     "median": 2.0000000000095497,
+     "p90": 2.0000000000095497,
+     "mean": 2.0000000000095497
+    },
+    "position": {
+     "behind_touch": 1
+    },
+    "rest_s_to_first_fill": {
+     "n": 1,
+     "p10": 2.3264424800872803,
+     "median": 2.3264424800872803,
+     "p90": 2.3264424800872803,
+     "mean": 2.3264424800872803
+    },
+    "filled_within": {
+     "1s": 0,
+     "5s": 1,
+     "15s": 1
+    },
+    "fill_cause": {
+     "trade_confirmed_cross_after": 1
+    },
+    "fill_print": {
+     "through": 1
+    },
+    "print_size_vs_order": {
+     "n": 1,
+     "p10": 2.1,
+     "median": 2.1,
+     "p90": 2.1,
+     "mean": 2.1
+    },
+    "through_depth_ticks": {
+     "n": 1,
+     "p10": 2.999999999985903,
+     "median": 2.999999999985903,
+     "p90": 2.999999999985903,
+     "mean": 2.999999999985903
+    },
+    "queue_ahead_at_placement": {
+     "n": 1,
+     "p10": 0.0,
+     "median": 0.0,
+     "p90": 0.0,
+     "mean": 0.0
+    },
+    "markout_1s_bps": {
+     "n": 0,
+     "mean": null,
+     "se": null,
+     "median": null
+    },
+    "markout_5s_bps": {
+     "n": 0,
+     "mean": null,
+     "se": null,
+     "median": null
+    },
+    "markout_30s_bps": {
+     "n": 0,
+     "mean": null,
+     "se": null,
+     "median": null
+    },
+    "empty_share": 1.0
+   }
+  }
+ }
+}

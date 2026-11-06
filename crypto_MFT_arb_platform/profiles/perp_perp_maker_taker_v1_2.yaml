@@ -7,6 +7,7 @@
 # Seven cumulative switches, in this order, each measured in v1_1_switch_ladder_report.html; everything else is byte-for-byte v1.
 #   1 data manifest gate + truncation count (applied by the runner: --data-manifest; the path is not a profile key)   2 trade_dedupe: multiset
 #   3 maker.ledger_epoch   4 own_impact: overlay   5 book_tape_repair: false   6 fitted unknown queue (floor 0, flagged fallback 25)
+placement_book: view                    # v1_2 switch (owner 7 Nov): 'truth' = a passive order joins the venue-truth book at its arrival (the book PostOnly is judged on) when it is complete there, the view book otherwise (counted). Built and measured alone; OFF in the profile until the owner approves the measurement
 trust_local_ts:                      # v1_2 (owner 6 Nov, own change after the depletion ledger): ASSUMED. The March-2024 local stamps are exchange time + exactly 2.000 ms on every record (constructed, not measured), so they are NOT used as receive time; the latency preset's feed delay is applied instead (one sample per exchange message). v1.1: both venues trusted
   bybit: false
   binance: false
@@ -101,8 +102,8 @@ maker:
   vanish_clears_queue: false             # v1.1 step 7: a vanished level alone never fills an order
   fill_evidence: trade_confirm           # v1.1 step 7: every fill that rests on a depth decrease or a snapshot shrink needs a confirming print within evidence_window_ms
   ledger_epoch: true                     # v1.1 step 3: a snapshot / reset invalidates old netting credit; ambiguous associations are flagged
-  fill_through_prints: false             # OFF until the Step-8 re-check is reported (owner 7 Nov). Was on from 6 Nov 18:31 (owner 6 Nov: volume-limited version in the next profile version unless the v1_1 four-slice check showed a problem); no v1_2 run ever read it from this file (only the tp2 slices set it by override). A print strictly through our price means the level we rest on was consumed ...
-  through_print_volume_limited: false    # ... but the fill is limited by the print's volume (one budget shared by every order the print went through). The full version (fill_through_prints without this) is refused at startup. Turn BOTH on together only after the owner approves
+  fill_through_prints: false             # OFF in v1_2 and off the freeze list (owner 7 Nov, after the Step 8 re-check): the logic is correct and the engine is fixed (one print budget across the cross, through and ordinary rules; a netted print still reaches the through rule), but the rule is not part of v1_2. History: on from 6 Nov 18:31, off 7 Nov. A print strictly through our price means the level we rest on was consumed ...
+  through_print_volume_limited: false    # ... but the fill is limited by the print's volume (ONE budget per print). The full version (fill_through_prints without this) is refused at startup. Turn BOTH on together only on the owner's instruction
   depletion_ledger: true                 # v1_2 (owner Phase B, step 4): both arrival orders of one execution (depth decrease / print) give the same queue ahead and the same fills when the print is at least as large as the decrease; netted pairs with no other proof are counted. v1.1: false
   evidence_window_ms: 20.0
   share_trade_volume: true               # MANDATORY
@@ -116,6 +117,11 @@ maker:
   # Cohort queue (queue_model: cohort) is a v1_2 SENSITIVITY case only; the headline runs stay on the scalar queue. The sensitivity range uses cohort_age: uniform, run WITH this profile's cross rule
   # (opposite_cross_fills, its confirm window, cap-to-print), like v1.1. cohort_hazard_theta 0.5 is SPOT_CALIBRATED (spot data 04-19..04-22), NOT a perp fit: the hazard age rule stays out of the
   # range until a perp fit from probe data exists; any result that runs it carries cohort_hazard_theta.provenance.
+dataset_settings:                        # v1_2 (owner 7 Nov): per-dataset settings, merged over this profile only when the runner names the dataset; January and every unnamed run keep the maker defaults (0.05 s / 20 ms)
+  mar2024:
+    maker:
+      dedupe_window_s: 0.15              # March-2024 Bybit depth arrives in ~100 ms batches (lag median ~60 ms, report C6): the 50 ms trade/depth window missed pairs. PROPOSED by the TRAIN-day matching study, owner-approved 7 Nov
+      evidence_window_ms: 50.0           # same study; January keeps 50 ms / 20 ms
 timing:                                  # WP3; numbers ASSUMED from the latency preset until calibrated
   from_latency_preset: singapore         # same preset as latency_preset (owner decision 2026-11-02)
   equal_time_policy: market_first

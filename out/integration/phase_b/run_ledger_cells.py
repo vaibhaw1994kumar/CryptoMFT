@@ -26,6 +26,8 @@ MAR_PROF, JAN_PROF = "perp_perp_maker_taker_v1_2", "perp_perp_maker_taker_v1_1"
 def variant(cell):
     if cell == "t1":
         return {}                                  # the profile alone
+    if cell == "ck":
+        return {"dedupe_window_s": 0.05, "evidence_window_ms": 20.0}          # identity check (7 Nov): v1_2 as it stood at t1 (through rule off, the old windows; the profile's March dataset_settings undone) -> must equal t1 byte for byte
     if cell == "tp2":
         return {"fill_through_prints": True, "through_print_volume_limited": True}      # t1 + the through-print rule, volume-limited (owner 6 Nov)
     on = cell.startswith("l1")

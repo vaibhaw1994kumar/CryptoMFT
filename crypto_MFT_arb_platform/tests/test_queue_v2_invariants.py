@@ -267,7 +267,7 @@ class ThroughPrints(unittest.TestCase):
 class ThroughPrintSpentOnce(unittest.TestCase):
     """Step 8 re-check (owner 7 Nov): one print is spent ONCE across the through rule, the cross rule and the ordinary trade rule, in both arrival orders, and a print that a depth
     decrease already explained still reaches the through rule. Settings: the v1_2 maker block with the volume-limited through rule switched on (the profile has it off for now).
-    Tests marked OPEN fail on today's engine: they pin the target, the fix waits for the owner's approval."""
+    The four tests that were OPEN (7 Nov re-check) pass since the owner's 7 Nov decision and the engine change: one print budget across the cross, through and ordinary rules; a netted print still reaches the through rule."""
     CFG = dict(BASE, cancel_model="proportional", fill_through_prints=True, through_print_volume_limited=True, opposite_cross_fills=True, opposite_cross_confirm_ms=50.0,
                opposite_cross_cap_to_print=True, dedupe_window_s=0.05, dedupe_time_basis="exchange", min_queue_ahead=0.0)
 
@@ -299,8 +299,7 @@ class ThroughPrintSpentOnce(unittest.TestCase):
         self.assertAlmostEqual(got, 3.0)                                                 # a sell at 99 went through our bid at 100
         self.assertEqual(b.filled_qty, 0.0)                                              # B only drained 4 of its 5 ahead
 
-    @unittest.expectedFailure
-    def test_OPEN_book_first_a_print_netted_against_the_depth_decrease_is_still_seen_by_the_through_rule(self):
+    def test_book_first_a_print_netted_against_the_depth_decrease_is_still_seen_by_the_through_rule(self):
         got, a, b = self._netted("book")
         self.assertAlmostEqual(got, 3.0)                                                 # today 0: the netted print returns before the through rule runs, so the two arrival orders differ
 
@@ -315,12 +314,10 @@ class ThroughPrintSpentOnce(unittest.TestCase):
             fills = ex.on_trade(book.venue, 99.0, 4.0, -1, 2.000, 0.0, event_ts=2.000)
         return fills
 
-    @unittest.expectedFailure
-    def test_OPEN_one_print_is_spent_once_across_the_through_rule_and_the_ordinary_rule_print_first(self):
+    def test_one_print_is_spent_once_across_the_through_rule_and_the_ordinary_rule_print_first(self):
         self.assertLessEqual(sum(f.qty for f in self._through_and_ordinary("trade")), 4.0 + 1e-9)       # today 6: the through budget is the gross print, B's ordinary fill spends it again
 
-    @unittest.expectedFailure
-    def test_OPEN_one_print_is_spent_once_across_the_through_rule_and_the_ordinary_rule_after_a_decrease(self):
+    def test_one_print_is_spent_once_across_the_through_rule_and_the_ordinary_rule_after_a_decrease(self):
         self.assertLessEqual(sum(f.qty for f in self._through_and_ordinary("book")), 4.0 + 1e-9)
 
     # -- the through rule and the cross rule share one print --
@@ -340,8 +337,7 @@ class ThroughPrintSpentOnce(unittest.TestCase):
         fills, a, c = self._through_and_cross("trade")
         self.assertLessEqual(sum(f.qty for f in fills), 4.0 + 1e-9)
 
-    @unittest.expectedFailure
-    def test_OPEN_cross_first_then_print_the_print_is_spent_once(self):
+    def test_cross_first_then_print_the_print_is_spent_once(self):
         fills, a, c = self._through_and_cross("cross")
         self.assertLessEqual(sum(f.qty for f in fills), 4.0 + 1e-9)                      # today 6: the cross cap is spent on A, the through budget for C starts again at the gross print
 
