@@ -139,7 +139,8 @@ The full instructions are in `core_backtest_integration_prompt.md`. One session 
 0. Baselines and 12 hand-calculated synthetic scenarios.
 A. Move shared code into the core with no logic change, checked byte-identical.
 B0. Owner's open decisions: frame-atomic rebuild check, step 2 diagnosis, ledger feasibility, hedge move from the probe, bid rounded onto the best bid.
-B. Shared accounting, fees and book rules, using the accounting shadow, then switching over. Native-id ledger if feasible. Sensitivity range from full replays, then the v1_2 freeze.
+B. Accounting shadow, book rules, depletion ledger, data checks and the March stamp change (built, gate reported). Sensitivity range from full replays once, on the final v1_2, then the v1_2 freeze with owner approval (not frozen yet).
+B2. Owner 6 Nov: switch fees, funding, margin and ledger to the core (funding_settler, margin_model, fee presets, common-timestamp valuation in the core); own gate; unstarted.
 C. Core fill-triggered hedging, porting behaviour from `opportunity.py` and the backtester.
 D. One runtime: `QueueAwareVenueAdapter`, the strategy on the SDK, old vs new parity, then single-pass shadow queue trackers.
 E. Risk gate, breaker pause vs trip, flatten on trip, ghost hedge fix, pairing, venue selector. Not built in Phase 0.
@@ -166,3 +167,6 @@ Naming: phases 0 and A-F here are integration phases. The "Phase 0" and "Gate 0"
 - `MINIMUM_REQUIREMENTS.md` describes `trading_platform_poc/minreq/`, which is out of scope. Traceability says the core also meets MR-01 to MR-17; that is unverified.
 - No mainnet orders exist, so latency, rejects and queues on perps are uncalibrated. Queue parameters are a spot prior.
 - Latency: the Binance 6-week PDF (received 6 Nov) measures market data delivery only. Binance feed delay fits about 2 ms, which suggests a host next to Binance, while the default preset is singapore at 36 ms. Host location, order ack, cancel and private report latency on both venues, and all Bybit figures, are still missing. The PDF says tick-to-trade is measured separately; those figures are requested. Handled after platform correctness, under the requirements' stages, and required before restricted live (Demonstration 5). Tool: `order_lifecycle_logger/`.
+
+
+- 7 Nov (owner Step 8 re-check): through-print (fill_through_prints + through_print_volume_limited) is OFF in v1_2 until the owner approves report C12 item 3; the freeze list entry is conditional on it. Three engine changes proposed (through rule before the netted-print return; one print budget across cross/through/ordinary; both-order tests), not applied.

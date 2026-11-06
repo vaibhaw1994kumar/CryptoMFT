@@ -37,6 +37,7 @@ ap.add_argument("--scenario", default="clean", choices=("clean", "hedge_reject_f
 ap.add_argument("--train", default="")
 ap.add_argument("--split-file", default=str(E / "split.json"))
 ap.add_argument("--allow-rejected-data", default=None)
+ap.add_argument("--allow-manifest-gap", default=None, help="written reason for a data-manifest block ONLY; the preflight still blocks (owner 6 Nov: use this for every v1_2 headline run)")
 a = ap.parse_args()
 if a.profile in ("legacy_v0", "perp_perp_maker_taker_v1") and not a.reference:
     raise SystemExit(f"{a.profile} is a REFERENCE profile, never for decisions: pass --reference to run it (the default profile is perp_perp_maker_taker_v1_1)")
@@ -105,7 +106,11 @@ kw = dict(data_root=DATA, pair="SOLUSDT", start_date=a.day, end_date=a.day, outp
 if a.profile == "legacy_v0":
     kw["hedge_arrival_book"] = "view"        # a non-legacy profile carries its own hedge_arrival_book (v1.1: truth); the runner does not override it
 if a.allow_rejected_data:
+    if a.profile.endswith("_v1_2"):
+        raise SystemExit("v1_2 headline runs do not override the preflight: use --allow-manifest-gap for the manifest and let the preflight block (owner 6 Nov)")
     kw["allow_rejected_data"] = a.allow_rejected_data
+if a.allow_manifest_gap:
+    kw["allow_manifest_gap"] = a.allow_manifest_gap
 cfg = apply_profile(doc, **kw)
 if a.cancel_model != "profile":
     cfg.maker = dataclasses.replace(cfg.maker, cancel_model=a.cancel_model)
@@ -166,7 +171,7 @@ summary = {
     "execution": {k: v for k, v in (r.execution_report or {}).items() if k not in ("plans",)} if getattr(r, "execution_report", None) else None,
     "data_quality": getattr(r, "data_quality", None), "book_stats": r.book_stats, "trades_path": r.trades_path, "fill_log_path": r.fill_log_path,
     "events_processed": r.events_processed, "wall_seconds_engine": r.wall_seconds, "execution_reconciliation": r.execution_reconciliation, "release_identity": r.release_identity,
-    "switch_table": switch_table(doc), "maker_config": dataclasses.asdict(cfg.maker),
+    "switch_table": switch_table(doc), "maker_config": {k: v for k, v in dataclasses.asdict(cfg.maker).items() if not (k == "depletion_ledger" and not v)},   # a switch that is off is not listed: every earlier result keeps its bytes
     "warnings": sorted({str(w.message)[:300] for w in caught}),
     "data_integrity": getattr(r, "data_integrity", None), "queue_parameter_status": getattr(r, "queue_parameter_status", None),
     "qv2": {"maker": _json.loads(os.environ.get("QV2_MAKER", "{}")), "cfg": _json.loads(os.environ.get("QV2_CFG", "{}")),
@@ -178,6 +183,8 @@ summary = {
 }
 if getattr(r, "core_shadow", None):
     (out / "core_shadow.json").write_text(json.dumps(r.core_shadow, indent=1))
+if getattr(_bt.maker, "ledger_stats", None):
+    (out / "ledger_stats.json").write_text(json.dumps({"stats": _bt.maker.ledger_stats, "diag": {k: v for k, v in _bt.maker.diag.items() if k.startswith(("ledger_", "trade_volume_credited", "delta_shrink_explained", "evidence_"))}}, indent=1))   # depletion ledger: how much matched volume came book-first vs trade-first
 if getattr(_bt.maker, "cross_log", None):
     (out / "cross_log.json").write_text(json.dumps(_bt.maker.cross_log, indent=1, default=str))
 summary["wall_s"] = time.time() - t0

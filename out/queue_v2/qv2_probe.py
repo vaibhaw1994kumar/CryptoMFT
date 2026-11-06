@@ -39,7 +39,9 @@ while t < t1 - 20:
         px = math.floor(b[0] * (1 - Q_BPS / 1e4) / TICK + 1e-9) * TICK
         orders.append((t, "buy", round(px, 10), 1.0))
     t += SLOT
-doc = load_profile(SNAP / "profiles" / "perp_perp_maker_taker_v1_1.yaml")
+PROFILE = os.environ.get("QV2_PROBE_PROFILE", "perp_perp_maker_taker_v1_1")                   # a later profile for a labelled comparison (Step 8 re-check, 7 Nov: v1_2 settings); default = the original v1.1 probe
+doc = load_profile(SNAP / "profiles" / f"{PROFILE}.yaml")
+doc.pop("hedge_move_calibration", None)                                                         # a pinned hedge move must come from days BEFORE the run start; a maker-only probe never hedges, so it is not read here
 doc["latency_preset"] = "singapore"
 if isinstance(doc.get("timing"), dict):
     doc["timing"]["from_latency_preset"] = "singapore"
@@ -47,8 +49,11 @@ cfg = apply_profile(doc, data_root=DATA, pair="SOLUSDT", start_date=day, end_dat
 cfg.venues = ("bybit",)
 cfg.hedge_faults = None; cfg.margin = None; cfg.circuit_breaker = None
 cfg.maker = dataclasses.replace(cfg.maker, unknown_queue_fit=str(X / "unknown_queue_fit_mar2024_NONE.json"))
+if os.environ.get("QV2_PROBE_MAKER"):
+    cfg.maker = dataclasses.replace(cfg.maker, **json.loads(os.environ["QV2_PROBE_MAKER"]))     # labelled MakerConfig override (e.g. the through-print rule on/off)
 cfg.arb.maker_max_live_orders = 10 ** 6; cfg.arb.max_position_base = 1e12; cfg.arb.max_venue_imbalance_base = 1e12
 cfg.arb.venue_ticks = {"bybit": 0.001}; cfg.arb.round_quotes_to_tick = False      # the probe prices its own orders (rounded above)
+cfg.arb.join_touch_on_tick_rounding = False                                         # a strategy quoting switch (v1_2) that needs the rounding the probe turns off; scheduled orders never use it
 cfg.analysis_mode = "maker_only"; cfg.scheduled_orders = tuple(orders); cfg.max_event_ts = t1 + 1.0
 cfg.gate_class = "BYBIT_ONLY_WINDOW"
 cfg.allow_rejected_data = "probe on a 2-hour slice; Bybit book only (Binance is read here as a price series)"
@@ -57,13 +62,28 @@ _bt = CrossVenueArbBacktester(cfg)
 r = _bt.run()
 rows = [json.loads(l) for l in (run_dir / "trades.jsonl").read_text().splitlines() if l.strip()]
 fills = [x for x in rows if not x.get("taker") and x["venue"] == "bybit" and x["side"] == "buy"]
+fill_obs = {}                                                                                    # (signal_id, ts) -> the engine's cause and the print that filled it
+for l in (run_dir / "maker_observations.jsonl").read_text().splitlines():
+    o = json.loads(l)
+    if o.get("obs") == "maker_fill":
+        fill_obs[(o["signal_id"], round(o["ts"], 6))] = (o["fill"]["cause"], (o.get("trigger") or {}).get("price"), o["price"])
+HORIZONS = (1.0, 5.0, 30.0)
+def mid_at(t):
+    a = at(t)
+    ok = a is not None and ts[bisect.bisect_right(ts, t) - 1] >= t - 5 and t <= ts[-1]
+    return (a[0] + a[1]) / 2 if ok else None
 res, drop = [], 0
 for x in fills:
     a, b = at(x["ts"]), at(x["ts"] + 1.0)
     if not a or not b or (ts[bisect.bisect_right(ts, x["ts"] + 1.0) - 1] < x["ts"] - 5):
         drop += 1; continue
     m0, m1 = (a[0] + a[1]) / 2, (b[0] + b[1]) / 2
-    res.append({"ts": x["ts"], "price": x["price"], "qty": x["qty"], "binance_mid_at_fill": m0, "move_bps": (m1 - m0) / m0 * 1e4})
+    cause, trig_px, ord_px = fill_obs.get((x["signal_id"], round(x["ts"], 6)), (None, None, x["price"]))
+    row = {"ts": x["ts"], "signal_id": x["signal_id"], "price": x["price"], "qty": x["qty"], "cause": cause, "trigger_price": trig_px, "binance_mid_at_fill": m0, "move_bps": (m1 - m0) / m0 * 1e4}
+    for h in HORIZONS:                                                                           # Binance mid move after the fill (negative = the mid fell after we bought); None when the slice ends first
+        mh = mid_at(x["ts"] + h)
+        row[f"move_bps_{int(h)}s"] = (mh - m0) / m0 * 1e4 if mh is not None else None
+    res.append(row)
 summary = {"day": day, "orders_scheduled": len(orders), "fired": r.analysis.get("fired"), "skipped": r.analysis.get("skipped"), "fills": len(fills), "fills_measured": len(res), "dropped": drop,
            "maker_fill_causes": (r.maker_observations or {}).get("maker_fill_causes"), "queue_updates": dict(getattr(_bt.maker, "queue_updates", {})), "q_bps": Q_BPS, "slot_s": SLOT, "wall_s": time.time() - w0, "rows": res}
 (out / f"{day}.json").write_text(json.dumps(summary, indent=1, default=str))

@@ -141,6 +141,12 @@ class ArbBacktestConfig:
     # (QualityGate REJECTED). A written justification here runs it anyway; the
     # justification and the gate decisions are recorded in the result.
     allow_rejected_data: str | None = None
+    # Phase B (owner 6 Nov): the manifest gate has its OWN written reason. None (default, legacy): allow_rejected_data serves both the manifest gate and the preflight (as before; the
+    # result's data_quality carries no new key). Set: it covers the manifest gate ONLY, and the preflight blocks unless allow_rejected_data is set as well (data_quality.override_scope says which).
+    allow_manifest_gap: str | None = None
+    # Phase B (owner 6 Nov): per venue, False = the recorded local_ts is NOT used as receive time and the latency preset's feed delay is applied instead (one sample per exchange message).
+    # None (default, legacy): every venue's VenueSpec.trust_local_ts (True). Set by v1_2 for the March data, whose local stamps are exchange time + exactly 2.000 ms (constructed, not measured).
+    trust_local_ts: dict | None = None
     # Queue model v2 step 1 (opt-in): path of out/queue_v2/manifest.json. A day with a truncated gzip stream blocks the run unless allow_rejected_data
     # carries a written reason; the manifest hash and the reason are recorded in the result (data_manifest).
     data_manifest: str | None = None
@@ -419,6 +425,9 @@ _SAME_STAMP_S = 1e-6        # message-atomic mode: receive stamps closer than th
 class CrossVenueArbBacktester:
     def __init__(self, config: ArbBacktestConfig) -> None:
         self.config = config
+        if config.maker.fill_through_prints and not config.maker.through_print_volume_limited:
+            raise ValueError("fill_through_prints without through_print_volume_limited is refused at startup (owner 6 Nov): the full version fills the whole order on any print through its price, "
+                             "whatever the print's size; set through_print_volume_limited as well, or leave fill_through_prints off")
         if config.require_explicit_size and config.arb.max_position_base == _ARBCONFIG_DEFAULT_SIZE:
             raise ValueError(
                 "max_position_base not set: choose a size or use per_pair=True (batch_backtest.run_pair)"
@@ -501,6 +510,9 @@ class CrossVenueArbBacktester:
             config.latency_preset, config.bybit_fee_preset, config.binance_fee_preset,
         )
         self.venue_specs: dict[str, VenueSpec] = {v: all_specs[v] for v in config.venues}
+        for v, trust in (config.trust_local_ts or {}).items():
+            if v in self.venue_specs:
+                self.venue_specs[v] = replace(self.venue_specs[v], trust_local_ts=bool(trust))
 
         self.latency = LatencyBook(
             {v: s.latency for v, s in self.venue_specs.items()}, seed=config.seed,
@@ -2796,7 +2808,7 @@ class CrossVenueArbBacktester:
         self.data_manifest_doc: dict = {}
         if cfg.data_manifest:
             from .data_manifest import gate
-            self.data_manifest_doc = gate(cfg.data_manifest, tuple(cfg.venues), cfg.pair, cfg.start_date, cfg.end_date, cfg.allow_rejected_data,
+            self.data_manifest_doc = gate(cfg.data_manifest, tuple(cfg.venues), cfg.pair, cfg.start_date, cfg.end_date, _manifest_reason(cfg),
                                           skipped_snapshot_venues=tuple(cfg.skip_snapshot_venues))
         virtual_clock.install_virtual_clock(0.0)
         virtual_clock.reset(0.0)
@@ -3269,6 +3281,15 @@ class CrossVenueArbBacktester:
         return out
 
 
+def _manifest_reason(cfg: ArbBacktestConfig) -> str | None:
+    """The written reason the manifest gate may be overridden with: allow_manifest_gap when set, else (legacy) allow_rejected_data."""
+    if cfg.allow_manifest_gap is None:
+        return cfg.allow_rejected_data
+    if not cfg.allow_manifest_gap.strip():
+        raise ValueError("allow_manifest_gap needs a written justification")
+    return cfg.allow_manifest_gap.strip()
+
+
 def _preflight_override(cfg: ArbBacktestConfig) -> str | None:
     if cfg.allow_rejected_data is None:
         return None
@@ -3286,13 +3307,17 @@ def _data_quality(feed, cfg: ArbBacktestConfig) -> dict:
     }
     rejected = [venue for venue, row in preflight.items() if row["health"] == "CRITICAL"]
     override = _preflight_override(cfg)
-    return {
+    out = {
         "preflight": preflight,
         "blocking": override is None,
         "rejected_venues": rejected,
         "override": ({"justification": override, "rejected_venues": rejected}
                      if override is not None else None),
     }
+    if cfg.allow_manifest_gap is not None:                       # new keys only when the separate manifest reason is used: every older result is unchanged
+        out["manifest_override"] = _manifest_reason(cfg)
+        out["override_scope"] = "manifest_only" if override is None else "manifest_and_preflight"
+    return out
 
 
 def hedge_touch(book: OrderBook, side: str) -> float:
@@ -3353,6 +3378,8 @@ def build_arg_parser() -> argparse.ArgumentParser:
     p.add_argument("--allow-rejected-data", metavar="JUSTIFICATION",
                    help="run even if the data-quality preflight rejects the data; "
                         "the justification is recorded in the result")
+    p.add_argument("--allow-manifest-gap", metavar="JUSTIFICATION",
+                   help="run past a data-manifest block (truncated or missing day) with this written reason; the preflight still blocks unless --allow-rejected-data is also given")
     return p
 
 
@@ -3381,6 +3408,7 @@ def config_from_args(args) -> ArbBacktestConfig:
         progress_every=args.progress_every,
         funding_rate_dir=args.funding_rate_dir,
         allow_rejected_data=args.allow_rejected_data,
+        allow_manifest_gap=args.allow_manifest_gap,
     )
 
 

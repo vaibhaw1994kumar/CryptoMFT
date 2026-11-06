@@ -7,7 +7,7 @@ import unittest
 from qv2_support import delta, make_book, make_executor, place, sell_print
 
 from new_backtest.fill_engine import MakerConfig
-from new_backtest.queue_v2.cancel_models import MODELS, cancel_ahead
+from new_backtest.queue_v2.cancel_models import ENGINE_ONLY, MODELS, cancel_ahead, clamp_feasible
 
 BASE = dict(fill_evidence="off", dedupe_trade_depth=True, share_trade_volume=True, exchange_time_eligibility=True)
 
@@ -24,7 +24,7 @@ class Arithmetic(unittest.TestCase):
 
     def test_every_model_stays_inside_the_feasibility_interval_everywhere(self):
         grid = [0.0, 0.5, 1.0, 3.0, 10.0, 100.0]
-        for model, A, B, C in itertools.product(("behind_first", "ahead_first", "proportional", "power", "min_baseline"), grid, grid, grid):
+        for model, A, B, C in itertools.product(MODELS, grid, grid, grid):
             x = cancel_ahead(model, C, A, B, 0.5 if model == "power" else 1.0)
             Ceff = min(C, A + B)
             lo, hi = (max(0.0, Ceff - B), min(Ceff, A)) if A > 0 and C > 0 else (0.0, 0.0)
@@ -48,6 +48,74 @@ class Arithmetic(unittest.TestCase):
             self.assertEqual(MakerConfig(cancel_model=m).effective_cancel_model, m)
         with self.assertRaises(ValueError):
             MakerConfig(cancel_model="bogus")
+
+
+class EngineOnlyAndValidation(unittest.TestCase):
+    def test_min_baseline_is_engine_only_and_never_ahead_first(self):
+        self.assertEqual(MODELS, ("behind_first", "ahead_first", "proportional", "power"))
+        self.assertEqual(ENGINE_ONLY, ("min_baseline", "all_ahead"))
+        for name in ENGINE_ONLY:
+            with self.assertRaises(ValueError) as cm:
+                cancel_ahead(name, 4.0, 10.0, 5.0)
+            self.assertIn("engine-only rule: running-minimum baseline", str(cm.exception))
+
+    def test_power_needs_n_above_zero(self):
+        for bad in (0.0, -1.0, float("nan")):
+            with self.assertRaises(ValueError):
+                cancel_ahead("power", 4.0, 10.0, 5.0, bad)
+        self.assertGreater(cancel_ahead("power", 4.0, 10.0, 5.0, 1e-9), 0.0)                  # a tiny positive n is allowed
+        self.assertEqual(cancel_ahead("proportional", 4.0, 10.0, 5.0, -3.0), cancel_ahead("proportional", 4.0, 10.0, 5.0))      # n is ignored for every model but power
+
+
+def engine_c_ahead(A, B, C, model, n=1.0):
+    """Run the real executor: an order behind A, B joining behind it, then a residual cancellation C; return how far the queue ahead moved."""
+    ex = make_executor(cancel_model=model, cancel_power_n=n, **BASE)
+    book = make_book(bids=[(100.0, A), (99.0, 100.0)])
+    o = place(ex, book, price=100.0, size=1.0)
+    level = A
+    if B:
+        delta(ex, book, "bid", 100.0, A + B, 1.5)
+        level = A + B
+    delta(ex, book, "bid", 100.0, level - C, 2.0)
+    return A - o.queue_ahead
+
+
+class EngineStaysInsideTheInterval(unittest.TestCase):
+    def test_power_2_with_one_ahead_and_ten_behind_moves_at_least_the_half_that_cannot_have_come_from_behind(self):
+        # A = 1, B = 10, C = 10.5: only 10 can have left from behind, so at least 0.5 left from ahead. power(2) alone gives 10.5 * 1 / 101 = 0.104.
+        self.assertGreaterEqual(engine_c_ahead(1.0, 10.0, 10.5, "power", 2.0), 0.5 - 1e-12)
+        self.assertGreaterEqual(cancel_ahead("power", 10.5, 1.0, 10.0, 2.0), 0.5 - 1e-12)
+
+    def test_every_engine_model_stays_inside_max0_C_minus_B_and_min_C_A(self):
+        for model, n in (("proportional", 1.0), ("power", 0.5), ("power", 2.0), ("power", 4.0), ("behind_first", 1.0), ("ahead_first", 1.0)):
+            for A, B, C in itertools.product((0.5, 1.0, 3.0, 10.0), (0.0, 0.5, 1.0, 10.0), (0.25, 1.0, 3.0, 10.5)):
+                if C > A + B - 1e-9:
+                    continue                                                          # the level cannot lose more than it holds (and C = A + B would be a vanish)
+                x = engine_c_ahead(A, B, C, model, n)
+                lo, hi = max(0.0, C - B), min(C, A)
+                self.assertTrue(lo - 1e-9 <= x <= hi + 1e-9, (model, n, A, B, C, x, lo, hi))
+
+    def test_proportional_is_bit_for_bit_what_it_was(self):
+        # the share the engine computed before the clamp existed: shrink * min(1, A / level_before), capped by A. It is inside the interval, so the clamp must not touch it.
+        for A, B, C in itertools.product((0.7, 1.0, 3.3, 10.0, 123.456), (0.0, 0.3, 1.0, 10.0, 77.7), (0.11, 0.5, 2.9, 7.0)):
+            level = A + B
+            if C > level - 1e-9:
+                continue
+            shrink = level - (level - C)                                          # what the engine computes: the level it showed minus the new size
+            old = min(A, shrink * min(1.0, A / max(level, 1e-12)))
+            ex = make_executor(cancel_model="proportional", **BASE)
+            book = make_book(bids=[(100.0, A), (99.0, 100.0)])
+            o = place(ex, book, price=100.0, size=1.0)
+            if B:
+                delta(ex, book, "bid", 100.0, level, 1.5)
+            before = o.queue_ahead
+            delta(ex, book, "bid", 100.0, level - C, 2.0)
+            self.assertEqual(o.queue_ahead, before - old, (A, B, C))
+
+    def test_clamp_feasible_leaves_a_value_inside_unchanged_and_moves_one_outside(self):
+        self.assertEqual(clamp_feasible(4.0, 10.0, 5.0, 2.5), 2.5)
+        self.assertEqual(clamp_feasible(10.5, 1.0, 10.0, 0.104), 0.5)
+        self.assertEqual(clamp_feasible(4.0, 3.0, 5.0, 3.5), 3.0)
 
 
 class WorkedExample(unittest.TestCase):

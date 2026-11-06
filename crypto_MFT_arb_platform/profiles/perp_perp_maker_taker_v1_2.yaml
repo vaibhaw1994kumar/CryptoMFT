@@ -1,12 +1,15 @@
 # perp_perp_maker_taker_v1_2 = perp_perp_maker_taker_v1_1 (kept byte-identical as the control) + ONE switch (owner decision, Phase B0, 5 Nov 2026):
 #   arb.join_touch_on_tick_rounding: a quote that was inside the spread before tick rounding and lands ON the touch once rounded joins the back of that level's queue (full displayed size ahead)
 #   if the edge recomputed at the rounded price still passes, instead of being refused. v1.1 refuses it (tick_rounding_no_improve). Results depend on the fees, which stay ASSUMED.
-# Owner 6 Nov: (1) the hedge move pin is the 7-day 45 ms arrival estimate (hedge_move_calibration below); (2) timing.floors_ms: min 35 ms on the Binance entry and cancel timelines, ASSUMED; (3) message_atomic_book: true; (4) margin.above_last_tier: breach (A9); (5) hedge_faults.query_before_replace: true (OMS03).
+# Owner 6 Nov: (1) the hedge move pin is the 7-day 45 ms arrival estimate (hedge_move_calibration below); (2) timing.floors_ms: min 35 ms on the Binance entry and cancel timelines, ASSUMED; (3) message_atomic_book: true; (4) margin.above_last_tier: breach (A9); (5) hedge_faults.query_before_replace: true (OMS03); (7) owner 6 Nov, after the ledger result: trust_local_ts false on both venues (ASSUMED, own change); (8) owner 6 Nov: through-print rule, volume-limited version only (maker.fill_through_prints and maker.through_print_volume_limited, both true; the full version is refused at startup); (6) owner 6 Nov, Phase B depletion ledger: maker.depletion_ledger: true (a depth decrease records the head movement it applied; its print then moves the queue only by the rest, and trade_after_front uses only the print left after that movement).
 # Everything below is v1.1 unchanged except `name`, `description`, that one key, the pinned hedge move and the run-defining keys added in B0.
 # perp_perp_maker_taker_v1_1 = perp_perp_maker_taker_v1 (kept frozen as the reference) + the audit's integrity ladder (L3 audit decisions, 2026-11-04).
 # Seven cumulative switches, in this order, each measured in v1_1_switch_ladder_report.html; everything else is byte-for-byte v1.
 #   1 data manifest gate + truncation count (applied by the runner: --data-manifest; the path is not a profile key)   2 trade_dedupe: multiset
 #   3 maker.ledger_epoch   4 own_impact: overlay   5 book_tape_repair: false   6 fitted unknown queue (floor 0, flagged fallback 25)
+trust_local_ts:                      # v1_2 (owner 6 Nov, own change after the depletion ledger): ASSUMED. The March-2024 local stamps are exchange time + exactly 2.000 ms on every record (constructed, not measured), so they are NOT used as receive time; the latency preset's feed delay is applied instead (one sample per exchange message). v1.1: both venues trusted
+  bybit: false
+  binance: false
 message_atomic_book: true            # v1_2 (owner Phase B): the deltas of one exchange message (same venue, exchange_ts, receive time) are one unit: a cross inside it is not repaired, the strategy, touch and maker queue updates run after the whole message. v1.1: false
 #   7 evidence-required fills (vanish_clears_queue: false, fill_evidence: trade_confirm)   8 maker.opposite_cross_confirm_ms: 500 (cross fills need a reaching print within +-500 ms; 2026-11-04 owner step).
 # Step 9 (owner, 2026-11-04, after the review of the step-8 reports): five corrections, each an opt-in switch, all on here:
@@ -28,6 +31,7 @@ name: perp_perp_maker_taker_v1_2
 description: v1.2 = v1.1 + join the touch when tick rounding lands a quote on it (refused in v1.1); EXPLORATORY, fees ASSUMED
 product: perp
 decision_status:                         # carried into every result's release_identity
+  march_stamps: ASSUMED_CONSTRUCTED_LOCAL_TS_NOT_TRUSTED_PRESET_FEED_DELAY_APPLIED   # owner 6 Nov: the 2 ms March stamps are constructed; the feed delay is the preset's (ASSUMED, not measured)
   net_ceiling_multiple: DECISION_PENDING_CALIBRATION
   fill_headroom_base: DECISION_PENDING_CALIBRATION   # value is the assistant's starting choice
   breaker: DECISION_PENDING_CALIBRATION
@@ -97,6 +101,9 @@ maker:
   vanish_clears_queue: false             # v1.1 step 7: a vanished level alone never fills an order
   fill_evidence: trade_confirm           # v1.1 step 7: every fill that rests on a depth decrease or a snapshot shrink needs a confirming print within evidence_window_ms
   ledger_epoch: true                     # v1.1 step 3: a snapshot / reset invalidates old netting credit; ambiguous associations are flagged
+  fill_through_prints: false             # OFF until the Step-8 re-check is reported (owner 7 Nov). Was on from 6 Nov 18:31 (owner 6 Nov: volume-limited version in the next profile version unless the v1_1 four-slice check showed a problem); no v1_2 run ever read it from this file (only the tp2 slices set it by override). A print strictly through our price means the level we rest on was consumed ...
+  through_print_volume_limited: false    # ... but the fill is limited by the print's volume (one budget shared by every order the print went through). The full version (fill_through_prints without this) is refused at startup. Turn BOTH on together only after the owner approves
+  depletion_ledger: true                 # v1_2 (owner Phase B, step 4): both arrival orders of one execution (depth decrease / print) give the same queue ahead and the same fills when the print is at least as large as the decrease; netted pairs with no other proof are counted. v1.1: false
   evidence_window_ms: 20.0
   share_trade_volume: true               # MANDATORY
   dedupe_trade_depth: true               # MANDATORY
@@ -106,6 +113,9 @@ maker:
                                          # reaches its price (hftbacktest probe cross-check 2026-11-03; owner decision 2026-11-04)
   opposite_cross_confirm_ms: 500.0       # v1.1 step 8: a cross is a fill only if a reaching print on the SAME venue executed within +-500 ms (before: fills at the cross; after: at the print); else dropped, no side effect
   opposite_cross_cap_to_print: true      # v1.1 step 9c: a confirmed cross fills min(remaining, the reaching prints' unused volume); one print never fills more than its size in total
+  # Cohort queue (queue_model: cohort) is a v1_2 SENSITIVITY case only; the headline runs stay on the scalar queue. The sensitivity range uses cohort_age: uniform, run WITH this profile's cross rule
+  # (opposite_cross_fills, its confirm window, cap-to-print), like v1.1. cohort_hazard_theta 0.5 is SPOT_CALIBRATED (spot data 04-19..04-22), NOT a perp fit: the hazard age rule stays out of the
+  # range until a perp fit from probe data exists; any result that runs it carries cohort_hazard_theta.provenance.
 timing:                                  # WP3; numbers ASSUMED from the latency preset until calibrated
   from_latency_preset: singapore         # same preset as latency_preset (owner decision 2026-11-02)
   equal_time_policy: market_first

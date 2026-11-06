@@ -368,6 +368,8 @@ def _clone(
         consume_liquidity=base.consume_liquidity,
         include_deltas=base.include_deltas, seed=base.seed,
         allow_rejected_data=base.allow_rejected_data,
+        allow_manifest_gap=base.allow_manifest_gap,
+        trust_local_ts=base.trust_local_ts,
         output_dir=output_dir, warm_start_fill_events=warm_start,
         warm_start_until_ts=warm_start_until_ts,
         fill_model_v1_path=fill_model_v1_path,
@@ -564,6 +566,8 @@ def build_arg_parser() -> argparse.ArgumentParser:
     p.add_argument("--progress-every", type=int, default=0)
     p.add_argument("--allow-rejected-data", metavar="JUSTIFICATION",
                    help="run pairs whose data the quality preflight rejects; recorded per result")
+    p.add_argument("--allow-manifest-gap", metavar="JUSTIFICATION",
+                   help="run past a data-manifest block with this written reason; the preflight still blocks")
     p.add_argument(
         "--funding-rate-dir", default=None,
         help=(
@@ -645,6 +649,7 @@ def main(argv: Iterable[str] | None = None) -> int:
         include_deltas=not args.no_deltas, seed=args.seed,
         progress_every=args.progress_every,
         allow_rejected_data=args.allow_rejected_data,
+        allow_manifest_gap=args.allow_manifest_gap,
     )
     run_batch(args.pairs, base, args.output_dir, two_pass=two_pass,
               calibration_days=args.calibration_days,

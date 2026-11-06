@@ -38,11 +38,12 @@ from __future__ import annotations
 
 import heapq
 import itertools
+import math
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterator
 
-from .event_loader import RawEvent, iter_venue_events
+from .event_loader import DELTA, RawEvent, iter_venue_events
 from .latency_model import LatencyBook
 from .quality_preflight import run_preflight
 
@@ -117,6 +118,7 @@ class CrossVenueFeed:
         root = self.venue_roots.get(venue, self.data_root)
         vl = self.latency[venue]
         trust = self.trust_local_ts.get(venue, True)
+        msg_key: tuple | None = None          # untrusted stamps only: (exchange_ts, kind) of the previous record, to give the deltas of one exchange message one receive time
 
         for ev in iter_venue_events(
             root, venue, self.pair, self.start_day, self.end_day,
@@ -133,7 +135,13 @@ class CrossVenueFeed:
                 else:
                     self.backlogged[venue] += 1
             else:
-                recv = vl.project_receive_ts(ev.exchange_ts)
+                key = (ev.exchange_ts, ev.kind) if (not trust and ev.kind == DELTA) else None
+                if key is not None and key == msg_key:
+                    recv = math.nextafter(vl._last_receive_ts, math.inf)       # one exchange message arrives in one frame: the same receive time, one float step apart (as recorded stamps do)
+                    vl._last_receive_ts = recv
+                else:
+                    recv = vl.project_receive_ts(ev.exchange_ts)
+                msg_key = key
                 self.no_local_ts[venue] += 1
 
             self.counts[venue] += 1

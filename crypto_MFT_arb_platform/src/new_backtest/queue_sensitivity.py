@@ -165,6 +165,8 @@ def _run_point(
         warm_start_fill_events=cfg.warm_start_fill_events,
         warm_start_until_ts=cfg.warm_start_until_ts,
         allow_rejected_data=cfg.allow_rejected_data,
+        allow_manifest_gap=cfg.allow_manifest_gap,
+        trust_local_ts=cfg.trust_local_ts,
     )
 
     sp = SweepPoint(

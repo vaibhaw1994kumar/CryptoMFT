@@ -1,0 +1,416 @@
+{
+ "label": "Step 8 re-check: through-print rule off vs on (fill_through_prints + through_print_volume_limited), v1_2 settings, probe, 7 TRAIN days 03-01..03-07 00:00-02:00 UTC; EXPLORATORY",
+ "cells": {
+  "off": {
+   "orders_placed": 3213,
+   "fills": 2036,
+   "fill_qty": 1010.8000000000001,
+   "by_cause_detail": {
+    "trade": 1668,
+    "trade_confirmed_cross_after": 356,
+    "trade_after_front": 10,
+    "trade_confirmed_cross_before": 2
+   },
+   "by_group": {
+    "cross_confirmed": {
+     "fills": 358,
+     "qty": 174.90031876309806,
+     "move_bps_1s": {
+      "n": 358,
+      "mean": -0.8433648251250749,
+      "median": -0.5815776927681247,
+      "se": 0.17000428435637527
+     },
+     "move_bps_5s": {
+      "n": 358,
+      "mean": -0.7213478050737764,
+      "median": -0.6903137475972196,
+      "se": 0.39004125841527
+     },
+     "move_bps_30s": {
+      "n": 358,
+      "mean": -0.3804985807756256,
+      "median": -1.5870436777103496,
+      "se": 0.9369638927522336
+     }
+    },
+    "trade_at_our_price": {
+     "fills": 1678,
+     "qty": 835.899681236902,
+     "move_bps_1s": {
+      "n": 1678,
+      "mean": -1.0760181370058328,
+      "median": -0.8937003593884052,
+      "se": 0.08415157264815748
+     },
+     "move_bps_5s": {
+      "n": 1678,
+      "mean": -1.5369653978917266,
+      "median": -1.2850094668299197,
+      "se": 0.1737752079022513
+     },
+     "move_bps_30s": {
+      "n": 1675,
+      "mean": -1.8392997200508372,
+      "median": -3.144473204869855,
+      "se": 0.44422850784098855
+     }
+    }
+   },
+   "all": {
+    "move_bps_1s": {
+     "n": 2036,
+     "mean": -1.0351095487674677,
+     "median": -0.838060119382979,
+     "se": 0.07554807768798603
+    },
+    "move_bps_5s": {
+     "n": 2036,
+     "mean": -1.393551302494464,
+     "median": -1.1552436724835906,
+     "se": 0.15894267314021746
+    },
+    "move_bps_30s": {
+     "n": 2033,
+     "mean": -1.582412947861695,
+     "median": -2.948949153310367,
+     "se": 0.40166235409596723
+    }
+   }
+  },
+  "on": {
+   "orders_placed": 3213,
+   "fills": 2046,
+   "fill_qty": 1010.8000000000001,
+   "by_cause_detail": {
+    "trade_through": 1202,
+    "trade_confirmed_cross_after": 356,
+    "trade": 476,
+    "trade_after_front": 10,
+    "trade_confirmed_cross_before": 2
+   },
+   "by_group": {
+    "cross_confirmed": {
+     "fills": 358,
+     "qty": 174.90031876309806,
+     "move_bps_1s": {
+      "n": 358,
+      "mean": -0.8433648251250749,
+      "median": -0.5815776927681247,
+      "se": 0.17000428435637527
+     },
+     "move_bps_5s": {
+      "n": 358,
+      "mean": -0.7213478050737764,
+      "median": -0.6903137475972196,
+      "se": 0.39004125841527
+     },
+     "move_bps_30s": {
+      "n": 358,
+      "mean": -0.3804985807756256,
+      "median": -1.5870436777103496,
+      "se": 0.9369638927522336
+     }
+    },
+    "trade_at_our_price": {
+     "fills": 486,
+     "qty": 276.0504108684694,
+     "move_bps_1s": {
+      "n": 486,
+      "mean": -1.4184376690032974,
+      "median": -0.9202489273348791,
+      "se": 0.16812395813245556
+     },
+     "move_bps_5s": {
+      "n": 486,
+      "mean": -1.8766098253326942,
+      "median": -1.4284992734538786,
+      "se": 0.31357302224788597
+     },
+     "move_bps_30s": {
+      "n": 485,
+      "mean": -2.5058167998247036,
+      "median": -3.7385529949140532,
+      "se": 0.8161767864395723
+     }
+    },
+    "trade_through": {
+     "fills": 1202,
+     "qty": 559.8492703684326,
+     "move_bps_1s": {
+      "n": 1202,
+      "mean": -0.9636618769990154,
+      "median": -0.9035498213607049,
+      "se": 0.09612178072881056
+     },
+     "move_bps_5s": {
+      "n": 1202,
+      "mean": -1.465142183950421,
+      "median": -1.234267905564585,
+      "se": 0.20795093794563005
+     },
+     "move_bps_30s": {
+      "n": 1200,
+      "mean": -1.7409235843902184,
+      "median": -2.969390943781722,
+      "se": 0.5289358101495717
+     }
+    }
+   },
+   "all": {
+    "move_bps_1s": {
+     "n": 2046,
+     "mean": -1.050638753999607,
+     "median": -0.8410514203397847,
+     "se": 0.07543319471876195
+    },
+    "move_bps_5s": {
+     "n": 2046,
+     "mean": -1.43273499239321,
+     "median": -1.202623221904245,
+     "se": 0.15873690828114387
+    },
+    "move_bps_30s": {
+     "n": 2043,
+     "mean": -1.684115487567752,
+     "median": -2.948949153310367,
+     "se": 0.40155618767868095
+    }
+   }
+  }
+ },
+ "per_day": {
+  "2024-03-01": {
+   "off": {
+    "orders": 479,
+    "fills": 317,
+    "causes": {
+     "trade": 274,
+     "trade_confirmed_cross_after": 42,
+     "trade_after_front": 1
+    }
+   },
+   "on": {
+    "orders": 479,
+    "fills": 319,
+    "causes": {
+     "trade_through": 195,
+     "trade_confirmed_cross_after": 42,
+     "trade": 81,
+     "trade_after_front": 1
+    }
+   }
+  },
+  "2024-03-02": {
+   "off": {
+    "orders": 479,
+    "fills": 330,
+    "causes": {
+     "trade": 278,
+     "trade_confirmed_cross_after": 49,
+     "trade_after_front": 2,
+     "trade_confirmed_cross_before": 1
+    }
+   },
+   "on": {
+    "orders": 479,
+    "fills": 333,
+    "causes": {
+     "trade_through": 217,
+     "trade_confirmed_cross_after": 49,
+     "trade": 64,
+     "trade_after_front": 2,
+     "trade_confirmed_cross_before": 1
+    }
+   }
+  },
+  "2024-03-03": {
+   "off": {
+    "orders": 479,
+    "fills": 184,
+    "causes": {
+     "trade": 150,
+     "trade_confirmed_cross_after": 33,
+     "trade_after_front": 1
+    }
+   },
+   "on": {
+    "orders": 479,
+    "fills": 184,
+    "causes": {
+     "trade_through": 96,
+     "trade": 54,
+     "trade_confirmed_cross_after": 33,
+     "trade_after_front": 1
+    }
+   }
+  },
+  "2024-03-04": {
+   "off": {
+    "orders": 479,
+    "fills": 314,
+    "causes": {
+     "trade": 240,
+     "trade_confirmed_cross_after": 70,
+     "trade_after_front": 3,
+     "trade_confirmed_cross_before": 1
+    }
+   },
+   "on": {
+    "orders": 479,
+    "fills": 316,
+    "causes": {
+     "trade_through": 160,
+     "trade_confirmed_cross_after": 70,
+     "trade": 82,
+     "trade_after_front": 3,
+     "trade_confirmed_cross_before": 1
+    }
+   }
+  },
+  "2024-03-05": {
+   "off": {
+    "orders": 479,
+    "fills": 203,
+    "causes": {
+     "trade": 168,
+     "trade_confirmed_cross_after": 31,
+     "trade_after_front": 4
+    }
+   },
+   "on": {
+    "orders": 479,
+    "fills": 203,
+    "causes": {
+     "trade": 84,
+     "trade_through": 84,
+     "trade_confirmed_cross_after": 31,
+     "trade_after_front": 4
+    }
+   }
+  },
+  "2024-03-06": {
+   "off": {
+    "orders": 479,
+    "fills": 309,
+    "causes": {
+     "trade": 242,
+     "trade_confirmed_cross_after": 66,
+     "trade_after_front": 1
+    }
+   },
+   "on": {
+    "orders": 479,
+    "fills": 312,
+    "causes": {
+     "trade": 97,
+     "trade_through": 148,
+     "trade_confirmed_cross_after": 66,
+     "trade_after_front": 1
+    }
+   }
+  },
+  "2024-03-07": {
+   "off": {
+    "orders": 479,
+    "fills": 379,
+    "causes": {
+     "trade": 309,
+     "trade_confirmed_cross_after": 65,
+     "trade_after_front": 5
+    }
+   },
+   "on": {
+    "orders": 479,
+    "fills": 379,
+    "causes": {
+     "trade_through": 225,
+     "trade_confirmed_cross_after": 65,
+     "trade": 84,
+     "trade_after_front": 5
+    }
+   }
+  }
+ },
+ "through_fills_vs_off_run": {
+  "counts": {
+   "filled_in_off_run_by_trade_at_our_price": 1145,
+   "covered_by_opposite_cross_confirm_in_off_run": 57
+  },
+  "qty": {
+   "filled_in_off_run_by_trade_at_our_price": 542.3495878232076,
+   "covered_by_opposite_cross_confirm_in_off_run": 17.499682545228087
+  },
+  "through_fills_total": 1202,
+  "markout_of_new_fills_only": {},
+  "markout_of_already_filled_in_off_run": {
+   "move_bps": {
+    "n": 1202,
+    "mean": -0.9636618769990154,
+    "median": -0.9035498213607049,
+    "se": 0.09612178072881056
+   },
+   "move_bps_5s": {
+    "n": 1202,
+    "mean": -1.465142183950421,
+    "median": -1.234267905564585,
+    "se": 0.20795093794563005
+   },
+   "move_bps_30s": {
+    "n": 1200,
+    "mean": -1.7409235843902184,
+    "median": -2.969390943781722,
+    "se": 0.5289358101495717
+   }
+  }
+ },
+ "orders_with_changed_outcome": {
+  "filled_in_on_not_off": 0,
+  "filled_in_off_not_on": 0,
+  "fills_total_on_minus_off": 10
+ },
+ "prints_reaching_orders_off_run_windows": {
+  "orders": 3213,
+  "prints_exactly_at_our_price": 850,
+  "volume_at_our_price": 4800.200000000002,
+  "orders_with_such_a_print": 397,
+  "prints_strictly_through_our_price": 24462,
+  "volume_strictly_through": 208996.30000002982,
+  "orders_with_such_a_print_through": 959,
+  "note": "window = placement time + the median placement-to-arrival latency of that order's fills (0 if none) up to placement + 15 s, or the full fill; Bybit sell prints (sign -1) from the slice tape, multiset de-duplication; a through print is evidence only, the rule decides the fill"
+ },
+ "timing_on_minus_off_first_fill_s": {
+  "orders_filled_in_both": 1020,
+  "identical_timestamp": 1018,
+  "earlier_in_on": 2,
+  "later_in_on": 0,
+  "min": -0.002452373504638672,
+  "median_of_changed": -0.0012298822402954102
+ },
+ "orders_by_queue_at_placement": {
+  "queue_ahead_zero_at_placement": 2971,
+  "queue_ahead_positive_at_placement": 242
+ },
+ "off_run_trade_fills_by_the_print_that_filled_them": {
+  "fills": {
+   "print_strictly_through_our_price": 1192,
+   "print_at_our_price": 486
+  },
+  "qty": {
+   "print_strictly_through_our_price": 559.8492703684361,
+   "print_at_our_price": 276.05041086846927
+  }
+ },
+ "through_exposure_by_queue_at_placement": {
+  "queue_positive.orders": 242,
+  "queue_positive.with_at_price_print_in_window": 55,
+  "queue_positive.with_through_print_filled_in_off": 111,
+  "queue_positive.with_through_print_filled_in_on": 111,
+  "queue_positive.with_through_print_in_window": 111,
+  "queue_zero.orders": 2971,
+  "queue_zero.with_at_price_print_in_window": 342,
+  "queue_zero.with_through_print_filled_in_off": 848,
+  "queue_zero.with_through_print_filled_in_on": 848,
+  "queue_zero.with_through_print_in_window": 848
+ }
+}

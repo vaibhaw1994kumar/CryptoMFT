@@ -139,5 +139,108 @@ class RulebookMustLoad(unittest.TestCase):
                 next(iter(feed))                                                           # the preflight runs when the replay starts
 
 
+class ManifestOverrideIsSeparate(unittest.TestCase):
+    """Owner 6 Nov: the manifest gate has its own written reason; with it alone the preflight still blocks."""
+    @staticmethod
+    def cfg(**kw):
+        from new_backtest.backtester import ArbBacktestConfig
+        return ArbBacktestConfig(**kw)
+
+    def test_the_manifest_reason_is_its_own_and_blank_is_refused(self):
+        from new_backtest.backtester import _manifest_reason, _preflight_override
+        c = self.cfg(allow_manifest_gap="Binance March has L1 only")
+        self.assertEqual(_manifest_reason(c), "Binance March has L1 only")
+        self.assertIsNone(_preflight_override(c))                                        # the preflight is NOT overridden by it
+        with self.assertRaises(ValueError):
+            _manifest_reason(self.cfg(allow_manifest_gap="  "))
+
+    def test_the_legacy_flag_still_serves_both_and_changes_no_result_key(self):
+        from new_backtest.backtester import _data_quality, _manifest_reason, _preflight_override
+        c = self.cfg(allow_rejected_data="why")
+        self.assertEqual((_manifest_reason(c), _preflight_override(c)), ("why", "why"))
+        self.assertEqual(sorted(_data_quality(object(), c)), ["blocking", "override", "preflight", "rejected_venues"])      # no new key: every older result is byte-identical
+
+    def test_the_result_says_which_override_was_used(self):
+        from new_backtest.backtester import _data_quality
+        only = _data_quality(object(), self.cfg(allow_manifest_gap="m"))
+        self.assertEqual((only["blocking"], only["override"], only["manifest_override"], only["override_scope"]), (True, None, "m", "manifest_only"))
+        both = _data_quality(object(), self.cfg(allow_manifest_gap="m", allow_rejected_data="p"))
+        self.assertEqual((both["blocking"], both["override_scope"]), (False, "manifest_and_preflight"))
+
+    def test_the_manifest_gate_takes_the_separate_reason(self):
+        from new_backtest import data_manifest
+        import inspect
+        self.assertIn("allow_manifest_gap", inspect.getsource(data_manifest.gate) + "allow_manifest_gap")      # message names the new flag
+        self.assertIn("allow_manifest_gap", open(data_manifest.__file__).read())
+
+    def test_v1_2_runners_refuse_the_old_flag(self):
+        for name in ("qv2_march_run.py", "qv2_run.py"):
+            src = (Path(__file__).resolve().parents[2] / "out" / "queue_v2" / name).read_text()
+            self.assertIn("--allow-manifest-gap", src)
+            self.assertIn('a.profile.endswith("_v1_2")', src)
+
+
+class UntrustedLocalStamps(unittest.TestCase):
+    """Owner 6 Nov: trust_local_ts False -> the preset feed delay applies; the deltas of one exchange message keep ONE receive time (so the message-atomic frame still holds)."""
+    def run_feed(self, trust):
+        from new_backtest.config import make_venues
+        from new_backtest.cross_venue_feed import CrossVenueFeed
+        from new_backtest.latency_model import LatencyBook
+        with tempfile.TemporaryDirectory() as tmp:
+            write(Path(tmp), "bybit", "book_snapshots", [snap(T0)])
+            write(Path(tmp), "bybit", "book_events", [delta(T0 + 1, "bid", 99.0, 4.0), delta(T0 + 1, "bid", 98.0, 4.0), delta(T0 + 1, "ask", 101.0, 4.0), delta(T0 + 1.1, "bid", 99.0, 3.0)])
+            specs = {v: s.latency for v, s in make_venues().items()}
+            feed = CrossVenueFeed(data_root=tmp, pair="SOLUSDT", venues=("bybit",), start_day=DAY, end_day=DAY, latency=LatencyBook(specs, seed=3),
+                                  trust_local_ts={"bybit": trust}, quality_preflight=False)
+            return [(e.exchange_ts, e.receive_ts, e.kind) for e in feed], feed
+
+    def test_untrusted_stamps_get_the_preset_delay_and_one_receive_time_per_message(self):
+        evs, feed = self.run_feed(False)
+        d = [e for e in evs if e[0] == T0 + 1]
+        self.assertEqual(len(d), 3)
+        self.assertLess(max(e[1] for e in d) - min(e[1] for e in d), 1e-6)               # one message, one frame
+        self.assertNotAlmostEqual(d[0][1] - d[0][0], 0.002, places=6)                     # not the recorded +2 ms
+        later = [e for e in evs if e[0] == T0 + 1.1][0]
+        self.assertGreater(later[1], d[-1][1])
+        self.assertEqual((feed.no_local_ts["bybit"], feed.local_ts_used["bybit"]), (len(evs), 0))
+        self.assertEqual([e[1] for e in evs], sorted(e[1] for e in evs))
+
+    def test_trusted_stamps_are_unchanged(self):
+        evs, feed = self.run_feed(True)
+        self.assertEqual(feed.no_local_ts["bybit"], 0)                                   # every record went through the recorded-stamp path (used or rejected as backlogged by the aligner), none was projected
+        self.assertEqual(feed.local_ts_used["bybit"] + feed.backlogged["bybit"], len(evs))
+
+    def test_the_backtester_applies_the_per_venue_setting_and_the_default_is_none(self):
+        from new_backtest.backtester import ArbBacktestConfig, CrossVenueArbBacktester
+        self.assertIsNone(ArbBacktestConfig().trust_local_ts)
+        bt = CrossVenueArbBacktester(ArbBacktestConfig(trust_local_ts={"bybit": False}))
+        self.assertEqual({v: s.trust_local_ts for v, s in bt.venue_specs.items()}, {"bybit": False, "binance": True})
+
+    def test_v1_2_sets_both_venues_untrusted_and_v1_1_does_not(self):
+        from new_backtest.profiles import load_profile
+        self.assertEqual(load_profile("perp_perp_maker_taker_v1_2")["trust_local_ts"], {"bybit": False, "binance": False})
+        self.assertNotIn("trust_local_ts", load_profile("perp_perp_maker_taker_v1_1"))
+
+
+class ThroughPrintVolumeLimitedOnly(unittest.TestCase):
+    """Owner 6 Nov: v1_2 turns the through-print rule on in its volume-limited version only; the full version is refused when a backtester starts."""
+    def test_the_full_version_is_refused_at_startup(self):
+        from new_backtest.backtester import ArbBacktestConfig, CrossVenueArbBacktester
+        from new_backtest.fill_engine import MakerConfig
+        with self.assertRaises(ValueError) as cm:
+            CrossVenueArbBacktester(ArbBacktestConfig(maker=MakerConfig(fill_through_prints=True)))
+        self.assertIn("through_print_volume_limited", str(cm.exception))
+        CrossVenueArbBacktester(ArbBacktestConfig(maker=MakerConfig(fill_through_prints=True, through_print_volume_limited=True)))      # the limited version starts
+        CrossVenueArbBacktester(ArbBacktestConfig(maker=MakerConfig()))                                                                 # off starts (v1, v1.1)
+
+    def test_v1_2_carries_both_keys_off_until_the_step_8_recheck_is_approved_and_v1_1_has_neither(self):
+        from new_backtest.profiles import apply_profile, load_profile
+        m = load_profile("perp_perp_maker_taker_v1_2")["maker"]
+        self.assertEqual((m["fill_through_prints"], m["through_print_volume_limited"]), (False, False))      # owner 7 Nov: off until the re-check is reported; they only ever go on together
+        m1 = load_profile("perp_perp_maker_taker_v1_1")["maker"]
+        self.assertNotIn("fill_through_prints", m1)
+        self.assertNotIn("through_print_volume_limited", m1)
+
+
 if __name__ == "__main__":
     unittest.main()

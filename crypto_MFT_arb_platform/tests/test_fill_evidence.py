@@ -332,7 +332,7 @@ GOLDEN = {
     "none": "8f1cf1b4b7d4c3ad8a05277a4cc49023a7c5acfa006b5583ac8e494c98d8cbd8",
     "all_ahead": "8f1cf1b4b7d4c3ad8a05277a4cc49023a7c5acfa006b5583ac8e494c98d8cbd8",     # unset behaves as all_ahead
     "proportional": "7d9b854f0b3976cc5f711cbbfcf7ba5d12220855be6c524782d41781afab3672",
-    "power13": "48481f93e6bca211a71593f02f230a22ff80c367ccc5afc425847937db4fdc0e",
+    "power13": "cdf342a8c8e5bd26e03a2223e2e485dad1482598f39a57e608972ec54c524e14",   # re-pinned 6 Nov (owner): power(n) now stays inside the feasibility interval (cancel-model fix 1); was 48481f93e6bca211a71593f02f230a22ff80c367ccc5afc425847937db4fdc0e
     "prop_through": "c992218269c1050da2ee471735950127807b4835a215e3ec149528758f99a5f8",
     "aa_legacy": "ae24d05a4f7461d573c550d54e6b96fc039fdd713eb5fed685b77efc9f4f5582",
 }

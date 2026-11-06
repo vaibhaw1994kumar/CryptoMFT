@@ -264,5 +264,91 @@ class ThroughPrints(unittest.TestCase):
         self.assertTrue(all(f.cause == "trade_through" for f in fills))
 
 
+class ThroughPrintSpentOnce(unittest.TestCase):
+    """Step 8 re-check (owner 7 Nov): one print is spent ONCE across the through rule, the cross rule and the ordinary trade rule, in both arrival orders, and a print that a depth
+    decrease already explained still reaches the through rule. Settings: the v1_2 maker block with the volume-limited through rule switched on (the profile has it off for now).
+    Tests marked OPEN fail on today's engine: they pin the target, the fix waits for the owner's approval."""
+    CFG = dict(BASE, cancel_model="proportional", fill_through_prints=True, through_print_volume_limited=True, opposite_cross_fills=True, opposite_cross_confirm_ms=50.0,
+               opposite_cross_cap_to_print=True, dedupe_window_s=0.05, dedupe_time_basis="exchange", min_queue_ahead=0.0)
+
+    def _ex(self, bids, orders):
+        ex = make_executor(**self.CFG)
+        book = make_book(bids=bids)
+        placed = [place(ex, book, price=p, size=sz, now=1.0) for p, sz in orders]
+        return ex, book, placed
+
+    def _cross_to(self, ex, book, price, now):
+        book.apply_delta("ask", 101.0, 0.0, "modify", now)
+        book.apply_delta("ask", price, 5.0, "modify", now)                              # the best ask is now at `price`: every bid at or above it is crossed
+        return ex.on_opposite_cross(book.venue, book, now, 0.0, event_ts=now)
+
+    # -- a print the book already explained still reaches the through rule --
+    def _netted(self, first):
+        # our bid A at 100 (through candidate) and our bid B at 99, behind 5 on the level the print hits; a sell of 4 at 99 and the depth decrease 5 -> 1 at 99 are the same execution
+        ex, book, (a, b) = self._ex([(100.0, 5.0), (99.0, 5.0)], [(100.0, 3.0), (99.0, 3.0)])
+        if first == "book":
+            fills = delta(ex, book, "bid", 99.0, 1.0, 2.000)
+            fills += ex.on_trade(book.venue, 99.0, 4.0, -1, 2.010, 0.0, event_ts=2.010)
+        else:
+            fills = ex.on_trade(book.venue, 99.0, 4.0, -1, 2.000, 0.0, event_ts=2.000)
+            fills += delta(ex, book, "bid", 99.0, 1.0, 2.010)
+        return sum(f.qty for f in fills if f.order_id == a.order_id), a, b
+
+    def test_print_first_the_through_rule_fills_the_order_through_which_the_print_went(self):
+        got, a, b = self._netted("trade")
+        self.assertAlmostEqual(got, 3.0)                                                 # a sell at 99 went through our bid at 100
+        self.assertEqual(b.filled_qty, 0.0)                                              # B only drained 4 of its 5 ahead
+
+    @unittest.expectedFailure
+    def test_OPEN_book_first_a_print_netted_against_the_depth_decrease_is_still_seen_by_the_through_rule(self):
+        got, a, b = self._netted("book")
+        self.assertAlmostEqual(got, 3.0)                                                 # today 0: the netted print returns before the through rule runs, so the two arrival orders differ
+
+    # -- the through rule and the ordinary rule share one print --
+    def _through_and_ordinary(self, first):
+        # bid A at 100 (through candidate) and bid B at 99 on an empty level (at the print's price): a sell of 4 at 99
+        ex, book, (a, b) = self._ex([(98.0, 50.0)], [(100.0, 3.0), (99.0, 3.0)])
+        if first == "book":
+            fills = delta(ex, book, "bid", 99.0, 0.0, 2.000)                              # a decrease at 99 that shrinks nothing of ours (the level was absent)
+            fills += ex.on_trade(book.venue, 99.0, 4.0, -1, 2.010, 0.0, event_ts=2.010)
+        else:
+            fills = ex.on_trade(book.venue, 99.0, 4.0, -1, 2.000, 0.0, event_ts=2.000)
+        return fills
+
+    @unittest.expectedFailure
+    def test_OPEN_one_print_is_spent_once_across_the_through_rule_and_the_ordinary_rule_print_first(self):
+        self.assertLessEqual(sum(f.qty for f in self._through_and_ordinary("trade")), 4.0 + 1e-9)       # today 6: the through budget is the gross print, B's ordinary fill spends it again
+
+    @unittest.expectedFailure
+    def test_OPEN_one_print_is_spent_once_across_the_through_rule_and_the_ordinary_rule_after_a_decrease(self):
+        self.assertLessEqual(sum(f.qty for f in self._through_and_ordinary("book")), 4.0 + 1e-9)
+
+    # -- the through rule and the cross rule share one print --
+    def _through_and_cross(self, first):
+        # A at 100 is crossed by the opposite quote; C at 99.5 is not. A sell of 4 at 99 is through both.
+        ex, book, (a, c) = self._ex([(98.0, 50.0)], [(100.0, 3.0), (99.5, 3.0)])
+        fills = []
+        if first == "cross":
+            fills += self._cross_to(ex, book, 100.0, 1.990)                                # armed: waits for a reaching print
+            fills += ex.on_trade(book.venue, 99.0, 4.0, -1, 2.000, 0.0, event_ts=2.000)
+        else:
+            fills += ex.on_trade(book.venue, 99.0, 4.0, -1, 1.980, 0.0, event_ts=1.980)
+            fills += self._cross_to(ex, book, 100.0, 1.990)
+        return fills, a, c
+
+    def test_print_first_then_cross_the_print_is_spent_once(self):
+        fills, a, c = self._through_and_cross("trade")
+        self.assertLessEqual(sum(f.qty for f in fills), 4.0 + 1e-9)
+
+    @unittest.expectedFailure
+    def test_OPEN_cross_first_then_print_the_print_is_spent_once(self):
+        fills, a, c = self._through_and_cross("cross")
+        self.assertLessEqual(sum(f.qty for f in fills), 4.0 + 1e-9)                      # today 6: the cross cap is spent on A, the through budget for C starts again at the gross print
+
+    def test_a_cross_pending_order_is_filled_once_by_the_print_that_confirms_it(self):
+        fills, a, c = self._through_and_cross("cross")
+        self.assertEqual([f.order_id for f in fills].count(a.order_id), 1)
+        self.assertAlmostEqual(a.filled_qty, 3.0)
+
 if __name__ == "__main__":  # pragma: no cover
     unittest.main()

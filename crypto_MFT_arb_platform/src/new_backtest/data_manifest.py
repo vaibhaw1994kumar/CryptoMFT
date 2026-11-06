@@ -68,6 +68,6 @@ def gate(path: str, venues: tuple[str, ...], pair: str, start_day: str, end_day:
     if blocked:
         if not allow_reason or not allow_reason.strip():
             raise DataManifestError("data manifest blocks the run: " + "; ".join(f"{v} {d}: {why}" for v, d, why in blocked)
-                                    + " (pass allow_rejected_data with a written reason to run anyway)")
+                                    + " (pass allow_manifest_gap, or the legacy allow_rejected_data, with a written reason to run anyway)")
         doc["override_reason"] = allow_reason.strip()
     return doc

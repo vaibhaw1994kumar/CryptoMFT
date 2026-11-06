@@ -29,6 +29,7 @@ ap.add_argument("--seed", type=int, default=1)
 ap.add_argument("--latency", default="singapore")
 ap.add_argument("--train", default="")
 ap.add_argument("--allow-rejected-data", default=None)
+ap.add_argument("--allow-manifest-gap", default=None, help="written reason for a data-manifest block ONLY; the preflight still blocks (owner 6 Nov: use this for every v1_2 headline run)")
 a = ap.parse_args()
 if a.profile in ("legacy_v0", "perp_perp_maker_taker_v1") and not a.reference:
     raise SystemExit(f"{a.profile} is a REFERENCE profile, never for decisions: pass --reference to run it (the default profile is perp_perp_maker_taker_v1_1)")
@@ -84,7 +85,11 @@ kw = dict(data_root=os.environ.get("QV2_DATA_ROOT", "/Users/vaibhav/Documents/Ne
           output_dir=str(out), funding_rate_dir="/Users/vaibhav/Documents/Newproject/out/funding/SOLUSDT", max_trade_log=10 ** 7,
           equity_bridge="warn", record_exposure=True)
 if a.allow_rejected_data:
+    if a.profile.endswith("_v1_2"):
+        raise SystemExit("v1_2 headline runs do not override the preflight: use --allow-manifest-gap for the manifest and let the preflight block (owner 6 Nov)")
     kw["allow_rejected_data"] = a.allow_rejected_data
+if a.allow_manifest_gap:
+    kw["allow_manifest_gap"] = a.allow_manifest_gap
 cfg = apply_profile(doc, **kw)
 if os.environ.get("QV2_VENUE_TICKS"):
     cfg.arb.venue_ticks = {k: float(v) for k, v in json.loads(os.environ["QV2_VENUE_TICKS"]).items()}      # declared per dataset (v1.1 step 9b); the engine checks the first snapshot against it
@@ -176,6 +181,8 @@ summary = {
 }
 if getattr(r, "core_shadow", None):
     (out / "core_shadow.json").write_text(json.dumps(r.core_shadow, indent=1))
+if getattr(_bt.maker, "ledger_stats", None):
+    (out / "ledger_stats.json").write_text(json.dumps({"stats": _bt.maker.ledger_stats, "diag": {k: v for k, v in _bt.maker.diag.items() if k.startswith(("ledger_", "trade_volume_credited", "delta_shrink_explained", "evidence_"))}}, indent=1))   # depletion ledger: how much matched volume came book-first vs trade-first
 if getattr(_bt.maker, "cross_log", None):
     (out / "cross_log.json").write_text(json.dumps(_bt.maker.cross_log, indent=1, default=str))        # opposite_cross_confirm_ms: one row per armed / confirmed / dropped cross
 summary["wall_s"] = time.time() - t0
