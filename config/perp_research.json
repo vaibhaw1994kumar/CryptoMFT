@@ -42,6 +42,24 @@
       "taker_fee_bps": "5.5",
       "effective_from": "1970-01-01T00:00:00Z",
       "tier": "linear-nonvip-assumed"
+    },
+    {
+      "venue": "BYBIT",
+      "instrument_id": "SOL-USDT-PERP",
+      "maker_fee_bps": "-0.5",
+      "taker_fee_bps": "5.5",
+      "effective_from": "1970-01-01T00:00:00Z",
+      "tier": "bybit_perp_mm-assumed (headline; maker rebate unconfirmed)",
+      "fee_source": "ASSUMED"
+    },
+    {
+      "venue": "BINANCE",
+      "instrument_id": "SOL-USDT-PERP",
+      "maker_fee_bps": "2",
+      "taker_fee_bps": "5",
+      "effective_from": "1970-01-01T00:00:00Z",
+      "tier": "binance_perp_vip0-assumed",
+      "fee_source": "ASSUMED"
     }
   ],
   "risk": {

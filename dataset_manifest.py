@@ -296,3 +296,67 @@ def record_override(output_dir: Path, override: dict[str, Any]) -> None:
     manifest["exclusions_and_repairs"]["data_quality_override"] = override
     manifest["manifest_sha256"] = hashlib.sha256(canonical_json(manifest).encode()).hexdigest()
     write_dataset_manifest(output_dir, manifest)
+
+
+class ArrivalChecks:
+    """Side, tick and unit checks at the moment a record arrives (Phase B data checks; observation only, nothing is repaired or dropped).
+
+    side   a book-event side must be bid or ask, a trade side buy or sell, or b / s (the Jan-2022 files write b / s; the loaders read the first letter). Anything else is
+           counted. Every value seen is listed per stream, so a vocabulary that differs by dataset is visible.
+    tick   a price must sit on the declared tick of its venue (MEASURED only when a tick is declared for the venue).
+    unit   a size must be finite and positive, and a multiple of the declared lot step (the lot step is MEASURED only when one is declared; none is stored for
+           SOLUSDT on disk, so the lot check is NOT_MEASURED until the instrument master provides it, REF03/REF04). A cancel or delete may carry size 0.
+    A rule that cannot be evaluated reports NOT_MEASURED, never a plain 0."""
+
+    BOOK_SIDES = frozenset({"bid", "ask"})
+    TRADE_SIDES = frozenset({"buy", "sell", "b", "s"})
+
+    def __init__(self, tick: float | None = None, lot: float | None = None, tol: float = 1e-6) -> None:
+        self.tick, self.lot, self.tol = tick, lot, tol
+        self.n = {"book_side": 0, "trade_side": 0, "price": 0, "size": 0}
+        self.bad = {"book_side": 0, "trade_side": 0, "price_off_tick": 0, "size_not_finite_or_negative": 0, "size_off_lot": 0}
+        self.sides_seen: dict[str, dict[str, int]] = {"book": {}, "trade": {}}
+
+    def _on_grid(self, x: float, step: float) -> bool:
+        q = x / step
+        return abs(q - round(q)) <= self.tol
+
+    def book_side(self, side: str) -> None:
+        self.n["book_side"] += 1
+        k = str(side).lower()
+        self.sides_seen["book"][k] = self.sides_seen["book"].get(k, 0) + 1
+        if k not in self.BOOK_SIDES:
+            self.bad["book_side"] += 1
+
+    def trade_side(self, side: str) -> None:
+        self.n["trade_side"] += 1
+        k = str(side).lower()
+        self.sides_seen["trade"][k] = self.sides_seen["trade"].get(k, 0) + 1
+        if k not in self.TRADE_SIDES:
+            self.bad["trade_side"] += 1
+
+    def price(self, price: float) -> None:
+        if self.tick:
+            self.n["price"] += 1
+            if not self._on_grid(price, self.tick):
+                self.bad["price_off_tick"] += 1
+
+    def size(self, size: float, may_be_zero: bool = False) -> None:
+        self.n["size"] += 1
+        if not (size == size) or size in (float("inf"), float("-inf")) or size < 0 or (size == 0 and not may_be_zero):
+            self.bad["size_not_finite_or_negative"] += 1
+        elif self.lot and size > 0 and not self._on_grid(size, self.lot):
+            self.bad["size_off_lot"] += 1
+
+    def report(self) -> dict[str, Any]:
+        def row(name: str, n_key: str, status_ok: bool, why: str) -> dict[str, Any]:
+            return ({"status": "MEASURED", "checked": self.n[n_key], "violations": self.bad[name]} if status_ok
+                    else {"status": "NOT_MEASURED", "checked": None, "violations": None, "reason": why})
+        return {
+            "book_side": row("book_side", "book_side", True, ""), "trade_side": row("trade_side", "trade_side", True, ""),
+            "tick": row("price_off_tick", "price", bool(self.tick), "no tick declared for this venue"),
+            "size_valid": row("size_not_finite_or_negative", "size", True, ""),
+            "lot": row("size_off_lot", "size", bool(self.lot), "no lot step stored for this instrument (instrument master, REF03/REF04)"),
+            "tick_declared": self.tick, "lot_declared": self.lot, "sides_seen": self.sides_seen,
+        }
+

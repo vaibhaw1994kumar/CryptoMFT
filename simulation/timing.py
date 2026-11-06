@@ -48,10 +48,13 @@ class TimelineSpec:
     jitter_ms: float = 0.0           # std-dev of the lognormal around the mean; 0 = fixed
     max_ms: float = 2000.0
     source: str = "ASSUMED"          # ASSUMED | CALIBRATED:<where> | MEASURED:<where>
+    min_ms: float = 0.0              # a floor on every draw (the draw is still taken, so the stream does not move); 0 = none. A physical lower bound, e.g. cross-region entry
 
     def __post_init__(self) -> None:
         if not (self.mean_ms >= 0.0) or not (self.jitter_ms >= 0.0) or not (self.max_ms > 0.0):
             raise ValueError(f"TimelineSpec needs mean_ms >= 0, jitter_ms >= 0, max_ms > 0, got {self}")
+        if not (0.0 <= self.min_ms <= self.max_ms):
+            raise ValueError(f"TimelineSpec needs 0 <= min_ms <= max_ms, got {self}")
 
 
 @dataclass(frozen=True)
@@ -101,23 +104,29 @@ class TimingConfig:
             raise ValueError("TimingConfig needs at least one venue")
 
     @classmethod
-    def from_latency_preset(cls, specs: dict[str, Any], **kw) -> "TimingConfig":
+    def from_latency_preset(cls, specs: dict[str, Any], floors_ms: dict[str, dict[str, float]] | None = None, **kw) -> "TimingConfig":
         """Start from the legacy per-venue preset (feed_ms / entry_ms / cancel_ms / jitter_ms): entry and cancel keep their
         numbers, feed keeps its number, and the three report timelines start at the feed delay (the legacy engine used the feed
-        delay as the report delay). Every timeline is its own stream from here on; the numbers are ASSUMED until calibrated."""
+        delay as the report delay). Every timeline is its own stream from here on; the numbers are ASSUMED until calibrated.
+        floors_ms {venue: {timeline: ms}}: a floor (min_ms) on that timeline, labelled ASSUMED; draws below it are raised to it."""
         venues = {}
         for v, s in specs.items():
             feed = TimelineSpec(s.feed_ms, s.jitter_ms, source="ASSUMED:latency_preset")
             venues[v] = VenueTimelines(entry=TimelineSpec(s.entry_ms, s.jitter_ms, source="ASSUMED:latency_preset"), ack_report=feed,
                                        fill_report=feed, cancel=TimelineSpec(s.cancel_ms, s.jitter_ms, source="ASSUMED:latency_preset"),
                                        cancel_report=feed, feed=feed)
+        for v, tl in (floors_ms or {}).items():
+            vt = venues[v]
+            for name, ms in tl.items():
+                venues[v] = vt = replace(vt, **{name: replace(vt.get(name), min_ms=float(ms), source="ASSUMED:floor_ms")})
         return cls(venues=venues, **kw)
 
     def describe(self) -> dict:
         return {"clock": {"host_offset_ns": self.clock.host_offset_ns, "uncertainty_ns": self.clock.uncertainty_ns, "source": self.clock.source},
                 "equal_time_policy": self.equal_time_policy, "dead_feed_s": self.dead_feed_s, "timer_wheel": self.timer_wheel,
                 "truth_books": self.truth_books, "seed": self.seed,
-                "venues": {v: {n: {"mean_ms": t.get(n).mean_ms, "jitter_ms": t.get(n).jitter_ms, "source": t.get(n).source} for n in TIMELINES}
+                "venues": {v: {n: {"mean_ms": t.get(n).mean_ms, "jitter_ms": t.get(n).jitter_ms, "source": t.get(n).source,
+                                   **({"min_ms": t.get(n).min_ms} if t.get(n).min_ms else {})} for n in TIMELINES}
                            for v, t in self.venues.items()}}
 
 
@@ -136,8 +145,8 @@ class _Sampler:
 
     def sample_ms(self) -> float:
         if self._mu is None:
-            return self.spec.mean_ms
-        return min(self.spec.max_ms, self._rng.lognormvariate(self._mu, self._sigma))
+            return max(self.spec.min_ms, self.spec.mean_ms)
+        return max(self.spec.min_ms, min(self.spec.max_ms, self._rng.lognormvariate(self._mu, self._sigma)))
 
     def sample_ns(self) -> int:
         return int(round(self.sample_ms() * 1_000_000))

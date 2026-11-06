@@ -172,6 +172,10 @@ class HedgeFaultConfig:
     unwind_band_bps: float = 0.0
     unknown_query_fail_prob: float = 0.0
     unknown_query_max_attempts: int = 3
+    # OMS03 (v1_2): query before replace. A hedge sent into an outage (blackhole or ghost) gets no answer; today the timeout writes it off at once and the retry or unwind is a
+    # replacement sent blind. With this on, the timeout starts a venue status query instead, answered after unknown_resolve_s and not before the gateway is back; a hedge the
+    # query finds executed is done (no replacement), one it does not find goes down the normal ladder. False = today's behaviour.
+    query_before_replace: bool = False
     # r12. unwind_max_attempts: TOTAL unwind sends per failed hedge chain (None = max_retries + 1, the legacy pairing); exhaustion
     # raises the persistent ALARM. Hedge retries keep using max_retries.
     unwind_max_attempts: int | None = None
@@ -238,6 +242,7 @@ class HedgeFaultConfig:
             "ack_unknown_prob": self.ack_unknown_prob, "unknown_resolve_s": self.unknown_resolve_s,
             "fast_move_reject_prob": self.fast_move_reject_prob, "fast_move_bps": self.fast_move_bps,
             "fast_move_window_s": self.fast_move_window_s, "label": self.label,
+            **({"query_before_replace": True} if self.query_before_replace else {}),
         }
 
 

@@ -77,18 +77,24 @@ class OrderBook:
         "state", "seq_last", "gaps", "seq_duplicates", "captured_depth_bid", "captured_depth_ask", "recovering_since",
         # queue model v2 (opt-in, defaults reproduce the legacy book): tape repair switch and the own-fill shadow overlay
         "tape_repair", "own_overlay", "overlay_bid", "overlay_ask",
+        # message-atomic mode (opt-in): a crossed state inside one exchange message is not repaired; it is judged once at end_message()
+        "message_atomic", "_pending_side",
     )
 
     def __init__(
         self, venue: str, pair: str,
         delta_semantics: str = "hybrid", max_levels: int = 200,
-        tape_repair: bool = True, own_overlay: bool = False,
+        tape_repair: bool = True, own_overlay: bool = False, message_atomic: bool = False,
     ) -> None:
         # tape_repair=False: on_trade() mutates nothing (the book is rebuilt from book messages only). Default True = legacy.
         # own_overlay=True: our own taker consumption is recorded in overlay_bid / overlay_ask (price -> qty taken), never in the
         # public levels; walk() subtracts it; a public update of that price level (or a snapshot) clears it.
         self.tape_repair = tape_repair
         self.own_overlay = own_overlay
+        # message_atomic=True: apply_delta() never repairs a cross; the caller marks the end of each exchange message with end_message(), which counts and repairs
+        # a cross that is still there. A crossed state that exists only between two deltas of one message is not a cross. Default False = the per-delta rule.
+        self.message_atomic = message_atomic
+        self._pending_side: str | None = None
         self.overlay_bid: dict[float, float] = {}
         self.overlay_ask: dict[float, float] = {}
         self.venue = venue
@@ -290,6 +296,7 @@ class OrderBook:
 
     def apply_snapshot(self, bids, asks, ts: float) -> None:
         """Full replace. Resyncs any drift accumulated from deltas."""
+        self._pending_side = None
         self.overlay_bid.clear()
         self.overlay_ask.clear()
         self._bids.clear()
@@ -376,13 +383,23 @@ class OrderBook:
         self.last_update_ts = ts
         self.updates += 1
 
-        if self.is_crossed():
+        if self.message_atomic:
+            self._pending_side = side                  # the cross, if any, is judged at end_message()
+        elif self.is_crossed():
             self.crossed_events += 1
             self._uncross(side)
 
         # A delta carrying a positive size confirms that level is really there.
         if new_size > 0:
             (self._bid_conf if is_bid else self._ask_conf)[price] = ts
+
+    def end_message(self) -> None:
+        """Message-atomic mode: the exchange message is complete. A cross that is still there counts once and is repaired as per-delta mode would have repaired it
+        after the message's last delta (the side that updated last is the incoming side). No-op when no delta arrived since the last call."""
+        side, self._pending_side = self._pending_side, None
+        if side is not None and self.is_crossed():
+            self.crossed_events += 1
+            self._uncross(side)
 
     def on_trade(self, price: float, volume: float, sign: int, ts: float) -> None:
         """Repair the book from the trade tape.
