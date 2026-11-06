@@ -28,6 +28,7 @@ from __future__ import annotations
 import functools
 import itertools
 import math
+import warnings
 from collections import deque
 from dataclasses import dataclass, field
 from typing import Protocol
@@ -35,6 +36,9 @@ from typing import Protocol
 from .models import LambdaBucket, LoggedOrderEvent, Side
 from .order_book import OrderBook, WalkResult
 from .postonly import would_cross
+from .queue_v2.cancel_models import cancel_ahead, clamp_feasible
+
+HAZARD_THETA_PROVENANCE = "SPOT_CALIBRATED (spot data 04-19..04-22); no perp fit exists yet"
 
 
 class OrderEventSink(Protocol):
@@ -362,9 +366,18 @@ class MakerConfig:
     # that has to choose between several pending credits at one level inside the window is counted as an AMBIGUOUS association (diag ledger_ambiguous,
     # obs flag ambiguous_trade_depth) instead of being silently resolved.
     ledger_epoch: bool = False
+    # Queue model v2 (step 4, depletion ledger), opt-in, v1_2. False (default): a print netted against an earlier depth decrease drains nothing more, so a decrease that moved the
+    # queue ahead by only its share (proportional) leaves the order further back than the same execution arriving print-first, and a trade_confirm fill after a head move
+    # may use the whole print (legacy, bit-identical). True: each depth decrease records the ahead movement it applied; when the matching print arrives only the print
+    # volume NOT already applied as head movement reaches the queue ahead and then the order (trade_after_front included), so both arrival orders give the same queue
+    # ahead and the same fills. Also counts netted prints / decreases that rest on the price+window association alone (diag ledger_netted_*_no_proof, kept apart from
+    # ledger_ambiguous). Scalar queue only: the cohort queue has its own provisional ledger and ignores the movement rule (the counting still runs).
+    depletion_ledger: bool = False
     # Queue model v2 (step 6), opt-in. "scalar" (default): one number, queue_ahead, per order (legacy). "cohort": the external size at our price is kept as cohorts by
     # arrival with our own orders interleaved (queue_v2/cohort.py); residual cancellations are removed by `cohort_age`; the cancel_model arithmetic is NOT used. The
-    # initial displayed size is one cohort of unknown age (cohort_unknown_age_s, an assumption). Not supported with opposite_cross_fills or amend.
+    # initial displayed size is one cohort of unknown age (cohort_unknown_age_s, an assumption). Works with opposite_cross_fills (a cross clears the cohorts ahead of the order, _clear_ahead); not supported with amend.
+    # cohort_hazard_theta (age rule 'hazard') is SPOT_CALIBRATED (spot data 04-19..04-22), NOT a perp fit: do not use the hazard rule in a perp sensitivity range until a perp fit from probe data exists;
+    # every result that runs the hazard rule carries diag cohort_hazard_theta_provenance.
     queue_model: str = "scalar"
     cohort_age: str = "uniform"
     cohort_hazard_theta: float = 1.0
@@ -387,10 +400,10 @@ class MakerConfig:
         if self.queue_model == "cohort":
             if self.cohort_age not in ("youngest_first", "oldest_first", "uniform", "hazard"):
                 raise ValueError(f"cohort_age must be youngest_first | oldest_first | uniform | hazard, got {self.cohort_age!r}")
-            if self.opposite_cross_fills:
-                raise ValueError("queue_model='cohort' does not support opposite_cross_fills")
             if self.cohort_hazard_theta < 0.0 or self.cohort_unknown_age_s < 0.0:
                 raise ValueError("cohort_hazard_theta and cohort_unknown_age_s must be >= 0")
+            if self.cohort_age == "hazard":
+                warnings.warn(f"cohort_age='hazard' uses cohort_hazard_theta={self.cohort_hazard_theta}, {HAZARD_THETA_PROVENANCE}: not a perp fit, keep it out of the perp sensitivity range", RuntimeWarning, stacklevel=2)
         if not (self.opposite_cross_confirm_ms >= 0.0):
             raise ValueError(f"opposite_cross_confirm_ms must be >= 0, got {self.opposite_cross_confirm_ms!r}")
         if self.opposite_cross_confirm_ms > 0.0 and not self.opposite_cross_fills:
@@ -537,6 +550,7 @@ class MakerExecutor:
         self.queue_updates: dict[str, dict[str, int]] = {}         # observation only: see _count_queue_updates
         self._obs_qb: dict[int, tuple[float, float]] = {}      # maker order id -> (queue ahead, event volume offered) just before its fill
         self._explained: dict[str, dict[tuple, deque]] = {"trade": {}, "delta": {}}
+        self.ledger_stats: dict[str, float] = {}           # observation / depletion_ledger only: how much matched volume arrived book-first vs trade-first, and on what evidence (see _ledger_note)
         self.cross_log: list[dict] = []                    # opposite_cross_confirm_ms: one row per resolved cross (confirmed before / after, dropped); bounded
         self._cx_prints: dict[str, deque] = {}             # opposite_cross_confirm_ms: recent public prints per venue [ct, event_ts, price, sign, gross, left] (left = volume no fill has used yet)
         # Aggregate counters, all in base-asset units unless named *_events.
@@ -553,7 +567,10 @@ class MakerExecutor:
             import dataclasses
             import hashlib
             import json
-            self._settings_hash = hashlib.sha256(json.dumps(dataclasses.asdict(self.config), sort_keys=True, default=str).encode()).hexdigest()
+            settings = dataclasses.asdict(self.config)
+            if not settings.get("depletion_ledger"):
+                settings.pop("depletion_ledger", None)         # listed only when on: the settings hash of every earlier profile is unchanged
+            self._settings_hash = hashlib.sha256(json.dumps(settings, sort_keys=True, default=str).encode()).hexdigest()
         return self._settings_hash
 
     def _obs_begin(self, kind: str, **kw) -> None:
@@ -580,6 +597,44 @@ class MakerExecutor:
             if len(self.cohort_log) < 20000:
                 self.cohort_log.extend(lq.log)
             del self._lq[key]
+
+    def _clear_ahead(self, order: "MakerOrder") -> None:
+        """Everything ahead of this order is gone (a confirmed cross, a vanished level, a queue at or below the empty threshold, a print through our price):
+        the cohort queue is told too, so queue_ahead and the cohort queue never disagree. Scalar queue: queue_ahead = 0 and nothing else."""
+        if self._lq:
+            lq = self._lq.get(self._lqk(order))
+            if lq is not None:
+                lq.clear_ahead(order.order_id)
+        order.queue_ahead = 0.0
+
+    def _cohort_refresh(self, order: "MakerOrder") -> None:
+        """Cohort mode: copy the cohort queue's value onto queue_ahead after a change that did not pass through _cohort_trade / _consume."""
+        lq = self._lq.get(self._lqk(order))
+        if lq is None or not order.is_live:
+            return
+        try:
+            order.queue_ahead = lq.ahead(order.order_id)
+        except KeyError:
+            order.queue_ahead = 0.0
+
+    def _cohort_check(self) -> None:
+        """Observation only (cohort mode): after an event, every live order's queue_ahead equals the cohort queue's ahead. Counts checks and violations, changes nothing."""
+        if not self._lq:
+            return
+        bad = 0
+        for o in self.orders.values():
+            lq = self._lq.get(self._lqk(o))
+            if lq is None or not o.is_live:
+                continue
+            try:
+                if abs(o.queue_ahead - lq.ahead(o.order_id)) > 1e-9:
+                    bad += 1
+            except KeyError:
+                bad += 1
+        self.diag["cohort_ahead_checks"] = self.diag.get("cohort_ahead_checks", 0) + 1
+        if bad:
+            self.diag["cohort_ahead_mismatch_orders"] = self.diag.get("cohort_ahead_mismatch_orders", 0) + bad
+            self.diag["cohort_ahead_mismatch_events"] = self.diag.get("cohort_ahead_mismatch_events", 0) + 1
 
     def _cohort_rebase(self, orders: list, displayed: float, now: float, note: str) -> None:
         """Counterfactual projection at a settled update boundary, once per level: the displayed external size is the truth about the public book."""
@@ -628,7 +683,11 @@ class MakerExecutor:
             for k in [k for k in self._explained[kind] if k[0] == venue]:
                 del self._explained[kind][k]
 
-    def _take(self, kind: str, key: tuple, now: float, want: float) -> float:
+    _PROOF_GAP_S = 1e-3          # a print and a decrease stamped within 1 ms by the exchange AND equal in size are counted as matched on more than the price and the window
+
+    def _take(self, kind: str, key: tuple, now: float, want: float, moved_out: dict | None = None, trace: list | None = None) -> float:
+        """Take up to `want` of pending credit. moved_out (depletion_ledger): order id -> [ahead movement the credit's decrease applied, credit volume taken while the order rested]. trace: one
+        (credit time, credit size before, volume taken) per credit used."""
         credits = self._explained[kind].get(key)
         if not credits:
             return 0.0
@@ -642,6 +701,15 @@ class MakerExecutor:
         taken = 0.0
         while credits and taken < want - 1e-12:
             use = min(credits[0][1], want - taken)
+            if trace is not None:
+                trace.append((credits[0][0], credits[0][1], use))
+            if moved_out is not None and len(credits[0]) > 2:
+                for oid, m in credits[0][2].items():
+                    got = min(m, use)                        # the head movement the decrease applied, first come first matched: a print never explains more movement than its own volume
+                    credits[0][2][oid] = m - got
+                    cell = moved_out.setdefault(oid, [0.0, 0.0])
+                    cell[0] += got
+                    cell[1] += use
             taken += use
             credits[0][1] -= use
             if credits[0][1] <= 1e-12:
@@ -650,15 +718,33 @@ class MakerExecutor:
             del self._explained[kind][key]
         return taken
 
-    def _add(self, kind: str, key: tuple, now: float, amount: float) -> None:
+    def _add(self, kind: str, key: tuple, now: float, amount: float, ledger: bool = False) -> list | None:
         if amount <= 1e-12:
-            return
+            return None
         book = self._explained[kind]
         if len(book) > 4096:
             horizon = now - self.config.dedupe_window_s
             for k in [k for k, d in book.items() if not d or d[-1][0] < horizon]:
                 del book[k]
-        book.setdefault(key, deque(maxlen=64)).append([now, amount])
+        entry = [now, amount, {}] if ledger else [now, amount]
+        book.setdefault(key, deque(maxlen=64)).append(entry)
+        return entry
+
+    def _ledger_note(self, kind: str, matched: float, whole: float, trace: list, now: float) -> bool:
+        """Observation: one netting. kind 'print' = a print netted against an EARLIER decrease (book-first), 'decrease' = a decrease netted against an EARLIER print (trade-first).
+        Returns True when the pair rests on the price + window association alone (no other proof): the exchange stamps are more than 1 ms apart AND the sizes differ."""
+        tol = 1e-9 * max(1.0, whole)
+        same_size = len(trace) == 1 and abs(trace[0][1] - whole) <= tol and abs(trace[0][2] - whole) <= tol
+        gap = max(now - t[0] for t in trace)
+        tight = gap <= self._PROOF_GAP_S + 1e-12
+        tier = "exact" if (same_size and tight) else ("size_or_time" if (same_size or tight) else "no_proof")
+        st = self.ledger_stats
+        for k, v in ((f"{kind}s_netted", 1.0), (f"{kind}_volume_netted", matched), (f"{kind}s_netted_{tier}", 1.0), (f"{kind}_volume_netted_{tier}", matched)):
+            st[k] = st.get(k, 0.0) + v
+        if tier == "no_proof" and self.config.depletion_ledger:
+            self.diag[f"ledger_netted_{kind}s_no_proof"] = self.diag.get(f"ledger_netted_{kind}s_no_proof", 0.0) + 1.0
+            self.diag[f"ledger_netted_{kind}_volume_no_proof"] = self.diag.get(f"ledger_netted_{kind}_volume_no_proof", 0.0) + matched
+        return tier == "no_proof"
 
     # ── Lifecycle ────────────────────────────────────────────────────────────
 
@@ -917,21 +1003,40 @@ class MakerExecutor:
             cx_rec = [ct, event_ts, price, sign, gross_volume, gross_volume]
             self._cx_prints.setdefault(venue, deque()).append(cx_rec)
             cx_ids = self._cx_pending_hits(venue, price, sign, now, ct, event_ts)
+        moved: dict | None = None                     # depletion_ledger: order id -> [head movement already applied by the matched decrease, credit taken while it rested]
+        extras: dict[int, float] = {}                 # depletion_ledger: order id -> print volume still owed to its queue (matched volume minus the movement already applied)
+        no_proof = False
         if cfg.dedupe_trade_depth:
             key = (venue, "bid" if sign < 0 else "ask", round(price, 8))
-            credited = self._take("delta", key, ct, volume)
+            ledger = cfg.depletion_ledger and not self._lq
+            moved = {} if ledger else None
+            trace = [] if (ledger or cfg.depletion_ledger or self.obs_enabled) else None
+            credited = self._take("delta", key, ct, volume, moved_out=moved, trace=trace)
             volume -= credited
             if self._lq and credited > 1e-12:
                 lq = self._lq.get(key)
                 if lq is not None:
                     lq.reclassify(credited)                      # book-first: the decrease already applied was an execution at the head
+                    for o in self.orders.values():
+                        if o.venue == venue and o.is_live and self._lqk(o) == key:
+                            self._cohort_refresh(o)              # the head moved: queue_ahead follows, also when the print is fully netted and returns below
             self.diag["trade_volume_credited_to_depth"] += credited
             self._add("trade", key, ct, volume)
-            if volume <= 1e-12 and not confirm_ids and not cx_ids:
+            if credited > 1e-12 and trace:
+                no_proof = self._ledger_note("print", credited, gross_volume, trace, ct)
+            if moved:
+                for oid, (applied, covered) in moved.items():
+                    o = self.orders.get(oid)
+                    if o is not None and o.is_live and covered - applied > 1e-12:
+                        extras[oid] = covered - applied
+            if volume <= 1e-12 and not confirm_ids and not cx_ids and not extras:
+                self._cohort_check()
                 return []
         if self.obs_enabled:
             self._obs_begin("trade", price=price, gross=gross_volume, credited=gross_volume - volume, net=volume, sign=sign, event_ts=event_ts,
                             ambiguous=bool(gross_volume - volume > 1e-12 or confirm_ids), synthetic=is_synthetic)
+            if no_proof and cfg.depletion_ledger:
+                self._obs_trig["netting_no_proof"] = True
         self.diag["trade_volume_net"] += volume
         fills: list[Fill] = []
         eligible, pre, through, confirmed, cx_orders = [], [], [], [], []
@@ -965,7 +1070,7 @@ class MakerExecutor:
                     continue                                   # this print has been used up by an earlier fill: the order keeps waiting
             else:
                 order.cross_state, order.cross_gap = None, False
-                order.queue_ahead = 0.0
+                self._clear_ahead(order)
             self.diag.setdefault("fills_from_cross", 0.0)
             self.diag["cross_confirmed_after"] = self.diag.get("cross_confirmed_after", 0.0) + 1.0
             self._cx_note(order, "confirmed_after", print_ts=ct, print_price=price, print_volume=gross_volume)
@@ -984,11 +1089,7 @@ class MakerExecutor:
         for order in through:
             if self.obs_enabled:
                 self._obs_qb[order.order_id] = (order.queue_ahead, gross_volume)
-            if self._lq:
-                lq = self._lq.get(self._lqk(order))
-                if lq is not None:
-                    lq.clear_ahead(order.order_id)
-            order.queue_ahead = 0.0
+            self._clear_ahead(order)
             avail = order.remaining / max(cfg.trade_fill_share, 1e-12)
             if cfg.through_print_volume_limited:
                 avail = min(avail, max(through_budget, 0.0))
@@ -1005,6 +1106,9 @@ class MakerExecutor:
                 if k not in seen and k in self._lq:
                     seen.add(k)
                     self._lq[k].cancel_head_external(volume)
+            for o in self.orders.values():
+                if o.venue == venue and o.is_live and self._lqk(o) in seen:
+                    self._cohort_refresh(o)                          # every order at a level whose head moved, not only the pre-arrival ones
         for order in pre:
             if self._lq and self._lqk(order) in self._lq:
                 new = self._lq[self._lqk(order)].ahead(order.order_id)
@@ -1021,6 +1125,10 @@ class MakerExecutor:
             confirmed.sort(key=lambda o: (o.placed_ts, o.order_id))
             budget = gross_volume
             for order in confirmed:
+                if moved:
+                    applied = moved.get(order.order_id, (0.0, 0.0))[0]
+                    if applied > 1e-12:
+                        budget = max(0.0, budget - applied)       # depletion_ledger: the head movement the decrease already applied is the first part of this print
                 if self.obs_enabled:
                     self._obs_qb[order.order_id] = (order.queue_ahead, budget)
                 cap = cfg.evidence_fill_fraction * order.front_decrease if cfg.fill_evidence == "trade_confirm+fractional" else None
@@ -1043,7 +1151,8 @@ class MakerExecutor:
         remaining = volume
         for order in eligible:
             queue_before = order.queue_ahead
-            f = self._consume(order, remaining if share else volume, now, cfg.trade_fill_share, "trade", fee_bps, is_synthetic, cause="trade")
+            extra = extras.get(order.order_id, 0.0)       # depletion_ledger: matched volume the earlier decrease did not move through this queue yet (0 on every legacy path)
+            f = self._consume(order, (remaining if share else volume) + extra, now, cfg.trade_fill_share, "trade", fee_bps, is_synthetic, cause="trade")
             self.diag["trade_volume_to_queue_ahead"] += queue_before - order.queue_ahead
             if f is not None:
                 fills.append(f)
@@ -1052,12 +1161,13 @@ class MakerExecutor:
                 absorbed = queue_before - order.queue_ahead
                 if f is not None and cfg.trade_fill_share > 0:
                     absorbed += f.qty / cfg.trade_fill_share
-                remaining -= absorbed
-                if remaining <= 1e-12:
+                remaining -= max(0.0, absorbed - extra) if extra else absorbed       # the owed volume was already matched, it is not taken from the unmatched budget
+                if remaining <= 1e-12 and not extras:
                     break
         if cx_rec is not None and cfg.opposite_cross_cap_to_print:
             used = sum(f.qty for f in fills if not (f.cause or "").startswith("trade_confirmed_cross"))
             cx_rec[5] = max(0.0, cx_rec[5] - used)           # the ordinary rules spent part of this print: a later cross cannot spend it again
+        self._cohort_check()
         return fills
 
     def on_delta(
@@ -1097,15 +1207,22 @@ class MakerExecutor:
         else:
             shrinks = {o.order_id: o.observed_level_size - new_size for o in at_level if o.observed_level_size > new_size}
         explained = 0.0
+        credit = None                                  # depletion_ledger: the credit entry this decrease leaves for its print, filled with each order's applied movement below
         if shrinks:
             level_shrink = max(shrinks.values())
             self.diag["delta_shrink_events"] += 1
             self.diag["delta_shrink_total"] += level_shrink
             if cfg.dedupe_trade_depth:
                 key = (venue, "bid" if want == Side.BID else "ask", round(price, 8))
-                explained = self._take("trade", key, ct, level_shrink)
-                self._add("delta", key, ct, level_shrink - explained)
+                trace = [] if (cfg.depletion_ledger or self.obs_enabled) else None
+                explained = self._take("trade", key, ct, level_shrink, trace=trace)
+                credit = self._add("delta", key, ct, level_shrink - explained, ledger=cfg.depletion_ledger and not self._lq)
+                if credit is not None and len(credit) < 3:
+                    credit = None
                 self.diag["delta_shrink_explained_by_trades"] += explained
+                if explained > 1e-12 and trace:
+                    if self._ledger_note("decrease", explained, level_shrink, trace, ct) and self.obs_enabled and cfg.depletion_ledger:
+                        self._obs_trig["netting_no_proof"] = True
         for order in at_level:
             full = shrinks.get(order.order_id, 0.0)
             shrink = full - explained
@@ -1128,14 +1245,24 @@ class MakerExecutor:
                     self.diag["pre_arrival_queue_drained"] += queue_before - order.queue_ahead
                 if f is not None:
                     fills.append(f)
+                if credit is not None:
+                    credit[2][order.order_id] = queue_before - order.queue_ahead + (f.qty / max(cfg.delta_fill_share, 1e-12) if f is not None and f.cause != "trade_after_front" else 0.0)
             # Any depth event is a fresh observation of this level: trade volume printed before it is already reflected
             # in the size it reports, so it must not be credited against a later snapshot shrink.
+            if credit is not None and order.order_id not in credit[2]:
+                credit[2][order.order_id] = 0.0                  # it rested through this decrease and nothing of it moved this order
             order.trade_vol_since_obs = 0.0
             # observed_level_size is a running MINIMUM (the 'all_ahead' baseline): it never rises, so volume that joins
             # behind us cannot later be mistaken for queue ahead, but a cancel that is hidden by such growth is never
             # counted either. level_now below does follow growth and is what the proportional family uses.
             order.observed_level_size = min(order.observed_level_size, new_size)
             order.level_now = new_size
+        if self._lq:
+            keys = {self._lqk(o) for o in at_level}
+            for order in self.orders.values():
+                if order.venue == venue and order.is_live and self._lqk(order) in keys:
+                    self._cohort_refresh(order)          # a rebase can move the queue ahead of an order whose own shrink was zero (explained, or seen before it was active)
+            self._cohort_check()
         return fills
 
     def on_snapshot(
@@ -1176,6 +1303,8 @@ class MakerExecutor:
                     order.trade_vol_since_obs -= explained
                     shrink -= explained
                     self.diag["snapshot_shrink_explained_by_trades"] += explained
+                    if explained > 1e-12 and (cfg.depletion_ledger or self.obs_enabled):
+                        self.ledger_stats["snapshot_volume_netted"] = self.ledger_stats.get("snapshot_volume_netted", 0.0) + explained
                 if shrink > 1e-12:
                     queue_before = order.queue_ahead
                     can_fill = not self._pre_arrival(order, event_ts)
@@ -1190,6 +1319,11 @@ class MakerExecutor:
             # Same invariant as on_delta: never increase observed_level_size.
             order.observed_level_size = min(order.observed_level_size, curr)
             order.level_now = curr
+        if cohort:
+            for order in self.orders.values():
+                if order.venue == venue and order.is_live:
+                    self._cohort_refresh(order)
+            self._cohort_check()
         return fills
 
     def on_opposite_cross(
@@ -1285,11 +1419,12 @@ class MakerExecutor:
                 if self.obs_enabled:
                     self._obs_trig["cross_confirm"] = {"direction": "print_before_cross", "cross_ts": ct, "print_ts": prior[0], "print_price": prior[2], "print_volume": prior[4]}
                 order.cross_state, order.cross_gap = None, False
-            order.queue_ahead = 0.0
+            self._clear_ahead(order)
             self.diag.setdefault("fills_from_cross", 0.0)
             f = self._fill_from(order, order.remaining, now, 1.0, "cross", fee_bps, False, cause=cause)
             if f is not None:
                 fills.append(f)
+        self._cohort_check()
         return fills
 
     def _cx_note(self, order: MakerOrder, outcome: str, **kw) -> None:
@@ -1410,7 +1545,6 @@ class MakerExecutor:
         if self._lq and order.order_id in self._cohort_ahead:
             drained = max(0.0, ahead - self._cohort_ahead[order.order_id])      # the cohort queue already moved; the common tail subtracts it
         elif model in ("behind_first", "ahead_first"):
-            from .queue_v2.cancel_models import cancel_ahead
             drained = cancel_ahead(model, shrink, ahead, max(prev_level - ahead, 0.0))
         else:
             if ahead <= 0:
@@ -1421,10 +1555,13 @@ class MakerExecutor:
                 behind = max(prev_level - ahead, 0.0)
                 frac = (ahead ** power_n) / (ahead ** power_n + behind ** power_n)
             drained = min(order.queue_ahead, shrink * frac)
+            if ahead > 0:
+                # every model stays inside max(0, C-B) <= C_ahead <= min(C, A); a proportional share is inside already and keeps its bits
+                drained = clamp_feasible(shrink, ahead, max(prev_level - ahead, 0.0), drained)
         order.queue_ahead -= drained
         self._settle_queue(order)
         if cause == "delta_vanish" and can_fill and (self.config.vanish_clears_queue or self.config.fill_evidence in _WHOLE_RULE_MODES):
-            order.queue_ahead = 0.0                              # the level is gone: everything that was ahead of us left with it
+            self._clear_ahead(order)                             # the level is gone: everything that was ahead of us left with it
         if not can_fill or order.queue_ahead > 1e-12:
             return None
         if self.config.fill_evidence != "off":
@@ -1452,7 +1589,7 @@ class MakerExecutor:
             return None
         vanish = cause == "delta_vanish"
         if vanish:
-            order.queue_ahead = 0.0
+            self._clear_ahead(order)
         if order.queue_ahead > 1e-12:
             return None
         if vanish or cfg.fill_evidence in ("trade_confirm", "trade_confirm+fractional"):
@@ -1473,7 +1610,7 @@ class MakerExecutor:
         if order.queue_ahead <= max(thr, 1e-12):
             self.diag["queue_empty_forgiven"] = self.diag.get("queue_empty_forgiven", 0.0) + order.queue_ahead
             self.diag["queue_empty_events"] = self.diag.get("queue_empty_events", 0.0) + 1.0
-            order.queue_ahead = 0.0
+            self._clear_ahead(order)
 
     def _confirming_orders(self, venue: str, price: float, sign: int, now: float, ct: float, event_ts: float | None) -> set[int]:
         """Orders at the front of the queue whose latest unexplained decrease is within evidence_window_ms before this trade,
@@ -1542,6 +1679,8 @@ class MakerExecutor:
             alternates = []                                                    # guide s4: where the association is ambiguous the alternate reading is KEPT with the fill, not only flagged
             if trig.get("ambiguous") or source in ("delta", "snapshot"):
                 flags.append("ambiguous_trade_depth")                          # volume attributed to us without one causal print
+            if trig.get("netting_no_proof"):
+                flags.append("netting_without_proof")                          # depletion_ledger: the print / decrease behind this fill was matched to its twin by price and window alone
             if source in ("delta", "snapshot"):
                 alternates.append({"scenario": "depletion_was_cancellation_not_execution", "own_fill_qty": 0.0,
                                    "basis": "a level decrease with no matched print is not proof of an execution; under this reading the order is not filled at this event"})
@@ -1562,7 +1701,10 @@ class MakerExecutor:
                         "source_type": "synthetic_flow" if is_synthetic else {"trade": "print", "delta": "depth_decrease", "snapshot": "snapshot_shrink",
                                                                               "cross": "opposite_cross"}.get(source, source),
                         "queue_model": self.config.queue_model, "cohort_age": self.config.cohort_age if self.config.queue_model == "cohort" else None,
-                        "model_settings_sha256": self._settings_sha()}
+                        "model_settings_sha256": self._settings_sha(),
+                        # only a run that uses the hazard rule carries the theta and where it came from
+                        **({"cohort_hazard_theta": {"value": self.config.cohort_hazard_theta, "provenance": HAZARD_THETA_PROVENANCE}}
+                           if self.config.queue_model == "cohort" and self.config.cohort_age == "hazard" else {})}
 
         if not order.is_live:
             self.orders.pop(order.order_id, None)
