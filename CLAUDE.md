@@ -68,7 +68,8 @@ Key docs: `docs/strategy_contract.md` (the strategy rules), `docs/economic_ledge
 
 ## Current state
 
-- `profiles/perp_perp_maker_taker_v1.yaml` is FROZEN as a reference. New work goes on `perp_perp_maker_taker_v1_1.yaml`.
+- `profiles/perp_perp_maker_taker_v1.yaml` is FROZEN as a reference.
+- `profiles/perp_perp_maker_taker_v1_2.yaml` is FROZEN (owner, 7 Nov 2026) as the simulator-correct baseline, strategy unchanged; its identity is in `profiles/perp_perp_maker_taker_v1_2.freeze.json` and a test pins its sha256. Do not edit it. New work goes on `perp_perp_maker_taker_v1_3.yaml` (S0, quote repricing), designed first and built only after the owner approves the design. `perp_perp_maker_taker_v1_1.yaml` stays as the control.
 - `legacy_v0` must stay byte-identical. Do not change its defaults.
 - Current run path: `out/queue_v2/qv2_march_run.py`, started by the pool scripts there. This is temporary; the plan is to merge the runners into `batch_backtest.py`.
 - There is no working walk-forward yet. `run_sol_wf.py` is retired, in `discarded/v1.0/`.

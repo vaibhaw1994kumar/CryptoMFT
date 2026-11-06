@@ -270,5 +270,34 @@ class UnknownThenReconciled(unittest.TestCase):
         self.assertAlmostEqual(h.bt._pending_exposure().buys.get(BYBIT, 0.0), 0.0)         # the reservation is released once the order is resolved
 
 
+class FrozenV1_2(unittest.TestCase):
+    """Owner 7 Nov: perp_perp_maker_taker_v1_2 is FROZEN as the simulator-correct baseline (strategy unchanged). The profile file is pinned by sha256 in profiles/perp_perp_maker_taker_v1_2.freeze.json;
+    a change to the file must be a new profile version (v1_3), never an edit of v1_2."""
+    def _manifest(self):
+        import json
+        from pathlib import Path
+        return json.loads((Path(__file__).resolve().parents[1] / "profiles" / "perp_perp_maker_taker_v1_2.freeze.json").read_text())
+
+    def test_the_profile_file_is_byte_for_byte_the_frozen_one(self):
+        from new_backtest.profiles import load_profile
+        self.assertEqual(load_profile("perp_perp_maker_taker_v1_2")["_sha256"], self._manifest()["profile_sha256"])
+
+    def test_the_frozen_settings_are_what_the_manifest_says(self):
+        from new_backtest.profiles import load_profile
+        doc = load_profile("perp_perp_maker_taker_v1_2")
+        self.assertEqual(doc["placement_book"], "view")
+        self.assertEqual((doc["maker"]["fill_through_prints"], doc["maker"]["through_print_volume_limited"]), (False, False))
+        self.assertIs(doc["maker"]["depletion_ledger"], True)
+        self.assertEqual((doc["trust_local_ts"]["bybit"], doc["trust_local_ts"]["binance"]), (False, False))
+        self.assertEqual(doc["dataset_settings"]["mar2024"]["maker"], {"dedupe_window_s": 0.15, "evidence_window_ms": 50.0})
+        self.assertEqual(doc["hedge_move_calibration"]["sha256"], self._manifest()["inputs"]["hedge_move_calibration"]["sha256"])
+
+    def test_the_reference_profiles_are_unchanged(self):
+        from new_backtest.profiles import load_profile
+        ref = self._manifest()["reference_profiles_sha256"]
+        for name, sha in ref.items():
+            self.assertEqual(load_profile(name)["_sha256"], sha, name)
+
+
 if __name__ == "__main__":  # pragma: no cover
     unittest.main()

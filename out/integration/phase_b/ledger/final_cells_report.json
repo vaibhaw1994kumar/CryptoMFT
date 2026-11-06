@@ -1,0 +1,1114 @@
+{
+ "label": "final v1_2 cells on the March SELECT slices; EXPLORATORY",
+ "rows": {
+  "ft": {
+   "2024-03-08": {
+    "signals": 0,
+    "maker_fills": 0,
+    "causes": {},
+    "orders_placed": 0.0,
+    "cash_pnl": 0.0,
+    "gross_pnl": 0.0,
+    "fees": 0.0,
+    "equity": 0.0,
+    "markout_1s": 0.0,
+    "markout_5s": 0.0,
+    "markout_30s": 0.0,
+    "markout_n": 0.0,
+    "hedge_move_bid_mean": null,
+    "hedge_move_n": 0,
+    "placement_stats": null,
+    "wall_s": 219.36744117736816
+   },
+   "2024-03-09": {
+    "signals": 2,
+    "maker_fills": 2,
+    "causes": {
+     "trade": 2
+    },
+    "orders_placed": 2.0,
+    "cash_pnl": -0.0063537499999881675,
+    "gross_pnl": 0.0589999999999975,
+    "fees": 0.06535375,
+    "equity": 0.0246462499999609,
+    "markout_1s": 0.585813462070109,
+    "markout_5s": 0.4307894363783715,
+    "markout_30s": 1.1357350481736794,
+    "markout_n": 4.0,
+    "hedge_move_bid_mean": -2.615854833825131,
+    "hedge_move_n": 1,
+    "placement_stats": null,
+    "wall_s": 168.80868196487427
+   },
+   "2024-03-10": {
+    "signals": 0,
+    "maker_fills": 0,
+    "causes": {},
+    "orders_placed": 0.0,
+    "cash_pnl": 0.0,
+    "gross_pnl": 0.0,
+    "fees": 0.0,
+    "equity": 0.0,
+    "markout_1s": 0.0,
+    "markout_5s": 0.0,
+    "markout_30s": 0.0,
+    "markout_n": 0.0,
+    "hedge_move_bid_mean": null,
+    "hedge_move_n": 0,
+    "placement_stats": null,
+    "wall_s": 211.76261401176453
+   },
+   "2024-03-11": {
+    "signals": 1,
+    "maker_fills": 1,
+    "causes": {
+     "trade": 1
+    },
+    "orders_placed": 1.0,
+    "cash_pnl": -0.054235349999999016,
+    "gross_pnl": 0.00899999999998613,
+    "fees": 0.06323535000000001,
+    "equity": -0.056235350000008566,
+    "markout_1s": -1.120803846280157,
+    "markout_5s": -0.640418969191354,
+    "markout_30s": -1.0871901790185383,
+    "markout_n": 2.0,
+    "hedge_move_bid_mean": -8.036298466702666,
+    "hedge_move_n": 1,
+    "placement_stats": null,
+    "wall_s": 449.03032207489014
+   }
+  },
+  "f0": {
+   "2024-03-08": {
+    "signals": 1,
+    "maker_fills": 0,
+    "causes": {},
+    "orders_placed": 1.0,
+    "cash_pnl": 0.0,
+    "gross_pnl": 0.0,
+    "fees": 0.0,
+    "equity": 0.0,
+    "markout_1s": 0.0,
+    "markout_5s": 0.0,
+    "markout_30s": 0.0,
+    "markout_n": 0.0,
+    "hedge_move_bid_mean": null,
+    "hedge_move_n": 0,
+    "placement_stats": null,
+    "wall_s": 240.24528312683105
+   },
+   "2024-03-09": {
+    "signals": 4,
+    "maker_fills": 1,
+    "causes": {
+     "trade_confirmed_cross_after": 1
+    },
+    "orders_placed": 4.0,
+    "cash_pnl": -0.03312335000001099,
+    "gross_pnl": 0.03200000000001069,
+    "fees": 0.06512335000000001,
+    "equity": -0.0021233500000619188,
+    "markout_1s": -1.4857513438565575,
+    "markout_5s": -1.0881129882115685,
+    "markout_30s": -0.5160019114696599,
+    "markout_n": 2.0,
+    "hedge_move_bid_mean": -4.834754981523858,
+    "hedge_move_n": 1,
+    "placement_stats": null,
+    "wall_s": 204.28456497192383
+   },
+   "2024-03-10": {
+    "signals": 1,
+    "maker_fills": 0,
+    "causes": {},
+    "orders_placed": 1.0,
+    "cash_pnl": 0.0,
+    "gross_pnl": 0.0,
+    "fees": 0.0,
+    "equity": 0.0,
+    "markout_1s": 0.0,
+    "markout_5s": 0.0,
+    "markout_30s": 0.0,
+    "markout_n": 0.0,
+    "hedge_move_bid_mean": null,
+    "hedge_move_n": 0,
+    "placement_stats": null,
+    "wall_s": 246.64260411262512
+   },
+   "2024-03-11": {
+    "signals": 1,
+    "maker_fills": 1,
+    "causes": {
+     "trade": 1
+    },
+    "orders_placed": 1.0,
+    "cash_pnl": -0.022276549999958206,
+    "gross_pnl": 0.04100000000002524,
+    "fees": 0.06327655,
+    "equity": -0.024276549999967756,
+    "markout_1s": -1.7600995942854782,
+    "markout_5s": -0.017660400233713847,
+    "markout_30s": 2.853426430492018,
+    "markout_n": 2.0,
+    "hedge_move_bid_mean": -3.696647425142356,
+    "hedge_move_n": 1,
+    "placement_stats": null,
+    "wall_s": 482.12859296798706
+   }
+  },
+  "f1": {
+   "2024-03-08": {
+    "signals": 1,
+    "maker_fills": 0,
+    "causes": {},
+    "orders_placed": 1.0,
+    "cash_pnl": 0.0,
+    "gross_pnl": 0.0,
+    "fees": 0.0,
+    "equity": 0.0,
+    "markout_1s": 0.0,
+    "markout_5s": 0.0,
+    "markout_30s": 0.0,
+    "markout_n": 0.0,
+    "hedge_move_bid_mean": null,
+    "hedge_move_n": 0,
+    "placement_stats": null,
+    "wall_s": 267.9401888847351
+   },
+   "2024-03-09": {
+    "signals": 4,
+    "maker_fills": 1,
+    "causes": {
+     "trade_confirmed_cross_after": 1
+    },
+    "orders_placed": 4.0,
+    "cash_pnl": -0.03312335000001099,
+    "gross_pnl": 0.03200000000001069,
+    "fees": 0.06512335000000001,
+    "equity": -0.0021233500000619188,
+    "markout_1s": -1.4857513438565575,
+    "markout_5s": -1.0881129882115685,
+    "markout_30s": -0.5160019114696599,
+    "markout_n": 2.0,
+    "hedge_move_bid_mean": -4.834754981523858,
+    "hedge_move_n": 1,
+    "placement_stats": null,
+    "wall_s": 213.11256098747253
+   },
+   "2024-03-10": {
+    "signals": 1,
+    "maker_fills": 0,
+    "causes": {},
+    "orders_placed": 1.0,
+    "cash_pnl": 0.0,
+    "gross_pnl": 0.0,
+    "fees": 0.0,
+    "equity": 0.0,
+    "markout_1s": 0.0,
+    "markout_5s": 0.0,
+    "markout_30s": 0.0,
+    "markout_n": 0.0,
+    "hedge_move_bid_mean": null,
+    "hedge_move_n": 0,
+    "placement_stats": null,
+    "wall_s": 250.47617602348328
+   },
+   "2024-03-11": {
+    "signals": 1,
+    "maker_fills": 1,
+    "causes": {
+     "trade": 1
+    },
+    "orders_placed": 1.0,
+    "cash_pnl": -0.022276549999958206,
+    "gross_pnl": 0.04100000000002524,
+    "fees": 0.06327655,
+    "equity": -0.024276549999967756,
+    "markout_1s": -1.7600995942854782,
+    "markout_5s": -0.017660400233713847,
+    "markout_30s": 2.853426430492018,
+    "markout_n": 2.0,
+    "hedge_move_bid_mean": -3.696647425142356,
+    "hedge_move_n": 1,
+    "placement_stats": null,
+    "wall_s": 471.0607478618622
+   }
+  },
+  "fp": {
+   "2024-03-08": {
+    "signals": 0,
+    "maker_fills": 0,
+    "causes": {},
+    "orders_placed": 0.0,
+    "cash_pnl": 0.0,
+    "gross_pnl": 0.0,
+    "fees": 0.0,
+    "equity": 0.0,
+    "markout_1s": 0.0,
+    "markout_5s": 0.0,
+    "markout_30s": 0.0,
+    "markout_n": 0.0,
+    "hedge_move_bid_mean": null,
+    "hedge_move_n": 0,
+    "placement_stats": null,
+    "wall_s": 260.9148771762848
+   },
+   "2024-03-09": {
+    "signals": 2,
+    "maker_fills": 2,
+    "causes": {
+     "trade": 2
+    },
+    "orders_placed": 2.0,
+    "cash_pnl": -0.0063537499999881675,
+    "gross_pnl": 0.0589999999999975,
+    "fees": 0.06535375,
+    "equity": 0.0246462499999609,
+    "markout_1s": 0.585813462070109,
+    "markout_5s": 0.4307894363783715,
+    "markout_30s": 1.1357350481736794,
+    "markout_n": 4.0,
+    "hedge_move_bid_mean": -2.615854833825131,
+    "hedge_move_n": 1,
+    "placement_stats": null,
+    "wall_s": 202.22050404548645
+   },
+   "2024-03-10": {
+    "signals": 0,
+    "maker_fills": 0,
+    "causes": {},
+    "orders_placed": 0.0,
+    "cash_pnl": 0.0,
+    "gross_pnl": 0.0,
+    "fees": 0.0,
+    "equity": 0.0,
+    "markout_1s": 0.0,
+    "markout_5s": 0.0,
+    "markout_30s": 0.0,
+    "markout_n": 0.0,
+    "hedge_move_bid_mean": null,
+    "hedge_move_n": 0,
+    "placement_stats": null,
+    "wall_s": 235.18151688575745
+   },
+   "2024-03-11": {
+    "signals": 1,
+    "maker_fills": 1,
+    "causes": {
+     "trade": 1
+    },
+    "orders_placed": 1.0,
+    "cash_pnl": -0.054235349999999016,
+    "gross_pnl": 0.00899999999998613,
+    "fees": 0.06323535000000001,
+    "equity": -0.056235350000008566,
+    "markout_1s": -1.120803846280157,
+    "markout_5s": -0.640418969191354,
+    "markout_30s": -1.0871901790185383,
+    "markout_n": 2.0,
+    "hedge_move_bid_mean": -8.036298466702666,
+    "hedge_move_n": 1,
+    "placement_stats": null,
+    "wall_s": 464.33226442337036
+   }
+  },
+  "fbf": {
+   "2024-03-08": {
+    "signals": 0,
+    "maker_fills": 0,
+    "causes": {},
+    "orders_placed": 0.0,
+    "cash_pnl": 0.0,
+    "gross_pnl": 0.0,
+    "fees": 0.0,
+    "equity": 0.0,
+    "markout_1s": 0.0,
+    "markout_5s": 0.0,
+    "markout_30s": 0.0,
+    "markout_n": 0.0,
+    "hedge_move_bid_mean": null,
+    "hedge_move_n": 0,
+    "placement_stats": null,
+    "wall_s": 252.0009491443634
+   },
+   "2024-03-09": {
+    "signals": 2,
+    "maker_fills": 2,
+    "causes": {
+     "trade": 2
+    },
+    "orders_placed": 2.0,
+    "cash_pnl": -0.0063537499999881675,
+    "gross_pnl": 0.0589999999999975,
+    "fees": 0.06535375,
+    "equity": 0.0246462499999609,
+    "markout_1s": 0.585813462070109,
+    "markout_5s": 0.4307894363783715,
+    "markout_30s": 1.1357350481736794,
+    "markout_n": 4.0,
+    "hedge_move_bid_mean": -2.615854833825131,
+    "hedge_move_n": 1,
+    "placement_stats": null,
+    "wall_s": 198.56852197647095
+   },
+   "2024-03-10": {
+    "signals": 0,
+    "maker_fills": 0,
+    "causes": {},
+    "orders_placed": 0.0,
+    "cash_pnl": 0.0,
+    "gross_pnl": 0.0,
+    "fees": 0.0,
+    "equity": 0.0,
+    "markout_1s": 0.0,
+    "markout_5s": 0.0,
+    "markout_30s": 0.0,
+    "markout_n": 0.0,
+    "hedge_move_bid_mean": null,
+    "hedge_move_n": 0,
+    "placement_stats": null,
+    "wall_s": 240.3008439540863
+   },
+   "2024-03-11": {
+    "signals": 1,
+    "maker_fills": 1,
+    "causes": {
+     "trade": 1
+    },
+    "orders_placed": 1.0,
+    "cash_pnl": -0.054235349999999016,
+    "gross_pnl": 0.00899999999998613,
+    "fees": 0.06323535000000001,
+    "equity": -0.056235350000008566,
+    "markout_1s": -1.120803846280157,
+    "markout_5s": -0.640418969191354,
+    "markout_30s": -1.0871901790185383,
+    "markout_n": 2.0,
+    "hedge_move_bid_mean": -8.036298466702666,
+    "hedge_move_n": 1,
+    "placement_stats": null,
+    "wall_s": 462.28550815582275
+   }
+  },
+  "faf": {
+   "2024-03-08": {
+    "signals": 0,
+    "maker_fills": 0,
+    "causes": {},
+    "orders_placed": 0.0,
+    "cash_pnl": 0.0,
+    "gross_pnl": 0.0,
+    "fees": 0.0,
+    "equity": 0.0,
+    "markout_1s": 0.0,
+    "markout_5s": 0.0,
+    "markout_30s": 0.0,
+    "markout_n": 0.0,
+    "hedge_move_bid_mean": null,
+    "hedge_move_n": 0,
+    "placement_stats": null,
+    "wall_s": 262.0666208267212
+   },
+   "2024-03-09": {
+    "signals": 2,
+    "maker_fills": 2,
+    "causes": {
+     "trade": 2
+    },
+    "orders_placed": 2.0,
+    "cash_pnl": -0.0063537499999881675,
+    "gross_pnl": 0.0589999999999975,
+    "fees": 0.06535375,
+    "equity": 0.0246462499999609,
+    "markout_1s": 0.585813462070109,
+    "markout_5s": 0.4307894363783715,
+    "markout_30s": 1.1357350481736794,
+    "markout_n": 4.0,
+    "hedge_move_bid_mean": -2.615854833825131,
+    "hedge_move_n": 1,
+    "placement_stats": null,
+    "wall_s": 206.70962500572205
+   },
+   "2024-03-10": {
+    "signals": 0,
+    "maker_fills": 0,
+    "causes": {},
+    "orders_placed": 0.0,
+    "cash_pnl": 0.0,
+    "gross_pnl": 0.0,
+    "fees": 0.0,
+    "equity": 0.0,
+    "markout_1s": 0.0,
+    "markout_5s": 0.0,
+    "markout_30s": 0.0,
+    "markout_n": 0.0,
+    "hedge_move_bid_mean": null,
+    "hedge_move_n": 0,
+    "placement_stats": null,
+    "wall_s": 233.81679892539978
+   },
+   "2024-03-11": {
+    "signals": 1,
+    "maker_fills": 1,
+    "causes": {
+     "trade": 1
+    },
+    "orders_placed": 1.0,
+    "cash_pnl": -0.054235349999999016,
+    "gross_pnl": 0.00899999999998613,
+    "fees": 0.06323535000000001,
+    "equity": -0.056235350000008566,
+    "markout_1s": -1.120803846280157,
+    "markout_5s": -0.640418969191354,
+    "markout_30s": -1.0871901790185383,
+    "markout_n": 2.0,
+    "hedge_move_bid_mean": -8.036298466702666,
+    "hedge_move_n": 1,
+    "placement_stats": null,
+    "wall_s": 422.24321579933167
+   }
+  },
+  "fco": {
+   "2024-03-08": {
+    "signals": 0,
+    "maker_fills": 0,
+    "causes": {},
+    "orders_placed": 0.0,
+    "cash_pnl": 0.0,
+    "gross_pnl": 0.0,
+    "fees": 0.0,
+    "equity": 0.0,
+    "markout_1s": 0.0,
+    "markout_5s": 0.0,
+    "markout_30s": 0.0,
+    "markout_n": 0.0,
+    "hedge_move_bid_mean": null,
+    "hedge_move_n": 0,
+    "placement_stats": null,
+    "wall_s": 249.496808052063
+   },
+   "2024-03-09": {
+    "signals": 2,
+    "maker_fills": 2,
+    "causes": {
+     "trade": 2
+    },
+    "orders_placed": 2.0,
+    "cash_pnl": -0.0063537499999881675,
+    "gross_pnl": 0.0589999999999975,
+    "fees": 0.06535375,
+    "equity": 0.0246462499999609,
+    "markout_1s": 0.585813462070109,
+    "markout_5s": 0.4307894363783715,
+    "markout_30s": 1.1357350481736794,
+    "markout_n": 4.0,
+    "hedge_move_bid_mean": -2.615854833825131,
+    "hedge_move_n": 1,
+    "placement_stats": null,
+    "wall_s": 202.00613498687744
+   },
+   "2024-03-10": {
+    "signals": 0,
+    "maker_fills": 0,
+    "causes": {},
+    "orders_placed": 0.0,
+    "cash_pnl": 0.0,
+    "gross_pnl": 0.0,
+    "fees": 0.0,
+    "equity": 0.0,
+    "markout_1s": 0.0,
+    "markout_5s": 0.0,
+    "markout_30s": 0.0,
+    "markout_n": 0.0,
+    "hedge_move_bid_mean": null,
+    "hedge_move_n": 0,
+    "placement_stats": null,
+    "wall_s": 200.70439076423645
+   },
+   "2024-03-11": {
+    "signals": 1,
+    "maker_fills": 1,
+    "causes": {
+     "trade": 1
+    },
+    "orders_placed": 1.0,
+    "cash_pnl": -0.054235349999999016,
+    "gross_pnl": 0.00899999999998613,
+    "fees": 0.06323535000000001,
+    "equity": -0.056235350000008566,
+    "markout_1s": -1.120803846280157,
+    "markout_5s": -0.640418969191354,
+    "markout_30s": -1.0871901790185383,
+    "markout_n": 2.0,
+    "hedge_move_bid_mean": -8.036298466702666,
+    "hedge_move_n": 1,
+    "placement_stats": null,
+    "wall_s": 311.3723509311676
+   }
+  }
+ },
+ "pairs": {
+  "ledger (f1 vs f0, stamps trusted)": {
+   "2024-03-08": {
+    "files_equal": {
+     "trades.jsonl": true,
+     "fill_events.jsonl": true,
+     "fill_bucket_stats.json": true,
+     "model_settings.json": true
+    },
+    "all_files_equal": true,
+    "summary_fields_differing": 1,
+    "first": [
+     [
+      "/maker_config/depletion_ledger",
+      "present",
+      "<absent>"
+     ]
+    ]
+   },
+   "2024-03-09": {
+    "files_equal": {
+     "trades.jsonl": true,
+     "fill_events.jsonl": true,
+     "fill_bucket_stats.json": true,
+     "model_settings.json": true
+    },
+    "all_files_equal": true,
+    "summary_fields_differing": 1,
+    "first": [
+     [
+      "/maker_config/depletion_ledger",
+      "present",
+      "<absent>"
+     ]
+    ]
+   },
+   "2024-03-10": {
+    "files_equal": {
+     "trades.jsonl": true,
+     "fill_events.jsonl": true,
+     "fill_bucket_stats.json": true,
+     "model_settings.json": true
+    },
+    "all_files_equal": true,
+    "summary_fields_differing": 1,
+    "first": [
+     [
+      "/maker_config/depletion_ledger",
+      "present",
+      "<absent>"
+     ]
+    ]
+   },
+   "2024-03-11": {
+    "files_equal": {
+     "trades.jsonl": true,
+     "fill_events.jsonl": true,
+     "fill_bucket_stats.json": true,
+     "model_settings.json": true
+    },
+    "all_files_equal": true,
+    "summary_fields_differing": 1,
+    "first": [
+     [
+      "/maker_config/depletion_ledger",
+      "present",
+      "<absent>"
+     ]
+    ]
+   }
+  },
+  "stamps (ft vs f1, ledger on)": {
+   "2024-03-08": {
+    "files_equal": {
+     "trades.jsonl": true,
+     "fill_events.jsonl": false,
+     "fill_bucket_stats.json": false,
+     "model_settings.json": true
+    },
+    "all_files_equal": false,
+    "summary_fields_differing": 25,
+    "first": [
+     [
+      "/counters/signals_blocked_by_book_stale_binance",
+      "9.0",
+      "7.0"
+     ],
+     [
+      "/counters/signals_blocked_by_book_state",
+      "9.0",
+      "7.0"
+     ],
+     [
+      "/equity_bridge/common_ts",
+      "1709863199.951646",
+      "1709863199.923"
+     ],
+     [
+      "/equity_bridge/mark_gap_s/binance",
+      "0.9277863502502441",
+      "0.0"
+     ]
+    ]
+   },
+   "2024-03-09": {
+    "files_equal": {
+     "trades.jsonl": false,
+     "fill_events.jsonl": false,
+     "fill_bucket_stats.json": false,
+     "model_settings.json": true
+    },
+    "all_files_equal": false,
+    "summary_fields_differing": 92,
+    "first": [
+     [
+      "/cash_pnl",
+      "-0.0063537499999881675",
+      "-0.03312335000001099"
+     ],
+     [
+      "/counters/hedge_flight_s_sum",
+      "0.07484602928161621",
+      "0.03500008583068848"
+     ],
+     [
+      "/counters/hedges_filled",
+      "2.0",
+      "1.0"
+     ],
+     [
+      "/counters/hedges_sent",
+      "2.0",
+      "1.0"
+     ]
+    ]
+   },
+   "2024-03-10": {
+    "files_equal": {
+     "trades.jsonl": true,
+     "fill_events.jsonl": false,
+     "fill_bucket_stats.json": false,
+     "model_settings.json": true
+    },
+    "all_files_equal": false,
+    "summary_fields_differing": 23,
+    "first": [
+     [
+      "/counters/signals_blocked_by_book_stale_binance",
+      "8.0",
+      "4.0"
+     ],
+     [
+      "/counters/signals_blocked_by_book_state",
+      "8.0",
+      "4.0"
+     ],
+     [
+      "/equity_bridge/common_ts",
+      "1710035999.9507885",
+      "1710035999.9520142"
+     ],
+     [
+      "/equity_bridge/mark_gap_s/binance",
+      "0.4640467166900635",
+      "0.503014087677002"
+     ]
+    ]
+   },
+   "2024-03-11": {
+    "files_equal": {
+     "trades.jsonl": false,
+     "fill_events.jsonl": false,
+     "fill_bucket_stats.json": false,
+     "model_settings.json": true
+    },
+    "all_files_equal": false,
+    "summary_fields_differing": 66,
+    "first": [
+     [
+      "/cash_pnl",
+      "-0.054235349999999016",
+      "-0.022276549999958206"
+     ],
+     [
+      "/ending_equity_common_timestamp",
+      "-0.056235350000008566",
+      "-0.024276549999967756"
+     ],
+     [
+      "/equity_bridge/cash_from_trade_log",
+      "-0.054235349999999016",
+      "-0.022276549999958206"
+     ],
+     [
+      "/equity_bridge/common_ts",
+      "1710122399.9511554",
+      "1710122399.9520183"
+     ]
+    ]
+   }
+  },
+  "placement truth alone (fp vs ft)": {
+   "2024-03-08": {
+    "files_equal": {
+     "trades.jsonl": true,
+     "fill_events.jsonl": true,
+     "fill_bucket_stats.json": true,
+     "model_settings.json": true
+    },
+    "all_files_equal": true,
+    "summary_fields_differing": 0,
+    "first": []
+   },
+   "2024-03-09": {
+    "files_equal": {
+     "trades.jsonl": true,
+     "fill_events.jsonl": true,
+     "fill_bucket_stats.json": true,
+     "model_settings.json": true
+    },
+    "all_files_equal": true,
+    "summary_fields_differing": 0,
+    "first": []
+   },
+   "2024-03-10": {
+    "files_equal": {
+     "trades.jsonl": true,
+     "fill_events.jsonl": true,
+     "fill_bucket_stats.json": true,
+     "model_settings.json": true
+    },
+    "all_files_equal": true,
+    "summary_fields_differing": 0,
+    "first": []
+   },
+   "2024-03-11": {
+    "files_equal": {
+     "trades.jsonl": true,
+     "fill_events.jsonl": true,
+     "fill_bucket_stats.json": true,
+     "model_settings.json": true
+    },
+    "all_files_equal": true,
+    "summary_fields_differing": 0,
+    "first": []
+   }
+  },
+  "behind_first vs headline": {
+   "2024-03-08": {
+    "files_equal": {
+     "trades.jsonl": true,
+     "fill_events.jsonl": true,
+     "fill_bucket_stats.json": true,
+     "model_settings.json": false
+    },
+    "all_files_equal": false,
+    "summary_fields_differing": 2,
+    "first": [
+     [
+      "/cancel_model",
+      "behind_first",
+      "proportional"
+     ],
+     [
+      "/maker_config/cancel_model",
+      "behind_first",
+      "proportional"
+     ]
+    ]
+   },
+   "2024-03-09": {
+    "files_equal": {
+     "trades.jsonl": true,
+     "fill_events.jsonl": true,
+     "fill_bucket_stats.json": true,
+     "model_settings.json": false
+    },
+    "all_files_equal": false,
+    "summary_fields_differing": 2,
+    "first": [
+     [
+      "/cancel_model",
+      "behind_first",
+      "proportional"
+     ],
+     [
+      "/maker_config/cancel_model",
+      "behind_first",
+      "proportional"
+     ]
+    ]
+   },
+   "2024-03-10": {
+    "files_equal": {
+     "trades.jsonl": true,
+     "fill_events.jsonl": true,
+     "fill_bucket_stats.json": true,
+     "model_settings.json": false
+    },
+    "all_files_equal": false,
+    "summary_fields_differing": 2,
+    "first": [
+     [
+      "/cancel_model",
+      "behind_first",
+      "proportional"
+     ],
+     [
+      "/maker_config/cancel_model",
+      "behind_first",
+      "proportional"
+     ]
+    ]
+   },
+   "2024-03-11": {
+    "files_equal": {
+     "trades.jsonl": true,
+     "fill_events.jsonl": true,
+     "fill_bucket_stats.json": true,
+     "model_settings.json": false
+    },
+    "all_files_equal": false,
+    "summary_fields_differing": 2,
+    "first": [
+     [
+      "/cancel_model",
+      "behind_first",
+      "proportional"
+     ],
+     [
+      "/maker_config/cancel_model",
+      "behind_first",
+      "proportional"
+     ]
+    ]
+   }
+  },
+  "ahead_first vs headline": {
+   "2024-03-08": {
+    "files_equal": {
+     "trades.jsonl": true,
+     "fill_events.jsonl": true,
+     "fill_bucket_stats.json": true,
+     "model_settings.json": false
+    },
+    "all_files_equal": false,
+    "summary_fields_differing": 2,
+    "first": [
+     [
+      "/cancel_model",
+      "ahead_first",
+      "proportional"
+     ],
+     [
+      "/maker_config/cancel_model",
+      "ahead_first",
+      "proportional"
+     ]
+    ]
+   },
+   "2024-03-09": {
+    "files_equal": {
+     "trades.jsonl": true,
+     "fill_events.jsonl": true,
+     "fill_bucket_stats.json": true,
+     "model_settings.json": false
+    },
+    "all_files_equal": false,
+    "summary_fields_differing": 2,
+    "first": [
+     [
+      "/cancel_model",
+      "ahead_first",
+      "proportional"
+     ],
+     [
+      "/maker_config/cancel_model",
+      "ahead_first",
+      "proportional"
+     ]
+    ]
+   },
+   "2024-03-10": {
+    "files_equal": {
+     "trades.jsonl": true,
+     "fill_events.jsonl": true,
+     "fill_bucket_stats.json": true,
+     "model_settings.json": false
+    },
+    "all_files_equal": false,
+    "summary_fields_differing": 2,
+    "first": [
+     [
+      "/cancel_model",
+      "ahead_first",
+      "proportional"
+     ],
+     [
+      "/maker_config/cancel_model",
+      "ahead_first",
+      "proportional"
+     ]
+    ]
+   },
+   "2024-03-11": {
+    "files_equal": {
+     "trades.jsonl": true,
+     "fill_events.jsonl": true,
+     "fill_bucket_stats.json": true,
+     "model_settings.json": false
+    },
+    "all_files_equal": false,
+    "summary_fields_differing": 2,
+    "first": [
+     [
+      "/cancel_model",
+      "ahead_first",
+      "proportional"
+     ],
+     [
+      "/maker_config/cancel_model",
+      "ahead_first",
+      "proportional"
+     ]
+    ]
+   }
+  },
+  "cohort uniform vs headline": {
+   "2024-03-08": {
+    "files_equal": {
+     "trades.jsonl": true,
+     "fill_events.jsonl": true,
+     "fill_bucket_stats.json": true,
+     "model_settings.json": true
+    },
+    "all_files_equal": true,
+    "summary_fields_differing": 1,
+    "first": [
+     [
+      "/maker_config/queue_model",
+      "cohort",
+      "scalar"
+     ]
+    ]
+   },
+   "2024-03-09": {
+    "files_equal": {
+     "trades.jsonl": true,
+     "fill_events.jsonl": true,
+     "fill_bucket_stats.json": true,
+     "model_settings.json": true
+    },
+    "all_files_equal": true,
+    "summary_fields_differing": 1,
+    "first": [
+     [
+      "/maker_config/queue_model",
+      "cohort",
+      "scalar"
+     ]
+    ]
+   },
+   "2024-03-10": {
+    "files_equal": {
+     "trades.jsonl": true,
+     "fill_events.jsonl": true,
+     "fill_bucket_stats.json": true,
+     "model_settings.json": true
+    },
+    "all_files_equal": true,
+    "summary_fields_differing": 1,
+    "first": [
+     [
+      "/maker_config/queue_model",
+      "cohort",
+      "scalar"
+     ]
+    ]
+   },
+   "2024-03-11": {
+    "files_equal": {
+     "trades.jsonl": true,
+     "fill_events.jsonl": true,
+     "fill_bucket_stats.json": true,
+     "model_settings.json": true
+    },
+    "all_files_equal": true,
+    "summary_fields_differing": 1,
+    "first": [
+     [
+      "/maker_config/queue_model",
+      "cohort",
+      "scalar"
+     ]
+    ]
+   }
+  }
+ },
+ "totals": {
+  "ft": {
+   "days": 4,
+   "signals": 3,
+   "maker_fills": 3,
+   "orders_placed": 3.0,
+   "cash_pnl": -0.060589099999987184,
+   "gross_pnl": 0.06799999999998363,
+   "fees": 0.1285891
+  },
+  "f0": {
+   "days": 4,
+   "signals": 7,
+   "maker_fills": 2,
+   "orders_placed": 7.0,
+   "cash_pnl": -0.05539989999996919,
+   "gross_pnl": 0.07300000000003593,
+   "fees": 0.1283999
+  },
+  "f1": {
+   "days": 4,
+   "signals": 7,
+   "maker_fills": 2,
+   "orders_placed": 7.0,
+   "cash_pnl": -0.05539989999996919,
+   "gross_pnl": 0.07300000000003593,
+   "fees": 0.1283999
+  },
+  "fp": {
+   "days": 4,
+   "signals": 3,
+   "maker_fills": 3,
+   "orders_placed": 3.0,
+   "cash_pnl": -0.060589099999987184,
+   "gross_pnl": 0.06799999999998363,
+   "fees": 0.1285891
+  },
+  "fbf": {
+   "days": 4,
+   "signals": 3,
+   "maker_fills": 3,
+   "orders_placed": 3.0,
+   "cash_pnl": -0.060589099999987184,
+   "gross_pnl": 0.06799999999998363,
+   "fees": 0.1285891
+  },
+  "faf": {
+   "days": 4,
+   "signals": 3,
+   "maker_fills": 3,
+   "orders_placed": 3.0,
+   "cash_pnl": -0.060589099999987184,
+   "gross_pnl": 0.06799999999998363,
+   "fees": 0.1285891
+  },
+  "fco": {
+   "days": 4,
+   "signals": 3,
+   "maker_fills": 3,
+   "orders_placed": 3.0,
+   "cash_pnl": -0.060589099999987184,
+   "gross_pnl": 0.06799999999998363,
+   "fees": 0.1285891
+  }
+ }
+}

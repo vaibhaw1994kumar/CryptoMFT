@@ -23,9 +23,23 @@ HM_JAN = str(X / "hedge_move" / "jan_train_for_2022-01-13.json")
 MAR_PROF, JAN_PROF = "perp_perp_maker_taker_v1_2", "perp_perp_maker_taker_v1_1"
 
 
+# 7 Nov final-v1_2 cells (March only; the profile as committed: March windows 0.15 s / 50 ms applied by the runner, placement_book view, through rule off, ledger on, stamps untrusted):
+#   f0 / f1 = ledger off / on with the March stamps TRUSTED (the constructed 2 ms stamps used as they are); ft = the profile as it stands (ledger on, stamps untrusted: the preset feed delay applies);
+#   fp = ft + placement_book truth (alone); fbf / faf / fco = ft with cancel model behind_first / ahead_first / cohort uniform (the profile's cross rule stays on): the four-model range with ft as the headline.
+FINAL = {"f0": ({"depletion_ledger": False}, {"trust_local_ts": {"bybit": True, "binance": True}}),
+         "f1": ({"depletion_ledger": True}, {"trust_local_ts": {"bybit": True, "binance": True}}),
+         "ft": ({}, {}),
+         "fp": ({}, {"placement_book": "truth"}),
+         "fbf": ({"cancel_model": "behind_first"}, {}),
+         "faf": ({"cancel_model": "ahead_first"}, {}),
+         "fco": ({"queue_model": "cohort", "cohort_age": "uniform"}, {})}
+
+
 def variant(cell):
     if cell == "t1":
         return {}                                  # the profile alone
+    if cell in FINAL:
+        return FINAL[cell][0]
     if cell == "ck":
         return {"dedupe_window_s": 0.05, "evidence_window_ms": 20.0}          # identity check (7 Nov): v1_2 as it stood at t1 (through rule off, the old windows; the profile's March dataset_settings undone) -> must equal t1 byte for byte
     if cell == "tp2":
@@ -50,7 +64,7 @@ def jobs():
                 t1 = calendar.timegm(time.strptime(day, "%Y-%m-%d")) + 7200 + 1.0
                 env = dict(os.environ, QV2_SNAP=str(LIVE), QV2_RUNS=str(runs), QV2_DATA_ROOT=str(X / "slices_mar2024"),
                            QV2_MAKER=json.dumps({"unknown_queue_fit": str(X / "unknown_queue_fit_mar2024_NONE.json"), **mk}),
-                           QV2_CFG=json.dumps({"max_event_ts": t1, "data_manifest": str(X / "manifest_mar2024.json")}))
+                           QV2_CFG=json.dumps({"max_event_ts": t1, "data_manifest": str(X / "manifest_mar2024.json"), **FINAL.get(cell, ({}, {}))[1]}))
                 cmd = ["python3.12", "-I", str(X / "qv2_march_run.py"), MAR_PROF, day, "--group", "base", "--cell", MAR_PROF, "--allow-manifest-gap", REASON_MAR]      # v1_2 headline runs override the manifest only: the preflight blocks (owner 6 Nov)
                 out.append((f"{cell}/{day}", runs / "base" / MAR_PROF / day / "summary.json", env, cmd))
         else:

@@ -1,0 +1,100 @@
+{
+ "freeze": {
+  "profile": "perp_perp_maker_taker_v1_2",
+  "status": "FROZEN as the simulator-correct baseline, strategy unchanged. New work goes on perp_perp_maker_taker_v1_3 (S0, quote repricing).",
+  "frozen_utc": "2026-11-06T23:42Z",
+  "approved_by": "owner, in chat, 7 Nov 2026 ('Approve freeze'; placement_book frozen as view, through rule out)",
+  "tag": "v1_2-freeze (outer repo at the freeze commit; core repo at the core commit below)"
+ },
+ "profile_file": "crypto_MFT_arb_platform/profiles/perp_perp_maker_taker_v1_2.yaml",
+ "profile_sha256": "734d7d2cf54db3bdb9b16a0d930be7cd1890649d9ed770bae9f8676797368a46",
+ "reference_profiles_sha256": {
+  "perp_perp_maker_taker_v1": "2c70171b6630e04656a8545dc9cf6a333a324648a3153c4687160cf4007cbdb4",
+  "perp_perp_maker_taker_v1_1": "bae35cff2e8ffef9f4da6ffdde08a9039179754ed7b062eca92d74d20e7412a1"
+ },
+ "code_hash": {
+  "sha256_sources": "2156a42a261ffc38d7b2b2f3ab289a0e4365c3abb59a14cd83cb7d237dca56b5",
+  "n_files": 89,
+  "note": "no source file changes between commit a0445e3 and the freeze commit (docs, scripts, tests and this manifest only)"
+ },
+ "git": {
+  "core": {
+   "branch": "consolidate-new-backtest",
+   "commit": "3569d0b5f6b6d150e60a8f00cccfd093433c1ac6",
+   "tag": "v1_2-freeze",
+   "worktree_note": "the core working tree carries 37 tracked-file changes that are not part of the frozen code (staged deletions of advanced_backtest/ and old documents, made outside this work); they are untouched and not committed here"
+  },
+  "outer": {
+   "branch": "integration-2026-11-01",
+   "base_commit_before_freeze_commit": "a0445e3c64739b7eb4a0465c599f37d2063ae007",
+   "tag": "v1_2-freeze"
+  }
+ },
+ "inputs": {
+  "hedge_move_calibration": {
+   "file": "config/hedge_move_arrival45ms_mar2024_train_0301_0307_v1.json",
+   "sha256": "c369b1b97af87dd7cecf146cce0583361be0d026a1d6dc6e3fed0d32506e8de7",
+   "label": "PROBE_ARRIVAL_ESTIMATE_45MS_PINNED_BY_SHA256_EXPLORATORY"
+  },
+  "data_manifest_mar2024": {
+   "file": "out/queue_v2/manifest_mar2024.json",
+   "sha256": "f1b6eee8f872939ef1471da046ed1271baab2fd3b5e2cfbae586a345b31c1172"
+  },
+  "unknown_queue_fit_mar2024": {
+   "file": "out/queue_v2/unknown_queue_fit_mar2024_NONE.json",
+   "sha256": "5fb59b9081c04f26c2cce978f81413d15882675099aadd20eca0770938e6f972"
+  },
+  "fee_snapshot_sha256": "485b47f4075ca74bb53090ea2328a600db639609304a01dc480d3e9ea750f995",
+  "fee_presets": {
+   "bybit": "bybit_perp_mm",
+   "binance": "binance_perp_vip0"
+  },
+  "latency_preset": "singapore (ASSUMED)"
+ },
+ "frozen_settings": {
+  "over_v1_1": [
+   "arb.join_touch_on_tick_rounding",
+   "hedge move pin (45 ms)",
+   "timing.floors_ms singapore binance entry/cancel 35 ms (ASSUMED)",
+   "message_atomic_book",
+   "hedge_faults.query_before_replace",
+   "margin.above_last_tier (A9)",
+   "maker.depletion_ledger true",
+   "trust_local_ts false for bybit and binance (ASSUMED)",
+   "dataset_settings.mar2024.maker dedupe_window_s 0.15, evidence_window_ms 50",
+   "placement_book view"
+  ],
+  "present_but_off_not_frozen": [
+   "maker.fill_through_prints false",
+   "maker.through_print_volume_limited false",
+   "cohort queue (sensitivity only)",
+   "placement_book truth"
+  ]
+ },
+ "decision_status_labels": {
+  "march_stamps": "ASSUMED_CONSTRUCTED_LOCAL_TS_NOT_TRUSTED_PRESET_FEED_DELAY_APPLIED",
+  "hedge_move": "PROBE_ARRIVAL_ESTIMATE_45MS_PINNED_BY_SHA256_EXPLORATORY",
+  "p_fail": "PLACEHOLDER_NOT_MEASURED (to be relabelled SCENARIO in Phase C)",
+  "queue_parameters": "SPOT_PRIOR_PERP_UNVALIDATED",
+  "unwind_band_bps / unwind_max_attempts / breaker": "DECISION_PENDING_CALIBRATION"
+ },
+ "evidence": {
+  "suite": "2,733 passed; 92 failed + 1 collection error, identical by name to the Phase 0 list (93 entries); 11 expected failures",
+  "byte_identity_gate": "13 clean baselines and 4 faulted runs identical to the Phase 0 reference (out/integration/baselines/logs/compare_b1_pp2.log, compare_f0_pp2_f.log)",
+  "v1_2_rule_off_identity": "cell ck equals t1 on the four March slices",
+  "final_cells": "out/integration/phase_b/ledger/final_cells_report.json",
+  "report": "out/integration/core_integration_report.html, sections C1 to C20"
+ },
+ "known_limits": [
+  "the strategy never reprices a resting quote (S0)",
+  "the conditional edge uses a scalar hedge move that leaves out the quote-to-fill drift (S1)",
+  "print-first leftover is not order-independent (ratio below 1.2)",
+  "hidden liquidity ahead of us and RPI orders are not modelled",
+  "79 to 92 % of orders rest on empty levels: queue models, ledger and placement book are inert on today's data",
+  "stamps, latency preset and fees are ASSUMED",
+  "March slices are 2 hours, Binance L1 only, no funding file",
+  "p_fail and loss_fail_bps are placeholders / simulated scenarios",
+  "cohort queue and the through rule are not validated on perp data"
+ ],
+ "all_results": "EXPLORATORY (profile, size, days and fees stated with each result); HOLDOUT untouched"
+}
