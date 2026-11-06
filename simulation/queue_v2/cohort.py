@@ -183,14 +183,17 @@ class LevelQueue:
         return fills
 
     def clear_ahead(self, oid: int) -> None:
-        """Price priority (a print through our price): everything ahead of this order is gone."""
-        out = []
+        """Price priority (a print through our price, a cross, a vanished level): every EXTERNAL cohort ahead of this order is gone. Another own order that rests ahead of it keeps its place:
+        it is filled by the print budget or it stays, it is never silently removed (owner 7 Nov). An unknown order id changes nothing."""
+        out, found = [], False
         for i in self.items:
             if i["t"] == "own" and i["id"] == oid:
+                found = True
                 out.append(i)
-                out += self.items[self.items.index(i) + 1:]
-                break
-        self.items = out
+            elif found or i["t"] == "own":
+                out.append(i)
+        if found:
+            self.items = out
 
     def rebase_external(self, displayed: float, now: float, hypothesis: str, theta: float, note: str = "") -> tuple[float, float]:
         """Counterfactual projection at a settled update boundary: the displayed external size is the truth about the public book. Growth joins behind everyone;

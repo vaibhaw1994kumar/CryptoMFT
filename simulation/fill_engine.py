@@ -597,6 +597,10 @@ class MakerExecutor:
             if len(self.cohort_log) < 20000:
                 self.cohort_log.extend(lq.log)
             del self._lq[key]
+        else:
+            for o in self.orders.values():
+                if o.is_live and self._lqk(o) == key:
+                    self._cohort_refresh(o)          # an own order ahead left the queue (filled or cancelled): the ones behind it move up
 
     def _clear_ahead(self, order: "MakerOrder") -> None:
         """Everything ahead of this order is gone (a confirmed cross, a vanished level, a queue at or below the empty threshold, a print through our price):
@@ -605,6 +609,8 @@ class MakerExecutor:
             lq = self._lq.get(self._lqk(order))
             if lq is not None:
                 lq.clear_ahead(order.order_id)
+                self._cohort_refresh(order)          # an own order resting ahead of this one is not cleared: its remaining size stays ahead (0 when there is none)
+                return
         order.queue_ahead = 0.0
 
     def _cohort_refresh(self, order: "MakerOrder") -> None:
@@ -1029,7 +1035,7 @@ class MakerExecutor:
                     o = self.orders.get(oid)
                     if o is not None and o.is_live and covered - applied > 1e-12:
                         extras[oid] = covered - applied
-            if volume <= 1e-12 and not confirm_ids and not cx_ids and not extras:
+            if volume <= 1e-12 and not confirm_ids and not cx_ids and not extras and not (cfg.fill_through_prints and self._has_through_orders(venue, price, sign, now)):
                 self._cohort_check()
                 return []
         if self.obs_enabled:
@@ -1061,6 +1067,7 @@ class MakerExecutor:
                 confirmed.append(order)
             else:
                 eligible.append(order)
+        spend = cfg.fill_through_prints and cfg.through_print_volume_limited      # owner 7 Nov: ONE print budget across the cross, through and ordinary rules (legacy budgets when off)
         for order in cx_orders:
             cap = cfg.opposite_cross_cap_to_print
             qty_cap = None
@@ -1085,7 +1092,8 @@ class MakerExecutor:
                     cx_rec[5] -= f.qty
                     if order.remaining <= 1e-12:
                         order.cross_state, order.cross_gap = None, False   # fully filled; a partial fill stays pending until its window ends
-        through_budget = gross_volume
+        print_left = max(0.0, gross_volume - sum(f.qty for f in fills)) if spend else gross_volume        # cross fills have spent part of the print
+        through_budget = print_left
         for order in through:
             if self.obs_enabled:
                 self._obs_qb[order.order_id] = (order.queue_ahead, gross_volume)
@@ -1099,6 +1107,9 @@ class MakerExecutor:
                     through_budget -= f.qty / cfg.trade_fill_share
                 fills.append(f)
                 self.diag["fills_from_through_print"] += f.qty
+        if spend:
+            print_left = max(0.0, through_budget)                                  # what the through fills left of the print
+            volume = min(volume, print_left)                                       # the ordinary rule gets no more than that
         if self._lq and pre:
             seen = set()
             for order in pre:
@@ -1123,7 +1134,8 @@ class MakerExecutor:
             # The trade is the second publication of the execution that produced the decrease: it fills the order up to its
             # own (gross) size, not reduced by the credit the de-duplication gave the decrease.
             confirmed.sort(key=lambda o: (o.placed_ts, o.order_id))
-            budget = gross_volume
+            budget = min(gross_volume, print_left) if spend else gross_volume
+            budget0 = budget
             for order in confirmed:
                 if moved:
                     applied = moved.get(order.order_id, (0.0, 0.0))[0]
@@ -1142,6 +1154,8 @@ class MakerExecutor:
                         budget -= f.qty / cfg.trade_fill_share
                     if budget <= 1e-12:
                         break
+            if spend:
+                volume = min(volume, max(0.0, print_left - (budget0 - budget)))    # the confirmed fills spent part of it too
         if self._lq and eligible:
             fills += self._cohort_trade(eligible, volume, now, fee_bps, is_synthetic)
             eligible = []
@@ -1169,6 +1183,17 @@ class MakerExecutor:
             cx_rec[5] = max(0.0, cx_rec[5] - used)           # the ordinary rules spent part of this print: a later cross cannot spend it again
         self._cohort_check()
         return fills
+
+    def _has_through_orders(self, venue: str, price: float, sign: int, now: float) -> bool:
+        """A live, active order of ours that this print went strictly through (a sell below our bid / a buy above our ask)."""
+        for o in self.orders.values():
+            if o.venue != venue or not o.is_live or now + 1e-12 < o.active_ts:
+                continue
+            if abs(price - o.price) <= 1e-9 * max(1.0, abs(price)):
+                continue
+            if (sign < 0 and o.side == Side.BID and price < o.price) or (sign > 0 and o.side == Side.ASK and price > o.price):
+                return True
+        return False
 
     def on_delta(
         self, venue: str, side: str, price: float, new_size: float, now: float,
@@ -1717,6 +1742,10 @@ class MakerExecutor:
             if not order.first_fill_is_synthetic:
                 self._record_outcome(order)
             self.orders_filled += 1
+        elif self._lq:
+            lq = self._lq.get(self._lqk(order))
+            if lq is not None:
+                lq.sync_own(order.order_id, order.remaining)     # a part-filled order keeps its place with what is left of it (the orders behind it see that size ahead)
         return fill
 
     @staticmethod
