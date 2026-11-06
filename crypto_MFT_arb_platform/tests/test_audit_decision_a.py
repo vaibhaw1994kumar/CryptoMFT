@@ -198,7 +198,7 @@ class ProfileV11(unittest.TestCase):
         changed = {k for k in set(a) | set(b) if a.get(k, "<absent>") != b.get(k, "<absent>")}
         self.assertEqual(changed, {"name", "description", "arb.join_touch_on_tick_rounding", "arb.maker_venues", "arb.venue_ticks.bybit", "arb.venue_ticks.binance", "arb.block_on_toxic",
                                    "arb.max_cross_venue_skew_s", "arb.fill_gate_horizon_s", "hedge_move_calibration.file", "hedge_move_calibration.sha256",
-                                   "decision_status.hedge_move"})
+                                   "decision_status.hedge_move", "timing.floors_ms.singapore.binance.entry", "timing.floors_ms.singapore.binance.cancel", "message_atomic_book", "margin.above_last_tier", "hedge_faults.query_before_replace"})
 
     def test_the_join_switch_is_on_in_v1_2_and_off_in_v1_1(self):
         from new_backtest.profiles import apply_profile, load_profile
@@ -211,8 +211,11 @@ class ProfileV11(unittest.TestCase):
         from new_backtest.profiles import ProfileError, apply_profile, load_profile
         doc = load_profile("perp_perp_maker_taker_v1_2")
         kw = dict(data_root="/nonexistent", pair="SOLUSDT", start_date="2024-03-08", end_date="2024-03-08")
-        a = apply_profile(doc, **kw).arb
-        self.assertAlmostEqual(a.expected_hedge_move_bps_bid, -0.7705897215547969)
+        cfg = apply_profile(doc, **kw)
+        a = cfg.arb
+        self.assertAlmostEqual(a.expected_hedge_move_bps_bid, -0.48796848488618055)         # owner 6 Nov: the 7-day, fixed 45 ms arrival estimate (not the 1 s window of -0.771)
+        hm = cfg.release_identity["hedge_move_calibration"]
+        self.assertEqual((hm["horizon_s"], hm["n"]["bid"], len(hm["days"])), (0.045, 2037, 7))        # recorded as an arrival estimate in the release identity, with the file's hash
         self.assertEqual((a.maker_venues, a.venue_ticks, a.fill_gate_horizon_s), (("bybit",) if isinstance(a.maker_venues, tuple) else ["bybit"], {"bybit": 0.001, "binance": 0.001}, 5))
         with self.assertRaises(ProfileError):                                             # a TRAIN day on or after the run's start
             apply_profile(doc, **{**kw, "start_date": "2024-03-02", "end_date": "2024-03-02"})
@@ -222,6 +225,26 @@ class ProfileV11(unittest.TestCase):
             apply_profile(bad, **kw)
         v11 = apply_profile(load_profile("perp_perp_maker_taker_v1_1"), **kw)
         self.assertEqual(v11.arb.expected_hedge_move_bps_bid, 0.0)                         # v1.1 pins nothing: the runner supplies it, as before
+
+    def test_v1_2_floors_the_cross_region_timelines_at_35_ms_for_singapore_only_and_v1_1_has_none(self):
+        from new_backtest.profiles import apply_profile, load_profile
+        kw = dict(data_root="/nonexistent", pair="SOLUSDT", start_date="2024-03-08", end_date="2024-03-08")
+        v = apply_profile(load_profile("perp_perp_maker_taker_v1_2"), **kw).timing.venues
+        self.assertEqual((v["binance"].entry.min_ms, v["binance"].cancel.min_ms, v["binance"].fill_report.min_ms, v["bybit"].entry.min_ms), (35.0, 35.0, 0.0, 0.0))
+        doc = load_profile("perp_perp_maker_taker_v1_2")
+        doc["latency_preset"] = "tokyo"; doc["timing"]["from_latency_preset"] = "tokyo"
+        self.assertEqual(apply_profile(doc, **kw).timing.venues["bybit"].entry.min_ms, 0.0)          # the floor names singapore's cross-region venue only
+        v11 = apply_profile(load_profile("perp_perp_maker_taker_v1_1"), **{**kw, "start_date": "2022-01-13", "end_date": "2022-01-13"}).timing.venues
+        self.assertTrue(all(sp.min_ms == 0.0 for tl in v11.values() for sp in (tl.entry, tl.cancel)))
+
+    def test_the_release_identity_names_both_repositories_commits_and_dirty_flags(self):
+        from new_backtest.profiles import apply_profile, load_profile, release_identity
+        doc = load_profile("perp_perp_maker_taker_v1_2")
+        cfg = apply_profile(doc, data_root="/nonexistent", pair="SOLUSDT", start_date="2024-03-08", end_date="2024-03-08")
+        g = release_identity(cfg, doc)["git"]
+        self.assertEqual(set(g), {"outer", "core"})
+        for repo in g.values():
+            self.assertTrue(("commit" in repo and isinstance(repo["dirty"], bool)) or "error" in repo)      # a checkout git cannot read says so instead of raising
 
     def test_the_integrity_switches_are_registered(self):
         from new_backtest.profiles import SWITCHES

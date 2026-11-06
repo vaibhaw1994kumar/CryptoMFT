@@ -103,6 +103,11 @@ class ArbBacktestConfig:
     gate_class: str = ""
     skip_snapshot_venues: tuple = ()    # venues whose book_snapshots are ignored (e.g. placeholder snapshots, manifest placeholder_snapshots); book from deltas only
     book_tape_repair: bool = True
+    # Message-atomic book (v1_2): the deltas of one exchange message (same venue, exchange_ts and receive time, consecutive) are applied as one unit. A cross inside the
+    # message is not repaired mid-message (OrderBook.message_atomic); the strategy, the maker queue updates and the touch run once, after the message. Off = per delta.
+    message_atomic_book: bool = False
+    # Accounting-only shadow of the core ledger and fee schedule (new_backtest/core_shadow.py, Phase B; removed when Phase B ends). Read only: results are unchanged.
+    core_shadow: bool = False
     event_order: str = "legacy"
     own_impact: str = "legacy"
     include_deltas: bool = True
@@ -336,6 +341,7 @@ class ArbBacktestResult:
     # Queue model v2 step 1: the manifest gate (days, truncation, override reason, manifest hash); empty when data_manifest is not set.
     data_manifest: dict = field(default_factory=dict)
     data_integrity: dict = field(default_factory=dict)            # truncated input files counted by the loader (audit decision A); reporting only
+    core_shadow: dict | None = None     # the accounting shadow's report when ArbBacktestConfig.core_shadow is on, else None
     markout_by_venue_role: dict = field(default_factory=dict)     # markout_summary split by "<venue>/<maker|taker>"; the pooled markout_summary is unchanged
     queue_parameter_status: str = ""                              # audit decision E: perp queue parameters are a spot prior, not validated on the target product
     # Maker-only analysis mode: {mode, gate_class, scheduled, fired, skipped{reason: n}}; empty for a normal run.
@@ -405,6 +411,9 @@ def _fee_preset_family(preset: str) -> str:
 
 
 _ARBCONFIG_DEFAULT_SIZE = ArbConfig().max_position_base   # 1.0; the sentinel for "not explicitly chosen"
+
+
+_SAME_STAMP_S = 1e-6        # message-atomic mode: receive stamps closer than this belong to one exchange message (the feed adds one float step per record to keep them strictly increasing)
 
 
 class CrossVenueArbBacktester:
@@ -526,12 +535,19 @@ class CrossVenueArbBacktester:
             self._install_timing()
             if self._truth_on:
                 self.truth_books = {v: OrderBook(v, config.pair, self.venue_specs[v].delta_semantics, tape_repair=config.book_tape_repair,
-                                                 own_overlay=config.own_impact == "overlay") for v in config.venues}
+                                                 own_overlay=config.own_impact == "overlay", message_atomic=config.message_atomic_book) for v in config.venues}
         self.books: dict[str, OrderBook] = {
             v: OrderBook(v, config.pair, self.venue_specs[v].delta_semantics, tape_repair=config.book_tape_repair,
-                         own_overlay=config.own_impact == "overlay")
+                         own_overlay=config.own_impact == "overlay", message_atomic=config.message_atomic_book)
             for v in config.venues
         }
+        self._shadow = None
+        if config.core_shadow:
+            from .core_shadow import CoreShadow
+            self._shadow = CoreShadow(config.pair, tuple(config.venues))
+        self._message_atomic = config.message_atomic_book
+        self._frame_last = True                    # message-atomic mode: the event being applied is the last of its exchange message
+        self._frame_buf: list = []                 # message-atomic mode: (side, price, new_size) of the message's deltas, handed to the maker after the message
         self.states: dict[str, VenueState] = {
             v: VenueState(v, config.venue_state) for v in config.venues
         }
@@ -762,6 +778,10 @@ class CrossVenueArbBacktester:
             ):
                 self._on_fill(f)
 
+        elif ev.kind == DELTA and self._message_atomic:
+            if not self._delta_in_message(ev, book, state, spec, now, ets):
+                return                                      # inside a message: nothing else runs until its last delta
+
         elif ev.kind == DELTA:
             side, price, volume, event_type = delta_fields(ev.payload)
             if price <= 0:
@@ -819,6 +839,75 @@ class CrossVenueArbBacktester:
             horizon = now - 2.0 * self.faults.fast_move_window_s
             while len(hist) > 1 and hist[1][0] < horizon:
                 hist.popleft()
+
+    def _delta_in_message(self, ev, book: OrderBook, state, spec, now: float, ets) -> bool:
+        """Message-atomic mode: apply one delta of an exchange message. Returns False while the message is still open (the book holds the delta, nothing else ran);
+        True when this is the message's last delta: the cross (if still there) is judged once, then the marks, the venue state and the maker queue updates run
+        on the completed message, in the order the deltas arrived. Sequence handling stays per delta."""
+        side, price, volume, event_type = delta_fields(ev.payload)
+        if price > 0:
+            self._feed_sequence(book, ev.payload, now)
+            book.apply_delta(side, price, volume, event_type, now)
+            self._frame_buf.append((side, price, book.level_size(side, price) if cfg_delta_book_size(self.config) else volume))
+        if not self._frame_last:
+            self.timing_stats["message_atomic_deltas_deferred"] += 1
+            return False
+        book.end_message()
+        buf, self._frame_buf = self._frame_buf, []
+        if len(buf) > 1:
+            self.timing_stats["message_atomic_multi_delta_messages"] += 1
+        if buf:
+            self._record_mark(ev.venue, now)
+            state.on_book(book, now)
+            for side, price, new_size in buf:
+                for f in self.maker.on_delta(ev.venue, side, price, new_size, now, self.tick_size[ev.venue], spec.fees.maker_bps, event_ts=ets):
+                    self._on_fill(f)
+        return True
+
+    def _mark_frames(self, stream):
+        """Message-atomic mode: yield the feed with every exchange message as one contiguous run, setting self._frame_last on each event before it is applied. An exchange
+        message is the run of DELTA events of one venue with the same exchange_ts and the same recorded receive stamp; a TRADE, a snapshot or a different exchange_ts of that venue
+        ends it. The feed makes receive times strictly increasing per venue by one float step per record (LatencyBook.observe_receive_ts, about 0.24 microseconds each at today's
+        epoch), so a 400-delta message spans 0.1 ms and another venue's event can fall inside that span: such events are held and applied right after the message (they move by at
+        most the span; the order inside a span is not data, it is the float step). 'The same receive stamp' means within _SAME_STAMP_S (1 microsecond) of the previous delta."""
+        from collections import deque
+        it = iter(stream)
+        pending: deque = deque()
+
+        def pull():
+            return pending.popleft() if pending else next(it, None)
+
+        while True:
+            ev = pull()
+            if ev is None:
+                return
+            if ev.kind != DELTA:
+                self._frame_last = True
+                yield ev
+                continue
+            frame, held, held_at, last = [ev], [], [], ev
+            while True:
+                nx = pull()
+                if nx is None:
+                    break
+                if nx.venue != ev.venue:
+                    held.append(nx)
+                    held_at.append(len(frame))                  # how many of the message's deltas had been read when it showed up
+                    continue
+                if nx.kind == DELTA and nx.exchange_ts == ev.exchange_ts and abs(nx.receive_ts - last.receive_ts) < _SAME_STAMP_S:
+                    frame.append(nx)
+                    last = nx
+                    continue
+                pending.appendleft(nx)
+                break
+            for h in reversed(held):
+                pending.appendleft(h)
+            moved = sum(1 for n in held_at if n < len(frame))       # only events that sat BETWEEN two deltas of the message were moved
+            if moved:
+                self.timing_stats["message_atomic_other_venue_events_moved_after_message"] += moved
+            for k, f in enumerate(frame):
+                self._frame_last = k == len(frame) - 1
+                yield f
 
     def _touch_changed(self, venue: str) -> bool:
         book = self.books[venue]
@@ -1480,6 +1569,8 @@ class CrossVenueArbBacktester:
         if self.margin_model is not None:
             self.margin_model.note_fill(fill.venue, fill.qty if fill.side == "buy" else -fill.qty, fill.price, self.inventory)
         self.fees_paid += fill.fee
+        if self._shadow is not None:
+            self._shadow.on_fill(fill, self.inventory)
         self.traded_notional += fill.notional
         self.markouts.record_fill(fill.ts, fill.venue, fill.side, fill.price, fill.qty, "taker" if fill.is_taker else "maker")
 
@@ -1838,6 +1929,8 @@ class CrossVenueArbBacktester:
             self._truth_apply(ev, tb)
             if ref_host_ts is not None and ev.receive_ts > ref_host_ts:
                 self.timing_stats["truth_events_applied_before_receipt"] += 1
+        if self._message_atomic:
+            tb.end_message()                                # message-atomic truth book: every held event of a message shares its exchange time, so a message is never split here
 
     def _truth_sync_event(self, ev) -> None:
         """Called for every event the strategy view applies: the truth book must be at least as far along."""
@@ -1849,8 +1942,12 @@ class CrossVenueArbBacktester:
             if q and q[0] is ev:                       # exchange_ts missing or out of order: apply it now anyway
                 q.popleft()
                 self._truth_apply(ev, self.truth_books[ev.venue])
+                if self._message_atomic:
+                    self.truth_books[ev.venue].end_message()
         else:
             self._truth_apply(ev, self.truth_books[ev.venue])
+            if self._message_atomic:
+                self.truth_books[ev.venue].end_message()
 
     def _arrival_book(self, order: InFlightOrder) -> OrderBook:
         """The book a taker arrival executes against: the venue-truth book at the arrival's exchange time under WP3, else the
@@ -2128,6 +2225,23 @@ class CrossVenueArbBacktester:
             self._resend(order, tracker, t0)
             return
         reason = order.tag.split(":", 1)[1]
+        if f.query_before_replace and order.is_hedge and order.role != "unwind" and reason in ("fault_outage_blackhole", "fault_outage_ghost"):
+            if order.tag.startswith("failed:"):                 # OMS03: the order may exist at the venue; ask before sending a replacement
+                out = self._active_outage(order.venue, t0)
+                answer = t0 + f.unknown_resolve_s
+                if out is not None:                             # the status query cannot be answered while the gateway is down, nor before a ghost has landed
+                    hit0 = self.xl.intent_for(order.origin_id or order.order_id, Role.HEDGE)
+                    ghost_rel = self.xl.ghost_release_ts(hit0) if hit0 is not None else None
+                    answer = max(answer, (ghost_rel if ghost_rel is not None else out.end_ts + self.venue_specs[order.venue].latency.entry_ms / 1000.0) + 1e-6)
+                self.hedge["queries_before_replace"] += 1
+                self._enqueue_timer(order, answer, "failed_queried:" + reason, order.attempt)
+                return
+            hit = self.xl.intent_for(order.origin_id or order.order_id, Role.HEDGE)
+            if hit is not None and hit.qty - hit.filled_qty <= 1e-9:      # the query found it executed: complete, nothing to replace
+                self.hedge["query_found_executed"] += 1
+                self._finish_leg(order, tracker, t0, "hedged_after_query")
+                return
+            self.hedge["query_not_found"] += 1                  # the venue does not know the order: a replacement is allowed now
         self.orders_missed += 1
         self.miss_reasons[reason] += 1
         if tracker is None:                                     # the signal was already closed out
@@ -2706,7 +2820,10 @@ class CrossVenueArbBacktester:
 
         now = 0.0
         try:
-            for ev in (self._with_lookahead(feed) if self._truth_on else feed):
+            stream = self._with_lookahead(feed) if self._truth_on else feed
+            if self._message_atomic:
+                stream = self._mark_frames(stream)
+            for ev in stream:
                 if cfg.max_events is not None and self.events_processed >= cfg.max_events:
                     break
                 now = ev.receive_ts
@@ -2723,6 +2840,8 @@ class CrossVenueArbBacktester:
                     self._fire_timers_before(now)
                 self._advance_to(now)
                 self._apply_event(ev)
+                if self._message_atomic and not self._frame_last:
+                    continue                                # inside an exchange message: marks, breaker, margin, signals wait for its last delta
                 self._record_mid_ts(ev.venue, now)
                 if self._breaker is not None:
                     self._breaker_poll(now)
@@ -2790,7 +2909,11 @@ class CrossVenueArbBacktester:
                                      {v: b.mid for v, b in self.books.items()}, self._ref_mid())
 
             self.markouts.resolve(now, {v: b.mid for v, b in self.books.items()}, finalize=True)
-            return self._build_result(feed, coverage, virtual_clock.real_time() - wall_start)
+            res = self._build_result(feed, coverage, virtual_clock.real_time() - wall_start)
+            if self._shadow is not None:
+                res.core_shadow = self._shadow.finish(self.inventory, {v: b.mid for v, b in self.books.items() if b.ready}, res.ending_equity,
+                                                      funding_paid=self.settler.report()["by_venue"] if self.settler is not None else None)
+            return res
         finally:
             virtual_clock.uninstall()
 

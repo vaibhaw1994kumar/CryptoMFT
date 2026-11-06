@@ -1,0 +1,224 @@
+{
+ "label": "Phase B data checks, observation only",
+ "pair": "SOLUSDT",
+ "rows": [
+  {
+   "venue": "bybit",
+   "day": "2024-03-07",
+   "preflight_counts": {
+    "events": 102029782,
+    "price_jumps": 1,
+    "wide_spreads": 0,
+    "invalid_levels": 0,
+    "crossed_books": 0,
+    "stale_intervals": 0,
+    "silent_feeds": 0
+   },
+   "preflight_scan_seconds": 1038.772,
+   "added_scan_seconds": 1639.4,
+   "defects": {
+    "stale_intervals": {
+     "status": "MEASURED",
+     "count": 0,
+     "rule": "no book event for more than 30 s, judged at the next snapshot"
+    },
+    "crossed_books": {
+     "status": "MEASURED",
+     "count": 0,
+     "rule": "crossed at a snapshot; the crossed-at-message-end count is in `observation`"
+    },
+    "price_jumps": {
+     "status": "MEASURED",
+     "count": 1
+    },
+    "wide_spreads": {
+     "status": "MEASURED",
+     "count": 0
+    },
+    "invalid_levels": {
+     "status": "MEASURED",
+     "count": 0
+    },
+    "silent_feeds": {
+     "status": "MEASURED",
+     "count": 0
+    },
+    "out_of_order": {
+     "status": "MEASURED",
+     "count": 0,
+     "rule": "a record whose exchange or receive time is below the previous record's, in the loader's merged order"
+    },
+    "invalid_trades": {
+     "status": "MEASURED",
+     "count": 0,
+     "rule": "price or size not finite and positive, side not buy/sell",
+     "scanned": 2442835
+    },
+    "gaps": {
+     "status": "NOT_MEASURED",
+     "count": null,
+     "reason": "this scan does not read sequence ids; the files carry no sequence ids, so nothing could be checked"
+    },
+    "duplicates": {
+     "status": "NOT_MEASURED",
+     "count": null,
+     "reason": "book-level duplicates need sequence ids; file-level duplicates dropped by the loader are in `loader_duplicates_dropped`"
+    },
+    "negative_latency": {
+     "status": "NOT_MEASURED",
+     "count": null,
+     "reason": "clock analysis not performed (the receive-minus-exchange gap is reported in the Phase B timestamp report)"
+    },
+    "impossible_latency": {
+     "status": "NOT_MEASURED",
+     "count": null,
+     "reason": "clock analysis not performed"
+    },
+    "schema_exceptions": {
+     "status": "NOT_MEASURED",
+     "count": null,
+     "reason": "live-runner defect, not defined for partition files"
+    },
+    "rejected_records": {
+     "status": "NOT_MEASURED",
+     "count": null,
+     "reason": "live-runner defect, not defined for partition files"
+    },
+    "rejected_partitions": {
+     "status": "NOT_MEASURED",
+     "count": null,
+     "reason": "not defined for partition files"
+    },
+    "unknown_instrument_rules": {
+     "status": "NOT_MEASURED",
+     "count": null,
+     "reason": "no instrument master is read by the preflight"
+    },
+    "persistence_lag_ns": {
+     "status": "NOT_MEASURED",
+     "count": null,
+     "reason": "live-runner defect"
+    },
+    "unpersisted_bytes": {
+     "status": "NOT_MEASURED",
+     "count": null,
+     "reason": "live-runner defect"
+    }
+   },
+   "checks": {
+    "venue": "bybit",
+    "day": "2024-03-07",
+    "events": {
+     "book": 2,
+     "delta": 102029780,
+     "trade": 2442835
+    },
+    "loader_duplicates_dropped": 0,
+    "sequence_fields_present": false,
+    "timestamps_backwards_exchange": 0,
+    "timestamps_backwards_receive": 0,
+    "invalid_trades": 0,
+    "stale_gaps": {
+     "gt_5s": {
+      "count": 0,
+      "seconds_in_gaps": 0.0
+     },
+     "gt_30s": {
+      "count": 0,
+      "seconds_in_gaps": 0.0
+     }
+    },
+    "observation": {
+     "messages": 863023,
+     "multi_delta_messages": 861962,
+     "crossed_books_at_message_end": 0,
+     "negative_sizes": 0,
+     "invalid_prices": 0,
+     "feed_silent_beyond_dead_feed_s": {
+      "limit_s": 5.0,
+      "count": 0,
+      "seconds_beyond_limit": 0.0
+     },
+     "non_valid_book_seconds": {
+      "book_older_than_max_book_age_s": 0.0,
+      "max_book_age_s": 0.5,
+      "note": "the engine marks a book stale beyond max_book_age_s; a cross at a message end is repaired at once (zero duration); invalid/recovering states need sequence ids"
+     }
+    },
+    "arrival_checks": {
+     "book_side": {
+      "status": "MEASURED",
+      "checked": 102029780,
+      "violations": 0
+     },
+     "trade_side": {
+      "status": "MEASURED",
+      "checked": 2442835,
+      "violations": 0
+     },
+     "tick": {
+      "status": "MEASURED",
+      "checked": 104474615,
+      "violations": 0
+     },
+     "size_valid": {
+      "status": "MEASURED",
+      "checked": 104474615,
+      "violations": 0
+     },
+     "lot": {
+      "status": "NOT_MEASURED",
+      "checked": null,
+      "violations": null,
+      "reason": "no lot step stored for this instrument (instrument master, REF03/REF04)"
+     },
+     "tick_declared": 0.001,
+     "lot_declared": null,
+     "sides_seen": {
+      "book": {
+       "bid": 51789730,
+       "ask": 50240050
+      },
+      "trade": {
+       "buy": 1248774,
+       "sell": 1194061
+      }
+     }
+    },
+    "scan_seconds": 1639.4
+   }
+  }
+ ],
+ "quality_source": "absolute",
+ "preflight_limits_per_day": {
+  "min_events": 100,
+  "max_gaps": 0,
+  "max_stale_intervals": 30,
+  "max_crossed_books": 0,
+  "max_duplicates": 0,
+  "max_out_of_order": 0,
+  "max_schema_exceptions": 0,
+  "max_rejected_partitions": 0,
+  "max_negative_latency": 0,
+  "max_impossible_latency": 0,
+  "max_unknown_instrument_rules": 0,
+  "max_persistence_lag_ns": 5000000000,
+  "max_unpersisted_bytes": 0,
+  "max_price_jumps": 3,
+  "max_wide_spreads": 5,
+  "max_invalid_levels": 0,
+  "max_invalid_trades": 0,
+  "max_silent_feeds": 0
+ },
+ "inline_limits_per_moment": {
+  "max_book_age_s": 0.5,
+  "dead_feed_s": 5.0,
+  "max_cross_venue_skew_s": 0.2,
+  "note": "inline rules judge one moment (the book at that moment); preflight limits judge one day (a count over the day)"
+ },
+ "stale_thresholds_s": {
+  "preflight": 30.0,
+  "engine_dead_feed": 5.0
+ },
+ "dataset": "mar2024full"
+}

@@ -91,6 +91,13 @@ class MarginModelConfig:
     transfers: TransferModelConfig | None = None
     # WP6: per-venue margin-utilisation limit (initial margin after the clip / equity); None = off.
     max_utilisation: float | None = None
+    # A9 (Phase B): what a position above the venue's LAST margin tier means. "ignore" (v1, v1.1): no maintenance figure exists, so it is never liquidated. "breach" (v1_2, the
+    # core rule, POSITION_ABOVE_RISK_LIMIT, fail closed): it counts as a margin breach and is liquidated like one.
+    above_last_tier: str = "ignore"
+
+    def __post_init__(self) -> None:
+        if self.above_last_tier not in ("ignore", "breach"):
+            raise ValueError("MarginModelConfig.above_last_tier must be 'ignore' or 'breach'")
 
 
 @dataclass
@@ -284,8 +291,13 @@ class MarginModel:
                         self.liq_distance[v] = {"min_bps": dist, "ts": now, "mark": mk, "liquidation_price": lp,
                                                 "position_base": inventory.base.get(v, 0.0), "equity": eq}
             breach, backing, mm_eff = self._breaches(v, inventory, books)
-            if notional > 0 and mm is not None and mm > 0:
-                self.stats["min_margin_ratio"] = min(self.stats["min_margin_ratio"], backing / mm_eff if mm_eff > 0 else float("inf"))
+            over_tier = notional > 0 and mm is None and self.cfg.above_last_tier == "breach"     # A9: above the last tier is a breach under the core rule
+            if over_tier:
+                breach, backing, mm_eff = True, eq, 0.0
+                self.stats["above_last_tier_breaches"] = self.stats.get("above_last_tier_breaches", 0) + 1
+            if notional > 0 and ((mm is not None and mm > 0) or over_tier):
+                if not over_tier:
+                    self.stats["min_margin_ratio"] = min(self.stats["min_margin_ratio"], backing / mm_eff if mm_eff > 0 else float("inf"))
                 if breach and self.cfg.liquidate:
                     qty = abs(inventory.base.get(v, 0.0))
                     side = "sell" if inventory.base.get(v, 0.0) > 0 else "buy"

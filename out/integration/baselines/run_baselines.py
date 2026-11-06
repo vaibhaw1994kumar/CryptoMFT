@@ -17,6 +17,7 @@ REASON_JAN = "exploratory: Binance trade tape truncated at ~17 h on 2022-01-05 a
 REASON_MAR = ("exploratory: 2-hour slice; Binance March-2024 has bookTicker (L1) only (manifest EMPTY); funding not settled; makers judged against the tape of the venue they rest on")
 PROFILES = ("legacy_v0", "perp_perp_maker_taker_v1", "perp_perp_maker_taker_v1_1")
 TICKS_JAN = {"bybit": 0.005, "binance": 0.001}
+CFG_EXTRA = json.loads(os.environ.get("BASELINE_CFG_EXTRA", "{}"))          # ArbBacktestConfig overrides for a switch-under-test run of v1.1 (label it; empty = the Phase 0 recipe)
 TICKS_MAR = {"bybit": 0.001, "binance": 0.001}
 FAULTS = (("realistic", 1), ("stressed", 1), ("stressed", 2), ("stressed", 3), ("realistic", 2))        # (preset, seed); the realistic seed is changed in the label notes if nothing fires with seed 1
 MAR_DAYS = ("2024-03-08", "2024-03-11")      # 03-08: v1.1 has 0 signals in its 2 h slice (an empty trade log is weak identity evidence); 03-11: v1.1 trades
@@ -31,7 +32,7 @@ def jobs():
             env = {"EXEC_SNAP": str(LIVE), "EXEC_OUT": str(RUNS / "jan"), "EXEC_TAG": "base"}
             if prof == "perp_perp_maker_taker_v1_1":
                 env.update(QV2_MAKER=json.dumps({"unknown_queue_fit": str(X / f"unknown_queue_fit_for_{day}.json")}),
-                           QV2_CFG=json.dumps({"data_manifest": str(X / "manifest.json")}), QV2_VENUE_TICKS=json.dumps(TICKS_JAN))
+                           QV2_CFG=json.dumps({"data_manifest": str(X / "manifest.json"), **CFG_EXTRA}), QV2_VENUE_TICKS=json.dumps(TICKS_JAN))
             else:
                 env.update(QV2_MAKER="{}", QV2_CFG="{}")
             if prof != "legacy_v0" and day in HM_JAN:
@@ -42,7 +43,7 @@ def jobs():
         t1 = calendar.timegm(time.strptime(MAR_DAY, "%Y-%m-%d")) + 7200 + 1.0
         for prof in PROFILES:
             env = {"QV2_SNAP": str(LIVE), "QV2_RUNS": str(RUNS / "mar"), "QV2_DATA_ROOT": str(X / "slices_mar2024")}
-            cfg = {"max_event_ts": t1}
+            cfg = {"max_event_ts": t1, **CFG_EXTRA}
             mk = {}
             if prof != "legacy_v0":
                 env["QV2_HEDGE_MOVE_FILE"] = HM_MAR

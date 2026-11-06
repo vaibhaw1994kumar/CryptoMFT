@@ -174,6 +174,8 @@ summary = {
             "maker_stats": r.maker_stats, "maker_diagnostics": r.maker_diagnostics,
             **({"label": "REFERENCE_ONLY"} if a.reference else {})},
 }
+if getattr(r, "core_shadow", None):
+    (out / "core_shadow.json").write_text(json.dumps(r.core_shadow, indent=1))
 if getattr(_bt.maker, "cross_log", None):
     (out / "cross_log.json").write_text(json.dumps(_bt.maker.cross_log, indent=1, default=str))        # opposite_cross_confirm_ms: one row per armed / confirmed / dropped cross
 summary["wall_s"] = time.time() - t0

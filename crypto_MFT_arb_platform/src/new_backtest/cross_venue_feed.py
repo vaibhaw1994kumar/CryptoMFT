@@ -147,6 +147,7 @@ class CrossVenueFeed:
                 self.preflight_reports[venue] = run_preflight(
                     root, venue, self.pair, self.start_day, self.end_day,
                     report_only=self._quality_report_only,
+                    require_rules=True,                         # an override covers REJECTED data; it never lets a run go on when quality.py itself cannot be loaded
                     scope=f"{venue}/{self.pair}/{self.start_day}:{self.end_day}",
                 )
 

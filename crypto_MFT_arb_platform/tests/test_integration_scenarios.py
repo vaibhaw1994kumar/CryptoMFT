@@ -472,6 +472,79 @@ class S18OutageBlackholeThenUnwind(Base):
         self.assertPosition(h, 2.0, 0.0)
 
 
+class HedgeOnANonValidBook(Base):
+    """Phase B data check 6: does the hedge path check the book state? TODAY, pinned. enforce_book_state is on. The maker fills 2.0 at 5.0; neither book has been updated since 0.0, so
+    the hedge venue's book is 5 s old (max_book_age_s 0.5: stale) when the hedge arrives at 5.003.
+    WITHOUT the fault layer (faults None) the taker arrival checks the book: it misses (reason book_not_valid) and the legacy instant unwind flattens the maker fill on bybit at once
+    (sell 2.0 @99): net 0, but the hedge never traded, and nothing waited or retried.
+    WITH the fault layer (the fault path returns before that check) the hedge executes on the stale book (sell 2.0 on binance @99). The rule for a hedge refused on a bad book
+    (wait, retry or unwind) is Phase C; this pins the gap."""
+
+    def _run(self, faults):
+        h = Harness(ttl=10.0, faults=faults, cfg_kw={"enforce_book_state": True})
+        h.book(0.0, BYBIT); h.book(0.0, BINANCE); h.send_maker(0.0); h.advance(0.003)
+        h.sell_trade(5.0, BYBIT, volume=2.5)
+        walk(h, [5.003, 5.01, 5.5])
+        return h
+
+    def test_today_without_faults_the_hedge_is_refused_on_a_stale_book_and_the_fill_is_flattened_at_once(self):
+        h = self._run(None)
+        self.assertEqual(dict(h.bt.miss_reasons), {"book_not_valid": 1})
+        self.assertEqual([(r["venue"], r["side"], r["qty"]) for r in h.bt.trade_log if r["taker"]], [(BYBIT, "sell", 2.0)])        # the instant unwind, not a hedge
+        self.assertAlmostEqual(h.bt.inventory.net_base, 0.0, places=9)
+
+    def test_today_with_faults_the_hedge_does_not_look_at_the_book_state(self):
+        h = self._run(fh())
+        self.assertEqual(dict(h.bt.miss_reasons), {})
+        self.assertEqual([(r["venue"], r["side"], r["qty"]) for r in h.bt.trade_log if r["taker"]], [(BINANCE, "sell", 2.0)])      # executed on the 5 s old book
+        self.assertPosition(h, 2.0, -2.0)
+
+
+class S05S18QueryBeforeReplace(Base):
+    """Phase B, v1_2 (HedgeFaultConfig.query_before_replace, OMS03): the two targets S05 and S18 pin as expected failures, with the switch on. A hedge sent into a gateway outage
+    4.0-10.0 gets no answer; at the ack timeout (7.0) the strategy queries instead of replacing. The query is answered unknown_resolve_s (3.0) later and not before the gateway
+    is back (10.0 + 3 ms) and, for a ghost, not before it has landed.
+    GHOST (S05 data, maker fill 1.2 at 5.0): no unwind at 7.0; the ghost executes at 10.003 and the query at 10.004 finds it done: bybit +1.2, binance -1.2, net 0, unwinds 0.
+    BLACKHOLE (S18 data, maker fill 2.0): no unwind at 7.5 (position +2.0 / 0, the 2.0 still reserved); the query at 10.004 finds nothing and the normal ladder runs: one unwind."""
+
+    def _ghost(self):
+        h = Harness(ttl=10.0, faults=fh(outages=(Outage(BINANCE, 4.0, 10.0),), outage_policy="ghost", response="unwind", ack_timeout_s=2.0, unknown_resolve_s=3.0,
+                                        query_before_replace=True), count_pending_exposure=True, count_unknown_exposure=True)
+        h.book(0.0, BYBIT); h.book(0.0, BINANCE); h.send_maker(0.0); h.advance(0.003)
+        mark(h, 0.003)
+        h.sell_trade(5.0, BYBIT, volume=1.7)
+        mark(h, 5.0)
+        walk(h, [5.003, 7.5])
+        return h
+
+    def test_ghost_is_found_executed_by_the_query_and_nothing_is_replaced(self):
+        h = self._ghost()
+        self.assertEqual(h.bt.hedge["unwinds_sent"], 0)
+        self.assertAlmostEqual(h.bt.inventory.net_base, 1.2, places=9)                           # still waiting for the query
+        walk(h, [10.003, 10.01, 10.5])
+        self.assertEqual((h.bt.hedge["unwinds_sent"], h.bt.hedge["query_found_executed"], h.bt.hedge["query_not_found"]), (0, 1, 0))
+        self.assertPosition(h, 1.2, -1.2)
+        self.assertAlmostEqual(h.bt.inventory.net_base, 0.0, places=9)
+
+    def test_blackhole_is_not_unwound_before_the_query_and_is_after_it_finds_nothing(self):
+        h = Harness(ttl=10.0, faults=fh(outages=(Outage(BINANCE, 4.0, 10.0),), outage_policy="blackhole", response="unwind", ack_timeout_s=2.0, unknown_resolve_s=3.0,
+                                        query_before_replace=True))
+        h.book(0.0, BYBIT); h.book(0.0, BINANCE); h.send_maker(0.0); h.advance(0.003)
+        mark(h, 0.003)
+        h.sell_trade(5.0, BYBIT, volume=2.5)
+        mark(h, 5.0)
+        walk(h, [5.003, 6.9, 7.0, 7.003, 7.01, 7.5])
+        self.assertEqual(h.bt.hedge["unwinds_sent"], 0)
+        self.assertPosition(h, 2.0, 0.0)
+        walk(h, [10.003, 10.01, 10.5])
+        self.assertEqual((h.bt.hedge["query_not_found"], h.bt.hedge["unwinds_sent"]), (1, 1))
+        self.assertPosition(h, 0.0, 0.0)
+
+    def test_the_switch_is_off_by_default_and_then_nothing_changes(self):
+        self.assertFalse(fh().query_before_replace)
+        self.assertNotIn("query_before_replace", fh().as_dict())
+
+
 class S19LostAckOnTheHedgeIsResolvedByQueryNotRetry(Base):
     """19. The hedge reaches binance and fills, but its acknowledgement is lost (ack_unknown_prob 1, scope hedge, ack_timeout 2.0, unknown_resolve 3.0, response retry_unwind).
     Maker fill at 5.0; the hedge lands and fills at 5.003: sell 2.0 @99.0 (fee 0.099). The strategy cannot tell: the order is UNKNOWN until 5.003 + 2.0 + 3.0 = 10.003. Requirement

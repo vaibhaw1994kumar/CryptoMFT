@@ -36,7 +36,7 @@ except ImportError:
         QualityGate = QualitySnapshot = QualityThresholds = None  # type: ignore[assignment,misc]
         _QUALITY_SOURCE = "unavailable"
 
-from .event_loader import BOOK, DELTA, delta_fields, iter_venue_events, snapshot_levels
+from .event_loader import BOOK, DELTA, delta_fields, iter_venue_events, snapshot_levels, trade_fields
 
 # ── Detection thresholds ──────────────────────────────────────────────────────
 
@@ -255,6 +255,7 @@ def run_preflight(
     *,
     report_only: bool = True,
     scope: str | None = None,
+    require_rules: bool = False,
 ) -> dict[str, Any]:
     """Run quality preflight for a venue/pair/date range.
 
@@ -266,7 +267,7 @@ def run_preflight(
     with ``{"skipped": True, "reason": "..."}``.
     """
     if QualityGate is None:
-        if not report_only:
+        if require_rules or not report_only:
             # Blocking mode must not silently pass data it could not check.
             raise RuntimeError(
                 "Quality preflight could not run (crypto_stat_arb.quality not importable; "
@@ -330,3 +331,175 @@ def run_preflight(
             f"Quality preflight CRITICAL for {venue}/{pair}/{start_day}: {flags}"
         )
     return report
+
+
+# ── Phase B data checks: observation only (nothing here feeds the gate, the replay or any result used for a byte comparison) ───────────────────────────────────────────────────────
+
+# Every defect type quality.py defines. The preflight report states for each one whether this scan measures it; a defect it does not measure is NOT_MEASURED, never a plain 0.
+_SEQUENCE_KEYS = ("u", "U", "pu", "seq", "last_update_id", "first_update_id", "prev_update_id", "lastUpdateId", "sequence")
+_DELTA_SEMANTICS = {"bybit": "hybrid", "binance": "absolute"}      # as new_backtest.config.make_venues
+_INLINE_LIMITS = {"max_book_age_s": 0.5, "dead_feed_s": 5.0, "max_cross_venue_skew_s": 0.2,
+                  "note": "inline rules judge one moment (the book at that moment); preflight limits judge one day (a count over the day)"}
+
+
+def _defect_table(day_counts: dict, check: dict) -> dict[str, dict]:
+    seq = check["sequence_fields_present"]
+    t = lambda status, count=None, **kw: {"status": status, "count": count, **kw}
+    nm = lambda why: t("NOT_MEASURED", None, reason=why)
+    return {
+        "stale_intervals": t("MEASURED", day_counts.get("stale_intervals"), rule="no book event for more than 30 s, judged at the next snapshot"),
+        "crossed_books": t("MEASURED", day_counts.get("crossed_books"), rule="crossed at a snapshot; the crossed-at-message-end count is in `observation`"),
+        "price_jumps": t("MEASURED", day_counts.get("price_jumps")), "wide_spreads": t("MEASURED", day_counts.get("wide_spreads")),
+        "invalid_levels": t("MEASURED", day_counts.get("invalid_levels")), "silent_feeds": t("MEASURED", day_counts.get("silent_feeds")),
+        "out_of_order": t("MEASURED", check["timestamps_backwards_exchange"] + check["timestamps_backwards_receive"],
+                          rule="a record whose exchange or receive time is below the previous record's, in the loader's merged order"),
+        "invalid_trades": (t("MEASURED", check["invalid_trades"], rule="price or size not finite and positive, side not buy/sell", scanned=check["events"]["trade"])
+                           if check["events"]["trade"] else nm("no trade records for this venue-day")),
+        "gaps": nm("this scan does not read sequence ids" + ("; ids ARE present in these files, the replay checks them inline (apply_sequence)" if seq else
+                                                                "; the files carry no sequence ids, so nothing could be checked")),
+        "duplicates": nm("book-level duplicates need sequence ids; file-level duplicates dropped by the loader are in `loader_duplicates_dropped`"),
+        "negative_latency": nm("clock analysis not performed (the receive-minus-exchange gap is reported in the Phase B timestamp report)"),
+        "impossible_latency": nm("clock analysis not performed"),
+        "schema_exceptions": nm("live-runner defect, not defined for partition files"), "rejected_records": nm("live-runner defect, not defined for partition files"),
+        "rejected_partitions": nm("not defined for partition files"), "unknown_instrument_rules": nm("no instrument master is read by the preflight"),
+        "persistence_lag_ns": nm("live-runner defect"), "unpersisted_bytes": nm("live-runner defect"),
+    }
+
+
+def scan_venue_day_checks(data_root: Path | str, venue: str, pair: str, day: str, *, tick: float | None = None, lot: float | None = None,
+                          max_book_age_s: float = 0.5, dead_feed_s: float = 5.0, gap_limits: tuple[float, ...] = (5.0, 30.0)) -> dict[str, Any]:
+    """One pass over a venue-day (snapshots, deltas and trades in the loader's merged order). Counts, never repairs or drops. The book is the engine's own OrderBook in
+    message-atomic mode, so 'crossed at message end' is the engine's rule: a message is the run of consecutive deltas with one (exchange_ts, receive time)."""
+    import math
+    import time
+
+    from crypto_stat_arb.dataset_manifest import ArrivalChecks
+    from crypto_stat_arb.simulation.order_book import OrderBook
+
+    t0 = time.perf_counter()
+    book = OrderBook(venue, pair, _DELTA_SEMANTICS.get(venue, "hybrid"), tape_repair=False, message_atomic=True)
+    arrival = ArrivalChecks(tick=tick, lot=lot)
+    loader_stats: dict[str, int] = {}
+    ev_n = {"book": 0, "delta": 0, "trade": 0}
+    back_x = back_l = 0
+    prev_x = prev_l = None
+    last_book_t = None
+    gaps = {g: [0, 0.0] for g in gap_limits}
+    stale_s = dead_s = 0.0
+    crossed_msgs = multi_msgs = msgs = 0
+    neg_sizes = bad_price = invalid_trades = 0
+    msg_key = None
+    msg_n = 0
+    seq_seen = False
+
+    def close_message() -> None:
+        nonlocal crossed_msgs, multi_msgs, msgs, msg_key, msg_n
+        before = book.crossed_events
+        book.end_message()
+        crossed_msgs += book.crossed_events - before
+        msgs += 1
+        multi_msgs += msg_n > 1
+        msg_key, msg_n = None, 0
+
+    for ev in iter_venue_events(data_root, venue, pair, day, day, include_trades=True, stats=loader_stats, trade_dedupe="multiset"):
+        if prev_x is not None and ev.exchange_ts < prev_x:
+            back_x += 1
+        prev_x = ev.exchange_ts
+        if ev.local_ts > 0:
+            if prev_l is not None and ev.local_ts < prev_l:
+                back_l += 1
+            prev_l = ev.local_ts
+        t = ev.local_ts if ev.local_ts > 0 else ev.exchange_ts
+        if ev.kind == DELTA:
+            ev_n["delta"] += 1
+            key = (ev.exchange_ts, ev.local_ts)
+            if msg_key is not None and key != msg_key:
+                close_message()
+            msg_key = key
+            msg_n += 1
+            if not seq_seen and ev_n["delta"] <= 200 and any(k in ev.payload for k in _SEQUENCE_KEYS):
+                seq_seen = True
+            side, price, vol, etype = delta_fields(ev.payload)
+            arrival.book_side(side)
+            if price <= 0:
+                bad_price += 1
+            else:
+                arrival.price(price)
+                arrival.size(vol, may_be_zero=True)
+                if vol < 0:
+                    neg_sizes += 1
+                book.apply_delta(side, price, vol, etype, ev.exchange_ts)
+        else:
+            if msg_key is not None:
+                close_message()
+            if ev.kind == BOOK:
+                ev_n["book"] += 1
+                if not seq_seen and any(k in ev.payload for k in _SEQUENCE_KEYS):
+                    seq_seen = True
+                bids, asks = snapshot_levels(ev.payload)
+                for lv in list(bids) + list(asks):
+                    try:
+                        pr, sz = float(lv[0]), float(lv[1])
+                    except (TypeError, ValueError, IndexError):
+                        bad_price += 1
+                        continue
+                    arrival.price(pr)
+                    arrival.size(sz, may_be_zero=True)
+                    neg_sizes += sz < 0
+                book.apply_snapshot([[float(l[0]), max(0.0, float(l[1]))] for l in bids if len(l) >= 2], [[float(l[0]), max(0.0, float(l[1]))] for l in asks if len(l) >= 2], ev.exchange_ts)
+            else:
+                ev_n["trade"] += 1
+                pr, vol, _sign = trade_fields(ev.payload)
+                raw_side = ev.payload.get("side", "")
+                arrival.trade_side(raw_side if isinstance(raw_side, str) else str(raw_side))
+                arrival.price(pr)
+                arrival.size(vol)
+                if not (math.isfinite(pr) and math.isfinite(vol)) or pr <= 0 or vol <= 0 or not str(raw_side).strip():
+                    invalid_trades += 1                  # an unusual side word is counted by the arrival check, not here; only an empty side makes the trade unusable
+        if ev.kind in (BOOK, DELTA):                       # book age: time between consecutive book events
+            if last_book_t is not None and t > last_book_t:
+                g = t - last_book_t
+                stale_s += max(0.0, g - max_book_age_s)
+                dead_s += max(0.0, g - dead_feed_s)
+                for lim in gap_limits:
+                    if g > lim:
+                        gaps[lim][0] += 1
+                        gaps[lim][1] += g
+            last_book_t = t if last_book_t is None else max(last_book_t, t)
+    if msg_key is not None:
+        close_message()
+    return {
+        "venue": venue, "day": day, "events": ev_n, "loader_duplicates_dropped": loader_stats.get("duplicates_dropped", 0),
+        "sequence_fields_present": seq_seen,
+        "timestamps_backwards_exchange": back_x, "timestamps_backwards_receive": back_l, "invalid_trades": int(invalid_trades),
+        "stale_gaps": {f"gt_{g:g}s": {"count": c, "seconds_in_gaps": round(sec, 3)} for g, (c, sec) in gaps.items()},
+        "observation": {
+            "messages": msgs, "multi_delta_messages": multi_msgs, "crossed_books_at_message_end": book.crossed_events,
+            "negative_sizes": int(neg_sizes), "invalid_prices": bad_price,
+            "feed_silent_beyond_dead_feed_s": {"limit_s": dead_feed_s, "count": gaps.get(dead_feed_s, [None])[0], "seconds_beyond_limit": round(dead_s, 3)},
+            "non_valid_book_seconds": {"book_older_than_max_book_age_s": round(stale_s, 3), "max_book_age_s": max_book_age_s,
+                                       "note": "the engine marks a book stale beyond max_book_age_s; a cross at a message end is repaired at once (zero duration); invalid/recovering states need sequence ids"},
+        },
+        "arrival_checks": arrival.report(), "scan_seconds": round(time.perf_counter() - t0, 3),
+    }
+
+
+def data_checks_report(data_root: Path | str, venues: tuple[str, ...], pair: str, days: tuple[str, ...], *, ticks: dict[str, float] | None = None,
+                       lots: dict[str, float] | None = None, thresholds: "QualityThresholds | None" = None) -> dict[str, Any]:
+    """The preflight report with the Phase B additions, per venue-day: the existing preflight counts (unchanged), the new scan, the MEASURED / NOT_MEASURED status of every
+    quality.py defect type, the preflight (per day) limits next to the inline (per moment) limits, and the scan time each part took. Observation only."""
+    import time
+
+    thr = thresholds if thresholds is not None else _default_thresholds()
+    rows = []
+    for venue in venues:
+        for day in days:
+            t0 = time.perf_counter()
+            base = _scan_day(Path(data_root), venue, pair, day, {})
+            base_s = time.perf_counter() - t0
+            chk = scan_venue_day_checks(data_root, venue, pair, day, tick=(ticks or {}).get(venue), lot=(lots or {}).get(venue))
+            rows.append({"venue": venue, "day": day, "preflight_counts": base, "preflight_scan_seconds": round(base_s, 3), "added_scan_seconds": chk["scan_seconds"],
+                         "defects": _defect_table(base, chk), "checks": chk})
+    return {"label": "Phase B data checks, observation only", "pair": pair, "rows": rows, "quality_source": _QUALITY_SOURCE,
+            "preflight_limits_per_day": (None if thr is None else {k: getattr(thr, k) for k in thr.__dataclass_fields__}), "inline_limits_per_moment": _INLINE_LIMITS,
+            "stale_thresholds_s": {"preflight": _STALE_THRESHOLD_S, "engine_dead_feed": _INLINE_LIMITS["dead_feed_s"]}}

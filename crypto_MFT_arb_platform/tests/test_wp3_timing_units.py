@@ -38,6 +38,21 @@ class TimelineTests(unittest.TestCase):
         capped = Timelines(TimingConfig(venues={"v": VenueTimelines(*(TimelineSpec(50.0, 500.0, max_ms=60.0),) * 6)}))
         self.assertTrue(all(capped.sample_ns("v", "feed") <= 60_000_000 for _ in range(200)))
 
+    def test_a_floor_raises_low_draws_only_on_the_named_timelines_and_the_stream_does_not_move(self):
+        base, fl = Timelines(cfg()), Timelines(cfg(floors_ms={"binance": {"entry": 35.0, "cancel": 35.0}}))
+        d0 = [base.sample_s("binance", "entry") * 1e3 for _ in range(400)]
+        d1 = [fl.sample_s("binance", "entry") * 1e3 for _ in range(400)]
+        self.assertTrue(min(d0) < 35.0 <= min(d1))                                   # the unfloored stream does go below 35 ms
+        self.assertEqual(d1, [max(35.0, x) for x in d0])                            # same draws, floored: the stream is not shifted
+        self.assertEqual([base.sample_s("binance", "fill_report") for _ in range(50)], [fl.sample_s("binance", "fill_report") for _ in range(50)])
+        self.assertEqual([base.sample_s("bybit", "entry") for _ in range(50)], [fl.sample_s("bybit", "entry") for _ in range(50)])
+        desc = cfg(floors_ms={"binance": {"entry": 35.0}}).describe()["venues"]["binance"]
+        self.assertEqual(desc["entry"]["min_ms"], 35.0)
+        self.assertEqual(desc["entry"]["source"], "ASSUMED:floor_ms")
+        self.assertNotIn("min_ms", desc["cancel"])                                    # no floor, nothing new in the description (v1.1 unchanged)
+        with self.assertRaises(ValueError):
+            TimelineSpec(10.0, min_ms=-1.0)
+
     def test_validation(self):
         with self.assertRaises(ValueError):
             TimelineSpec(-1.0)

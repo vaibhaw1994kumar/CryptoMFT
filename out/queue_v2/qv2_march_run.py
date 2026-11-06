@@ -28,6 +28,7 @@ ap = argparse.ArgumentParser()
 ap.add_argument("profile", nargs="?", default="perp_perp_maker_taker_v1_1"); ap.add_argument("day")
 ap.add_argument("--reference", action="store_true", help="REFERENCE_ONLY: required to run legacy_v0 or perp_perp_maker_taker_v1 (never for decisions)")
 ap.add_argument("--latency-preset", default="singapore", choices=("singapore", "tokyo"), help="singapore is the run default; tokyo only for a labelled latency sensitivity run (no preset is changed)")
+ap.add_argument("--hedge-move-sensitivity", default=None, help="a labelled SENSITIVITY run: replace the hedge-move file a pinned profile names with this one (hash-checked, TRAIN days only); the profile file is not edited")
 ap.add_argument("--group", required=True); ap.add_argument("--cell", required=True)
 ap.add_argument("--buffer", default="none")
 ap.add_argument("--fee", default="mm", choices=sorted(FEES))
@@ -43,6 +44,12 @@ out = RUNS / a.group / a.cell / a.day
 out.mkdir(parents=True, exist_ok=True)
 
 doc = load_profile(SNAP / "profiles" / f"{a.profile}.yaml")
+if a.hedge_move_sensitivity:
+    import hashlib as _hl
+    _sf = Path(a.hedge_move_sensitivity); _sf = _sf if _sf.is_absolute() else SNAP / _sf
+    if not doc.get("hedge_move_calibration"):
+        raise SystemExit("--hedge-move-sensitivity replaces the file a profile PINS; this profile pins none")
+    doc["hedge_move_calibration"] = {"file": str(_sf), "sha256": _hl.sha256(_sf.read_bytes()).hexdigest()}
 doc["latency_preset"] = a.latency_preset
 if isinstance(doc.get("timing"), dict):
     doc["timing"]["from_latency_preset"] = a.latency_preset
@@ -166,8 +173,11 @@ summary = {
             "markout_summary": r.markout_summary, "markout_by_venue_role": getattr(r, "markout_by_venue_role", None), "maker_observations": r.maker_observations,
             "data_manifest": r.data_manifest, "maker_stats": r.maker_stats, "maker_diagnostics": r.maker_diagnostics,
             "queue_updates": dict(getattr(_bt.maker, "queue_updates", {})),
-            **({"label": "REFERENCE_ONLY"} if a.reference else {}), **({"latency_label": "LATENCY_SENSITIVITY"} if a.latency_preset != "singapore" else {})},
+            **({"label": "REFERENCE_ONLY"} if a.reference else {}), **({"latency_label": "LATENCY_SENSITIVITY"} if a.latency_preset != "singapore" else {}),
+            **({"hedge_move_label": "SENSITIVITY", "hedge_move_file": a.hedge_move_sensitivity} if a.hedge_move_sensitivity else {})},
 }
+if getattr(r, "core_shadow", None):
+    (out / "core_shadow.json").write_text(json.dumps(r.core_shadow, indent=1))
 if getattr(_bt.maker, "cross_log", None):
     (out / "cross_log.json").write_text(json.dumps(_bt.maker.cross_log, indent=1, default=str))
 summary["wall_s"] = time.time() - t0

@@ -1,21 +1,24 @@
 # perp_perp_maker_taker_v1_2 = perp_perp_maker_taker_v1_1 (kept byte-identical as the control) + ONE switch (owner decision, Phase B0, 5 Nov 2026):
 #   arb.join_touch_on_tick_rounding: a quote that was inside the spread before tick rounding and lands ON the touch once rounded joins the back of that level's queue (full displayed size ahead)
 #   if the edge recomputed at the rounded price still passes, instead of being refused. v1.1 refuses it (tick_rounding_no_improve). Results depend on the fees, which stay ASSUMED.
-# Everything below is v1.1 unchanged except `name`, `description` and that one key.
+# Owner 6 Nov: (1) the hedge move pin is the 7-day 45 ms arrival estimate (hedge_move_calibration below); (2) timing.floors_ms: min 35 ms on the Binance entry and cancel timelines, ASSUMED; (3) message_atomic_book: true; (4) margin.above_last_tier: breach (A9); (5) hedge_faults.query_before_replace: true (OMS03).
+# Everything below is v1.1 unchanged except `name`, `description`, that one key, the pinned hedge move and the run-defining keys added in B0.
 # perp_perp_maker_taker_v1_1 = perp_perp_maker_taker_v1 (kept frozen as the reference) + the audit's integrity ladder (L3 audit decisions, 2026-11-04).
 # Seven cumulative switches, in this order, each measured in v1_1_switch_ladder_report.html; everything else is byte-for-byte v1.
 #   1 data manifest gate + truncation count (applied by the runner: --data-manifest; the path is not a profile key)   2 trade_dedupe: multiset
 #   3 maker.ledger_epoch   4 own_impact: overlay   5 book_tape_repair: false   6 fitted unknown queue (floor 0, flagged fallback 25)
+message_atomic_book: true            # v1_2 (owner Phase B): the deltas of one exchange message (same venue, exchange_ts, receive time) are one unit: a cross inside it is not repaired, the strategy, touch and maker queue updates run after the whole message. v1.1: false
 #   7 evidence-required fills (vanish_clears_queue: false, fill_evidence: trade_confirm)   8 maker.opposite_cross_confirm_ms: 500 (cross fills need a reaching print within +-500 ms; 2026-11-04 owner step).
 # Step 9 (owner, 2026-11-04, after the review of the step-8 reports): five corrections, each an opt-in switch, all on here:
 #   9a arb.expected_hedge_move_bps_{bid,ask} are estimated from MARKET DATA only (Binance mid move 0-1 s after each Bybit print on our side, TRAIN days; new_backtest/market_hedge_move.py), never from
 #      simulated fills (the runner supplies the number; the profile alone carries 0)   9b arb.round_quotes_to_tick (bids down, asks up; the runner declares the venue ticks)
 #   9c maker.opposite_cross_cap_to_print: a confirmed cross fills at most the reaching prints' volume, each print spent once   9d arb.maker_venues is NOT set here (a data-dependent choice: the March runner
 #      sets ["bybit"] because Binance March-2024 has no depth)   9e hedge_arrival_book: truth (the hedge executes on the venue-truth book at its arrival, for every dataset).
-hedge_move_calibration:                  # PINNED (B0.2, owner 5 Nov): the expected hedge move is the PROBE estimate on TRAIN days 03-01..03-03 (bid only: the probe quotes a bid; the ask value is the market-data one, unused while maker_passive_side is bid)
-  file: config/hedge_move_probe_mar2024_train_0301_0303.json
-  sha256: c267f0b23f81d26debe1606bd4fc480d31fd1d360792f720007904495f6296fd
-  # the probe window starts at the simulated fill and is 1 s, NOT the hedge arrival time; it is the move after OUR kind of fill, estimated on the simulator's own fills (EXPLORATORY)
+hedge_move_calibration:                  # PINNED (owner 6 Nov, replaces the B0.2 pin): the PROBE estimate on the 7 TRAIN days 03-01..03-07, Binance mid move from the fill to a FIXED 45 ms after it = -0.488 bps (bid only: the probe quotes a bid; the ask value is the market-data one, unused while maker_passive_side is bid)
+  file: config/hedge_move_arrival45ms_mar2024_train_0301_0307_v1.json
+  sha256: c369b1b97af87dd7cecf146cce0583361be0d026a1d6dc6e3fed0d32506e8de7
+  # an ARRIVAL ESTIMATE: the 45 ms is an ASSUMED hedge arrival delay (the singapore preset gives about 31-52 ms), NOT measured on mainnet. The probe slices cover 00:00-02:00 UTC of each day only. Estimated on the simulator's own probe fills (EXPLORATORY).
+  # The earlier pins stay on disk: 1 s window, 03-01..03 (-0.771, config/hedge_move_probe_mar2024_train_0301_0303.json); 7-day 130 ms sensitivity value -0.862 (to be run at the Phase B freeze).
 # Queue parameters remain a SPOT PRIOR, perp-unvalidated (decision E), and say so in every result.
 # perp_perp_maker_taker_v1 — passive leg on one USDT-perp venue, taker hedge on the other, dispatched on the maker fill.
 # Every switch is classified (see src/new_backtest/profiles.py SWITCHES): MANDATORY controls cannot be disabled here; CALIBRATED
@@ -32,7 +35,7 @@ decision_status:                         # carried into every result's release_i
   unwind_max_attempts: DECISION_PENDING_CALIBRATION
   p_fail: PLACEHOLDER_NOT_MEASURED
   queue_parameters: SPOT_PRIOR_PERP_UNVALIDATED   # decision E: calibrated on Bybit SPOT orders, never validated on the perp target
-  hedge_move: PROBE_ESTIMATE_PINNED_BY_SHA256_EXPLORATORY
+  hedge_move: PROBE_ARRIVAL_ESTIMATE_45MS_PINNED_BY_SHA256_EXPLORATORY
   data_manifest: REQUIRED_AT_RUN                  # ladder step 1: the runner supplies the manifest path; a truncated day needs a written reason
   unknown_queue_fit: PER_DAY_FILE_FROM_STRICTLY_EARLIER_DAYS   # ladder step 6: the runner supplies the day's fit; the profile alone cannot run a fitted queue
 product_fee_consistency: true            # MANDATORY: fee presets must be perp presets
@@ -106,6 +109,9 @@ maker:
 timing:                                  # WP3; numbers ASSUMED from the latency preset until calibrated
   from_latency_preset: singapore         # same preset as latency_preset (owner decision 2026-11-02)
   equal_time_policy: market_first
+  floors_ms:                             # ASSUMED (owner 6 Nov): a floor of 35 ms on the Binance entry and cancel timelines, the cross-region venue of the singapore preset (host near Bybit, Binance in Tokyo); draws below it are raised to it. Not measured. No decision time is added. A preset other than singapore gets no floor.
+    singapore:
+      binance: {entry: 35.0, cancel: 35.0}
   dead_feed_s: 5.0                       # MANDATORY
   truth_books: true                      # MANDATORY
   clock:
@@ -125,6 +131,7 @@ breaker:                                 # MANDATORY — DECISION_PENDING_CALIBR
 # Reset is MANUAL ONLY: nothing in the simulator or the strategy clears a tripped breaker (bt.reset_breaker() is an operator action).
 hedge_faults:                            # the response policy (recovery), not injected faults
   response: retry_unwind                 # MANDATORY (not the legacy oracle)
+  query_before_replace: true             # OMS03 (v1_2, Phase B): a hedge that gets no answer in an outage is queried before any retry or unwind is sent (the query waits for the gateway and for a ghost to land). v1.1: false
   max_retries: 2
   retry_backoff_s: 0.25
   entry_guard: true
@@ -134,6 +141,7 @@ hedge_faults:                            # the response policy (recovery), not i
 margin:                                  # MANDATORY in a perp profile; tiers ASSUMED, prefunded capital per venue
   check_every_s: 1.0
   flatten_other_venue: true
+  above_last_tier: breach                # A9 (owner Phase B, the core rule wins): a position above the venue's last tier is a margin breach (POSITION_ABOVE_RISK_LIMIT, fail closed). v1.1: ignore
   venues:
     bybit:
       initial_capital: 1000.0

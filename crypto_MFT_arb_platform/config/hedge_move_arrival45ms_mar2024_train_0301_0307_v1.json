@@ -1,0 +1,75 @@
+{
+ "label": "hedge move ARRIVAL ESTIMATE from the PROBE at a FIXED 45 ms delay from the fill, 7 TRAIN days (owner decision 6 Nov 2026, v1_2 only); EXPLORATORY",
+ "version": "v1",
+ "method": "PROBE: one 1 SOL Bybit bid per 15 s slot at the strategy's quote depth (qv2_probe.py, v1.1 fill rules, 00:00-02:00 UTC slice of each day); bid = the Binance mid move (bps) from each simulated probe fill to fill + 45 ms, mean over all fills. The 45 ms is an ASSUMED hedge arrival delay (the singapore preset gives about 31-52 ms for a hedge), NOT measured on mainnet. The probe is bid-only: the ask value is the market-data value, carried over unchanged and unused while maker_passive_side is bid",
+ "pair": "SOLUSDT",
+ "maker_venue": "bybit",
+ "hedge_venue": "binance",
+ "horizon_s": 0.045,
+ "window": "fixed delay from the fill, ASSUMED arrival estimate",
+ "days": [
+  "2024-03-01",
+  "2024-03-02",
+  "2024-03-03",
+  "2024-03-04",
+  "2024-03-05",
+  "2024-03-06",
+  "2024-03-07"
+ ],
+ "expected_hedge_move_bps": {
+  "bid": -0.48796848488618055,
+  "ask": -0.14602462230064214
+ },
+ "stats": {
+  "bid": {
+   "n": 2037,
+   "mean_bps": -0.48796848488618055,
+   "stdev_bps": 1.2581096116254096,
+   "se_bps": 0.027875519238835317,
+   "se_day_block_bps": 0.09903244168094798,
+   "day_means_bps": {
+    "2024-03-01": -0.31139832582599447,
+    "2024-03-02": -0.32885366404305055,
+    "2024-03-03": -0.2762057999301165,
+    "2024-03-04": -0.5010276098113685,
+    "2024-03-05": -0.5823814321879948,
+    "2024-03-06": -1.0264103809843625,
+    "2024-03-07": -0.38034974539092037
+   },
+   "fills_per_day": {
+    "2024-03-01": 319,
+    "2024-03-02": 329,
+    "2024-03-03": 186,
+    "2024-03-04": 314,
+    "2024-03-05": 198,
+    "2024-03-06": 309,
+    "2024-03-07": 382
+   },
+   "note": "se_bps treats fills as independent and understates; read se_day_block_bps (7 day blocks)"
+  },
+  "ask": {
+   "n": 2450680,
+   "mean_bps": -0.14602462230064214,
+   "median_bps": -0.2,
+   "stdev_bps": 9.04859545095153,
+   "se_bps": 0.005780133494454293
+  }
+ },
+ "provenance": {
+  "probe_results": "out/integration/b0/probe_train7/2024-03-0{1..7}.json",
+  "summary": "out/integration/b0/probe_train7/summary_7days.json",
+  "summary_sha256": "798b685800dc792e22e1208ffeb50c831b57176be0a9093b4ed03df0009ee930",
+  "ask_from": "queue_v2/hedge_move/mar_train_2024-03-01_07.json",
+  "probe_code": "out/queue_v2/qv2_probe.py (unchanged), live tree after Phase B0",
+  "delay_analysis": "offline from the probe fills and the Binance L1 series (session script b0f_probe7.py)",
+  "other_windows_bps": {
+   "1s": -1.1050887194026586,
+   "30ms": -0.21791289334325115,
+   "45ms": -0.48796848488618055,
+   "60ms": -0.6202564612388967,
+   "100ms": -0.8001354057290306,
+   "130ms": -0.862259428466872,
+   "200ms": -0.9107082278185437
+  }
+ }
+}

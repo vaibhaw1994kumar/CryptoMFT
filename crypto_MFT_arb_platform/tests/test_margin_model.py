@@ -50,6 +50,40 @@ class ModelUnitTests(unittest.TestCase):
             MarginModel(margin_cfg(transfers=TransferModelConfig(routes=(TransferRoute(BINANCE, BYBIT, delay_s=5.0),), low_watermark=5.0, target=2.0)), (BYBIT, BINANCE))
 
 
+class AboveLastTier(unittest.TestCase):
+    """A9 (Phase B): a position above the venue's last tier. 'ignore' (v1, v1.1) never liquidates it; 'breach' (v1_2, the core rule POSITION_ABOVE_RISK_LIMIT) treats it as a breach."""
+    def _step(self, mode):
+        cfg = margin_cfg(bybit_capital=100_000.0, binance_capital=100_000.0)                  # ample equity: only the tier rule can breach
+        cfg = MarginModelConfig(venues=cfg.venues, check_every_s=1.0, gate_new_signals=False, above_last_tier=mode)
+        h = Harness(cfg_kw={"margin": cfg})
+        h.book(1.0, BYBIT)
+        h.book(1.0, BINANCE)
+        h.bt.inventory.base[BYBIT] = 120.0                                                    # 120 x 100 mid = 12,000 > the last tier (10,000)
+        return h.bt.margin_model, h.bt.margin_model.step(10.0, h.bt.inventory, h.bt.books), h
+
+    def test_ignore_never_liquidates_and_breach_does(self):
+        m, out, _ = self._step("ignore")
+        self.assertEqual(out, [])
+        self.assertNotIn("above_last_tier_breaches", m.stats)
+        m, out, _ = self._step("breach")
+        self.assertEqual([(v, side, qty) for v, side, qty, _ in out][0], (BYBIT, "sell", 120.0))
+        self.assertEqual(m.stats["above_last_tier_breaches"], 1)
+        self.assertEqual(m.events[-1]["type"], "liquidation")
+
+    def test_a_position_inside_the_tiers_is_unaffected_by_the_setting(self):
+        for mode in ("ignore", "breach"):
+            cfg = margin_cfg(bybit_capital=100_000.0, binance_capital=100_000.0)
+            h = Harness(cfg_kw={"margin": MarginModelConfig(venues=cfg.venues, check_every_s=1.0, gate_new_signals=False, above_last_tier=mode)})
+            h.book(1.0, BYBIT)
+            h.book(1.0, BINANCE)
+            h.bt.inventory.base[BYBIT] = 20.0                                                 # 2,000: inside tier 2
+            self.assertEqual(h.bt.margin_model.step(10.0, h.bt.inventory, h.bt.books), [])
+
+    def test_the_setting_is_validated(self):
+        with self.assertRaises(ValueError):
+            MarginModelConfig(venues=margin_cfg().venues, above_last_tier="liquidate")
+
+
 class GateTests(unittest.TestCase):
     def _sig(self, h, qty=2.0):
         from new_backtest.arb_strategy import ArbLeg, ArbSignal

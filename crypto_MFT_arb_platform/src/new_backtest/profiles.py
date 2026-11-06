@@ -70,6 +70,7 @@ SWITCHES: tuple[Switch, ...] = (
     Switch("maker.opposite_cross_confirm_ms", "CALIBRATED", note="0 (off) in v1; v1.1 step 8 sets 500: a cross fills only with a reaching print on the same venue within +-500 ms, else it is dropped (EXPLORATORY window)"),
     Switch("maker.opposite_cross_cap_to_print", "CALIBRATED", note="False in v1; v1.1 step 9c sets True: a confirmed cross fills at most the reaching prints' unused volume (EXPLORATORY)"),
     Switch("arb.round_quotes_to_tick", "LEGACY_COMPAT", note="False in v1 (off-grid quotes); v1.1 step 9b sets True: bids round down, asks up, onto the declared venue tick"),
+    Switch("message_atomic_book", "LEGACY_COMPAT", note="False in v1 / v1.1 (each delta is applied, repaired and evaluated on its own); v1.2 sets True: the deltas of one exchange message are one unit (cross judged at the message end; strategy, touch and maker queue updates run after the whole message)"),
     Switch("arb.join_touch_on_tick_rounding", "LEGACY_COMPAT", note="False in v1 / v1.1 (a quote rounded onto the touch is refused); v1.2 sets True: it joins the back of the touch queue if the edge at the rounded price passes"),
     Switch("hedge_arrival_book", "LEGACY_COMPAT", note="view in v1 (default); v1.1 step 9e sets truth: hedge IOCs execute on the venue-truth book at arrival"),
     Switch("arb.net_ceiling_multiple", "MANDATORY", note="1.0 in the perp profile — DECISION_PENDING (1x vs fill headroom)"),
@@ -181,7 +182,8 @@ def apply_profile(doc: dict, **overrides):
         clock = t.pop("clock", None)
         if clock:
             t["clock"] = ClockConfig(**clock)
-        cfg_kw["timing"] = TimingConfig.from_latency_preset(LATENCY_PRESETS[preset], **t)
+        floors = (t.pop("floors_ms", None) or {}).get(preset)        # ASSUMED floors per preset: they name the cross-region venue of THAT preset, so another preset gets none
+        cfg_kw["timing"] = TimingConfig.from_latency_preset(LATENCY_PRESETS[preset], floors_ms=floors, **t)
     b = doc.get("breaker")
     if b:
         cfg_kw["circuit_breaker"] = CircuitBreakerConfig(**b)
@@ -334,6 +336,19 @@ def resolve_calibration(doc: dict, cal: dict) -> Path:
     return path
 
 
+def _git_state(repo: Path) -> dict:
+    """Phase B freeze: the commit a repository is at and whether tracked files differ from it (untracked files are not counted). Never raises: a repository that cannot be read says so."""
+    import subprocess
+
+    def run(*a: str) -> str:
+        return subprocess.run(["git", "-C", str(repo), *a], capture_output=True, text=True, timeout=20, check=True).stdout.strip()
+    try:
+        dirty = [ln for ln in run("status", "--porcelain", "--untracked-files=no").splitlines() if ln.strip()]
+        return {"repo": str(repo), "branch": run("rev-parse", "--abbrev-ref", "HEAD"), "commit": run("rev-parse", "HEAD"), "dirty": bool(dirty), "tracked_files_changed": len(dirty)}
+    except Exception as e:  # pragma: no cover - depends on the checkout
+        return {"repo": str(repo), "error": type(e).__name__}
+
+
 def release_identity(cfg, doc: dict | None = None) -> dict:
     root = ENGINE_DIR.parents[2]
     fee_snapshot = hashlib.sha256(json.dumps({k: (v.maker_bps, v.taker_bps) for k, v in sorted(FEE_PRESETS.items())}).encode()).hexdigest()
@@ -362,6 +377,7 @@ def release_identity(cfg, doc: dict | None = None) -> dict:
             "fee_snapshot_sha256": fee_snapshot, "fee_presets": {"bybit": cfg.bybit_fee_preset, "binance": cfg.binance_fee_preset},
             "instrument_master_sha256": _sha_files(cm_files) if cm_files else None,
             "calibration_file": str(calib) if calib.exists() else None, "calibration_cutoff": cutoff, "calibration": calib_info,
+            "git": {"outer": _git_state(root), "core": _git_state(CORE_DIR)},
             "seed": cfg.seed, "latency_preset": cfg.latency_preset,
             "execution": ({"config": cfg.execution.as_dict(), "config_sha256": cfg.execution.sha256()} if getattr(cfg, "execution", None) is not None else None)}
 
