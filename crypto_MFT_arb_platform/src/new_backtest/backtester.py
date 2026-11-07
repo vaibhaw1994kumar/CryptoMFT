@@ -441,6 +441,8 @@ _SAME_STAMP_S = 1e-6        # message-atomic mode: receive stamps closer than th
 class CrossVenueArbBacktester:
     def __init__(self, config: ArbBacktestConfig) -> None:
         self.config = config
+        from .profiles import require_core_accounting
+        require_core_accounting(config)                    # B2 step 8: a working profile (v1_4 and later) never runs on an old accounting module
         if config.maker.fill_through_prints and not config.maker.through_print_volume_limited:
             raise ValueError("fill_through_prints without through_print_volume_limited is refused at startup (owner 6 Nov): the full version fills the whole order on any print through its price, "
                              "whatever the print's size; set through_print_volume_limited as well, or leave fill_through_prints off")

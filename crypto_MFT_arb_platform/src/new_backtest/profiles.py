@@ -33,6 +33,39 @@ class ProfileError(ValueError):
     pass
 
 
+# B2 step 8 (owner, 7 Nov 2026): these profiles keep the old accounting modules (funding_settler, margin_model, the fee presets, the backtester's own equity books)
+# so their results reproduce byte for byte. Every other profile, v1_4 and every later version, uses only the core accounting.
+REFERENCE_PROFILES = frozenset({"legacy_v0", "perp_perp_maker_taker_v1", "perp_perp_maker_taker_v1_1", "perp_perp_maker_taker_v1_2", "perp_perp_maker_taker_v1_3",
+                                "spot_perp_basis_v1", "spot_spot_maker_taker_v1"})
+CONTROL_PROFILES = frozenset({"perp_perp_maker_taker_v1_1"})          # a reference profile that is the CONTROL of the working comparisons
+CORE_ACCOUNTING = {"fee_source": "core", "funding_source": "core", "margin_source": "core", "ledger_source": "core"}
+
+
+def profile_status(name: str | None) -> str:
+    """CONTROL (v1.1), REFERENCE_ONLY (the other reference profiles) or WORKING (everything else: core accounting only)."""
+    if name in CONTROL_PROFILES:
+        return "CONTROL"
+    return "REFERENCE_ONLY" if name in REFERENCE_PROFILES else "WORKING"
+
+
+def profile_label(name: str | None) -> str:
+    """The profile name as every runner prints it: reference profiles carry their status, a working profile is printed as it is."""
+    st = profile_status(name)
+    return f"{name} [{st}]" if st != "WORKING" else str(name)
+
+
+def require_core_accounting(cfg, name: str | None = None) -> None:
+    """Refuse a non-reference profile (WORKING) that would call an old accounting module: fee presets, funding_settler, margin_model, the backtester's equity books.
+    Called at profile load (apply_profile) and again when the backtester starts, so an override or a later edit of the config is caught too."""
+    name = name or (getattr(cfg, "release_identity", None) or {}).get("profile")
+    if name is None or profile_status(name) != "WORKING":
+        return
+    bad = {k: getattr(cfg, k, None) for k, want in CORE_ACCOUNTING.items() if getattr(cfg, k, None) != want}
+    if bad:
+        raise ProfileError(f"profile {name} is a working profile and uses only the core accounting; {bad} would call an old accounting module "
+                           f"(the old modules are for the reference profiles {sorted(REFERENCE_PROFILES)} only, they move to discarded/ in Phase F)")
+
+
 @dataclass(frozen=True)
 class Switch:
     key: str                  # dotted path into the profile document (and into ArbBacktestConfig unless `target` says otherwise)
@@ -238,6 +271,7 @@ def apply_profile(doc: dict, dataset: str | None = None, **overrides):
     hm = doc.get("hedge_move_calibration")
     if hm:
         cfg.arb.expected_hedge_move_bps_bid, cfg.arb.expected_hedge_move_bps_ask, hm_info = load_hedge_move_calibration(doc, hm, cfg.start_date)
+    require_core_accounting(cfg, doc.get("name"))
     cfg.release_identity = release_identity(cfg, doc)
     if ds_applied:
         cfg.release_identity["dataset_settings"] = ds_applied
@@ -394,7 +428,7 @@ def release_identity(cfg, doc: dict | None = None) -> dict:
             cutoff = (c.get("meta") or {}).get("generated_utc")      # the calibration post-dates the Jan-2022 replay data
         except Exception:  # pragma: no cover
             cutoff = "unreadable"
-    return {"profile": (doc or {}).get("name"), "profile_sha256": (doc or {}).get("_sha256"), "profile_path": (doc or {}).get("_path"),
+    return {"profile": (doc or {}).get("name"), "profile_status": profile_status((doc or {}).get("name")) if doc else None, "profile_sha256": (doc or {}).get("_sha256"), "profile_path": (doc or {}).get("_path"),
             "decision_status": (doc or {}).get("decision_status"),
             "code": code_hash(),
             "data": data_manifest_hash(cfg.data_root, cfg.pair, cfg.venues, cfg.start_date, cfg.end_date),

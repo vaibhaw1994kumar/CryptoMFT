@@ -112,11 +112,11 @@ class ReleaseIdentityTests(unittest.TestCase):
         json.dumps(a)                                                          # serialisable into results
 
     def test_identity_travels_into_the_result(self):
-        h = Harness(cfg_kw={"release_identity": {"profile": "test", "profile_sha256": "x" * 64}})
+        h = Harness(cfg_kw={"release_identity": {"profile": "perp_perp_maker_taker_v1_1", "profile_sha256": "x" * 64}})
         h.book(0.5, BYBIT); h.book(0.5, BINANCE)
         from types import SimpleNamespace
         r = h.bt._build_result(SimpleNamespace(report=lambda: {}), {}, 0.0)
-        self.assertEqual(r.release_identity["profile"], "test")
+        self.assertEqual(r.release_identity["profile"], "perp_perp_maker_taker_v1_1")
         self.assertEqual(r.product_by_venue, {BYBIT: "perp", BINANCE: "perp"})
         self.assertEqual(r.strategy_validation_label, "")
 

@@ -72,6 +72,8 @@ Key docs: `docs/strategy_contract.md` (the strategy rules), `docs/economic_ledge
 - `profiles/perp_perp_maker_taker_v1.yaml` is FROZEN as a reference.
 - `profiles/perp_perp_maker_taker_v1_2.yaml` is FROZEN (owner, 7 Nov 2026) as the simulator-correct baseline, strategy unchanged; its identity is in `profiles/perp_perp_maker_taker_v1_2.freeze.json` and a test pins its sha256. Do not edit it. New work goes on `perp_perp_maker_taker_v1_3.yaml` (S0, quote repricing), designed first and built only after the owner approves the design. `perp_perp_maker_taker_v1_1.yaml` stays as the control.
 - `legacy_v0` must stay byte-identical. Do not change its defaults.
+- Reference profiles (owner, 7 Nov 2026): `legacy_v0`, `v1`, `v1_1` (the CONTROL), `v1_2` (frozen), `v1_3`, `spot_perp_basis_v1`, `spot_spot_maker_taker_v1`. They keep the old accounting modules (`funding_settler`, `margin_model`, fee presets, `valuation.py`'s accounting role) so results reproduce byte for byte, and runners print them as REFERENCE_ONLY (v1.1: CONTROL). The old modules move to `discarded/` in Phase F.
+- Working profile: `perp_perp_maker_taker_v1_4` and every later version use only the core accounting (`fee_source`, `funding_source`, `margin_source`, `ledger_source` all `core`). A non-reference profile that would call an old accounting module is refused at startup. S0 (repricing) is measured inside v1_4, on vs off.
 - Current run path: `out/queue_v2/qv2_march_run.py`, started by the pool scripts there. This is temporary; the plan is to merge the runners into `batch_backtest.py`.
 - There is no working walk-forward yet. `run_sol_wf.py` is retired, in `discarded/v1.0/`.
 - Latest status: the newest `execution_layer_progress_report.html` and `v1_1_fix_ladder_report.html`.

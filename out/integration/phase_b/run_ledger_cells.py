@@ -11,9 +11,9 @@ from pathlib import Path
 ROOT = Path("/Users/vaibhav/Documents/Newproject")
 LIVE = ROOT / "crypto_MFT_arb_platform"
 X = ROOT / "out" / "queue_v2"
-OUT = ROOT / "out" / "integration" / "phase_b" / "ledger"
+OUT = Path(os.environ["LEDGER_OUT"]) if os.environ.get("LEDGER_OUT") else ROOT / "out" / "integration" / "phase_b" / "ledger"      # LEDGER_OUT / LEDGER_DAYS: an identity re-run into another folder / on fewer days
 n, dataset, cells = int(sys.argv[1]), sys.argv[2], sys.argv[3:]
-MAR_DAYS = ("2024-03-08", "2024-03-09", "2024-03-10", "2024-03-11")
+MAR_DAYS = tuple(os.environ["LEDGER_DAYS"].split(",")) if os.environ.get("LEDGER_DAYS") else ("2024-03-08", "2024-03-09", "2024-03-10", "2024-03-11")
 JAN_DAY = "2022-01-13"
 REASON_MAR = ("exploratory: 2-hour slice; Binance March-2024 has bookTicker (L1) only (manifest EMPTY); funding not settled; makers judged against the tape of the venue they rest on")
 REASON_JAN = "exploratory: Binance trade tape truncated at ~17 h on 2022-01-05 and 2022-01-13 (queue_v2 manifest); each maker order is judged against the tape of the venue it rests on"

@@ -319,7 +319,7 @@ class FeesFromTheCore(unittest.TestCase):
         from unittest import mock
         import new_backtest.config as C
         from new_backtest.backtester import CrossVenueArbBacktester
-        cfg = self._cfg(funding_source="settler")                      # (v1_4 also sets funding_source core, which needs a rate directory: not what this test is about)
+        cfg = self._cfg()
         cfg.allow_manifest_gap = "test"
         nonsense = {k: C.FeeSpec(maker_bps=99.0, taker_bps=99.0) for k in C.FEE_PRESETS}
         with mock.patch.dict(C.FEE_PRESETS, nonsense):
@@ -671,12 +671,109 @@ class LedgerFromTheCore(unittest.TestCase):
 
     def test_ledger_core_needs_margin_and_core_funding(self):
         from new_backtest.backtester import CrossVenueArbBacktester
-        from new_backtest.profiles import apply_profile, load_profile
-        cfg = apply_profile(load_profile("perp_perp_maker_taker_v1_4"), dataset="mar2024", data_root="/nonexistent", pair="SOLUSDT", start_date="2024-03-08", end_date="2024-03-08", output_dir="/tmp/x_led",
-                            funding_rate_dir="/tmp", funding_source="settler")
+        from new_backtest.profiles import ProfileError, apply_profile, load_profile
+        doc = load_profile("perp_perp_maker_taker_v1_4")
+        kw = dict(dataset="mar2024", data_root="/nonexistent", pair="SOLUSDT", start_date="2024-03-08", end_date="2024-03-08", output_dir="/tmp/x_led", funding_rate_dir="/tmp")
+        with self.assertRaises(ProfileError):                                   # the working profile refuses the old settler at load
+            apply_profile(doc, funding_source="settler", **kw)
+        cfg = apply_profile(doc, **kw)
         cfg.allow_manifest_gap = "test"
+        cfg.funding_source, cfg.release_identity = "settler", None             # a config with no profile name: the backtester's own consistency check
         with self.assertRaises(ValueError):
             CrossVenueArbBacktester(cfg)
+
+
+class WorkingProfilesUseOnlyTheCore(unittest.TestCase):
+    """B2 step 8 (owner 7 Nov 2026): reference profiles keep the old accounting modules, every other profile (v1_4 and later) is refused at startup if it would call one."""
+
+    REFERENCE = ("legacy_v0", "perp_perp_maker_taker_v1", "perp_perp_maker_taker_v1_1", "perp_perp_maker_taker_v1_2", "perp_perp_maker_taker_v1_3", "spot_perp_basis_v1", "spot_spot_maker_taker_v1")
+    OLD = {"fee_source": "presets", "funding_source": "settler", "margin_source": "model", "ledger_source": "backtester"}
+    KW = dict(dataset="mar2024", data_root="/nonexistent", pair="SOLUSDT", start_date="2024-03-08", end_date="2024-03-08", output_dir="/tmp/x_step8")
+
+    def _doc(self, name="perp_perp_maker_taker_v1_4"):
+        from new_backtest.profiles import load_profile
+        return load_profile(name)
+
+    def test_the_registry_names_the_seven_reference_profiles_and_v1_1_is_the_control(self):
+        from new_backtest.profiles import profile_label, profile_status
+        for n in self.REFERENCE:
+            self.assertEqual(profile_status(n), "CONTROL" if n == "perp_perp_maker_taker_v1_1" else "REFERENCE_ONLY", n)
+        for n in ("perp_perp_maker_taker_v1_4", "perp_perp_maker_taker_v1_5", "anything_new"):
+            self.assertEqual(profile_status(n), "WORKING", n)
+        self.assertEqual(profile_label("perp_perp_maker_taker_v1_2"), "perp_perp_maker_taker_v1_2 [REFERENCE_ONLY]")
+        self.assertEqual(profile_label("perp_perp_maker_taker_v1_1"), "perp_perp_maker_taker_v1_1 [CONTROL]")
+        self.assertEqual(profile_label("perp_perp_maker_taker_v1_4"), "perp_perp_maker_taker_v1_4")
+
+    def test_every_profile_file_is_a_registered_reference_or_runs_only_on_the_core(self):
+        from new_backtest.profiles import PROFILES_DIR, apply_profile, load_profile, profile_status
+        names = sorted(p.stem for p in PROFILES_DIR.glob("*.yaml"))
+        self.assertTrue(set(self.REFERENCE) <= set(names), "a reference profile file is missing")
+        for n in names:
+            cfg = apply_profile(load_profile(n), **self.KW)
+            if profile_status(n) == "WORKING":
+                self.assertEqual({k: getattr(cfg, k) for k in self.OLD}, {k: "core" for k in self.OLD}, n)
+            else:
+                self.assertEqual({k: getattr(cfg, k) for k in self.OLD}, self.OLD, f"{n}: a reference profile must reproduce byte for byte, on the old modules")
+            self.assertEqual(cfg.release_identity["profile_status"], profile_status(n))
+
+    def test_a_working_profile_is_refused_at_load_for_each_old_module(self):
+        from new_backtest.profiles import ProfileError, apply_profile
+        for key, old in self.OLD.items():
+            with self.assertRaises(ProfileError, msg=key):
+                apply_profile(self._doc(), **self.KW, **{key: old})
+
+    def test_a_later_version_is_working_too(self):
+        from new_backtest.profiles import ProfileError, apply_profile
+        doc = dict(self._doc(), name="perp_perp_maker_taker_v1_5")
+        self.assertEqual(apply_profile(doc, **self.KW).fee_source, "core")
+        doc["margin_source"] = "model"
+        with self.assertRaises(ProfileError):
+            apply_profile(doc, **self.KW)
+
+    def test_the_backtester_refuses_at_startup_when_a_working_config_is_edited_after_the_load(self):
+        from new_backtest.backtester import CrossVenueArbBacktester
+        from new_backtest.profiles import ProfileError, apply_profile
+        for key, old in self.OLD.items():
+            cfg = apply_profile(self._doc(), **self.KW)
+            cfg.allow_manifest_gap = "test"
+            setattr(cfg, key, old)
+            with self.assertRaises(ProfileError, msg=key):
+                CrossVenueArbBacktester(cfg)
+
+    def test_a_reference_profile_still_starts_on_the_old_modules(self):
+        from new_backtest.backtester import CrossVenueArbBacktester
+        from new_backtest.profiles import apply_profile
+        for n in ("perp_perp_maker_taker_v1_3",):                              # (v1.1 / v1_2 need the runner's venue ticks to start; their accounting fields are checked by the file test above)
+            cfg = apply_profile(self._doc(n), **self.KW)
+            cfg.allow_manifest_gap = "test"
+            bt = CrossVenueArbBacktester(cfg)
+            self.assertEqual(type(bt.margin_model).__name__, "MarginModel", n)
+
+    def test_a_working_run_books_fees_funding_margin_and_equity_only_in_the_core(self):
+        """The structural guard: with every old accounting entry point poisoned, a v1_4 backtester still builds, takes a margin step and closes the run."""
+        import tempfile
+        from types import SimpleNamespace
+        from unittest import mock
+        import new_backtest.config as C
+        import new_backtest.funding_settler as FS
+        from new_backtest.backtester import CrossVenueArbBacktester
+        from new_backtest.margin_model import MarginModel
+        from new_backtest.profiles import apply_profile
+        boom = AssertionError("accounting outside the core")
+        with tempfile.TemporaryDirectory() as tmp, tempfile.TemporaryDirectory() as rates:
+            Path(rates, "bybit.jsonl").write_text("")
+            cfg = apply_profile(self._doc(), **{**self.KW, "output_dir": tmp}, funding_rate_dir=rates)
+            cfg.allow_manifest_gap = "test"
+            poisoned = {k: mock.Mock(side_effect=boom) for k in ("maker_bps", "taker_bps")}
+            with mock.patch.object(FS, "FundingSettler", side_effect=boom), \
+                 mock.patch.object(MarginModel, "_breaches", side_effect=boom), mock.patch.object(MarginModel, "equity", side_effect=boom), \
+                 mock.patch.object(CrossVenueArbBacktester, "_equity_bridge", side_effect=boom), \
+                 mock.patch.dict(C.FEE_PRESETS, {k: SimpleNamespace(**{"maker_bps": float("nan"), "taker_bps": float("nan")}) for k in C.FEE_PRESETS}):
+                bt = CrossVenueArbBacktester(cfg)
+                val = {"available": True, "marks": {"bybit": 100.0, "binance": 100.0}, "equity": 0.0, "common_ts": 1.0}
+                equity, doc, cash = bt._core_ledger_close(val, 0.0, 0.0, {"bybit": 100.0, "binance": 100.0}, SimpleNamespace())
+            self.assertEqual((equity, doc["ok"], type(bt.settler).__name__, type(bt.margin_model).__name__), (0.0, True, "CoreFundingSettler", "CoreMarginModel"))
+            self.assertEqual([(s.fees.maker_bps, s.fees.taker_bps) for s in bt.venue_specs.values()], [(1.0, 3.2), (0.0, 1.7)])
 
 
 if __name__ == "__main__":

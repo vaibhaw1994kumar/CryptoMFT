@@ -34,6 +34,8 @@ a = ap.parse_args()
 if a.profile in ("legacy_v0", "perp_perp_maker_taker_v1") and not a.reference:
     raise SystemExit(f"{a.profile} is a REFERENCE profile, never for decisions: pass --reference to run it (the default profile is perp_perp_maker_taker_v1_1)")
 tag = f"{a.latency}_{a.fee}_{a.faults}_s{a.seed}" + (("_" + os.environ["EXEC_TAG"]) if os.environ.get("EXEC_TAG") else "")
+from new_backtest import profiles as _pf
+print("profile:", getattr(_pf, "profile_label", lambda n: n)(a.profile), flush=True)          # B2 step 8: REFERENCE_ONLY / CONTROL labels (an older snapshot without the registry prints the bare name)
 out = ROOT / a.profile / tag / a.day
 out.mkdir(parents=True, exist_ok=True)
 

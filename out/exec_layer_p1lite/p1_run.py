@@ -35,6 +35,8 @@ out = RUNS / a.group / a.cell / a.day
 out.mkdir(parents=True, exist_ok=True)
 
 doc = load_profile(SNAP / "profiles" / f"{a.profile}.yaml")
+from new_backtest import profiles as _pf
+print("profile:", getattr(_pf, "profile_label", lambda n: n)(a.profile), flush=True)          # B2 step 8: REFERENCE_ONLY / CONTROL labels (an older snapshot without the registry prints the bare name)
 doc["latency_preset"] = "singapore"
 if isinstance(doc.get("timing"), dict):
     doc["timing"]["from_latency_preset"] = "singapore"
