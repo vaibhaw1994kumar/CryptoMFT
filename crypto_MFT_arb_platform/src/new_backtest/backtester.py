@@ -41,7 +41,7 @@ from .arb_strategy import (
 from .background_agent_model import AgentFlowConfig, BackgroundAgentModel
 from .config import (
     BINANCE, BYBIT, DEFAULT_END_DATE, DEFAULT_LATENCY_PRESET, DEFAULT_START_DATE,
-    LATENCY_PRESETS, VenueSpec, make_venues, max_position_for,
+    LATENCY_PRESETS, VenueSpec, core_fee_specs, make_venues, max_position_for,
 )
 from .cross_venue_feed import CrossVenueFeed, check_coverage
 from .event_loader import BOOK, DELTA, TRADE, delta_fields, reset_truncation, snapshot_levels, trade_fields, truncation_report
@@ -83,6 +83,9 @@ class ArbBacktestConfig:
     latency_preset: str = DEFAULT_LATENCY_PRESET
     bybit_fee_preset: str = "bybit_perp_mm"
     binance_fee_preset: str = "binance_perp_vip0"
+    # B2 step 4: "presets" = the backtester's own FEE_PRESETS (v1, v1.1, v1_2, v1_3, legacy_v0); "core" = the preset names above are tier names of the core FeeSchedule (crypto_stat_arb.fees.FEE_TIERS) and every
+    # rate the run uses (edge, quotes, taker fees, maker fills, liquidation) is that schedule's booked rate. The shadow's schedule is the same rows.
+    fee_source: str = "presets"
 
     arb: ArbConfig = field(default_factory=ArbConfig)
     maker: MakerConfig = field(default_factory=MakerConfig)
@@ -516,8 +519,14 @@ class CrossVenueArbBacktester:
                 "orders in the original audit). Legacy behaviour, kept for comparison only.",
                 RuntimeWarning, stacklevel=2,
             )
+        if config.fee_source not in ("presets", "core"):
+            raise ValueError(f"fee_source must be 'presets' or 'core', got {config.fee_source!r}")
+        self.fee_rows: list[dict] | None = None
+        fee_specs = None
+        if config.fee_source == "core":
+            fee_specs, self.fee_rows = core_fee_specs(config.pair, config.bybit_fee_preset, config.binance_fee_preset)
         all_specs = make_venues(
-            config.latency_preset, config.bybit_fee_preset, config.binance_fee_preset,
+            config.latency_preset, config.bybit_fee_preset, config.binance_fee_preset, fee_specs=fee_specs,
         )
         self.venue_specs: dict[str, VenueSpec] = {v: all_specs[v] for v in config.venues}
         for v, trust in (config.trust_local_ts or {}).items():
@@ -566,7 +575,7 @@ class CrossVenueArbBacktester:
         self._shadow = None
         if config.core_shadow:
             from .core_shadow import CoreShadow
-            self._shadow = CoreShadow(config.pair, tuple(config.venues), funding_rate_dir=config.funding_rate_dir, start_date=config.start_date, end_date=config.end_date,
+            self._shadow = CoreShadow(config.pair, tuple(config.venues), fee_rows=self.fee_rows, funding_rate_dir=config.funding_rate_dir, start_date=config.start_date, end_date=config.end_date,
                                        margin=config.margin)
         self._message_atomic = config.message_atomic_book
         self._frame_last = True                    # message-atomic mode: the event being applied is the last of its exchange message

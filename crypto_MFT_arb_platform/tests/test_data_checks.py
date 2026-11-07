@@ -177,7 +177,7 @@ class ManifestOverrideIsSeparate(unittest.TestCase):
         for name in ("qv2_march_run.py", "qv2_run.py"):
             src = (Path(__file__).resolve().parents[2] / "out" / "queue_v2" / name).read_text()
             self.assertIn("--allow-manifest-gap", src)
-            self.assertIn('a.profile.endswith(("_v1_2", "_v1_3"))', src)      # frozen v1_2 and the v1_3 that follows it
+            self.assertIn('a.profile.endswith(("_v1_2", "_v1_3", "_v1_4"))', src)      # frozen v1_2, the v1_3 and the v1_4 that follow it
 
 
 class UntrustedLocalStamps(unittest.TestCase):

@@ -60,16 +60,36 @@ class VenueSpec:
     snapshot_period_s: float = 1.0
 
 
+def core_instrument_id(pair: str) -> str:
+    """The core's instrument id for a backtester pair: SOLUSDT -> SOL-USDT-PERP."""
+    base = pair[:-4] if pair.endswith("USDT") else pair
+    return f"{base}-USDT-PERP"
+
+
+def core_fee_specs(pair: str, bybit_tier: str, binance_tier: str) -> tuple[dict[str, FeeSpec], list[dict]]:
+    """B2 step 4: the maker and taker rate of each venue from the core FeeSchedule (the rate that is booked, conservative policy applied), as floats for the simulator's hot path,
+    and the config rows they came from. Floats are made once, here; the core stays Decimal."""
+    from crypto_stat_arb.fees import Liquidity, schedule_for, tier_rows
+    inst = core_instrument_id(pair)
+    tiers = {BYBIT: bybit_tier, BINANCE: binance_tier}
+    schedule = schedule_for(tiers, inst)
+    specs = {v: FeeSpec(maker_bps=float(schedule.rate_bps(v.upper(), inst, Liquidity.MAKER)), taker_bps=float(schedule.rate_bps(v.upper(), inst, Liquidity.TAKER))) for v in tiers}
+    return specs, tier_rows(tiers, inst)
+
+
 def make_venues(
     latency_preset: str = DEFAULT_LATENCY_PRESET,
     bybit_fee_preset: str = "bybit_perp_mm",
     binance_fee_preset: str = "binance_perp_vip0",
+    fee_specs: dict[str, FeeSpec] | None = None,
 ) -> dict[str, VenueSpec]:
+    """`fee_specs` (B2 step 4, the core schedule's rates): when given, the presets above are not read for fees."""
     lat = LATENCY_PRESETS[latency_preset]
+    fee_of = (lambda venue, preset: fee_specs[venue]) if fee_specs is not None else (lambda venue, preset: FEE_PRESETS[preset])
     return {
         BYBIT: VenueSpec(
             name=BYBIT,
-            fees=FEE_PRESETS[bybit_fee_preset],
+            fees=fee_of(BYBIT, bybit_fee_preset),
             latency=lat[BYBIT],
             tardis_exchange="bybit",
             trust_local_ts=True,
@@ -78,7 +98,7 @@ def make_venues(
         ),
         BINANCE: VenueSpec(
             name=BINANCE,
-            fees=FEE_PRESETS[binance_fee_preset],
+            fees=fee_of(BINANCE, binance_fee_preset),
             latency=lat[BINANCE],
             tardis_exchange="binance-futures",
             trust_local_ts=True,

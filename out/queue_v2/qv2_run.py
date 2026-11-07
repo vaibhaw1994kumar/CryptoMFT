@@ -85,7 +85,7 @@ kw = dict(data_root=os.environ.get("QV2_DATA_ROOT", "/Users/vaibhav/Documents/Ne
           output_dir=str(out), funding_rate_dir="/Users/vaibhav/Documents/Newproject/out/funding/SOLUSDT", max_trade_log=10 ** 7,
           equity_bridge="warn", record_exposure=True)
 if a.allow_rejected_data:
-    if a.profile.endswith(("_v1_2", "_v1_3")):
+    if a.profile.endswith(("_v1_2", "_v1_3", "_v1_4")):
         raise SystemExit("v1_2 headline runs do not override the preflight: use --allow-manifest-gap for the manifest and let the preflight block (owner 6 Nov)")
     kw["allow_rejected_data"] = a.allow_rejected_data
 if a.allow_manifest_gap:

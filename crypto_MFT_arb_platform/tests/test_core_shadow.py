@@ -260,5 +260,91 @@ class MarginShadow(unittest.TestCase):
             self.assertEqual(m["differences_by_class"], {})
 
 
+class FeesFromTheCore(unittest.TestCase):
+    """B2 step 4 (7 Nov): with fee_source core every rate a run uses is the core FeeSchedule's booked rate, selected by tier name."""
+    def _cfg(self, profile="perp_perp_maker_taker_v1_4", **kw):
+        from new_backtest.profiles import apply_profile, load_profile
+        return apply_profile(load_profile(profile), dataset="mar2024", data_root="/nonexistent", pair="SOLUSDT", start_date="2024-03-08", end_date="2024-03-08", output_dir="/tmp/x_fee", **kw)
+
+    def test_the_tiers_book_the_rates_the_owner_gave_and_carry_their_labels(self):
+        from decimal import Decimal
+        from crypto_stat_arb.fees import Liquidity, schedule_for
+        s = schedule_for({"bybit": "bybit_perp_vip5", "binance": "binance_perp_vip9"}, "SOL-USDT-PERP")
+        got = {(v, l): s.rate_bps(v, "SOL-USDT-PERP", l) for v in ("BYBIT", "BINANCE") for l in Liquidity}
+        self.assertEqual(got, {("BYBIT", Liquidity.MAKER): Decimal("1.0"), ("BYBIT", Liquidity.TAKER): Decimal("3.2"), ("BINANCE", Liquidity.MAKER): Decimal("0.0"), ("BINANCE", Liquidity.TAKER): Decimal("1.7")})
+        label = s.rule("BYBIT", "SOL-USDT-PERP").effective_bps(Liquidity.MAKER)[1]
+        self.assertIn("PUBLIC_SCHEDULE_UNVERIFIED", label)
+        self.assertIn("ASSUMED", label)                                  # the ledger classes the fee as ASSUMED, never as simulated
+        self.assertEqual(got[("BYBIT", Liquidity.MAKER)] + got[("BINANCE", Liquidity.TAKER)], Decimal("2.7"))
+
+    def test_an_unverified_negative_maker_fee_books_zero_and_the_scenario_rebate_is_credited_on_purpose(self):
+        from decimal import Decimal
+        from crypto_stat_arb.fees import FeeRule, FeeSource, Liquidity, schedule_for
+        rule = FeeRule("BYBIT", Decimal("-0.5"), Decimal("3.2"), source=FeeSource.PUBLIC_SCHEDULE_UNVERIFIED, conservative_unverified=True)
+        self.assertEqual(rule.effective_bps(Liquidity.MAKER), (Decimal("0"), "CONSERVATIVE_ASSUMED"))
+        mm = schedule_for({"bybit": "bybit_perp_mm", "binance": "binance_perp_vip9"}, "SOL-USDT-PERP")
+        self.assertEqual(mm.rate_bps("BYBIT", "SOL-USDT-PERP", Liquidity.MAKER) + mm.rate_bps("BINANCE", "SOL-USDT-PERP", Liquidity.TAKER), Decimal("1.2"))
+        self.assertIn("SCENARIO", mm.rule("BYBIT", "SOL-USDT-PERP").tier)
+        old = schedule_for({"bybit": "bybit_perp_mm", "binance": "binance_perp_vip0"}, "SOL-USDT-PERP")
+        self.assertEqual(old.rate_bps("BYBIT", "SOL-USDT-PERP", Liquidity.MAKER) + old.rate_bps("BINANCE", "SOL-USDT-PERP", Liquidity.TAKER), Decimal("4.5"))
+
+    def test_a_tier_cannot_be_used_on_the_wrong_venue_or_by_a_wrong_name(self):
+        from crypto_stat_arb.fees import tier_rows
+        with self.assertRaises(ValueError):
+            tier_rows({"binance": "bybit_perp_vip5"}, "SOL-USDT-PERP")
+        with self.assertRaises(ValueError):
+            tier_rows({"bybit": "bybit_perp_vip99"}, "SOL-USDT-PERP")
+
+    def test_v1_4_differs_from_v1_3_only_in_the_fee_switch_and_its_labels(self):
+        from new_backtest.profiles import load_profile
+        def flat(o, p=""):
+            out = {}
+            if isinstance(o, dict):
+                for k, v in o.items():
+                    if not k.startswith("_"):
+                        out.update(flat(v, p + k + "."))
+            else:
+                out[p[:-1]] = o
+            return out
+        a, b = flat(load_profile("perp_perp_maker_taker_v1_3")), flat(load_profile("perp_perp_maker_taker_v1_4"))
+        diff = {k for k in set(a) | set(b) if a.get(k) != b.get(k)}
+        self.assertEqual(diff, {"name", "description", "fee_source", "fee_presets.bybit", "fee_presets.binance", "decision_status.fees"})
+
+    def test_the_earlier_profiles_keep_their_own_presets(self):
+        for name in ("perp_perp_maker_taker_v1_2", "perp_perp_maker_taker_v1_3"):
+            self.assertEqual(self._cfg(name).fee_source, "presets", name)
+        self.assertEqual(self._cfg().fee_source, "core")
+
+    def test_a_v1_4_run_reads_no_backtester_fee_preset(self):
+        from unittest import mock
+        import new_backtest.config as C
+        from new_backtest.backtester import CrossVenueArbBacktester
+        cfg = self._cfg()
+        cfg.allow_manifest_gap = "test"
+        nonsense = {k: C.FeeSpec(maker_bps=99.0, taker_bps=99.0) for k in C.FEE_PRESETS}
+        with mock.patch.dict(C.FEE_PRESETS, nonsense):
+            bt = CrossVenueArbBacktester(cfg)
+        got = {v: (s.fees.maker_bps, s.fees.taker_bps) for v, s in bt.venue_specs.items()}
+        self.assertEqual(got, {"bybit": (1.0, 3.2), "binance": (0.0, 1.7)})
+        self.assertEqual([r["venue"] for r in bt.fee_rows], ["BYBIT", "BINANCE"])
+
+    def test_the_identity_tiers_reproduce_todays_presets_exactly(self):
+        import new_backtest.config as C
+        specs, _ = C.core_fee_specs("SOLUSDT", "bybit_perp_mm", "binance_perp_vip0")
+        self.assertEqual((specs["bybit"].maker_bps, specs["bybit"].taker_bps), (C.FEE_PRESETS["bybit_perp_mm"].maker_bps, C.FEE_PRESETS["bybit_perp_mm"].taker_bps))
+        self.assertEqual((specs["binance"].maker_bps, specs["binance"].taker_bps), (C.FEE_PRESETS["binance_perp_vip0"].maker_bps, C.FEE_PRESETS["binance_perp_vip0"].taker_bps))
+
+    def test_the_shadow_built_on_the_run_rows_has_no_fee_rate_difference(self):
+        from crypto_stat_arb.fees import tier_rows
+        rows = tier_rows({"bybit": "bybit_perp_vip5", "binance": "binance_perp_vip9"}, "SOL-USDT-PERP")
+        sh, inv = CoreShadow("SOLUSDT", VENUES, fee_rows=rows), InventoryBook()
+        inv.ensure(VENUES)
+        book(sh, inv, fill("buy", "bybit", 1.0, 100.0, False, 1.0))
+        book(sh, inv, fill("sell", "binance", 1.0, 100.1, True, 1.7, sid=2))
+        r = sh.finish(inv, {"bybit": 100.0, "binance": 100.1}, bt_ending_equity=sum(inv.cash.values()) + inv.base["bybit"] * 100.0 + inv.base["binance"] * 100.1)
+        self.assertLess(abs(float(r["fees"]["diff"])), 1e-12)
+        self.assertEqual(r["differences"], [])
+
+
 if __name__ == "__main__":
     unittest.main()

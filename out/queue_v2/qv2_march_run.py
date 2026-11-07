@@ -23,7 +23,8 @@ from new_backtest.profiles import apply_profile, load_profile, switch_table
 RUNS = Path(os.environ["QV2_RUNS"]) if os.environ.get("QV2_RUNS") else Q / "runs_mar2024"
 TRAIN_RUNS = E / "runs"
 DATA = os.environ.get("QV2_DATA_ROOT", "/Users/vaibhav/Documents/Newproject/data")
-FEES = {"mm": "bybit_perp_mm", "vip0": "bybit_perp_vip0"}
+FEES = {"mm": "bybit_perp_mm", "vip0": "bybit_perp_vip0", "vip5": "bybit_perp_vip5"}
+BFEES = {"vip0": "binance_perp_vip0", "vip9": "binance_perp_vip9"}      # B2 step 4: tier names of the core FeeSchedule when the profile sets fee_source: core
 ap = argparse.ArgumentParser()
 ap.add_argument("profile", nargs="?", default="perp_perp_maker_taker_v1_1"); ap.add_argument("day")
 ap.add_argument("--reference", action="store_true", help="REFERENCE_ONLY: required to run legacy_v0 or perp_perp_maker_taker_v1 (never for decisions)")
@@ -31,7 +32,8 @@ ap.add_argument("--latency-preset", default="singapore", choices=("singapore", "
 ap.add_argument("--hedge-move-sensitivity", default=None, help="a labelled SENSITIVITY run: replace the hedge-move file a pinned profile names with this one (hash-checked, TRAIN days only); the profile file is not edited")
 ap.add_argument("--group", required=True); ap.add_argument("--cell", required=True)
 ap.add_argument("--buffer", default="none")
-ap.add_argument("--fee", default="mm", choices=sorted(FEES))
+ap.add_argument("--fee", default="mm", choices=sorted(FEES) + ["profile"], help="Bybit fee preset; mm is the historic default; profile = the profile's own (v1_4: Bybit VIP 5)")
+ap.add_argument("--binance-fee", default="profile", choices=sorted(BFEES) + ["profile"], help="Binance fee tier; profile = the profile's own")
 ap.add_argument("--cancel-model", default="profile", choices=("profile", "behind_first", "ahead_first"))
 ap.add_argument("--scenario", default="clean", choices=("clean", "hedge_reject_fast_move", "outage_binance_2s"))
 ap.add_argument("--train", default="")
@@ -54,7 +56,10 @@ if a.hedge_move_sensitivity:
 doc["latency_preset"] = a.latency_preset
 if isinstance(doc.get("timing"), dict):
     doc["timing"]["from_latency_preset"] = a.latency_preset
-doc.setdefault("fee_presets", {})["bybit"] = FEES[a.fee]
+if a.fee != "profile":
+    doc.setdefault("fee_presets", {})["bybit"] = FEES[a.fee]
+if a.binance_fee != "profile":
+    doc.setdefault("fee_presets", {})["binance"] = BFEES[a.binance_fee]
 if a.buffer != "none":
     doc.setdefault("execution", {}).setdefault("hedge", {}).update({"cap": "breakeven_plus_buffer", "cap_buffer_bps": float(a.buffer)})
 
@@ -106,7 +111,7 @@ kw = dict(data_root=DATA, pair="SOLUSDT", start_date=a.day, end_date=a.day, outp
 if a.profile == "legacy_v0":
     kw["hedge_arrival_book"] = "view"        # a non-legacy profile carries its own hedge_arrival_book (v1.1: truth); the runner does not override it
 if a.allow_rejected_data:
-    if a.profile.endswith(("_v1_2", "_v1_3")):
+    if a.profile.endswith(("_v1_2", "_v1_3", "_v1_4")):
         raise SystemExit("v1_2 headline runs do not override the preflight: use --allow-manifest-gap for the manifest and let the preflight block (owner 6 Nov)")
     kw["allow_rejected_data"] = a.allow_rejected_data
 if a.allow_manifest_gap:

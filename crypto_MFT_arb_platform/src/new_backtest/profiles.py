@@ -86,6 +86,7 @@ SWITCHES: tuple[Switch, ...] = (
     Switch("maker.ledger_epoch", "LEGACY_COMPAT", note="off in v1; v1.1 sets True: a snapshot / reset invalidates old netting credit, ambiguous associations are flagged"),
     Switch("execution.primary.reprice", "CALIBRATED", note="none in v1 / v1.1 / v1_2 (a resting quote is never repriced); v1_3 carries the S0 rule with every number null and enabled false: the trader (or the live values) supplies them, nothing is fitted"),
     Switch("placement_book", "LEGACY_COMPAT", note="view in v1 / v1.1 (a passive order joins the strategy's feed-delayed book); v1_2 carries the switch: truth = the venue-truth book at the arrival's exchange time, the book PostOnly is judged on, when it is complete there, otherwise the view book (counted)"),
+    Switch("fee_source", "LEGACY_COMPAT", note="presets in v1 / v1.1 / v1_2 / v1_3 / legacy_v0 (the backtester's own FEE_PRESETS); core in v1_4 (B2 step 4): the preset names are tier names of the core FeeSchedule (crypto_stat_arb.fees.FEE_TIERS) and every rate a run uses is that schedule's booked rate"),
     Switch("trust_local_ts", "CALIBRATED", note="ASSUMED. True on both venues in v1 / v1.1 (a recorded local_ts is the receive time); v1.2 sets False per venue for the March data, whose local stamps are constructed (exchange + exactly 2.000 ms): the latency preset feed delay applies instead, one sample per exchange message"),
     Switch("maker.fill_through_prints", "LEGACY_COMPAT", note="False in v1 / v1.1 (a print through our price only burns queue); v1.2 sets True together with through_print_volume_limited: the order fills when a print goes through its price, limited by the print's volume. True alone (the full version) is refused at startup"),
     Switch("maker.through_print_volume_limited", "LEGACY_COMPAT", note="False in v1 / v1.1; v1.2 True: the through-print fill is limited by the print volume, one budget shared by every order the print went through"),
@@ -367,6 +368,11 @@ def _git_state(repo: Path) -> dict:
 def release_identity(cfg, doc: dict | None = None) -> dict:
     root = ENGINE_DIR.parents[2]
     fee_snapshot = hashlib.sha256(json.dumps({k: (v.maker_bps, v.taker_bps) for k, v in sorted(FEE_PRESETS.items())}).encode()).hexdigest()
+    fee_schedule = None
+    if getattr(cfg, "fee_source", "presets") == "core":                 # B2 step 4: the rows the run booked, labels included; the presets dict is not what this run used
+        from .config import core_fee_specs
+        _, rows = core_fee_specs(cfg.pair, cfg.bybit_fee_preset, cfg.binance_fee_preset)
+        fee_schedule = {"source": "core crypto_stat_arb.fees.FEE_TIERS", "rows": rows, "rows_sha256": hashlib.sha256(json.dumps(rows, sort_keys=True).encode()).hexdigest()}
     cm = root / "data" / "contract_master"
     cm_files = sorted(cm.glob("*")) if cm.is_dir() else []
     calib = PLATFORM_DIR / "config" / "lifecycle_calibration_bybit.json"
@@ -389,7 +395,7 @@ def release_identity(cfg, doc: dict | None = None) -> dict:
             "decision_status": (doc or {}).get("decision_status"),
             "code": code_hash(),
             "data": data_manifest_hash(cfg.data_root, cfg.pair, cfg.venues, cfg.start_date, cfg.end_date),
-            "fee_snapshot_sha256": fee_snapshot, "fee_presets": {"bybit": cfg.bybit_fee_preset, "binance": cfg.binance_fee_preset},
+            "fee_snapshot_sha256": fee_snapshot, "fee_schedule": fee_schedule, "fee_presets": {"bybit": cfg.bybit_fee_preset, "binance": cfg.binance_fee_preset},
             "instrument_master_sha256": _sha_files(cm_files) if cm_files else None,
             "calibration_file": str(calib) if calib.exists() else None, "calibration_cutoff": cutoff, "calibration": calib_info,
             "git": {"outer": _git_state(root), "core": _git_state(CORE_DIR)},
