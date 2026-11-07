@@ -165,6 +165,8 @@ class ArbBacktestConfig:
     funding_rate_dir: str | None = None
     # B2 step 5: "settler" = funding_settler (v1, v1.1, v1_2, v1_3, legacy_v0); "core" = the core FundingEngine books the funding (record mark, else book mid flagged FUNDING_MARK_FALLBACK) and its cash flow is applied to the run.
     funding_source: str = "settler"
+    # B2 step 6: "model" = margin_model.py (v1, v1.1, v1_2, v1_3, legacy_v0); "core" = every check and every admission decision comes from the core RiskEngine margin path (needs funding_source core when funding is modelled).
+    margin_source: str = "model"
     # Hedge-leg failure injection (hedge_faults.py). None = off and the replay is exactly as before.
     hedge_faults: HedgeFaultConfig | None = None
     # Opt-in margin / liquidation / cross-venue equity-transfer model (margin_model.py). None (default): infinite margin and no
@@ -577,7 +579,13 @@ class CrossVenueArbBacktester:
         self._shadow = None
         if config.funding_source not in ("settler", "core"):
             raise ValueError(f"funding_source must be 'settler' or 'core', got {config.funding_source!r}")
-        if config.core_shadow or (config.funding_source == "core" and config.funding_rate_dir):          # no rate directory = funding not modelled, as with the settler (March has no funding file)
+        if config.margin_source not in ("model", "core"):
+            raise ValueError(f"margin_source must be 'model' or 'core', got {config.margin_source!r}")
+        if config.margin_source == "core" and config.margin is None:
+            raise ValueError("margin_source 'core' needs a margin configuration")
+        if config.margin_source == "core" and config.funding_rate_dir and config.funding_source != "core":
+            raise ValueError("margin_source 'core' with funding modelled needs funding_source 'core' (the core ledger must carry the funding the run pays)")
+        if config.core_shadow or (config.funding_source == "core" and config.funding_rate_dir) or config.margin_source == "core":          # no rate directory = funding not modelled, as with the settler (March has no funding file)
             from .core_shadow import CoreShadow
             self._shadow = CoreShadow(config.pair, tuple(config.venues), fee_rows=self.fee_rows, funding_venues=tuple(v for v in config.venues if self.product_by_venue.get(v) != "spot"), funding_rate_dir=config.funding_rate_dir, start_date=config.start_date, end_date=config.end_date,
                                        margin=config.margin)
@@ -647,8 +655,12 @@ class CrossVenueArbBacktester:
 
         self.agent = BackgroundAgentModel(config.agent_flow)
         # WP7b: only perp venues carry a margin account (a spot wallet holds inventory, not margin).
-        self.margin_model: MarginModel | None = (MarginModel(config.margin, tuple(v for v in config.venues if self.product_by_venue.get(v) != "spot"))
-                                                 if config.margin is not None else None)
+        margin_venues = tuple(v for v in config.venues if self.product_by_venue.get(v) != "spot")
+        if config.margin is not None and config.margin_source == "core":
+            from .core_shadow import _make_core_margin_model
+            self.margin_model: MarginModel | None = _make_core_margin_model()(config.margin, margin_venues, self._shadow)      # B2.6: the core decides; the old model's decision code is not called
+        else:
+            self.margin_model = MarginModel(config.margin, margin_venues) if config.margin is not None else None
         self._last_trade_ts: dict[str, float] = {}
 
         self._order_ids = 0

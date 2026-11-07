@@ -308,7 +308,7 @@ class FeesFromTheCore(unittest.TestCase):
             return out
         a, b = flat(load_profile("perp_perp_maker_taker_v1_3")), flat(load_profile("perp_perp_maker_taker_v1_4"))
         diff = {k for k in set(a) | set(b) if a.get(k) != b.get(k)}
-        self.assertEqual(diff, {"name", "description", "fee_source", "funding_source", "fee_presets.bybit", "fee_presets.binance", "decision_status.fees"})
+        self.assertEqual(diff, {"name", "description", "fee_source", "funding_source", "margin_source", "fee_presets.bybit", "fee_presets.binance", "decision_status.fees"})
 
     def test_the_earlier_profiles_keep_their_own_presets(self):
         for name in ("perp_perp_maker_taker_v1_2", "perp_perp_maker_taker_v1_3"):
@@ -464,8 +464,88 @@ class FundingFromTheCore(unittest.TestCase):
         cfg.allow_manifest_gap = "test"
         bt = CrossVenueArbBacktester(cfg)
         self.assertIsNone(bt.settler)
-        self.assertIsNone(bt._shadow)
         self.assertIs(cfg.release_identity["funding_modelled"], False)                       # recorded: March has no funding file
+
+
+class MarginFromTheCore(unittest.TestCase):
+    """B2 step 6 (7 Nov): the core RiskEngine decides breach and admission; compared with the old MarginModel on the same fills. Synthetic data: wiring only."""
+    def _cfg(self, **kw):
+        return MarginShadow._cfg(self, **kw)
+
+    def _pair(self, cfg, qty=1.0, price=100.0, fee_bps=0.0):
+        from new_backtest.core_shadow import _make_core_margin_model
+        from new_backtest.margin_model import MarginModel
+        sh, inv = CoreShadow("SOLUSDT", VENUES, margin=cfg), InventoryBook()
+        inv.ensure(VENUES)
+        book(sh, inv, fill("buy", "bybit", qty, price, False, fee_bps, ts=1.0))
+        book(sh, inv, fill("sell", "binance", qty, price, True, fee_bps, ts=1.0, sid=2))
+        return MarginModel(cfg, VENUES), _make_core_margin_model()(cfg, VENUES, sh), inv, {v: _Book(price) for v in VENUES}, sh
+
+    def test_a_healthy_book_orders_nothing_and_admits_a_small_clip_on_both(self):
+        from types import SimpleNamespace
+        old, core, inv, books, _ = self._pair(self._cfg())
+        self.assertEqual(old.step(100.0, inv, books), core.step(100.0, inv, books))
+        sig = SimpleNamespace(buy_venue="bybit", sell_venue="binance", qty=1.0)
+        self.assertEqual((old.allows(sig, inv, books), core.allows(sig, inv, books)), (True, True))
+
+    def test_a_breach_gives_the_same_liquidation_and_flatten_orders(self):
+        old, core, inv, books, _ = self._pair(self._cfg(capital=20.0, init=0.5, maint=0.4))
+        a, b = old.step(100.0, inv, books), core.step(100.0, inv, books)
+        self.assertTrue(a)
+        self.assertEqual(a, b)
+
+    def test_the_gate_refuses_what_the_old_gate_refuses_when_equity_cannot_post_the_initial_margin(self):
+        from types import SimpleNamespace
+        old, core, inv, books, _ = self._pair(self._cfg(capital=60.0, init=0.5, maint=0.1))
+        sig = SimpleNamespace(buy_venue="bybit", sell_venue="binance", qty=2.0)          # position 1 -> 3: initial margin 150 against equity 60
+        self.assertEqual((old.allows(sig, inv, books), core.allows(sig, inv, books)), (False, False))
+        self.assertEqual(core.stats["signals_blocked_by_margin"], 1)
+
+    def test_above_the_last_tier_the_core_fails_closed_whatever_the_old_switch_says(self):
+        old, core, inv, books, _ = self._pair(self._cfg(last=50.0, above="ignore"))
+        self.assertEqual(old.step(100.0, inv, books), [])                                 # the old model ignores it under v1.1's setting
+        self.assertTrue(core.step(100.0, inv, books))                                     # the core: POSITION_ABOVE_RISK_LIMIT, a breach (above_last_tier is redundant)
+        old2, core2, inv2, books2, _ = self._pair(self._cfg(last=50.0, above="breach"))
+        self.assertEqual(old2.step(100.0, inv2, books2), core2.step(100.0, inv2, books2))
+
+    def test_the_core_gate_counts_exposure_worst_case_so_a_reducing_trade_is_not_netted(self):
+        from types import SimpleNamespace
+        old, core, inv, books, _ = self._pair(self._cfg(capital=160.0, init=0.5, maint=0.1), qty=3.0)
+        sig = SimpleNamespace(buy_venue="binance", sell_venue="bybit", qty=3.0)          # closes both legs
+        self.assertTrue(old.allows(sig, inv, books))                                      # old: the position after the trade is 0, initial margin 0
+        self.assertFalse(core.allows(sig, inv, books))                                    # core: worst case adds the clip to the exposure (BY_DESIGN, the core rule wins)
+
+    def test_the_old_models_decision_code_is_not_called(self):
+        from unittest import mock
+        from new_backtest.margin_model import MarginModel
+        old, core, inv, books, _ = self._pair(self._cfg(capital=20.0, init=0.5, maint=0.4))
+        with mock.patch.object(MarginModel, "_breaches", side_effect=AssertionError("margin decided outside the core")), \
+             mock.patch.object(MarginModel, "equity", side_effect=AssertionError("margin decided outside the core")):
+            self.assertTrue(core.step(100.0, inv, books))
+
+    def test_what_the_core_path_does_not_model_is_refused_not_ignored(self):
+        from new_backtest.core_shadow import _make_core_margin_model
+        from new_backtest.margin_model import MarginModelConfig, TransferModelConfig, TransferRoute, VenueMargin
+        cfg = self._cfg()
+        sh = CoreShadow("SOLUSDT", VENUES, margin=cfg)
+        tr = TransferModelConfig(routes=(TransferRoute("bybit", "binance", 10.0),), low_watermark=1.0, target=5.0)
+        with self.assertRaises(ValueError):
+            _make_core_margin_model()(MarginModelConfig(venues=cfg.venues, transfers=tr), VENUES, sh)
+        with self.assertRaises(ValueError):
+            _make_core_margin_model()(MarginModelConfig(venues=cfg.venues, max_utilisation=0.5), VENUES, sh)
+        iso = {v: VenueMargin(initial_capital=1000.0, tiers=cfg.venues[v].tiers, mode="isolated") for v in VENUES}
+        with self.assertRaises(ValueError):
+            _make_core_margin_model()(MarginModelConfig(venues=iso), VENUES, sh)
+
+    def test_a_v1_4_backtester_is_built_on_the_core_margin_model(self):
+        from new_backtest.backtester import CrossVenueArbBacktester
+        from new_backtest.profiles import apply_profile, load_profile
+        cfg = apply_profile(load_profile("perp_perp_maker_taker_v1_4"), dataset="mar2024", data_root="/nonexistent", pair="SOLUSDT", start_date="2024-03-08", end_date="2024-03-08", output_dir="/tmp/x_marg")
+        cfg.allow_manifest_gap = "test"
+        self.assertEqual(type(CrossVenueArbBacktester(cfg).margin_model).__name__, "CoreMarginModel")
+        old = apply_profile(load_profile("perp_perp_maker_taker_v1_3"), dataset="mar2024", data_root="/nonexistent", pair="SOLUSDT", start_date="2024-03-08", end_date="2024-03-08", output_dir="/tmp/x_marg")
+        old.allow_manifest_gap = "test"
+        self.assertEqual(type(CrossVenueArbBacktester(old).margin_model).__name__, "MarginModel")
 
 
 if __name__ == "__main__":

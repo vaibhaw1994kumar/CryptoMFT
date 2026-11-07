@@ -54,6 +54,7 @@ class CoreShadow:
         self.fee_by_venue: dict[str, list[Decimal]] = {v: [Decimal(0), Decimal(0)] for v in self.venues}       # [backtester fee, core fee], per venue (B2.3)
         self.funding_venues = tuple(funding_venues) if funding_venues is not None else tuple(venues)       # perp venues only: a spot wallet never pays funding
         self.funding_due: list[tuple[float, str, int]] = []   # B2.5: (settlement time in s, venue, ns) of every rate row in the window, sorted: when the core engine is asked to settle
+        self.margin_driven = False                            # B2.6: True when CoreMarginModel decides from this engine: the read-only comparison against the old model is then moot
         self.funding_driven = False                           # B2.5: True when CoreFundingSettler drives the run's cash from this engine: nothing else may settle it
         self.funding = None                                   # B2.2: the core FundingEngine, fed the same rate files and the same fills as the backtester's funding_settler
         self._last_ns = 0
@@ -124,6 +125,8 @@ class CoreShadow:
 
     def on_margin_check(self, now: float, rows: dict[str, dict]) -> None:
         """B2.3: one periodic check of the backtester's margin model, called right after the model decided and before any liquidation fill: `rows[venue]` holds the numbers it used and its breach decision. Reads only."""
+        if self.margin_driven:
+            return
         m = self._m
         m["checks"] += 1
         marks = {v: float(r["mark"]) for v, r in rows.items() if v in self.margin_venues}
@@ -143,6 +146,29 @@ class CoreShadow:
         m["evaluated"] += 1
         for v in self.margin_venues:
             self._compare_margin_row(now, v, rows[v], core_rows.get(self._venue(v)))
+
+    def core_margin_rows(self, now: float, marks: dict[str, float]) -> dict[str, Any]:
+        """B2.6: the core's margin state per venue (dry run, no open orders) at these marks."""
+        now_ns = int(now * 1_000_000_000)
+        if self.funding is not None and not self.funding_driven:
+            self.funding.settle_until(now_ns - 1, final=True)
+        report = self.margin.evaluate_margin(ledger=self.ledger, now_ns=now_ns, mark_prices={(self._venue(v), self.instrument): _dec(x) for v, x in marks.items()}, open_orders={},
+                                             enforce_controls=False, dry_run=True)
+        return {r.venue.lower(): r for r in report.venues}
+
+    def core_margin_admits(self, venue: str, qty: float, marks: dict[str, float], reserved_qty: float) -> tuple[bool, str]:
+        """B2.6: the core's admission check for one more leg of `qty` on `venue` (worst-case exposure: position plus resting orders, then this leg): its initial-margin increment against the free margin
+        the core computes. `reserved_qty` is the resting orders' quantity (counted on both sides, as the backtester's gate reserves them)."""
+        V = self._venue(venue)
+        self.margin.margin_marks = {(self._venue(v), self.instrument): _dec(x) for v, x in marks.items()}
+        self.margin.margin_open_orders = {(V, self.instrument): (_dec(reserved_qty), _dec(reserved_qty))} if reserved_qty > 0 else {}
+        try:
+            increment, free = self.margin._tiered_initial_increment(V, self.instrument, _dec(qty), _dec(marks[venue]), self._last_ns)
+        except ValueError as exc:                                       # above the last risk tier: the venue would not accept it
+            return False, str(exc)
+        finally:
+            self.margin.margin_open_orders = {}
+        return (increment <= free), f"increment {increment} free {free}"
 
     def _compare_margin_row(self, now: float, v: str, bt: dict, core) -> None:
         from crypto_stat_arb.risk import MarginState
@@ -433,3 +459,107 @@ class CoreFundingSettler:
                 "FUNDING_MARK_FALLBACK": codes.get("FUNDING_MARK_FALLBACK", 0), "core_flags": codes,
                 "core_status": {k: core.get(k) for k in ("status", "economic_status", "data_coverage", "mark_basis", "settlements_booked", "settlements_on_book_mid")},
                 "settlements": list(self.settlements)}
+
+
+def _make_core_margin_model():
+    from .margin_model import MarginModel
+
+    class CoreMarginModel(MarginModel):
+        """B2.6: the run's margin decisions come from the core. Every check evaluates the core RiskEngine margin path (tiers, collateral from the ledger, cross mode, A9 fail-closed above the last tier) on the
+        ledger the fills are booked into; a breach is the core's BREACH state; the admission gate is the core's worst-case initial-margin increment against its free margin. What stays in the backtester's
+        class is bookkeeping only (counters, events, the flatten after a liquidation, the report) and the execution of a liquidation against the simulator's book (the core's own liquidation engine walks
+        a simulated venue adapter the backtester does not have). Refused here, because the core path does not model them: transfers, isolated mode, a utilisation limit. Not provided by the core and reported as None:
+        the liquidation price and distance."""
+        def __init__(self, cfg, venues, shadow):
+            if cfg.transfers is not None:
+                raise ValueError("margin_source core: transfers are not modelled on the core path")
+            if cfg.max_utilisation is not None:
+                raise ValueError("margin_source core: max_utilisation is not a core rule")
+            if any(vm.mode != "cross" for vm in cfg.venues.values()):
+                raise ValueError("margin_source core: isolated mode is not compared or modelled on the core path (cross only)")
+            if shadow.margin is None:
+                raise ValueError("margin_source core needs the core accounting object (margin configured)")
+            super().__init__(cfg, venues)
+            self.sh = shadow
+            shadow.margin_driven = True
+            self.core = {"checks_skipped_no_mark": 0, "gate_calls": 0, "gate_refusals": 0, "gate_refusals_above_last_tier": 0, "breach_rows": 0, "warning_rows": 0}
+
+        def step(self, now, inventory, books):
+            if now - self.last_check < self.cfg.check_every_s:
+                return []
+            self.last_check = now
+            self.stats["checks"] += 1
+            marks = {v: self.mark(v, books) for v in self.venues}
+            self.last_rows, self.last_rows_ts = {}, now
+            if any(x <= 0.0 for x in marks.values()):
+                self.core["checks_skipped_no_mark"] += 1
+                return []
+            from crypto_stat_arb.risk import MarginState
+            rows = self.sh.core_margin_rows(now, marks)
+            out: list[tuple[str, str, float, float]] = []
+            for v in self.venues:
+                row = rows[v]
+                eq = float(row.effective_margin_balance)
+                notional = float(row.gross_notional)
+                mm = float(row.maintenance_margin_required)
+                self.stats["min_equity"] = min(self.stats["min_equity"], eq)
+                if eq > 0 and row.initial_margin_required.is_finite():
+                    self.stats["peak_initial_margin_usage"] = max(self.stats["peak_initial_margin_usage"], float(row.initial_margin_required) / eq)
+                if notional > 0 and mm > 0 and mm != float("inf"):
+                    self.stats["min_margin_ratio"] = min(self.stats["min_margin_ratio"], eq / mm)
+                self.core["warning_rows"] += row.state == MarginState.WARNING
+                breach = row.state == MarginState.BREACH and notional > 0
+                if not breach:
+                    continue
+                self.core["breach_rows"] += 1
+                if mm == float("inf"):
+                    self.stats["above_last_tier_breaches"] = self.stats.get("above_last_tier_breaches", 0) + 1
+                if not self.cfg.liquidate:
+                    continue
+                vm = self.cfg.venues[v]
+                qty = abs(inventory.base.get(v, 0.0))
+                side = "sell" if inventory.base.get(v, 0.0) > 0 else "buy"
+                b = books.get(v)
+                depth = sum(sz for _, sz in b.levels("bid" if side == "sell" else "ask", 50)) if b is not None and b.ready else 0.0
+                adl = depth < qty
+                if adl:
+                    self.stats["adl_exposure_events"] += 1
+                self.events.append({"ts": now, "type": "liquidation", "venue": v, "mode": vm.mode, "equity": eq, "maintenance": mm, "qty": qty, "side": side, "adl_exposure": adl,
+                                    "book_depth": depth, "liquidation_price": None, "core_alerts": list(row.alert_codes)})
+                out.append((v, side, qty, vm.liquidation_fee_bps))
+                if self.cfg.flatten_other_venue:
+                    for o in self.venues:
+                        if o != v and inventory.base.get(o, 0.0) != 0.0:
+                            out.append((o, "sell" if inventory.base.get(o, 0.0) > 0 else "buy", min(qty, abs(inventory.base.get(o, 0.0))), -1.0))
+            return out
+
+        def allows(self, signal, inventory, books, reserved=None):
+            if not self.cfg.gate_new_signals:
+                return True
+            marks = {v: self.mark(v, books) for v in self.venues}
+            for venue, sign in ((signal.buy_venue, 1.0), (signal.sell_venue, -1.0)):
+                if venue not in self.cfg.venues:
+                    continue
+                if marks.get(venue, 0.0) <= 0 or any(x <= 0 for x in marks.values()):
+                    continue
+                res = (reserved or {}).get(venue, 0.0) if self.cfg.venues[venue].reserve_open_orders else 0.0
+                self.core["gate_calls"] += 1
+                ok, why = self.sh.core_margin_admits(venue, signal.qty, marks, res / marks[venue])
+                if not ok:
+                    self.core["gate_refusals"] += 1
+                    self.stats["signals_blocked_by_margin"] += 1
+                    if "above the last risk tier" in why:
+                        self.core["gate_refusals_above_last_tier"] += 1
+                        self.stats["tier_exceeded"] += 1
+                    return False
+            return True
+
+        def report(self, inventory, books):
+            r = super().report(inventory, books)
+            r["margin_source"] = "core crypto_stat_arb RiskEngine (tiers, ledger collateral, cross mode, A9 fail-closed, worst-case admission)"
+            r["core_path"] = dict(self.core, not_provided_by_core=["liquidation price", "liquidation distance"], not_modelled=["transfers", "isolated mode", "utilisation limit", "liquidation fee in the core ledger (the fee rides on the backtester's fill)"])
+            r["min_liquidation_distance"] = {v: None for v in self.venues}
+            r["liquidation_price_by_venue"] = {v: None for v in self.venues}
+            return r
+
+    return CoreMarginModel
