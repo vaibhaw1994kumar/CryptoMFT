@@ -440,5 +440,36 @@ class LiquidationSessionTests(unittest.TestCase):
             store.close()
 
 
+class MarkMissingTests(unittest.TestCase):
+    """B2.7 (owner 7 Nov): a position held with no mark price is flagged MARK_MISSING and the economics gate is INCOMPLETE; it is no longer valued silently at its average price."""
+    def test_a_held_position_with_no_mark_is_flagged_and_remembered(self):
+        ledger, _ = make_risk_env()
+        fill(ledger, "BINANCE", Side.BUY, "1")
+        state = ledger.recalculate_account_state(mark_prices={})
+        self.assertEqual(state["mark_missing"], [f"BINANCE:{PERP}"])
+        self.assertEqual(ledger.mark_missing, {f"BINANCE:{PERP}"})
+        self.assertEqual(Decimal(state["positions"][f"BINANCE:{PERP}"]["unrealized_pnl"]), Decimal("0"))      # the old stand-in is unchanged: average price, unrealised 0
+        self.assertEqual(ledger.recalculate_account_state(mark_prices={("BINANCE", PERP): Decimal("101")})["mark_missing"], [])
+
+    def test_a_flat_position_needs_no_mark(self):
+        ledger, _ = make_risk_env()
+        fill(ledger, "BINANCE", Side.BUY, "1", order_id="a")
+        fill(ledger, "BINANCE", Side.SELL, "1", order_id="b")
+        self.assertEqual(ledger.recalculate_account_state(mark_prices={})["mark_missing"], [])
+
+    def test_the_reconciliation_and_the_gate_call_it_incomplete(self):
+        from decimal import Decimal as D
+        from crypto_stat_arb.economics import Valuation, reconcile
+        from crypto_stat_arb.economics_gate import incomplete_reasons
+        ledger, _ = make_risk_env()
+        fill(ledger, "BINANCE", Side.BUY, "1")
+        closing = Valuation("USDT", {("BINANCE", PERP): D("100"), ("BYBIT", PERP): D("100")})
+        ok = reconcile(ledger.economics, opening=Valuation("USDT", {}), closing=closing)
+        self.assertNotEqual(ok["status"], "INCOMPLETE")
+        report = reconcile(ledger.economics, opening=Valuation("USDT", {}), closing=closing, mark_missing=[f"BINANCE:{PERP}"])
+        self.assertEqual(report["status"], "INCOMPLETE")
+        self.assertEqual(incomplete_reasons(report, None)["MISSING_PRICE"], [f"MARK_MISSING:BINANCE:{PERP}"])
+
+
 if __name__ == "__main__":
     unittest.main()

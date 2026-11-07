@@ -167,6 +167,9 @@ class ArbBacktestConfig:
     funding_source: str = "settler"
     # B2 step 6: "model" = margin_model.py (v1, v1.1, v1_2, v1_3, legacy_v0); "core" = every check and every admission decision comes from the core RiskEngine margin path (needs funding_source core when funding is modelled).
     margin_source: str = "model"
+    # B2 step 7: "backtester" = headline equity, cash P&L and the equity bridge from the backtester's float books (v1, v1.1, v1_2, v1_3, legacy_v0); "core" = from the core ledger at the common-timestamp marks, the strict
+    # bridge in the core (trade-log rebuild, fees against the schedule, equity, the float inventory against the ledger), the core reconciliation and the economics gate (written to the run directory).
+    ledger_source: str = "backtester"
     # Hedge-leg failure injection (hedge_faults.py). None = off and the replay is exactly as before.
     hedge_faults: HedgeFaultConfig | None = None
     # Opt-in margin / liquidation / cross-venue equity-transfer model (margin_model.py). None (default): infinite margin and no
@@ -581,11 +584,17 @@ class CrossVenueArbBacktester:
             raise ValueError(f"funding_source must be 'settler' or 'core', got {config.funding_source!r}")
         if config.margin_source not in ("model", "core"):
             raise ValueError(f"margin_source must be 'model' or 'core', got {config.margin_source!r}")
+        if config.ledger_source not in ("backtester", "core"):
+            raise ValueError(f"ledger_source must be 'backtester' or 'core', got {config.ledger_source!r}")
+        if config.ledger_source == "core" and config.margin is None:
+            raise ValueError("ledger_source 'core' needs a margin configuration (the core ledger's opening balances come from the per-venue capital)")
+        if config.ledger_source == "core" and config.funding_rate_dir and config.funding_source != "core":
+            raise ValueError("ledger_source 'core' with funding modelled needs funding_source 'core' (the core ledger must carry the funding the run pays)")
         if config.margin_source == "core" and config.margin is None:
             raise ValueError("margin_source 'core' needs a margin configuration")
         if config.margin_source == "core" and config.funding_rate_dir and config.funding_source != "core":
             raise ValueError("margin_source 'core' with funding modelled needs funding_source 'core' (the core ledger must carry the funding the run pays)")
-        if config.core_shadow or (config.funding_source == "core" and config.funding_rate_dir) or config.margin_source == "core":          # no rate directory = funding not modelled, as with the settler (March has no funding file)
+        if config.core_shadow or (config.funding_source == "core" and config.funding_rate_dir) or config.margin_source == "core" or config.ledger_source == "core":          # no rate directory = funding not modelled, as with the settler (March has no funding file)
             from .core_shadow import CoreShadow
             self._shadow = CoreShadow(config.pair, tuple(config.venues), fee_rows=self.fee_rows, funding_venues=tuple(v for v in config.venues if self.product_by_venue.get(v) != "spot"), funding_rate_dir=config.funding_rate_dir, start_date=config.start_date, end_date=config.end_date,
                                        margin=config.margin)
@@ -1658,7 +1667,8 @@ class CrossVenueArbBacktester:
             self.margin_model.note_fill(fill.venue, fill.qty if fill.side == "buy" else -fill.qty, fill.price, self.inventory)
         self.fees_paid += fill.fee
         if self._shadow is not None:
-            self._shadow.on_fill(fill, self.inventory)
+            self._shadow.on_fill(fill, self.inventory, liquidation_fee_bps=(self.margin_model.cfg.venues[fill.venue].liquidation_fee_bps
+                                                                          if self._fill_kind == "liquidation" and self.margin_model is not None else None))
         self.traded_notional += fill.notional
         self.markouts.record_fill(fill.ts, fill.venue, fill.side, fill.price, fill.qty, "taker" if fill.is_taker else "maker")
 
@@ -3010,6 +3020,64 @@ class CrossVenueArbBacktester:
 
     # ── Result ───────────────────────────────────────────────────────────────
 
+    def _core_ledger_close(self, val: dict, common_equity: float, last_mark_equity: float, mids: dict, feed) -> tuple[float, dict, float]:
+        """B2.7: close the run on the core ledger. Headline equity and cash P&L are the ledger's at the common-timestamp marks (the venue mids when no common timestamp exists, flagged); the strict bridge,
+        the core reconciliation and the economics gate then judge the books. Raises EquityBridgeError unless equity_bridge == 'warn', as the old bridge did."""
+        from decimal import Decimal as D
+        from crypto_stat_arb.economics import Valuation, reconcile, strict_bridge
+        from crypto_stat_arb.economics_gate import economics_gate
+        sh, cfg = self._shadow, self.config
+        basis = "common_timestamp" if val.get("available") else f"unavailable:{val.get('reason')}"
+        marks = {v: float(val["marks"][v]) for v in cfg.venues} if val.get("available") else {v: float(mids.get(v, 0.0)) for v in cfg.venues}
+        dm = {v: D(repr(float(x))) for v, x in marks.items()}
+        core_cash = sum((sh.ledger.cash_deltas.get(sh._venue(v), D(0)) for v in cfg.venues), D(0))
+        core_open = sum((sh.ledger.positions.get((sh._venue(v), sh.instrument), D(0)) * dm[v] for v in cfg.venues), D(0))
+        funding_by_venue = self.settler.report()["by_venue"] if self.settler else {}
+        truncated = len(self.trade_log) >= cfg.max_trade_log
+        bridge = strict_bridge(sh.ledger, trades=self.trade_log, schedule=sh.schedule, instrument_id=sh.instrument, venues=cfg.venues, marks=dm,
+                               reported_equity=D(repr(float(common_equity))) if val.get("available") else D(repr(float(last_mark_equity))), inventory_cash=self.inventory.cash, inventory_base=self.inventory.base,
+                               funding_paid=funding_by_venue, liquidation_fee_bps={v: D(repr(float(c.liquidation_fee_bps))) for v, c in cfg.margin.venues.items()}, truncated=truncated,
+                               traded_notional=D(repr(float(self.traded_notional))))
+        val_c = Valuation("USDT", {(sh._venue(v), sh.instrument): dm[v] for v in cfg.venues})
+        funding_on = sh.funding is not None
+        recon = reconcile(sh.ledger.economics, opening=Valuation("USDT", {}), closing=val_c, product_types={sh._venue(v): "PERP" for v in cfg.venues},
+                          funding_modelled_venues=[sh._venue(v) for v in sh.funding_venues] if funding_on else (),
+                          funding_flags_by_venue=sh.funding.blocking_flags_by_venue() if funding_on else None, estimated_by_venue=sh.funding.estimated_by_venue() if funding_on else None,
+                          mark_missing=sh.ledger.mark_missing, identity_tolerance=D("1e-15"))      # float-fed ledger: 17-digit quantities, Decimal products round at ~1e-25
+        gate = None
+        dq = _data_quality(feed, cfg)
+        if cfg.output_dir:
+            out = Path(cfg.output_dir)
+            out.mkdir(parents=True, exist_ok=True)
+            (out / "economic_reconciliation.json").write_text(json.dumps(recon, indent=1, sort_keys=True, default=str), encoding="utf-8")
+            if funding_on:
+                (out / "funding_report.json").write_text(json.dumps(sh.funding.report(), indent=1, sort_keys=True, default=str), encoding="utf-8")
+            rejected = bool(dq["rejected_venues"])
+            (out / "data_quality_report.json").write_text(json.dumps({"decision": "REJECTED" if rejected else "ACCEPTED", "active_flags": [{"code": c} for v, r in dq["preflight"].items() for c in r["active_flag_codes"]]}, indent=1), encoding="utf-8")
+            allow = {"DATA_QUALITY": dq["override"]["justification"]} if (rejected and dq["override"]) else {}
+            gate = economics_gate(out, allow_incomplete=allow)
+        doc = dict(bridge, valuation_basis=basis, common_ts=val.get("common_ts"), core_cash=str(core_cash), core_open_position_value=str(core_open),
+                   reconciliation={"status": recon["status"], "checks": [{"check": c["check"], "passed": c["passed"]} for c in recon["checks"]], "mark_missing": recon["mark_missing"], "estimated": recon["estimated"]},
+                   economics_gate=None if gate is None else {"decision": gate["decision"], "failures": gate["failures"], "incomplete_reasons": gate["incomplete_reasons"], "allowed_incomplete": gate["allowed_incomplete"],
+                                                             "warnings": gate["warnings"], "estimated": gate["estimated"]},
+                   data_quality={"preflight_rejected_venues": dq["rejected_venues"], "override": dq["override"], "manifest_override": dq.get("manifest_override")},      # the gate sees preflight rejections only; a manifest gap and its written reason are carried here so they cannot pass unseen
+                   source="core ledger (crypto_stat_arb.economics.strict_bridge, reconcile, economics_gate)")
+        problems = []
+        if not bridge["ok"]:
+            problems.append(f"strict bridge failed: equity gap {bridge['equity_gap']}, failed venues {bridge['failed']}, fee mismatches {len(bridge['fee_mismatches'])}, tolerance {bridge['tolerance_usdt']}")
+        if gate is not None and gate["decision"] != "PASS":
+            problems.append(f"economics gate {gate['decision']}: {'; '.join(gate['failures'])[:600]}")
+        elif recon["status"] == "FAIL":
+            problems.append("core reconciliation FAIL")
+        doc["ok"] = not problems
+        if problems:
+            msg = "core ledger close failed: " + " | ".join(problems)
+            if cfg.equity_bridge == "warn":
+                warnings.warn(msg, RuntimeWarning, stacklevel=2)
+            else:
+                raise EquityBridgeError(msg)
+        return float(core_cash + core_open), doc, float(core_cash)
+
     def _equity_bridge(self, open_pos_value: float, ending_equity: float, valuation: dict | None = None) -> dict:
         """Ledger identity, checked at the end of every run (docs/strategy_contract.md section 4):
              cash rebuilt from the trade log (fills, fees) + funding + transfers == ledger cash
@@ -3176,14 +3244,19 @@ class CrossVenueArbBacktester:
             ending_equity = last_mark_equity
         val = dict(val, headline=cfg.valuation, last_mark_equity=last_mark_equity, last_mark_open_position_value=last_mark_open,
                    last_marks=dict(mids), stale_mark_inflation=last_mark_equity - common_timestamp_equity)
+        if cfg.ledger_source == "core":
+            ending_equity, self.equity_bridge, core_cash = self._core_ledger_close(val, common_timestamp_equity, last_mark_equity, mids, feed)       # B2.7: the core ledger's figures; the old bridge is not called
+        else:
+            core_cash = None
         mtm = ending_equity  # legacy alias
-        self.equity_bridge = self._equity_bridge(open_pos_value, ending_equity, val)
+        if cfg.ledger_source != "core":
+            self.equity_bridge = self._equity_bridge(open_pos_value, ending_equity, val)
         self.xl.finalize(getattr(self, "_now", 0.0) or 0.0)
         self.exec_reconciliation = self._exec_reconcile(self.inventory.total_cash)
         self.valuation_doc = val
 
         # Task 5 — cash_pnl: direct ledger reading (fees already deducted in cash_delta).
-        cash_pnl = self.inventory.total_cash
+        cash_pnl = self.inventory.total_cash if core_cash is None else core_cash
 
         n = max(1, self.edge_samples)
         mean_exp = self.expected_gross_sum / n

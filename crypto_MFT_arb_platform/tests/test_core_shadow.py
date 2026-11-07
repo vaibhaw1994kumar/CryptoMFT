@@ -308,7 +308,7 @@ class FeesFromTheCore(unittest.TestCase):
             return out
         a, b = flat(load_profile("perp_perp_maker_taker_v1_3")), flat(load_profile("perp_perp_maker_taker_v1_4"))
         diff = {k for k in set(a) | set(b) if a.get(k) != b.get(k)}
-        self.assertEqual(diff, {"name", "description", "fee_source", "funding_source", "margin_source", "fee_presets.bybit", "fee_presets.binance", "decision_status.fees"})
+        self.assertEqual(diff, {"name", "description", "fee_source", "funding_source", "margin_source", "ledger_source", "fee_presets.bybit", "fee_presets.binance", "decision_status.fees"})
 
     def test_the_earlier_profiles_keep_their_own_presets(self):
         for name in ("perp_perp_maker_taker_v1_2", "perp_perp_maker_taker_v1_3"):
@@ -398,6 +398,22 @@ class FundingFromTheCore(unittest.TestCase):
             st.settle(10.014, inv, None)                  # the timer wheel calls at exactly the row's time, the next event is later: nothing may be left unsettled
             st.settle(11.0, inv, None)
             self.assertEqual(sorted(r["venue"] for r in st.report()["settlements"]), ["binance", "bybit"])
+
+    def test_a_boundary_with_no_rate_record_is_flagged_during_the_run_not_dropped(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmp:
+            sh, inv = self._setup(tmp)                                                              # rate rows at 10 s; the 8-hour boundary at 28,800 s has none
+            for t in (20_000.0, 29_000.0):
+                sh.on_mid("bybit", t, 100.0)
+                sh.on_mid("binance", t, 100.0)
+            st = sh.funding_settler()
+            st.settle(11.0, inv, None)
+            cash = dict(inv.cash)
+            st.settle(29_000.0, inv, None)
+            self.assertEqual(inv.cash, cash)                                                        # nothing to book ...
+            flags = [x for x in st.report()["settlements"] if x.get("flag") == "FUNDING_RATE_MISSING"]
+            self.assertEqual(sorted(x["venue"] for x in flags), ["binance", "bybit"])               # ... and the run says so, per venue
+            self.assertEqual(st.report()["core_status"]["economic_status"], "INCOMPLETE")
 
     def test_a_settlement_is_booked_once_however_often_the_settler_is_called(self):
         import tempfile
@@ -546,6 +562,121 @@ class MarginFromTheCore(unittest.TestCase):
         old = apply_profile(load_profile("perp_perp_maker_taker_v1_3"), dataset="mar2024", data_root="/nonexistent", pair="SOLUSDT", start_date="2024-03-08", end_date="2024-03-08", output_dir="/tmp/x_marg")
         old.allow_manifest_gap = "test"
         self.assertEqual(type(CrossVenueArbBacktester(old).margin_model).__name__, "MarginModel")
+
+
+class LedgerFromTheCore(unittest.TestCase):
+    """B2 step 7 (7 Nov): the core's strict bridge, liquidation booking, and the run close on the core ledger. Synthetic data: wiring only."""
+    def _booked(self, with_margin=True):
+        from crypto_stat_arb.fees import tier_rows
+        rows = tier_rows({"bybit": "bybit_perp_vip5", "binance": "binance_perp_vip9"}, "SOL-USDT-PERP")
+        sh, inv = CoreShadow("SOLUSDT", VENUES, fee_rows=rows, margin=MarginShadow._cfg(self) if with_margin else None), InventoryBook()
+        inv.ensure(VENUES)
+        f1, f2 = fill("buy", "bybit", 1.0, 100.0, False, 1.0, ts=1.0), fill("sell", "binance", 1.0, 100.1, True, 1.7, ts=1.0, sid=2)
+        book(sh, inv, f1)
+        book(sh, inv, f2)
+        trades = [{"ts": 1.0, "venue": f.venue, "side": f.side, "qty": f.qty, "price": f.price, "fee": f.fee, "taker": f.is_taker, "kind": None} for f in (f1, f2)]
+        return sh, inv, trades
+
+    def _bridge(self, sh, inv, trades, **kw):
+        from decimal import Decimal as D
+        from crypto_stat_arb.economics import strict_bridge
+        marks = {"bybit": D("100.05"), "binance": D("100.05")}
+        eq = sum(inv.cash.values()) + sum(inv.base[v] * 100.05 for v in VENUES)
+        args = dict(trades=trades, schedule=sh.schedule, instrument_id=sh.instrument, venues=VENUES, marks=marks, reported_equity=D(repr(eq)), inventory_cash=inv.cash, inventory_base=inv.base,
+                    traded_notional=D("200.1"))
+        args.update(kw)
+        return strict_bridge(sh.ledger, **args)
+
+    def test_a_consistent_book_passes_every_check(self):
+        sh, inv, trades = self._booked()
+        r = self._bridge(sh, inv, trades)
+        self.assertTrue(r["ok"], r)
+        self.assertEqual((r["fee_mismatches"], r["failed"]), ([], []))
+        self.assertLess(abs(float(r["equity_gap"])), 1e-12)
+
+    def test_each_old_check_still_fails_when_its_input_is_wrong(self):
+        sh, inv, trades = self._booked()
+        bad_fee = [dict(trades[0], fee=trades[0]["fee"] + 0.01)] + trades[1:]
+        self.assertEqual(len(self._bridge(sh, inv, bad_fee)["fee_mismatches"]), 1)                    # a fee that is not the schedule's
+        self.assertFalse(self._bridge(sh, inv, trades[:1])["per_venue"]["binance"]["rebuild_ok"])     # a fill missing from the trade log
+        from decimal import Decimal as D
+        r = self._bridge(sh, inv, trades, reported_equity=D("5"))
+        self.assertFalse(r["ok"])                                                                      # a wrong equity
+        self.assertGreater(abs(float(r["equity_gap"])), 1.0)
+
+    def test_the_float_inventory_must_match_the_ledger(self):
+        sh, inv, trades = self._booked()
+        inv.apply("bybit", 0.001, 0.0)                                                                 # the strategy's view drifted from what is booked
+        r = self._bridge(sh, inv, trades)
+        self.assertFalse(r["per_venue"]["bybit"]["inventory_ok"])
+        self.assertFalse(r["ok"])
+
+    def test_a_truncated_trade_log_skips_the_rebuild_but_not_the_inventory_check(self):
+        sh, inv, trades = self._booked()
+        r = self._bridge(sh, inv, trades[:1], truncated=True)
+        self.assertTrue(r["per_venue"]["binance"]["rebuild_ok"])
+        self.assertTrue(r["per_venue"]["binance"]["inventory_ok"])
+
+    def test_a_liquidation_is_booked_as_one_with_the_declared_fee_and_the_bridge_accepts_it(self):
+        from crypto_stat_arb.economics import EconomicEventType
+        sh, inv, trades = self._booked()
+        liq = fill("sell", "bybit", 1.0, 99.0, True, 3.2 + 10.0, ts=2.0, sid=0)                       # taker 3.2 plus the declared 10 bps
+        inv.apply(liq.venue, liq.signed_qty, liq.cash_delta)
+        sh.on_fill(liq, inv, liquidation_fee_bps=10.0)
+        self.assertEqual(sum(1 for e in sh.ledger.economics.events if e.event_type == EconomicEventType.LIQUIDATION), 1)
+        trades.append({"ts": 2.0, "venue": "bybit", "side": "sell", "qty": 1.0, "price": 99.0, "fee": liq.fee, "taker": True, "kind": "liquidation"})
+        from decimal import Decimal as D
+        r = self._bridge(sh, inv, trades, liquidation_fee_bps={"bybit": D("10")})
+        self.assertEqual(r["fee_mismatches"], [])
+        self.assertLess(abs(float(r["equity_gap"])), 1e-9)
+
+    def test_the_run_close_uses_the_core_and_never_the_old_bridge(self):
+        import tempfile
+        from types import SimpleNamespace
+        from unittest import mock
+        from new_backtest.backtester import CrossVenueArbBacktester, EquityBridgeError
+        from new_backtest.profiles import apply_profile, load_profile
+        with tempfile.TemporaryDirectory() as tmp:
+            cfg = apply_profile(load_profile("perp_perp_maker_taker_v1_4"), dataset="mar2024", data_root="/nonexistent", pair="SOLUSDT", start_date="2024-03-08", end_date="2024-03-08", output_dir=tmp)
+            cfg.allow_manifest_gap = "test"
+            bt = CrossVenueArbBacktester(cfg)
+            self.assertEqual(cfg.ledger_source, "core")
+            val = {"available": True, "marks": {"bybit": 100.0, "binance": 100.0}, "equity": 0.0, "common_ts": 1.0}
+            with mock.patch.object(CrossVenueArbBacktester, "_equity_bridge", side_effect=AssertionError("equity booked outside the core")):
+                equity, doc, cash = bt._core_ledger_close(val, 0.0, 0.0, {"bybit": 100.0, "binance": 100.0}, SimpleNamespace())
+                self.assertEqual((equity, cash, doc["ok"]), (0.0, 0.0, True))
+                self.assertEqual(doc["economics_gate"]["decision"], "PASS")
+                self.assertTrue(Path(tmp, "economic_reconciliation.json").exists())
+                bt.inventory.apply("bybit", 1.0, -100.0)                                               # the float books move, the core ledger does not
+                with self.assertRaises(EquityBridgeError):
+                    bt._core_ledger_close(val, 0.0, 0.0, {"bybit": 100.0, "binance": 100.0}, SimpleNamespace())
+                bt.config.equity_bridge = "warn"
+                with self.assertWarns(RuntimeWarning):
+                    bt._core_ledger_close(val, 0.0, 0.0, {"bybit": 100.0, "binance": 100.0}, SimpleNamespace())
+
+
+    def test_a_float_fed_ledger_passes_the_reconciliation_only_with_a_stated_tolerance(self):
+        from decimal import Decimal as D
+        from crypto_stat_arb.economics import Valuation, reconcile
+        sh, inv = CoreShadow("SOLUSDT", VENUES, margin=MarginShadow._cfg(self)), InventoryBook()
+        inv.ensure(VENUES)
+        for i, q in enumerate((0.1, 0.2, 0.30000000000000004)):                                       # binary floats: 17-digit quantities
+            book(sh, inv, fill("buy", "bybit", q, 151.4575 + i, False, 1.0, ts=1.0 + i, sid=i + 1))
+            book(sh, inv, fill("sell", "binance", q, 151.4575 + i, True, 1.7, ts=1.0 + i, sid=i + 11))
+        closing = Valuation("USDT", {("BYBIT", sh.instrument): D("152.123456789"), ("BINANCE", sh.instrument): D("152.123456789")})
+        loose = reconcile(sh.ledger.economics, opening=Valuation("USDT", {}), closing=closing, identity_tolerance=D("1e-15"))
+        self.assertEqual([c["passed"] for c in loose["checks"]], [True, True])
+        strict = reconcile(sh.ledger.economics, opening=Valuation("USDT", {}), closing=closing)
+        self.assertEqual(all(c["passed"] for c in strict["checks"]), all(abs(D(v["identity_residual"])) == 0 for v in strict["venues"].values()))      # default stays exact: it passes only when the residual is exactly 0
+
+    def test_ledger_core_needs_margin_and_core_funding(self):
+        from new_backtest.backtester import CrossVenueArbBacktester
+        from new_backtest.profiles import apply_profile, load_profile
+        cfg = apply_profile(load_profile("perp_perp_maker_taker_v1_4"), dataset="mar2024", data_root="/nonexistent", pair="SOLUSDT", start_date="2024-03-08", end_date="2024-03-08", output_dir="/tmp/x_led",
+                            funding_rate_dir="/tmp", funding_source="settler")
+        cfg.allow_manifest_gap = "test"
+        with self.assertRaises(ValueError):
+            CrossVenueArbBacktester(cfg)
 
 
 if __name__ == "__main__":

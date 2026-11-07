@@ -69,7 +69,7 @@ class CoreShadow:
         import datetime as dt
         from crypto_stat_arb.funding import FundingEngine, FundingRateBook, FundingSpec
         self.ledger.asset_resolver = lambda venue, instrument_id: (instrument_id, "USDT")        # the session's rule for a perpetual: the position asset is the instrument id
-        specs = [FundingSpec(self._venue(v), self.instrument, self.instrument, "USDT") for v in self.funding_venues]
+        specs = [FundingSpec(self._venue(v), self.instrument, self.instrument, "USDT", interval_ns=8 * 3_600 * 10**9, anchor_ns=0) for v in self.funding_venues]      # the 8-hour schedule (B2.7a): a missing record is then flagged, and a jittered record (Binance +14 ms) snaps to its boundary
         lo = dt.datetime.fromisoformat(start_date).replace(tzinfo=dt.timezone.utc).timestamp() if start_date else None
         hi = dt.datetime.fromisoformat(end_date).replace(tzinfo=dt.timezone.utc).timestamp() + 86_400 if end_date else None
         book, mine = FundingRateBook(), {v.lower() for v in self.funding_venues}
@@ -85,9 +85,17 @@ class CoreShadow:
                     continue
                 book.add_row(dict(row, venue=str(row["venue"]).upper(), instrument_id=self.instrument), "shadow")
                 exact_ns = int(row["funding_ts_ns"]) if row.get("funding_ts_ns") is not None else int(row["funding_ts_ms"]) * 1_000_000        # the engine's own key: a float round trip is off by up to 256 ns
-                self.funding_due.append((ts, str(row["venue"]).lower(), exact_ns))
         self.funding = FundingEngine(self.ledger, specs, book, mark_fallback="book_mid")
-        self.funding_due.sort()
+        # When the engine is asked to settle: every record key AFTER snapping (exact ns) and every 8-hour boundary of the window, so a boundary with no record reaches settle_until during the run and is flagged while cash can still change.
+        due = {(v.lower(), ns) for (v, _i, ns) in self.funding.rates.realized}
+        if lo is not None and hi is not None:
+            step = 8 * 3_600 * 10**9
+            for v in self.funding_venues:
+                t = -(-int(lo * 1e9) // step) * step
+                while t < int(hi * 1e9):
+                    due.add((v.lower(), t))
+                    t += step
+        self.funding_due = sorted((ns / 1e9, v, ns) for v, ns in due)
 
     def _init_margin(self, cfg, flat_every: int) -> None:
         from crypto_stat_arb.economics import opening_balance_events
@@ -239,12 +247,15 @@ class CoreShadow:
     def _venue(self, v: str) -> str:
         return v.upper()
 
-    def on_fill(self, fill, inventory) -> None:
-        """Called by the backtester after it booked `fill` (inventory already updated). Reads only."""
+    def on_fill(self, fill, inventory, liquidation_fee_bps: float | None = None) -> None:
+        """Called by the backtester after it booked `fill` (inventory already updated). Reads only. `liquidation_fee_bps` (B2.7): the fill is a margin liquidation: the declared fee rides on the taker fee and the core books it as a LIQUIDATION."""
         self.n += 1
         liq = self._Liquidity.TAKER if fill.is_taker else self._Liquidity.MAKER
         venue = self._venue(fill.venue)
         rate = self.schedule.rate_bps(venue, self.instrument, liq)
+        is_liq = liquidation_fee_bps is not None
+        if is_liq and rate is not None:
+            rate = rate + _dec(liquidation_fee_bps)
         qty, px = _dec(fill.qty), _dec(fill.price)
         notional = qty * px
         if rate is None:
@@ -262,8 +273,13 @@ class CoreShadow:
         self.max_fill_fee_diff = max(self.max_fill_fee_diff, abs(bt_fee - core_fee))
         order = self._ChildOrder(order_id=f"shadow-{self.n}", parent_id=f"shadow-{fill.signal_id}", opportunity_id=f"shadow-{fill.signal_id}", venue=venue,
                                  instrument_id=self.instrument, side=self._Side.BUY if fill.side == "buy" else self._Side.SELL, quantity=qty, limit_price=px,
-                                 filled_quantity=qty, average_price=px, fee=core_fee, liquidity=liq.value, fee_rate_bps=rate, fee_source="ASSUMED")
-        self.ledger.apply_fill(order, int(fill.ts * 1_000_000_000))
+                                 filled_quantity=qty, average_price=px, fee=core_fee, liquidity="LIQUIDATION" if is_liq else liq.value, fee_rate_bps=rate,
+                                 fee_source="LIQUIDATION_FEE_ASSUMED" if is_liq else "ASSUMED", **({"order_role": "LIQUIDATION"} if is_liq else {}))
+        if is_liq:
+            from crypto_stat_arb.economics import EconomicEventType
+            self.ledger.apply_fill(order, int(fill.ts * 1_000_000_000), economic_type=EconomicEventType.LIQUIDATION)
+        else:
+            self.ledger.apply_fill(order, int(fill.ts * 1_000_000_000))
         self._compare_after_fill(fill, inventory)
 
     def _compare_after_fill(self, fill, inventory) -> None:
