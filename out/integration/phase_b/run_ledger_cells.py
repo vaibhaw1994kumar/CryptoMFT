@@ -14,7 +14,7 @@ X = ROOT / "out" / "queue_v2"
 OUT = Path(os.environ["LEDGER_OUT"]) if os.environ.get("LEDGER_OUT") else ROOT / "out" / "integration" / "phase_b" / "ledger"      # LEDGER_OUT / LEDGER_DAYS: an identity re-run into another folder / on fewer days
 n, dataset, cells = int(sys.argv[1]), sys.argv[2], sys.argv[3:]
 MAR_DAYS = tuple(os.environ["LEDGER_DAYS"].split(",")) if os.environ.get("LEDGER_DAYS") else ("2024-03-08", "2024-03-09", "2024-03-10", "2024-03-11")
-JAN_DAY = "2022-01-13"
+JAN_DAY = os.environ.get("LEDGER_JAN_DAY", "2022-01-13")      # LEDGER_JAN_DAY: January cells on another day (no hedge-move file exists for 2022-01-05, so none is passed)
 REASON_MAR = ("exploratory: 2-hour slice; Binance March-2024 has bookTicker (L1) only (manifest EMPTY); funding not settled; makers judged against the tape of the venue they rest on")
 REASON_JAN = "exploratory: Binance trade tape truncated at ~17 h on 2022-01-05 and 2022-01-13 (queue_v2 manifest); each maker order is judged against the tape of the venue it rests on"
 TICKS_MAR = {"bybit": 0.001, "binance": 0.001}
@@ -79,7 +79,7 @@ def jobs():
                 cmd = ["python3.12", "-I", str(X / "qv2_march_run.py"), PROFILE_OF.get(cell, MAR_PROF), day, "--group", "base", "--cell", PROFILE_OF.get(cell, MAR_PROF), "--allow-manifest-gap", REASON_MAR, *EXTRA_ARGS.get(cell, [])]      # v1_2 headline runs override the manifest only: the preflight blocks (owner 6 Nov)
                 out.append((f"{cell}/{day}", runs / "base" / PROFILE_OF.get(cell, MAR_PROF) / day / "summary.json", env, cmd))
         else:
-            env = dict(os.environ, EXEC_SNAP=str(LIVE), EXEC_OUT=str(runs / "jan"), EXEC_TAG="base", QV2_HEDGE_MOVE_FILE=HM_JAN,
+            env = dict(os.environ, EXEC_SNAP=str(LIVE), EXEC_OUT=str(runs / "jan"), EXEC_TAG="base", **({"QV2_HEDGE_MOVE_FILE": HM_JAN} if JAN_DAY == "2022-01-13" else {}),
                        QV2_MAKER=json.dumps({"unknown_queue_fit": str(X / f"unknown_queue_fit_for_{JAN_DAY}.json"), **mk}),
                        QV2_CFG=json.dumps({"data_manifest": str(X / "manifest.json"), "message_atomic_book": True, **FINAL.get(cell, ({}, {}))[1]}), QV2_VENUE_TICKS=json.dumps(TICKS_JAN))
             cmd = ["python3.12", str(X / "qv2_run.py"), JAN_PROF, JAN_DAY, "--allow-rejected-data", REASON_JAN]
