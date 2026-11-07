@@ -356,8 +356,8 @@ class FundingEngine(PeriodicSettlement):
         self.flags.append({
             "venue": spec.venue, "instrument_id": spec.instrument_id, "funding_ts_ns": ts_ns,
             "code": code, "position": str(position), "detail": detail,
-            # Missing data only matters economically when a position was held.
-            "blocking": position != 0 and code != "LATE_FILL_REBOOKED",
+            # Missing data only matters economically when a position was held. A mark fallback is booked, not missing: counted, never blocking.
+            "blocking": position != 0 and code not in ("LATE_FILL_REBOOKED", "FUNDING_MARK_FALLBACK"),
         })
 
     def _note_rebook(self, line, ts_ns: int, quantity: Decimal, detail: str) -> None:
@@ -408,6 +408,8 @@ class FundingEngine(PeriodicSettlement):
             if mark is None and last is not None and last[0] <= ts_ns:
                 mark = last[1]
             mark_source = "book mid at settlement (approximation of the mark price)"
+            if mark is not None and mark > 0:
+                self._flag(spec, ts_ns, "FUNDING_MARK_FALLBACK", position, "no mark price in the funding record: the book mid was used")      # owner 7 Nov: flagged and counted
         if mark is None and self.mark_fallback == "exchange_mark":
             observed = self._xmark_at.get((spec.venue, spec.instrument_id, ts_ns))
             last = self._last_xmark.get((spec.venue, spec.instrument_id))
@@ -505,7 +507,8 @@ class FundingEngine(PeriodicSettlement):
             by_venue[event.venue] = by_venue.get(event.venue, ZERO) + event.postings[0].quantity
         blocking = [f for f in self.flags if f["blocking"]]
         unscheduled = sorted(f"{v}:{i}" for (v, i), s in self.specs.items() if s.interval_ns <= 0)
-        data_gaps = [f for f in self.flags if f["code"] != "LATE_FILL_REBOOKED"]
+        data_gaps = [f for f in self.flags if f["code"] not in ("LATE_FILL_REBOOKED", "FUNDING_MARK_FALLBACK")]
+        fallbacks = [f for f in self.flags if f["code"] == "FUNDING_MARK_FALLBACK"]
         estimated = [e for e in self.settled_events() if "approximation" in e.valuation_source]
         marks = closing_marks or {}
         rate_sources: dict[str, int] = {}
@@ -549,6 +552,7 @@ class FundingEngine(PeriodicSettlement):
             # ESTIMATED when any used the book mid instead (audit P1).
             "mark_basis": "ESTIMATED" if estimated else ("EXCHANGE_MARK" if self._settled else "NONE"),
             "settlements_on_book_mid": len(estimated),
+            "FUNDING_MARK_FALLBACK": len(fallbacks),
             "unscheduled_instruments": unscheduled,
             "horizon_ns": self.horizon_ns,
             "settlements_booked": len(self._settled),
