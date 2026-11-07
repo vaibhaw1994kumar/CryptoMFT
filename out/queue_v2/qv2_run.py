@@ -85,7 +85,7 @@ kw = dict(data_root=os.environ.get("QV2_DATA_ROOT", "/Users/vaibhav/Documents/Ne
           output_dir=str(out), funding_rate_dir="/Users/vaibhav/Documents/Newproject/out/funding/SOLUSDT", max_trade_log=10 ** 7,
           equity_bridge="warn", record_exposure=True)
 if a.allow_rejected_data:
-    if a.profile.endswith("_v1_2"):
+    if a.profile.endswith(("_v1_2", "_v1_3")):
         raise SystemExit("v1_2 headline runs do not override the preflight: use --allow-manifest-gap for the manifest and let the preflight block (owner 6 Nov)")
     kw["allow_rejected_data"] = a.allow_rejected_data
 if a.allow_manifest_gap:
@@ -186,6 +186,10 @@ if getattr(_bt.maker, "ledger_stats", None):
 if getattr(_bt.maker, "cross_log", None):
     (out / "cross_log.json").write_text(json.dumps(_bt.maker.cross_log, indent=1, default=str))        # opposite_cross_confirm_ms: one row per armed / confirmed / dropped cross
 summary["wall_s"] = time.time() - t0
+if getattr(_bt, "requoter", None) is not None:                 # S0 quote repricing: only when the profile switched it on (a run without it writes exactly what it always wrote)
+    _rq = _bt.requoter.report()
+    summary["requote"] = {"enabled": True, "source": _rq["config"]["source"], "config": _rq["config"], "stats": _rq["stats"], "holds": _rq["holds"], "amends_total": _rq["amends_total"]}
+    (out / "requote.json").write_text(json.dumps(_rq, indent=1, default=str))
 (out / "summary.json").write_text(json.dumps(summary, indent=1, default=str))
 if getattr(r, "hedge_capture", None):
     import gzip

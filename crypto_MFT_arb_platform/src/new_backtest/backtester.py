@@ -63,6 +63,8 @@ from .models import Side
 from .order_book import OrderBook
 from .order_events import OrderEventLog
 from .postonly import AckLatencyConfig, AckLatencySource, would_cross
+from .requote import Requoter
+from crypto_stat_arb.ems.tactics.passive import RepriceConfig
 from .venue_state import VenueState, VenueStateConfig
 
 
@@ -490,7 +492,7 @@ class CrossVenueArbBacktester:
                 "ArbConfig.maker_max_age_s is 0 in maker_taker mode: a resting maker order is only ever removed by a "
                 "fill, so one that stops being marketable keeps its place in the queue, blocks the live-order limit "
                 "and can fill much later at a stale price. The engine has no cancel/replace on price moves "
-                "(maker_requote_bps is not used); set maker_max_age_s as a time-in-force.",
+                "(unless execution.primary.reprice is set); set maker_max_age_s as a time-in-force.",
                 RuntimeWarning, stacklevel=2,
             )
         if (config.arb.mode == "maker_taker" and config.arb.maker_max_live_orders > 1
@@ -695,6 +697,12 @@ class CrossVenueArbBacktester:
         self.xl = ExecutionLayer(config.execution or ExecutionConfig(pairing=config.arb.mode), instrument=config.pair,
                                  dispatch_mode=config.arb.dispatch_mode)
         self.xl.set_risk(self._risk_limits, lambda: self.inventory.base)
+        self.requoter = None                            # S0 quote repricing: built only when execution.primary.reprice is set and enabled (the default is "none")
+        _rq = RepriceConfig.parse(((config.execution.primary if config.execution is not None else {}) or {}).get("reprice"))
+        if _rq.enabled:
+            if config.arb.mode != "maker_taker":
+                raise ValueError("execution.primary.reprice needs arb.mode maker_taker")
+            self.requoter = Requoter(self, _rq)
         self._maker_to_intent: dict[int, str] = {}      # resting maker order id -> the primary intent that sent it
         self._fill_src = ""                             # journal kind of the fill being booked when it is not a child order's
         self.exec_reconciliation: dict = {}
@@ -776,6 +784,8 @@ class CrossVenueArbBacktester:
             self._resolve_postonly(ev.venue, ets, now)
         if self.config.cancel_time_basis == "exchange" and self._cancel_watch:
             self._apply_due_cancels(ev.venue, ets, now)
+        if self.requoter is not None and self.requoter.pending:
+            self.requoter.apply_due(ev.venue, ets, now)         # an amend whose effective time has come lands before this event (the cancel rule)
 
         if ev.kind == BOOK:
             bids, asks = snapshot_levels(ev.payload)
@@ -1193,6 +1203,10 @@ class CrossVenueArbBacktester:
             "near_side_size_at_price": lvl, "opposite_side_size_at_price": self.maker._level_size(book, far, order.limit_price, tick),
             "queue_unknown": mo.queue_unknown, "level_was_absent": mo.level_was_absent, "relative_to_touch_ticks": mo.relative_to_touch_ticks,
             "touch": self._touches(order.venue), "hedge_touch_at_decision": dec.get("hedge_touch"), "decision_ts": dec.get("ts"), **(extra or {})})
+
+    def _obs_requote_place(self, rec: dict) -> None:
+        """S0: the observation of a repriced (amended) quote, written by the Requoter through the backtester (the engine never reads an observation)."""
+        self.obs.add("maker_place", rec)
 
     def _obs_fill(self, fill: Fill, intent_id: str) -> None:
         ev, ob = self._cur_ev, dict(fill.obs or {})
@@ -2638,7 +2652,7 @@ class CrossVenueArbBacktester:
         order.cancel_reason = reason
         order.filled_at_cancel_request = order.filled_qty
         self._cancel_watch[order.order_id] = order
-        self.lifetime["expiries_triggered" if reason == "expired" else "breaker_cancels_requested"] += 1
+        self.lifetime["expiries_triggered" if reason == "expired" else ("breaker_cancels_requested" if reason == "breaker_trip" else "requote_cancels_requested")] += 1
         self.events.emit(requested, "cancel_requested", order.venue, source="modelled", order_id=order.order_id,
                          signal_id=self._maker_to_signal.get(order.order_id, 0), side=order.side_str, qty=order.remaining, price=order.price,
                          **({} if reason == "expired" else {"reason": reason}))
@@ -2886,6 +2900,8 @@ class CrossVenueArbBacktester:
                 self._apply_event(ev)
                 if self._message_atomic and not self._frame_last:
                     continue                                # inside an exchange message: marks, breaker, margin, signals wait for its last delta
+                if self.requoter is not None and ev.kind in (BOOK, DELTA):
+                    self.requoter.on_hedge_event(ev.venue, now)    # S0: the hedge venue moved: ask the rule about every resting quote on the other venue
                 self._record_mid_ts(ev.venue, now)
                 if self._breaker is not None:
                     self._breaker_poll(now)

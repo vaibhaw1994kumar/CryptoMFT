@@ -106,7 +106,7 @@ kw = dict(data_root=DATA, pair="SOLUSDT", start_date=a.day, end_date=a.day, outp
 if a.profile == "legacy_v0":
     kw["hedge_arrival_book"] = "view"        # a non-legacy profile carries its own hedge_arrival_book (v1.1: truth); the runner does not override it
 if a.allow_rejected_data:
-    if a.profile.endswith("_v1_2"):
+    if a.profile.endswith(("_v1_2", "_v1_3")):
         raise SystemExit("v1_2 headline runs do not override the preflight: use --allow-manifest-gap for the manifest and let the preflight block (owner 6 Nov)")
     kw["allow_rejected_data"] = a.allow_rejected_data
 if a.allow_manifest_gap:
@@ -119,6 +119,8 @@ if os.environ.get("QV2_MAKER"):
     cfg.maker = dataclasses.replace(cfg.maker, **_json.loads(os.environ["QV2_MAKER"]))
 for _k, _v in _json.loads(os.environ.get("QV2_CFG", "{}")).items():
     setattr(cfg, _k, _v)
+if os.environ.get("QV2_REPRICE"):                                   # S0 smoke / sensitivity run ONLY: the reprice numbers come from the caller and are labelled in the result (source ILLUSTRATIVE_NOT_FITTED unless the caller says otherwise)
+    cfg.execution.primary["reprice"] = _json.loads(os.environ["QV2_REPRICE"])
 if os.environ.get("QV2_VENUE_TICKS") and not _pinned:
     cfg.arb.venue_ticks = {k: float(v) for k, v in json.loads(os.environ["QV2_VENUE_TICKS"]).items()}      # declared per dataset (v1.1 step 9b); the engine checks the first snapshot against it
 for _k, _v in json.loads(os.environ.get("QV2_ARB", "{}")).items():
@@ -188,6 +190,10 @@ if getattr(_bt.maker, "ledger_stats", None):
 if getattr(_bt.maker, "cross_log", None):
     (out / "cross_log.json").write_text(json.dumps(_bt.maker.cross_log, indent=1, default=str))
 summary["wall_s"] = time.time() - t0
+if getattr(_bt, "requoter", None) is not None:                 # S0 quote repricing: only when the profile switched it on (a run without it writes exactly what it always wrote)
+    _rq = _bt.requoter.report()
+    summary["requote"] = {"enabled": True, "source": _rq["config"]["source"], "config": _rq["config"], "stats": _rq["stats"], "holds": _rq["holds"], "amends_total": _rq["amends_total"]}
+    (out / "requote.json").write_text(json.dumps(_rq, indent=1, default=str))
 (out / "summary.json").write_text(json.dumps(summary, indent=1, default=str))
 print(a.group, a.cell, a.day, f"wall {summary['wall_s']:.0f}s sig {r.signals_generated} fills {r.orders_filled} cash {r.cash_pnl:.4f} "
       f"eq {r.ending_equity:.4f} bridge_ok {r.equity_bridge.get('ok')} trips {len(summary['breaker_trips'])} alarms {len(r.alarms)}", flush=True)

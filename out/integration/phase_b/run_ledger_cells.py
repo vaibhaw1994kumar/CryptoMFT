@@ -26,7 +26,12 @@ MAR_PROF, JAN_PROF = "perp_perp_maker_taker_v1_2", "perp_perp_maker_taker_v1_1"
 # 7 Nov final-v1_2 cells (March only; the profile as committed: March windows 0.15 s / 50 ms applied by the runner, placement_book view, through rule off, ledger on, stamps untrusted):
 #   f0 / f1 = ledger off / on with the March stamps TRUSTED (the constructed 2 ms stamps used as they are); ft = the profile as it stands (ledger on, stamps untrusted: the preset feed delay applies);
 #   fp = ft + placement_book truth (alone); fbf / faf / fco = ft with cancel model behind_first / ahead_first / cohort uniform (the profile's cross rule stays on): the four-model range with ft as the headline.
-FINAL = {"f0": ({"depletion_ledger": False}, {"trust_local_ts": {"bybit": True, "binance": True}}),
+# 7 Nov S0 cells: fs = v1_2 again on the final code (must equal ft byte for byte: the engine change for repricing is inert when off); v3 = v1_3 with the switch off (must equal ft too);
+# v3on = v1_3 with the rule ON and ILLUSTRATIVE numbers (a wiring smoke run, not a setting and not a result: the numbers are the trader's to set).
+ILLUSTRATIVE = {"enabled": True, "source": "ILLUSTRATIVE_NOT_FITTED", "band_down_bps": 2.0, "band_up_bps": None, "debounce_ms": None, "jump_bps": None, "min_interval_ms": 250.0, "max_age_s": 15.0,
+                "queue_hold": True, "amend_first": True}
+PROFILE_OF = {"v3": "perp_perp_maker_taker_v1_3", "v3on": "perp_perp_maker_taker_v1_3"}
+FINAL = {"fs": ({}, {}), "v3": ({}, {}), "v3on": ({}, {}), "f0": ({"depletion_ledger": False}, {"trust_local_ts": {"bybit": True, "binance": True}}),
          "f1": ({"depletion_ledger": True}, {"trust_local_ts": {"bybit": True, "binance": True}}),
          "ft": ({}, {}),
          "fp": ({}, {"placement_book": "truth"}),
@@ -62,11 +67,11 @@ def jobs():
         if dataset == "mar":
             for day in MAR_DAYS:
                 t1 = calendar.timegm(time.strptime(day, "%Y-%m-%d")) + 7200 + 1.0
-                env = dict(os.environ, QV2_SNAP=str(LIVE), QV2_RUNS=str(runs), QV2_DATA_ROOT=str(X / "slices_mar2024"),
+                env = dict(os.environ, **({"QV2_REPRICE": json.dumps(ILLUSTRATIVE)} if cell == "v3on" else {}), QV2_SNAP=str(LIVE), QV2_RUNS=str(runs), QV2_DATA_ROOT=str(X / "slices_mar2024"),
                            QV2_MAKER=json.dumps({"unknown_queue_fit": str(X / "unknown_queue_fit_mar2024_NONE.json"), **mk}),
                            QV2_CFG=json.dumps({"max_event_ts": t1, "data_manifest": str(X / "manifest_mar2024.json"), **FINAL.get(cell, ({}, {}))[1]}))
-                cmd = ["python3.12", "-I", str(X / "qv2_march_run.py"), MAR_PROF, day, "--group", "base", "--cell", MAR_PROF, "--allow-manifest-gap", REASON_MAR]      # v1_2 headline runs override the manifest only: the preflight blocks (owner 6 Nov)
-                out.append((f"{cell}/{day}", runs / "base" / MAR_PROF / day / "summary.json", env, cmd))
+                cmd = ["python3.12", "-I", str(X / "qv2_march_run.py"), PROFILE_OF.get(cell, MAR_PROF), day, "--group", "base", "--cell", PROFILE_OF.get(cell, MAR_PROF), "--allow-manifest-gap", REASON_MAR]      # v1_2 headline runs override the manifest only: the preflight blocks (owner 6 Nov)
+                out.append((f"{cell}/{day}", runs / "base" / PROFILE_OF.get(cell, MAR_PROF) / day / "summary.json", env, cmd))
         else:
             env = dict(os.environ, EXEC_SNAP=str(LIVE), EXEC_OUT=str(runs / "jan"), EXEC_TAG="base", QV2_HEDGE_MOVE_FILE=HM_JAN,
                        QV2_MAKER=json.dumps({"unknown_queue_fit": str(X / f"unknown_queue_fit_for_{JAN_DAY}.json"), **mk}),

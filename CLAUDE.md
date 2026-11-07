@@ -53,6 +53,7 @@ There are two parallel stacks. `new_backtest` uses only `crypto_stat_arb.quality
 | Latency / clock | `latency.py`, `sim_clock.py` | `latency_model.py`, `timing.py`, `virtual_clock.py` |
 | Data quality | `quality.py`, `dataset_manifest.py` | `quality_preflight.py`, `data_manifest.py` |
 | Release identity | `release.py` | `profiles.py` |
+| Quote repricing (S0, v1_3) | `ems/tactics/passive.py` (`decide_reprice`, `RepriceConfig`: the rule, pure) | `requote.py` (simulator glue), `arb_strategy.py` `requote_target` (edge at the current hedge price) |
 
 Backtester only:
 - Replay engine: `backtester.py`; runner and walk-forward: `batch_backtest.py`
