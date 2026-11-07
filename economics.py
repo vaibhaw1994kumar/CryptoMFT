@@ -388,6 +388,8 @@ def reconcile(
     estimated_by_venue: Mapping[str, list[str]] | None = None,
     transfer_mode: str | None = None,
     legacy_transfer_fees_by_venue: Mapping[str, Decimal] | None = None,
+    mark_missing: Iterable[str] = (),
+    identity_tolerance: Decimal = ZERO,
 ) -> dict[str, Any]:
     """Closing equity = opening + inventory revaluation + trading + fees/rebates
     + funding - borrow + transfers + external flows + valuation adjustments.
@@ -561,8 +563,10 @@ def reconcile(
             },
         }
         missing_all |= missing
-        checks.append({"check": f"{venue}_identity_exact", "passed": residual == 0,
-                       "detail": f"residual {residual}"})
+        # Exact (tolerance 0) for quantities on an exchange step. A caller that feeds the ledger from binary floats (the backtester) has quantities with 17 digits, and Decimal's 28-digit context then
+        # rounds products at ~1e-25: it passes a stated, tiny tolerance (reported in the detail), never a silent one.
+        checks.append({"check": f"{venue}_identity_exact", "passed": abs(residual) <= identity_tolerance,
+                       "detail": f"residual {residual}" + (f" (tolerance {identity_tolerance})" if identity_tolerance else "")})
         if trade_pnl_by_venue is not None:
             expected = trade_pnl_by_venue.get(venue, ZERO)
             # A venue buy-in of a recalled loan is a fill in the trade ledger.
@@ -643,7 +647,8 @@ def reconcile(
             ),
         })
     failed = [c for c in checks if not c["passed"]]
-    status = "FAIL" if failed else "INCOMPLETE" if missing_all or any(
+    mark_missing = sorted(set(mark_missing))                      # B2.7: a position was held with no mark price somewhere in the run (Ledger.mark_missing): reported, and INCOMPLETE
+    status = "FAIL" if failed else "INCOMPLETE" if missing_all or mark_missing or any(
         row["unvalued_fee_events"] or row["funding_flags"] or row["unvalued_borrow_accruals"]
         or row["fee_fallbacks"] or row["unvalued_transfer_fees"]
         or any(not f.startswith("UNFINANCED_SHORT") for f in row["borrow_flags"])
@@ -654,6 +659,7 @@ def reconcile(
         "reporting_currency": ledger.reporting_currency,
         "status": status,
         "estimated": sorted({item for row in rows.values() for item in row["estimated"]}),
+        "mark_missing": mark_missing,
         "venue_reported_equity": "AVAILABLE" if venue_reported_equity else "NOT_AVAILABLE (paper/simulation)",
         "venues": rows,
         "consolidated": {
@@ -683,3 +689,65 @@ def opening_balance_events(
         )
         for venue, asset, quantity in balances
     ]
+
+
+def strict_bridge(
+    ledger: Any, *, trades: Iterable[Mapping[str, Any]], schedule: Any, instrument_id: str, venues: Iterable[str], marks: Mapping[str, Decimal],
+    reported_equity: Decimal | None, inventory_cash: Mapping[str, Decimal], inventory_base: Mapping[str, Decimal], funding_paid: Mapping[str, Decimal] | None = None,
+    liquidation_fee_bps: Mapping[str, Decimal] | None = None, truncated: bool = False, traded_notional: Decimal = ZERO,
+) -> dict[str, Any]:
+    """The strict equity bridge, in the core (B2.7; carried over from the backtester's _equity_bridge, A3, so that no check is lost). Everything is Decimal; venue names are the ledger's.
+
+    Per venue: cash rebuilt from the independent trade log (signed notional minus fee minus funding paid) against the ledger's cash, and the position rebuilt from the trade log against the ledger's position;
+    every fill's fee against the fee schedule's booked rate times its notional (plus the declared liquidation fee on a liquidation); the ledger's equity (cash plus the open position at `marks`, which the caller
+    takes at the common timestamp) against `reported_equity`; and, the check the old bridge never needed, the caller's own float inventory (`inventory_cash`, `inventory_base`) against the ledger, so
+    what the strategy decides on cannot drift from what is booked. Tolerances as before: 1e-9 x the venue's traded notional per venue, max(1e-6, 1e-9 x traded notional) in total. A truncated trade log skips the rebuild checks (flagged).
+    `trades` rows: venue, side ('buy'/'sell'), qty, price, fee, taker (bool), kind (None/'liquidation'/'flatten'), ts."""
+    from .fees import Liquidity
+
+    def dec(x: Any) -> Decimal:
+        return x if isinstance(x, Decimal) else Decimal(repr(float(x)))
+    trades = list(trades)
+    funding_paid = {v: dec(x) for v, x in (funding_paid or {}).items()}
+    liq = {v: dec(x) for v, x in (liquidation_fee_bps or {}).items()}
+    tol_total = max(Decimal("1e-6"), Decimal("1e-9") * traded_notional)
+    per_venue: dict[str, Any] = {}
+    fee_mismatches: list[dict[str, Any]] = []
+    for r in trades:
+        qty, px, fee = dec(r["qty"]), dec(r["price"]), dec(r["fee"])
+        rate = schedule.rate_bps(str(r["venue"]).upper(), instrument_id, Liquidity.TAKER if r.get("taker") else Liquidity.MAKER)
+        if rate is None:
+            expected = None
+        else:
+            bps = rate + (liq.get(r["venue"], ZERO) if r.get("kind") == "liquidation" else ZERO)
+            expected = qty * px * bps / Decimal(10_000)
+        if expected is None or abs(expected - fee) > Decimal("1e-9") * max(Decimal(1), qty * px):
+            if len(fee_mismatches) < 20:
+                fee_mismatches.append({"ts": r.get("ts"), "venue": r["venue"], "kind": r.get("kind"), "fee": str(fee), "expected": None if expected is None else str(expected)})
+            else:
+                fee_mismatches[-1]["more"] = fee_mismatches[-1].get("more", 0) + 1
+    core_equity = ZERO
+    for v in venues:
+        V = v.upper()
+        rows = [r for r in trades if r["venue"] == v]
+        cash_v = sum(((-dec(r["qty"]) * dec(r["price"]) if r["side"] == "buy" else dec(r["qty"]) * dec(r["price"])) - dec(r["fee"]) for r in rows), ZERO) - funding_paid.get(v, ZERO)
+        base_v = sum((dec(r["qty"]) if r["side"] == "buy" else -dec(r["qty"]) for r in rows), ZERO)
+        notional_v = sum((dec(r["qty"]) * dec(r["price"]) for r in rows), ZERO)
+        tol_v = Decimal("1e-9") * max(Decimal(1), notional_v)
+        led_cash = ledger.cash_deltas.get(V, ZERO)
+        led_base = ledger.positions.get((V, instrument_id), ZERO)
+        inv_cash, inv_base = dec(inventory_cash.get(v, 0)), dec(inventory_base.get(v, 0))
+        core_equity += led_cash + led_base * dec(marks[v])
+        per_venue[v] = {
+            "ledger_cash": str(led_cash), "cash_from_trade_log": str(cash_v), "cash_gap": str(cash_v - led_cash),
+            "ledger_base": str(led_base), "base_from_trade_log": str(base_v), "base_gap": str(base_v - led_base), "tolerance": str(tol_v),
+            "inventory_cash": str(inv_cash), "inventory_base": str(inv_base), "inventory_cash_gap": str(inv_cash - led_cash), "inventory_base_gap": str(inv_base - led_base),
+            "rebuild_ok": truncated or (abs(cash_v - led_cash) <= tol_v and abs(base_v - led_base) <= Decimal("1e-9")),
+            "inventory_ok": abs(inv_cash - led_cash) <= tol_v and abs(inv_base - led_base) <= Decimal("1e-9"),
+        }
+    gap_equity = None if reported_equity is None else dec(reported_equity) - core_equity
+    ok = (all(x["rebuild_ok"] and x["inventory_ok"] for x in per_venue.values()) and not fee_mismatches
+          and (gap_equity is None or abs(gap_equity) <= tol_total))
+    return {"checked": not truncated, "tolerance_usdt": str(tol_total), "core_equity_at_marks": str(core_equity), "reported_equity": None if reported_equity is None else str(dec(reported_equity)),
+            "equity_gap": None if gap_equity is None else str(gap_equity), "marks": {v: str(dec(m)) for v, m in marks.items()}, "fee_mismatches": fee_mismatches, "per_venue": per_venue,
+            "failed": [v for v, x in per_venue.items() if not (x["rebuild_ok"] and x["inventory_ok"])], "ok": ok}

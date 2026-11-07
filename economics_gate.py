@@ -54,6 +54,8 @@ def incomplete_reasons(report: dict[str, Any], funding: dict[str, Any] | None) -
         for item in row.get("borrow_flags", []):
             if not item.startswith("UNFINANCED_SHORT"):
                 reasons.setdefault("BORROW_DATA", []).append(f"{venue}:{item}")
+    for item in report.get("mark_missing", []):
+        reasons.setdefault("MISSING_PRICE", []).append(f"MARK_MISSING:{item}")
     if funding and funding.get("economic_status", funding.get("status")) == "INCOMPLETE":
         reasons.setdefault("FUNDING_DATA", [])
     if funding and funding.get("configuration") == "INVALID":

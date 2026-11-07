@@ -92,6 +92,9 @@ class Ledger:
         self.events: list[dict] = []
         self.positions: dict[tuple[str, str], Decimal] = {}
         self.cash_deltas: dict[str, Decimal] = {}
+        # B2.7 (owner 7 Nov): positions that were held with no mark price when account state was rebuilt (distinct "VENUE:INSTRUMENT"): the average price stands in, unrealised 0, and it is flagged
+        # MARK_MISSING and carried into the economic reconciliation (INCOMPLETE) instead of passing silently.
+        self.mark_missing: set[str] = set()
         self._fill_cumulative: dict[str, Decimal] = {}
         self._fill_notional_cumulative: dict[str, Decimal] = {}
         self._fee_cumulative: dict[str, Decimal] = {}
@@ -567,7 +570,11 @@ class Ledger:
                     venue, Decimal("0")
                 ) + fee_delta
 
+        missing_now: list[str] = []
         for key, state in positions.items():
+            if key not in marks and state.quantity != 0:
+                missing_now.append(f"{key[0]}:{key[1]}")
+                self.mark_missing.add(f"{key[0]}:{key[1]}")
             state.mark_price = marks.get(key, state.average_price)
             state.unrealized_pnl = (
                 state.mark_price - state.average_price
@@ -641,6 +648,7 @@ class Ledger:
             )
         return {
             "schema_version": "1.0.0",
+            "mark_missing": sorted(missing_now),
             "positions": {
                 f"{venue}:{instrument_id}": state.to_dict()
                 for (venue, instrument_id), state in sorted(positions.items())
