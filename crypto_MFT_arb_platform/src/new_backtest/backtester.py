@@ -115,7 +115,7 @@ class ArbBacktestConfig:
     # venue-truth book at the arrival's exchange time, the book PostOnly is judged on, when it is complete at that time (_truth_complete_at); otherwise the view book, COUNTED
     # (timing_stats placement_view_fallback_*). Needs timing.truth_books.
     placement_book: str = "view"
-    # Accounting-only shadow of the core ledger and fee schedule (new_backtest/core_shadow.py, Phase B; removed when Phase B ends). Read only: results are unchanged.
+    # Accounting-only shadow of the core ledger and fee schedule (new_backtest/core_accounting.py, Phase B; removed when Phase B ends). Read only: results are unchanged.
     core_shadow: bool = False
     event_order: str = "legacy"
     own_impact: str = "legacy"
@@ -597,7 +597,7 @@ class CrossVenueArbBacktester:
         if config.margin_source == "core" and config.funding_rate_dir and config.funding_source != "core":
             raise ValueError("margin_source 'core' with funding modelled needs funding_source 'core' (the core ledger must carry the funding the run pays)")
         if config.core_shadow or (config.funding_source == "core" and config.funding_rate_dir) or config.margin_source == "core" or config.ledger_source == "core":          # no rate directory = funding not modelled, as with the settler (March has no funding file)
-            from .core_shadow import CoreShadow
+            from .core_accounting import CoreShadow
             self._shadow = CoreShadow(config.pair, tuple(config.venues), fee_rows=self.fee_rows, funding_venues=tuple(v for v in config.venues if self.product_by_venue.get(v) != "spot"), funding_rate_dir=config.funding_rate_dir, start_date=config.start_date, end_date=config.end_date,
                                        margin=config.margin)
         self._message_atomic = config.message_atomic_book
@@ -668,7 +668,7 @@ class CrossVenueArbBacktester:
         # WP7b: only perp venues carry a margin account (a spot wallet holds inventory, not margin).
         margin_venues = tuple(v for v in config.venues if self.product_by_venue.get(v) != "spot")
         if config.margin is not None and config.margin_source == "core":
-            from .core_shadow import _make_core_margin_model
+            from .core_accounting import _make_core_margin_model
             self.margin_model: MarginModel | None = _make_core_margin_model()(config.margin, margin_venues, self._shadow)      # B2.6: the core decides; the old model's decision code is not called
         else:
             self.margin_model = MarginModel(config.margin, margin_venues) if config.margin is not None else None

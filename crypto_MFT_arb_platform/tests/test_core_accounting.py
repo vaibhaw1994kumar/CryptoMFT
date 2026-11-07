@@ -1,4 +1,4 @@
-"""Accounting-only core shadow (new_backtest/core_shadow.py, ArbBacktestConfig.core_shadow). Synthetic fills: wiring only.
+"""Accounting-only core shadow (new_backtest/core_accounting.py, ArbBacktestConfig.core_shadow). Synthetic fills: wiring only.
 The shadow must (1) agree with the backtester when both book the same fills at the same rates, (2) report a classified difference for a wrong fee and a dropped fill, (3) carry the
 same assumed rates as the backtester's headline presets (core config against FEE_PRESETS), and (4) leave a run untouched when it is off."""
 from __future__ import annotations
@@ -10,7 +10,7 @@ from pathlib import Path
 import crypto_stat_arb
 from new_backtest.arb_strategy import InventoryBook
 from new_backtest.config import FEE_PRESETS
-from new_backtest.core_shadow import CoreShadow
+from new_backtest.core_accounting import CoreShadow
 from new_backtest.fill_engine import Fill
 
 VENUES = ("bybit", "binance")
@@ -489,7 +489,7 @@ class MarginFromTheCore(unittest.TestCase):
         return MarginShadow._cfg(self, **kw)
 
     def _pair(self, cfg, qty=1.0, price=100.0, fee_bps=0.0):
-        from new_backtest.core_shadow import _make_core_margin_model
+        from new_backtest.core_accounting import _make_core_margin_model
         from new_backtest.margin_model import MarginModel
         sh, inv = CoreShadow("SOLUSDT", VENUES, margin=cfg), InventoryBook()
         inv.ensure(VENUES)
@@ -540,7 +540,7 @@ class MarginFromTheCore(unittest.TestCase):
             self.assertTrue(core.step(100.0, inv, books))
 
     def test_what_the_core_path_does_not_model_is_refused_not_ignored(self):
-        from new_backtest.core_shadow import _make_core_margin_model
+        from new_backtest.core_accounting import _make_core_margin_model
         from new_backtest.margin_model import MarginModelConfig, TransferModelConfig, TransferRoute, VenueMargin
         cfg = self._cfg()
         sh = CoreShadow("SOLUSDT", VENUES, margin=cfg)

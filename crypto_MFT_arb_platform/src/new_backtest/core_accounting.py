@@ -1,4 +1,4 @@
-"""Accounting-only shadow of the core platform (Phase B, matrix proposal 4A; delete when Phase B ends).
+"""The run's accounting adapter onto the core platform (was core_shadow.py until B2 gate; Phase B shadow, matrix proposal 4A, now also the run's accounting object on core-source profiles).
 
 The unchanged backtester hands every fill it books, and nothing else, to the core's ledger and fee schedule. The shadow keeps the core's view of positions, trade cash and fees
 next to the backtester's own numbers and reports every difference with a class. It only reads: it holds copies of values (Decimal), never gives a core object back, and
