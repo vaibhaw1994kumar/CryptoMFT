@@ -6,8 +6,10 @@ the switch ArbBacktestConfig.core_shadow is off by default, so a run without it 
 
 Compared: (1) position per venue after every fill; (2) cash per venue (both ledgers book fees into cash, so a fee difference shows up here too; the trade-cash check below removes it); (3) fees, two columns: the backtester's own fee and the core FeeSchedule rate at the same notional; (4) equity at the end: the backtester's
 common-timestamp valuation (R11) against each venue valued at its own last mid, which is what the core does today (A2).
-Not compared (not built, say so in every report): funding (no funding file in March; January settles in the backtester only), margin and liquidation, the core's risk engine and
-OMS (order level behaviour stays covered by the parity tests).
+(5) funding (B2.2): the core FundingEngine beside funding_settler; (6) margin (B2.3): at every periodic check of the backtester's margin model, the core RiskEngine.evaluate_margin (tiers, ECONOMIC_LEDGER_COLLATERAL balance,
+cross mode, A9 fail-closed above the last tier) on the shadow ledger, against the model's own equity, maintenance, initial margin and breach decision.
+Not compared (not built, say so in every report): the margin gate (initial margin of a new clip, reserved margin for resting orders), isolated mode, transfers, liquidation execution (the shadow never liquidates), the core's
+risk engine limits and OMS (order level behaviour stays covered by the parity tests).
 
 Differences are sorted BUG_BACKTEST / BUG_CORE / BY_DESIGN by the rules written next to each check; anything the shadow cannot decide is UNCLASSIFIED and listed."""
 from __future__ import annotations
@@ -27,7 +29,7 @@ def _dec(x: float) -> Decimal:
 
 class CoreShadow:
     def __init__(self, pair: str, venues: tuple[str, ...], fee_rows: list[dict] | None = None, *, funding_rate_dir: str | None = None,
-                 start_date: str | None = None, end_date: str | None = None) -> None:
+                 start_date: str | None = None, end_date: str | None = None, margin=None, margin_flat_every: int = 600) -> None:
         from crypto_stat_arb.fees import FeeSchedule, Liquidity
         from crypto_stat_arb.ledger import Ledger
         from crypto_stat_arb.models import ChildOrder, Side
@@ -49,10 +51,15 @@ class CoreShadow:
         self.mismatches: list[dict[str, Any]] = []
         self.fee_rows: dict[str, Any] = {}
         self.last_mid: dict[str, float] = {}
+        self.fee_by_venue: dict[str, list[Decimal]] = {v: [Decimal(0), Decimal(0)] for v in self.venues}       # [backtester fee, core fee], per venue (B2.3)
         self.funding = None                                   # B2.2: the core FundingEngine, fed the same rate files and the same fills as the backtester's funding_settler
         self._last_ns = 0
         if funding_rate_dir:
             self._init_funding(funding_rate_dir, start_date, end_date)
+        self.margin = None                                    # B2.3: the core RiskEngine margin path, fed the same fills, compared at the backtester's own check instants
+        self.margin_cfg = margin
+        if margin is not None:
+            self._init_margin(margin, margin_flat_every)
 
     def _init_funding(self, directory: str, start_date: str | None, end_date: str | None) -> None:
         import datetime as dt
@@ -74,6 +81,122 @@ class CoreShadow:
                     continue
                 book.add_row(dict(row, venue=str(row["venue"]).upper(), instrument_id=self.instrument), "shadow")
         self.funding = FundingEngine(self.ledger, specs, book, mark_fallback="book_mid")
+
+    def _init_margin(self, cfg, flat_every: int) -> None:
+        from crypto_stat_arb.economics import opening_balance_events
+        from crypto_stat_arb.instruments import InstrumentMaster
+        from crypto_stat_arb.margin import MarginConfig
+        from crypto_stat_arb.models import Instrument
+        from crypto_stat_arb.risk import AccountRiskSnapshot, RiskEngine, RiskLimits
+
+        self.ledger.asset_resolver = lambda venue, instrument_id: (instrument_id, "USDT")
+        self.margin_venues = tuple(v for v in self.venues if v in cfg.venues)
+        isolated = [v for v in self.margin_venues if cfg.venues[v].mode != "cross"]
+        base = self.instrument.split("-")[0]
+        sections = {}
+        for v in self.margin_venues:
+            vm = cfg.venues[v]
+            sections[self._venue(v)] = {"mode": "CROSS", "liquidation": {"enabled": False},
+                                        "tiers": {self.instrument: {"source": str(vm.source), "tiers": [
+                                            {"max_notional": repr(t.max_notional), "maintenance_rate": repr(t.maintenance_rate), "initial_rate": repr(t.initial_rate),
+                                             "maintenance_deduction": repr(t.maintenance_deduction)} for t in vm.tiers]}}}
+        for event in opening_balance_events([(self._venue(v), "USDT", _dec(cfg.venues[v].initial_capital)) for v in self.margin_venues]):
+            self.ledger.economics.apply(event)
+        master = InstrumentMaster([Instrument(instrument_id=self.instrument, venue=self._venue(v), symbol=self.instrument, base=base, quote="USDT", tick_size=Decimal("0.001"),
+                                              quantity_step=Decimal("0.001"), min_quantity=Decimal("0.001"), min_notional=Decimal("1"), taker_fee_bps=Decimal("5"), product_type="PERP",
+                                              settlement_asset="USDT", funding_interval_ns=8 * 3_600 * 10**9) for v in self.margin_venues])
+        risk = RiskEngine(RiskLimits(max_order_notional=Decimal("1e12"), max_gross_notional=Decimal("1e12"), max_residual_base=Decimal("1e12"), max_book_age_ns=10**18),
+                          {self._venue(v): AccountRiskSnapshot(venue=self._venue(v), margin_enabled=True) for v in self.margin_venues})
+        risk.margin_config = MarginConfig.from_config({"venues": sections})
+        risk.instruments = master
+        risk.ledger = self.ledger
+        self.margin = risk
+        self._m = {"flat_every": max(1, int(flat_every)), "checks": 0, "evaluated": 0, "skipped_flat": 0, "skipped_no_mark": 0, "venue_rows": 0, "breach_agree": 0, "breach_disagree": 0,
+                   "core_warning": 0, "core_breach": 0, "bt_breach": 0, "max_balance_gap": Decimal(0), "max_maintenance_diff": Decimal(0), "max_initial_diff": Decimal(0), "tier_mismatch": 0,
+                   "by_class": {}, "mismatches": [], "not_compared": [f"isolated mode on {isolated}"] if isolated else [], "transfers": cfg.transfers is not None,
+                   "above_last_tier_rule": cfg.above_last_tier, "max_notional": Decimal(0)}
+
+    def on_margin_check(self, now: float, rows: dict[str, dict]) -> None:
+        """B2.3: one periodic check of the backtester's margin model, called right after the model decided and before any liquidation fill: `rows[venue]` holds the numbers it used and its breach decision. Reads only."""
+        m = self._m
+        m["checks"] += 1
+        marks = {v: float(r["mark"]) for v, r in rows.items() if v in self.margin_venues}
+        if not marks or any(x <= 0.0 for x in marks.values()):
+            m["skipped_no_mark"] += 1
+            return
+        held = any(r["base"] != 0.0 for v, r in rows.items() if v in self.margin_venues)
+        if not held and m["checks"] % m["flat_every"] != 1:
+            m["skipped_flat"] += 1
+            return
+        now_ns = int(now * 1_000_000_000)
+        if self.funding is not None:
+            self.funding.settle_until(now_ns - 1, final=True)        # the backtester pays funding into cash when it happens; the core engine settles only when asked
+        report = self.margin.evaluate_margin(ledger=self.ledger, now_ns=now_ns, mark_prices={(self._venue(v), self.instrument): _dec(x) for v, x in marks.items()},
+                                             open_orders={}, enforce_controls=False, dry_run=True)
+        core_rows = {r.venue: r for r in report.venues}
+        m["evaluated"] += 1
+        for v in self.margin_venues:
+            self._compare_margin_row(now, v, rows[v], core_rows.get(self._venue(v)))
+
+    def _compare_margin_row(self, now: float, v: str, bt: dict, core) -> None:
+        from crypto_stat_arb.risk import MarginState
+        m = self._m
+        m["venue_rows"] += 1
+        inf = Decimal("Infinity")
+        fee_bt, fee_core = self.fee_by_venue[v]
+        fee_diff = fee_core - fee_bt
+        bt_eq = _dec(bt["equity"] - bt["transfer_cash"])
+        notional = _dec(bt["notional"])
+        m["max_notional"] = max(m["max_notional"], notional)
+        if core is None:
+            self._margin_mismatch(now, v, "CORE_ROW_MISSING", "BUG_CORE", {})
+            return
+        gap = core.effective_margin_balance - bt_eq + fee_diff            # core cash is net of the core fee, the backtester's of its own: what is left is not a fee effect
+        mm_core = core.maintenance_margin_required
+        im_core = core.initial_margin_required
+        mm_bt = inf if bt["maintenance"] is None else _dec(bt["maintenance"])
+        im_bt = inf if bt["initial"] is None else _dec(bt["initial"])
+        m["max_balance_gap"] = max(m["max_balance_gap"], abs(gap))
+        d_mm = Decimal(0) if mm_core == mm_bt else abs(mm_core - mm_bt)
+        d_im = Decimal(0) if im_core == im_bt else abs(im_core - im_bt)
+        if d_mm != inf:
+            m["max_maintenance_diff"] = max(m["max_maintenance_diff"], d_mm)
+        if d_im != inf:
+            m["max_initial_diff"] = max(m["max_initial_diff"], d_im)
+        core_breach = core.state == MarginState.BREACH
+        m["core_breach"] += core_breach
+        m["bt_breach"] += bool(bt["breach"])
+        m["core_warning"] += core.state == MarginState.WARNING
+        tiers = self.margin_cfg.venues[v].tiers
+        bt_tier = next((i for i, t in enumerate(tiers) if bt["notional"] <= t.max_notional), None) if bt["notional"] > 0 else None
+        core_tier = next((p["tier"] for p in core.details.get("positions", []) if Decimal(p["quantity"])), None)
+        if bt_tier != core_tier and bt["notional"] > 0:
+            m["tier_mismatch"] += 1
+            self._margin_mismatch(now, v, "TIER", "UNCLASSIFIED", {"bt": bt_tier, "core": core_tier, "notional": str(notional)})
+        if abs(gap) > TOL_USDT:
+            self._margin_mismatch(now, v, "BALANCE", "UNCLASSIFIED", {"bt_equity": str(bt_eq), "core_balance": str(core.effective_margin_balance), "gap_after_fee_correction": str(gap)})
+        if d_mm > TOL_USDT or d_im > TOL_USDT:
+            self._margin_mismatch(now, v, "REQUIREMENT", "UNCLASSIFIED", {"bt_maintenance": str(mm_bt), "core_maintenance": str(mm_core), "bt_initial": str(im_bt), "core_initial": str(im_core)})
+        if core_breach == bool(bt["breach"]):
+            m["breach_agree"] += 1
+            return
+        m["breach_disagree"] += 1
+        corrected = core.effective_margin_balance + fee_diff              # the core balance with the fee difference removed, judged by the backtester's own rule
+        corrected_breach = bt["notional"] > 0 and bt["maintenance"] is not None and bt["maintenance"] > 0 and corrected < mm_bt
+        if bt["over_tier"] is False and bt["maintenance"] is None and bt["notional"] > 0 and core_breach and self.margin_cfg.above_last_tier == "ignore":
+            cls, why = "BY_DESIGN", "A9: above the last tier the backtester ignores (v1, v1.1) while the core fails closed"
+        elif core_breach != corrected_breach and corrected_breach == bool(bt["breach"]):
+            cls, why = "BY_DESIGN", "C1: the decision flips only because the two stacks carry different fees"
+        else:
+            cls, why = "UNCLASSIFIED", "breach decision differs"
+        self._margin_mismatch(now, v, "BREACH", cls, {"bt_breach": bool(bt["breach"]), "core_state": core.state.value, "alerts": list(core.alert_codes), "why": why})
+
+    def _margin_mismatch(self, now: float, v: str, what: str, cls: str, detail: dict) -> None:
+        m = self._m
+        key = f"{what}/{cls}"
+        m["by_class"][key] = m["by_class"].get(key, 0) + 1
+        if len(m["mismatches"]) < 20:
+            m["mismatches"].append({"ts": now, "venue": v, "what": what, "class": cls, **detail})
 
     def on_mid(self, venue: str, now: float, mid: float) -> None:
         """B2.2: every book event's mid, so the core engine can mark a settlement at the mid prevailing at its time."""
@@ -101,6 +224,9 @@ class CoreShadow:
         bt_fee = _dec(fill.fee)
         self.bt_fee += bt_fee
         self.core_fee += core_fee
+        if fill.venue in self.fee_by_venue:
+            self.fee_by_venue[fill.venue][0] += bt_fee
+            self.fee_by_venue[fill.venue][1] += core_fee
         self.max_fill_fee_diff = max(self.max_fill_fee_diff, abs(bt_fee - core_fee))
         order = self._ChildOrder(order_id=f"shadow-{self.n}", parent_id=f"shadow-{fill.signal_id}", opportunity_id=f"shadow-{fill.signal_id}", venue=venue,
                                  instrument_id=self.instrument, side=self._Side.BUY if fill.side == "buy" else self._Side.SELL, quantity=qty, limit_price=px,
@@ -208,9 +334,27 @@ class CoreShadow:
                     valuation_diff = gap_c
             if abs(valuation_diff) > TOL_USDT:
                 diffs.append({"id": "A2_VALUATION", "class": "BY_DESIGN", "detail": f"equity differs by {valuation_diff} beyond the fee difference: common-timestamp against per-venue closing marks"})
+        margin_report = None
+        if self.margin is not None:
+            mg = self._m
+            margin_report = {"checks_seen": mg["checks"], "evaluated": mg["evaluated"], "skipped_flat": mg["skipped_flat"], "skipped_no_mark": mg["skipped_no_mark"], "venue_rows_compared": mg["venue_rows"],
+                             "breach": {"agree": mg["breach_agree"], "disagree": mg["breach_disagree"], "backtester_breach_rows": mg["bt_breach"], "core_breach_rows": mg["core_breach"], "core_warning_rows": mg["core_warning"]},
+                             "max_balance_gap_after_fee_correction": str(mg["max_balance_gap"]), "max_maintenance_diff": str(mg["max_maintenance_diff"]), "max_initial_diff": str(mg["max_initial_diff"]),
+                             "tier_mismatches": mg["tier_mismatch"], "max_notional_seen": str(mg["max_notional"]), "above_last_tier_rule": mg["above_last_tier_rule"], "differences_by_class": mg["by_class"],
+                             "mismatches": mg["mismatches"], "not_compared": mg["not_compared"] + ["the margin gate (initial margin of a new clip, reserved margin of resting orders)", "liquidation execution", "liquidation price and distance"]
+                             + (["transfers (equity compared net of transfer cash)"] if mg["transfers"] else []),
+                             "sampling": f"checks with an open position are all evaluated; flat checks are evaluated once in {self._m['flat_every']}"}
+            if mg["by_class"]:
+                unclassified = {k: n for k, n in mg["by_class"].items() if k.endswith("/UNCLASSIFIED")}
+                by_design = {k: n for k, n in mg["by_class"].items() if k.endswith("/BY_DESIGN")}
+                other = {k: n for k, n in mg["by_class"].items() if k.endswith("/BUG_CORE")}
+                if unclassified or other:
+                    diffs.append({"id": "MARGIN", "class": "UNCLASSIFIED" if unclassified else "BUG_CORE", "detail": f"margin differs: {dict(unclassified, **other)}"})
+                if by_design:
+                    diffs.append({"id": "MARGIN_BY_DESIGN", "class": "BY_DESIGN", "detail": f"margin differs by design: {by_design}"})
         return {
-            "label": "core accounting shadow, read only; funding, margin, risk and OMS not compared", "fills": self.n, "instrument": self.instrument,
+            "label": "core accounting shadow, read only; margin gate, isolated mode, transfers, liquidation execution, risk limits and OMS not compared", "fills": self.n, "instrument": self.instrument,
             "tolerance": {"base": str(TOL_BASE), "usdt": str(TOL_USDT)}, "positions": positions, "trade_cash": cash,
             "fees": {"bt_total": str(self.bt_fee), "core_total": str(self.core_fee), "diff": str(fee_diff), "max_per_fill_abs_diff": str(self.max_fill_fee_diff), "core_rates_bps": self.fee_rows},
-            "trade_cash_gap_after_removing_fee_difference": str(cash_gap), "funding_booked_by_backtester_not_compared": ({} if funding_report is not None else {v: str(_dec(x)) for v, x in funding_paid.items()}), "funding": funding_report, "equity": equity, "differences": diffs, "mismatches_per_fill": self.mismatches[:20], "ok": not diffs,
+            "trade_cash_gap_after_removing_fee_difference": str(cash_gap), "funding_booked_by_backtester_not_compared": ({} if funding_report is not None else {v: str(_dec(x)) for v, x in funding_paid.items()}), "funding": funding_report, "margin": margin_report, "equity": equity, "differences": diffs, "mismatches_per_fill": self.mismatches[:20], "ok": not diffs,
         }

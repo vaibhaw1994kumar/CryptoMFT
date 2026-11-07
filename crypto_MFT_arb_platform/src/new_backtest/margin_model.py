@@ -152,6 +152,9 @@ class MarginModel:
         # position and equity at that moment. None until the venue has held a position at a check.
         self.liq_distance: dict[str, dict | None] = {v: None for v in venues}
         self._below_since: dict[str, float | None] = {v: None for v in venues}
+        # B2.3: what the last periodic check saw and decided, per venue, kept as plain numbers so the core accounting shadow can compare against it. Written, never read, by the model.
+        self.last_rows: dict[str, dict] = {}
+        self.last_rows_ts: float | None = None
 
     # ---- accounting -------------------------------------------------------------------------------------------
     def mark(self, venue: str, books) -> float:
@@ -272,6 +275,7 @@ class MarginModel:
         self.stats["checks"] += 1
         self._settle_transfers(now)
         out: list[tuple[str, str, float, float]] = []
+        rows: dict[str, dict] = {}
         for v in self.venues:
             eq = self.equity(v, inventory, books)
             notional = self.notional(v, inventory, books)
@@ -295,6 +299,8 @@ class MarginModel:
             if over_tier:
                 breach, backing, mm_eff = True, eq, 0.0
                 self.stats["above_last_tier_breaches"] = self.stats.get("above_last_tier_breaches", 0) + 1
+            rows[v] = {"equity": eq, "transfer_cash": self.transfer_cash[v], "notional": notional, "mark": self.mark(v, books), "base": inventory.base.get(v, 0.0),
+                       "maintenance": mm, "initial": im, "breach": bool(breach and notional > 0 and (over_tier or (mm is not None and mm > 0))), "over_tier": over_tier}
             if notional > 0 and ((mm is not None and mm > 0) or over_tier):
                 if not over_tier:
                     self.stats["min_margin_ratio"] = min(self.stats["min_margin_ratio"], backing / mm_eff if mm_eff > 0 else float("inf"))
@@ -318,6 +324,7 @@ class MarginModel:
                             if o != v and inventory.base.get(o, 0.0) != 0.0:
                                 oq = min(qty, abs(inventory.base.get(o, 0.0)))
                                 out.append((o, "sell" if inventory.base.get(o, 0.0) > 0 else "buy", oq, -1.0))   # -1: a flatten, no liquidation fee
+        self.last_rows, self.last_rows_ts = rows, now
         if self.cfg.transfers is not None:
             self._rebalance(now, inventory, books)
         return out

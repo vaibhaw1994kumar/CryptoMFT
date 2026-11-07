@@ -17,7 +17,7 @@ ul{padding-left:20px}li{margin:4px 0}
 <h1>Backtest and core integration: status</h1>
 <p class="s">7 Nov 2026. One shared platform: rules live once in <code>crypto_stat_arb</code>, backtest and live call it. Every P&amp;L figure here is EXPLORATORY (stated profile, size 1, days, assumed fees). HOLDOUT untouched.</p>
 
-<div class="box"><b>Short version.</b> The simulator baseline is frozen and proven (v1_2). The repricing feature the live bot has and the backtest lacked is built, modular and off. The accounting switch-over (Phase B2) has started: equity valuation and funding now agree with the core to rounding. Phases C to F and the strategy steps S1 to S3 are not started. The real strategy loses about 2 bps per fill after fees in the simulator, mostly because quotes are never repriced when Binance moves.</div>
+<div class="box"><b>Short version.</b> The simulator baseline is frozen and proven (v1_2). The repricing feature the live bot has and the backtest lacked is built, modular and off. The accounting switch-over (Phase B2) has started: equity valuation, funding and margin now agree with the core to rounding in the shadow. Phases C to F and the strategy steps S1 to S3 are not started. The real strategy loses about 2 bps per fill after fees in the simulator, mostly because quotes are never repriced when Binance moves.</div>
 
 <h2>1. Where each phase stands</h2>
 <div class="wrap"><table>
@@ -27,7 +27,7 @@ ul{padding-left:20px}li{margin:4px 0}
 <tr><td>B0</td><td>Owner decisions: join-the-touch, 45 ms hedge-move pin, timing floors</td><td class="ok">done</td><td>tags <code>phaseB0-gate</code>, <code>phaseB0-followups</code></td></tr>
 <tr><td>B</td><td>Message-atomic book, depletion ledger, stamps, matching windows, cancel-model fixes, cohort fixes, through-print fix, adverse-selection study</td><td class="ok">done, v1_2 frozen</td><td>tags <code>phaseB-gate</code>, <code>phaseB-pass2</code>, <code>v1_2-freeze</code></td></tr>
 <tr><td>S0</td><td>Quote repricing (generic rule, numbers left to the trader), profile v1_3, off by default</td><td class="ok">built, committed</td><td>core <code>c9a09db</code>, outer <code>cffb339</code>; report C21</td></tr>
-<tr><td>B2</td><td>Switch fees, funding, margin, ledger to the core; retire the old modules</td><td class="warn">2 of 8 steps done</td><td>C22 (valuation), C23 (funding); see section 4</td></tr>
+<tr><td>B2</td><td>Switch fees, funding, margin, ledger to the core; retire the old modules</td><td class="warn">3 of 8 steps done</td><td>C22 (valuation), C23 (funding), C24 (margin); see section 4</td></tr>
 <tr><td>C</td><td>Core fill-triggered hedging, one hedge lifecycle state machine</td><td class="todo">not started</td><td>specification recorded in the prompt</td></tr>
 <tr><td>D</td><td>One runtime for backtest, paper, live</td><td class="todo">not started</td><td>-</td></tr>
 <tr><td>E</td><td>Risk gate, pairing, venue selector, flatten on breaker trip</td><td class="todo">not started</td><td>-</td></tr>
@@ -60,7 +60,7 @@ ul{padding-left:20px}li{margin:4px 0}
 <tr><th>Step</th><th>State</th><th>Result</th></tr>
 <tr><td>1 Valuation (A2)</td><td class="ok">done</td><td>The core already had the common-timestamp valuation. Marking the core ledger with it closes the equity gap: 0.008 USDT on March 03-11 and 6.45 USDT on January 01-13 become about 1e-14. Runs unchanged.</td></tr>
 <tr><td>2 Funding in the shadow</td><td class="ok">done</td><td>Core <code>FundingEngine</code> against <code>funding_settler</code>, January 01-13: 4 settlements, same sign, position, rate and mark, largest payment difference 3.6e-18 USDT, no flags. Run unchanged. March has no funding file.</td></tr>
-<tr><td>3 Margin in the shadow</td><td class="todo">next</td><td>core <code>margin.py</code> against <code>margin_model</code>, rule A9 included</td></tr>
+<tr><td>3 Margin in the shadow</td><td class="ok">done</td><td>Core <code>RiskEngine.evaluate_margin</code> against <code>margin_model</code> at every check: 84,018 January checks and the March days with fills agree on every breach decision, tier and requirement (balance gap about 1e-13 USDT). No real check came near maintenance, so the breach path is covered by synthetic tests only. Runs unchanged; 13 + 4 baselines identical; failing tests equal the Phase 0 list. Report C24.</td></tr>
 <tr><td>4 to 8</td><td class="todo">pending</td><td>Switch fees (floats inside, Decimal at the fill boundary), funding, margin, ledger to the core, then retire the old modules. Each is a profile switch on v1_3 or later, measured alone against the frozen v1_2.</td></tr>
 </table></div>
 

@@ -27,11 +27,12 @@ MAR_PROF, JAN_PROF = "perp_perp_maker_taker_v1_2", "perp_perp_maker_taker_v1_1"
 #   f0 / f1 = ledger off / on with the March stamps TRUSTED (the constructed 2 ms stamps used as they are); ft = the profile as it stands (ledger on, stamps untrusted: the preset feed delay applies);
 #   fp = ft + placement_book truth (alone); fbf / faf / fco = ft with cancel model behind_first / ahead_first / cohort uniform (the profile's cross rule stays on): the four-model range with ft as the headline.
 # 7 Nov S0 cells: fs = v1_2 again on the final code (must equal ft byte for byte: the engine change for repricing is inert when off); v3 = v1_3 with the switch off (must equal ft too);
+# B2.3 cells: jsm / fsm = the shadow with the margin comparison (January 01-13 / March), results must equal jsh / fsh (and so l0 / ft) byte for byte.
 # v3on = v1_3 with the rule ON and ILLUSTRATIVE numbers (a wiring smoke run, not a setting and not a result: the numbers are the trader's to set).
 ILLUSTRATIVE = {"enabled": True, "source": "ILLUSTRATIVE_NOT_FITTED", "band_down_bps": 2.0, "band_up_bps": None, "debounce_ms": None, "jump_bps": None, "min_interval_ms": 250.0, "max_age_s": 15.0,
                 "queue_hold": True, "amend_first": True}
 PROFILE_OF = {"v3": "perp_perp_maker_taker_v1_3", "v3on": "perp_perp_maker_taker_v1_3"}
-FINAL = {"jsh": ({}, {"core_shadow": True}), "fsh": ({}, {"core_shadow": True}), "fs": ({}, {}), "v3": ({}, {}), "v3on": ({}, {}), "f0": ({"depletion_ledger": False}, {"trust_local_ts": {"bybit": True, "binance": True}}),
+FINAL = {"jsh": ({}, {"core_shadow": True}), "fsh": ({}, {"core_shadow": True}), "jsm": ({}, {"core_shadow": True}), "fsm": ({}, {"core_shadow": True}), "fs": ({}, {}), "v3": ({}, {}), "v3on": ({}, {}), "f0": ({"depletion_ledger": False}, {"trust_local_ts": {"bybit": True, "binance": True}}),
          "f1": ({"depletion_ledger": True}, {"trust_local_ts": {"bybit": True, "binance": True}}),
          "ft": ({}, {}),
          "fp": ({}, {"placement_book": "truth"}),

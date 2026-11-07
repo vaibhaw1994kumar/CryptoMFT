@@ -566,7 +566,8 @@ class CrossVenueArbBacktester:
         self._shadow = None
         if config.core_shadow:
             from .core_shadow import CoreShadow
-            self._shadow = CoreShadow(config.pair, tuple(config.venues), funding_rate_dir=config.funding_rate_dir, start_date=config.start_date, end_date=config.end_date)
+            self._shadow = CoreShadow(config.pair, tuple(config.venues), funding_rate_dir=config.funding_rate_dir, start_date=config.start_date, end_date=config.end_date,
+                                       margin=config.margin)
         self._message_atomic = config.message_atomic_book
         self._frame_last = True                    # message-atomic mode: the event being applied is the last of its exchange message
         self._frame_buf: list = []                 # message-atomic mode: (side, price, new_size) of the message's deltas, handed to the maker after the message
@@ -3090,7 +3091,11 @@ class CrossVenueArbBacktester:
     def _margin_step(self, now: float) -> None:
         """Run the margin model; execute any liquidation (and the matching flatten) it orders against the live books. Liquidations
         trade at market through the same taker path as an unwind; their fee is charged to cash and reported on its own line."""
-        for venue, side, qty, fee_bps in self.margin_model.step(now, self.inventory, self.books):
+        before = self.margin_model.last_rows_ts
+        orders = self.margin_model.step(now, self.inventory, self.books)
+        if self._shadow is not None and self._shadow.margin is not None and self.margin_model.last_rows_ts != before:
+            self._shadow.on_margin_check(now, self.margin_model.last_rows)         # B2.3: read only, before any liquidation fill
+        for venue, side, qty, fee_bps in orders:
             book = self.books[venue]
             if qty <= 0 or not book.ready:
                 continue

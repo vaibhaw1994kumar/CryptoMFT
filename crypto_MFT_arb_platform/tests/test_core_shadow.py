@@ -157,5 +157,108 @@ class FundingShadow(unittest.TestCase):
             self.assertGreater(float(r["funding"]["max_abs_payment_diff"]), 0.03)
 
 
+class _Book:
+    def __init__(self, mid):
+        self.mid, self.ready = mid, True
+
+    def levels(self, side, n):
+        return [(self.mid, 1e9)]
+
+
+class MarginShadow(unittest.TestCase):
+    """B2.3 (7 Nov): the core RiskEngine.evaluate_margin against the backtester's MarginModel at the same check, same fills. Synthetic data: wiring only."""
+    def _cfg(self, capital=1000.0, last=1e6, init=0.02, maint=0.01, above="breach"):
+        from new_backtest.margin_model import MarginModelConfig, MarginTier, VenueMargin
+        vm = VenueMargin(initial_capital=capital, tiers=(MarginTier(last, init, maint),))
+        return MarginModelConfig(venues={"bybit": vm, "binance": vm}, above_last_tier=above)
+
+    def _run(self, cfg, fee_bps=(0.0, 0.0), qty=1.0, mark=100.0, funding_dir=None, now=100.0):
+        from new_backtest.margin_model import MarginModel
+        sh = CoreShadow("SOLUSDT", VENUES, margin=cfg, margin_flat_every=1, **({"funding_rate_dir": funding_dir, "start_date": "1970-01-01", "end_date": "1970-01-01"} if funding_dir else {}))
+        inv, model = InventoryBook(), MarginModel(cfg, VENUES)
+        inv.ensure(VENUES)
+        book(sh, inv, fill("buy", "bybit", qty, 100.0, False, fee_bps[0], ts=1.0))
+        book(sh, inv, fill("sell", "binance", qty, 100.0, True, fee_bps[1], ts=1.0, sid=2))
+        return sh, inv, model, {v: _Book(mark) for v in VENUES}
+
+    def _check(self, sh, inv, model, books, now=100.0):
+        model.step(now, inv, books)
+        sh.on_margin_check(now, model.last_rows)
+
+    def test_same_fills_same_rates_agree_on_balance_requirements_and_decision(self):
+        sh, inv, model, books = self._run(self._cfg(), fee_bps=(FEE_PRESETS["bybit_perp_mm"].maker_bps, FEE_PRESETS["binance_perp_vip0"].taker_bps))
+        self._check(sh, inv, model, books)
+        r = sh.finish(inv, {"bybit": 100.0, "binance": 100.0}, None)["margin"]
+        self.assertEqual((r["evaluated"], r["venue_rows_compared"]), (1, 2))
+        self.assertEqual(r["breach"]["disagree"], 0)
+        self.assertEqual(r["differences_by_class"], {})
+        self.assertLess(float(r["max_balance_gap_after_fee_correction"]), 1e-9)
+        self.assertLess(float(r["max_maintenance_diff"]), 1e-9)
+        self.assertLess(float(r["max_initial_diff"]), 1e-9)
+
+    def test_equity_below_maintenance_is_a_breach_on_both_sides_at_the_same_check(self):
+        sh, inv, model, books = self._run(self._cfg(capital=20.0, init=0.5, maint=0.4))
+        self._check(sh, inv, model, books)
+        r = sh.finish(inv, {"bybit": 100.0, "binance": 100.0}, None)["margin"]
+        self.assertEqual(r["breach"]["backtester_breach_rows"], 2)
+        self.assertEqual(r["breach"]["core_breach_rows"], 2)
+        self.assertEqual(r["breach"]["disagree"], 0)
+
+    def test_above_the_last_tier_a9_breach_agrees_and_ignore_is_a_by_design_difference(self):
+        sh, inv, model, books = self._run(self._cfg(last=50.0, above="breach"))
+        self._check(sh, inv, model, books)
+        r = sh.finish(inv, {"bybit": 100.0, "binance": 100.0}, None)["margin"]
+        self.assertEqual((r["breach"]["backtester_breach_rows"], r["breach"]["core_breach_rows"], r["breach"]["disagree"]), (2, 2, 0))
+        sh, inv, model, books = self._run(self._cfg(last=50.0, above="ignore"))
+        self._check(sh, inv, model, books)
+        res = sh.finish(inv, {"bybit": 100.0, "binance": 100.0}, None)
+        self.assertEqual(res["margin"]["breach"]["disagree"], 2)
+        self.assertEqual(res["margin"]["differences_by_class"], {"BREACH/BY_DESIGN": 2})
+        self.assertEqual([d["class"] for d in res["differences"] if d["id"].startswith("MARGIN")], ["BY_DESIGN"])
+
+    def test_a_fee_difference_is_corrected_in_the_balance_and_flips_a_decision_only_as_c1(self):
+        # the backtester books no fee, the core charges 5 bps taker on 100 = 0.05: maintenance 40 against equity 40.02 (backtester) and 39.97 (core)
+        sh, inv, model, books = self._run(self._cfg(capital=40.02, init=0.5, maint=0.4), fee_bps=(0.0, 0.0))      # the backtester side sits just above maintenance
+        self._check(sh, inv, model, books)
+        m = sh.finish(inv, {"bybit": 100.0, "binance": 100.0}, None)["margin"]
+        self.assertLess(float(m["max_balance_gap_after_fee_correction"]), 1e-9)     # the core's fee on the same trade is a rate difference, removed from the balance
+        self.assertEqual(m["breach"]["disagree"], 1)                               # but the core's own decision still sees its own fee: that is the C1 difference
+        self.assertEqual(m["differences_by_class"], {"BREACH/BY_DESIGN": 1})
+
+    def test_a_wrong_backtester_cash_is_an_unclassified_balance_difference(self):
+        sh, inv, model, books = self._run(self._cfg())
+        inv.apply("bybit", 0.0, -5.0)
+        self._check(sh, inv, model, books)
+        res = sh.finish(inv, {"bybit": 100.0, "binance": 100.0}, None)
+        self.assertEqual(res["margin"]["differences_by_class"].get("BALANCE/UNCLASSIFIED"), 1)
+        self.assertFalse(res["ok"])
+
+    def test_the_evaluation_is_read_only(self):
+        sh, inv, model, books = self._run(self._cfg())
+        before = ({k: v for k, v in sh.ledger.positions.items()}, dict(sh.ledger.cash_deltas), len(sh.ledger.economics.events))
+        for t in (100.0, 101.0, 102.0):
+            self._check(sh, inv, model, books, now=t)
+        self.assertEqual(before, ({k: v for k, v in sh.ledger.positions.items()}, dict(sh.ledger.cash_deltas), len(sh.ledger.economics.events)))
+
+    def test_funding_settled_mid_run_is_in_the_core_balance(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmp:
+            d = Path(tmp)
+            for v, rate in (("bybit", "0.0001"), ("binance", "0.0002")):
+                (d / f"{v}.jsonl").write_text(json.dumps({"funding_ts_ms": 10_000, "venue": v, "rate": rate, "instrument_id": "SOL-USDT-PERP"}))
+            sh, inv, model, books = self._run(self._cfg(), qty=2.0, funding_dir=str(d))
+            for t in (2.0, 9.0, 11.0):
+                sh.on_mid("bybit", t, 100.0)
+                sh.on_mid("binance", t, 100.0)
+            inv.apply("bybit", 0.0, -0.02)                   # what the settler books: long 2 on bybit pays 0.02, short 2 on binance receives 0.04
+            inv.apply("binance", 0.0, 0.04)
+            self._check(sh, inv, model, books, now=12.0)
+            m = sh.finish(inv, {"bybit": 100.0, "binance": 100.0}, None, funding_paid={"bybit": 0.02, "binance": -0.04},
+                          funding_settlements=[{"venue": "bybit", "ts": 10.0, "position_base": 2.0, "mark": 100.0, "rate": 0.0001, "payment": 0.02},
+                                               {"venue": "binance", "ts": 10.0, "position_base": -2.0, "mark": 100.0, "rate": 0.0002, "payment": -0.04}])["margin"]
+            self.assertLess(float(m["max_balance_gap_after_fee_correction"]), 1e-9)
+            self.assertEqual(m["differences_by_class"], {})
+
+
 if __name__ == "__main__":
     unittest.main()
