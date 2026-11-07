@@ -31,7 +31,7 @@ MAR_PROF, JAN_PROF = "perp_perp_maker_taker_v1_2", "perp_perp_maker_taker_v1_1"
 ILLUSTRATIVE = {"enabled": True, "source": "ILLUSTRATIVE_NOT_FITTED", "band_down_bps": 2.0, "band_up_bps": None, "debounce_ms": None, "jump_bps": None, "min_interval_ms": 250.0, "max_age_s": 15.0,
                 "queue_hold": True, "amend_first": True}
 PROFILE_OF = {"v3": "perp_perp_maker_taker_v1_3", "v3on": "perp_perp_maker_taker_v1_3"}
-FINAL = {"fsh": ({}, {"core_shadow": True}), "fs": ({}, {}), "v3": ({}, {}), "v3on": ({}, {}), "f0": ({"depletion_ledger": False}, {"trust_local_ts": {"bybit": True, "binance": True}}),
+FINAL = {"jsh": ({}, {"core_shadow": True}), "fsh": ({}, {"core_shadow": True}), "fs": ({}, {}), "v3": ({}, {}), "v3on": ({}, {}), "f0": ({"depletion_ledger": False}, {"trust_local_ts": {"bybit": True, "binance": True}}),
          "f1": ({"depletion_ledger": True}, {"trust_local_ts": {"bybit": True, "binance": True}}),
          "ft": ({}, {}),
          "fp": ({}, {"placement_book": "truth"}),
@@ -75,7 +75,7 @@ def jobs():
         else:
             env = dict(os.environ, EXEC_SNAP=str(LIVE), EXEC_OUT=str(runs / "jan"), EXEC_TAG="base", QV2_HEDGE_MOVE_FILE=HM_JAN,
                        QV2_MAKER=json.dumps({"unknown_queue_fit": str(X / f"unknown_queue_fit_for_{JAN_DAY}.json"), **mk}),
-                       QV2_CFG=json.dumps({"data_manifest": str(X / "manifest.json"), "message_atomic_book": True}), QV2_VENUE_TICKS=json.dumps(TICKS_JAN))
+                       QV2_CFG=json.dumps({"data_manifest": str(X / "manifest.json"), "message_atomic_book": True, **FINAL.get(cell, ({}, {}))[1]}), QV2_VENUE_TICKS=json.dumps(TICKS_JAN))
             cmd = ["python3.12", str(X / "qv2_run.py"), JAN_PROF, JAN_DAY, "--allow-rejected-data", REASON_JAN]
             out.append((f"{cell}/{JAN_DAY}", runs / "jan" / JAN_PROF / "singapore_bybit_perp_mm_clean_s1_base" / JAN_DAY / "summary.json", env, cmd))
     return out

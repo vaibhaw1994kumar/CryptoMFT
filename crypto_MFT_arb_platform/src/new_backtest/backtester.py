@@ -566,7 +566,7 @@ class CrossVenueArbBacktester:
         self._shadow = None
         if config.core_shadow:
             from .core_shadow import CoreShadow
-            self._shadow = CoreShadow(config.pair, tuple(config.venues))
+            self._shadow = CoreShadow(config.pair, tuple(config.venues), funding_rate_dir=config.funding_rate_dir, start_date=config.start_date, end_date=config.end_date)
         self._message_atomic = config.message_atomic_book
         self._frame_last = True                    # message-atomic mode: the event being applied is the last of its exchange message
         self._frame_buf: list = []                 # message-atomic mode: (side, price, new_size) of the message's deltas, handed to the maker after the message
@@ -954,6 +954,8 @@ class CrossVenueArbBacktester:
         book = self.books.get(venue)
         if book is not None and book.ready:
             self._last_mid_ts[venue] = (now, book.mid)
+            if self._shadow is not None:
+                self._shadow.on_mid(venue, now, book.mid)             # B2.2: the core funding engine marks a settlement at the mid prevailing at its time
         # Single-venue diagnostic: accumulate stale-book event counts across all venues.
         max_age = self.config.arb.max_book_age_s
         n_stale = 0
@@ -2972,7 +2974,8 @@ class CrossVenueArbBacktester:
             res = self._build_result(feed, coverage, virtual_clock.real_time() - wall_start)
             if self._shadow is not None:
                 res.core_shadow = self._shadow.finish(self.inventory, {v: b.mid for v, b in self.books.items() if b.ready}, res.ending_equity,
-                                                      funding_paid=self.settler.report()["by_venue"] if self.settler is not None else None, valuation=self._common_valuation())
+                                                      funding_paid=self.settler.report()["by_venue"] if self.settler is not None else None, valuation=self._common_valuation(),
+                                                      funding_settlements=self.settler.report()["settlements"] if self.settler is not None else None)
             return res
         finally:
             virtual_clock.uninstall()

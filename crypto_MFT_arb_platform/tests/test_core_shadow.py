@@ -112,5 +112,50 @@ class CommonTimestampMarks(unittest.TestCase):
         self.assertIn("A2_VALUATION", [d["id"] for d in r["differences"]])
 
 
+class FundingShadow(unittest.TestCase):
+    """B2.2 (7 Nov): the core FundingEngine, fed the same rate files and fills, against the backtester's funding_settler. Synthetic data: wiring only."""
+    def _setup(self, tmp):
+        import tempfile
+        d = Path(tmp)
+        rows = {"bybit": [{"funding_ts_ms": 10_000, "venue": "bybit", "rate": "0.0001", "instrument_id": "SOL-USDT-PERP"}],
+                "binance": [{"funding_ts_ms": 10_000, "venue": "binance", "rate": "0.0002", "instrument_id": "SOL-USDT-PERP"}]}
+        for v, r in rows.items():
+            (d / f"{v}.jsonl").write_text("\n".join(json.dumps(x) for x in r))
+        sh, inv = CoreShadow("SOLUSDT", VENUES, funding_rate_dir=str(d), start_date="1970-01-01", end_date="1970-01-01"), InventoryBook()
+        inv.ensure(VENUES)
+        book(sh, inv, fill("buy", "bybit", 2.0, 100.0, False, 0.0, ts=1.0))
+        book(sh, inv, fill("sell", "binance", 2.0, 100.0, True, 0.0, ts=1.0, sid=2))
+        for t in (2.0, 9.0, 11.0):
+            sh.on_mid("bybit", t, 100.0)
+            sh.on_mid("binance", t, 100.0)
+        return sh, inv
+
+    def _bt(self, sign=1.0):
+        # the backtester pays position x mark x rate: long 2 on bybit pays 2 x 100 x 0.0001 = 0.02; short 2 on binance receives 0.04
+        return [{"venue": "bybit", "ts": 10.0, "position_base": 2.0, "mark": 100.0, "mark_source": "book_mid", "rate": 0.0001, "payment": sign * 0.02},
+                {"venue": "binance", "ts": 10.0, "position_base": -2.0, "mark": 100.0, "mark_source": "book_mid", "rate": 0.0002, "payment": sign * -0.04}]
+
+    def test_the_core_engine_and_the_settler_agree_on_sign_position_and_amount(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmp:
+            sh, inv = self._setup(tmp)
+            inv.apply("bybit", 0.0, -0.02)
+            inv.apply("binance", 0.0, 0.04)
+            r = sh.finish(inv, {"bybit": 100.0, "binance": 100.0}, None, funding_paid={"bybit": 0.02, "binance": -0.04}, funding_settlements=self._bt())
+            f = r["funding"]
+            self.assertEqual(f["settlements_compared"], 2)
+            self.assertLess(abs(float(f["max_abs_payment_diff"])), 1e-12)
+            self.assertEqual(f["unmatched_backtester"], [])
+            self.assertEqual(f["core_only"], [])
+            self.assertLess(abs(float(f["by_venue"]["bybit"]["diff"])), 1e-12)
+
+    def test_a_wrong_sign_in_the_backtester_is_reported(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmp:
+            sh, inv = self._setup(tmp)
+            r = sh.finish(inv, {"bybit": 100.0, "binance": 100.0}, None, funding_paid={"bybit": -0.02, "binance": 0.04}, funding_settlements=self._bt(sign=-1.0))
+            self.assertGreater(float(r["funding"]["max_abs_payment_diff"]), 0.03)
+
+
 if __name__ == "__main__":
     unittest.main()
