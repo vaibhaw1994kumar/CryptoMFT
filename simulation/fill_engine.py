@@ -924,6 +924,15 @@ class MakerExecutor:
         self._lc_by_maker[order.order_id] = rec
         self._lc_note(rec, ts, "resting", source)
 
+    def lc_amended(self, old_maker_id: int, new_order: MakerOrder, ts: float) -> None:
+        """S0: a repriced quote is the same submission under a new maker id (it lost its queue place, not its identity)."""
+        rec = self._lc_by_maker.pop(old_maker_id, None)
+        if rec is None:
+            return
+        rec.maker_id, rec.order = new_order.order_id, new_order
+        self._lc_by_maker[new_order.order_id] = rec
+        self._lc_note(rec, ts, "resting", "modelled", "amended")
+
     def lc_unknown(self, inflight_id: int, since: float, until: float | None, source: str = "injected", reason: str = "ack_lost") -> None:
         """No answer to the submit by `since` (the ack timeout). Settled at `until` by a status query or a late ack; None = never within the data.
         Entered from SUBMITTED only (R4): an order that already carries evidence is not made unknown."""
