@@ -1,0 +1,99 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Integration Status</title>
+<style>
+:root{--bg:#fafaf8;--fg:#1d1d1b;--mut:#5f5f5a;--line:#dcdcd5;--card:#fff;--ok:#1a7f4b;--warn:#a05a00;--todo:#8a8a84;--acc:#1f4fd8}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#151514;--fg:#ececE8;--mut:#a3a39c;--line:#2e2e2b;--card:#1c1c1a;--ok:#4cc38a;--warn:#e0a14a;--todo:#8a8a84;--acc:#7aa2ff}}
+:root[data-theme="dark"]{--bg:#151514;--fg:#ececE8;--mut:#a3a39c;--line:#2e2e2b;--card:#1c1c1a;--ok:#4cc38a;--warn:#e0a14a;--todo:#8a8a84;--acc:#7aa2ff}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--fg);font:15px/1.55 system-ui,-apple-system,Segoe UI,sans-serif}
+main{max-width:980px;margin:0 auto;padding:24px 16px 64px}
+h1{font-size:26px;margin:0 0 4px}h2{font-size:19px;margin:34px 0 10px;border-top:1px solid var(--line);padding-top:18px}
+p.s{color:var(--mut);margin:0 0 18px}.box{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:14px 16px;margin:12px 0}
+table{border-collapse:collapse;width:100%;margin:8px 0;font-size:14px}th,td{border-bottom:1px solid var(--line);padding:7px 8px;text-align:left;vertical-align:top}th{color:var(--mut);font-weight:600}
+.wrap{overflow-x:auto}.ok{color:var(--ok);font-weight:600}.warn{color:var(--warn);font-weight:600}.todo{color:var(--todo);font-weight:600}
+code{font:13px ui-monospace,Menlo,monospace;background:color-mix(in srgb,var(--line) 55%,transparent);padding:1px 5px;border-radius:4px}
+ul{padding-left:20px}li{margin:4px 0}
+</style></head><body><main>
+<h1>Backtest and core integration: status</h1>
+<p class="s">7 Nov 2026. One shared platform: rules live once in <code>crypto_stat_arb</code>, backtest and live call it. Every P&amp;L figure here is EXPLORATORY (stated profile, size 1, days, assumed fees). HOLDOUT untouched.</p>
+
+<div class="box"><b>Short version.</b> The simulator baseline is frozen and proven (v1_2). The repricing feature the live bot has and the backtest lacked is built, modular and off. The accounting switch-over (Phase B2) has started: equity valuation and funding now agree with the core to rounding. Phases C to F and the strategy steps S1 to S3 are not started. The real strategy loses about 2 bps per fill after fees in the simulator, mostly because quotes are never repriced when Binance moves.</div>
+
+<h2>1. Where each phase stands</h2>
+<div class="wrap"><table>
+<tr><th>Phase</th><th>What</th><th>State</th><th>Evidence</th></tr>
+<tr><td>0</td><td>Baselines, scenarios, hedge-failure catalogue (40 cases)</td><td class="ok">done</td><td>tag <code>phase0-gate</code></td></tr>
+<tr><td>A</td><td>Shared code moved into the core, no logic change</td><td class="ok">done</td><td>tag <code>phaseA-gate</code></td></tr>
+<tr><td>B0</td><td>Owner decisions: join-the-touch, 45 ms hedge-move pin, timing floors</td><td class="ok">done</td><td>tags <code>phaseB0-gate</code>, <code>phaseB0-followups</code></td></tr>
+<tr><td>B</td><td>Message-atomic book, depletion ledger, stamps, matching windows, cancel-model fixes, cohort fixes, through-print fix, adverse-selection study</td><td class="ok">done, v1_2 frozen</td><td>tags <code>phaseB-gate</code>, <code>phaseB-pass2</code>, <code>v1_2-freeze</code></td></tr>
+<tr><td>S0</td><td>Quote repricing (generic rule, numbers left to the trader), profile v1_3, off by default</td><td class="ok">built, committed</td><td>core <code>c9a09db</code>, outer <code>cffb339</code>; report C21</td></tr>
+<tr><td>B2</td><td>Switch fees, funding, margin, ledger to the core; retire the old modules</td><td class="warn">2 of 8 steps done</td><td>C22 (valuation), C23 (funding); see section 4</td></tr>
+<tr><td>C</td><td>Core fill-triggered hedging, one hedge lifecycle state machine</td><td class="todo">not started</td><td>specification recorded in the prompt</td></tr>
+<tr><td>D</td><td>One runtime for backtest, paper, live</td><td class="todo">not started</td><td>-</td></tr>
+<tr><td>E</td><td>Risk gate, pairing, venue selector, flatten on breaker trip</td><td class="todo">not started</td><td>-</td></tr>
+<tr><td>F</td><td>Clean-up, dead modules to <code>discarded/</code>, re-exports removed</td><td class="todo">not started</td><td>-</td></tr>
+<tr><td>S1 to S3</td><td>Adverse-selection table, hedge cap sweep, Albers features</td><td class="todo">after F</td><td>S1 to be fitted on the repricing strategy's fills</td></tr>
+</table></div>
+
+<h2>2. What is frozen, and how it is proven</h2>
+<ul>
+<li><b>v1_2</b> is the simulator-correct baseline, strategy unchanged: profile sha256 <code>734d7d2c&hellip;</code>, pinned by a test; identity in <code>profiles/perp_perp_maker_taker_v1_2.freeze.json</code>. <code>placement_book</code> is <code>view</code>; the through-print rule and the cohort queue are in the file but off and not part of the freeze.</li>
+<li><b>Byte identity</b> after every change: 13 clean baselines and 4 faulted runs equal the Phase 0 reference (legacy_v0, v1, v1.1, January and March); v1_2 and v1_3-off equal the frozen cell on all four March slices.</li>
+<li><b>Tests:</b> the failing list equals the Phase 0 list (92 failed + 1 collection error, all in <code>tests/platform_kit</code>, native module not built), checked by name; around 2,760 pass.</li>
+<li><b>Commits:</b> core <code>c9a09db</code>, outer <code>3025542</code> (latest). v1_2 identity tag <code>v1_2-freeze</code> in both repos.</li>
+</ul>
+
+<h2>3. What the work found</h2>
+<div class="wrap"><table>
+<tr><th>Finding</th><th>Number</th><th>Meaning</th></tr>
+<tr><td>Quotes are never repriced</td><td><code>maker_requote_bps</code> was declared and read by nothing</td><td>A quote leaves the book only by fill, the 15 s timeout or a breaker trip. Live reprices; the backtest did not.</td></tr>
+<tr><td>Quote-to-fill drift, real strategy (24 fills)</td><td>hedge venue &minus;4.8 bps (SE 0.9)</td><td>18 of 24 fills drifted against the quote, none in favour; believed edge +8.15 bps, realised +3.83, net after fees &minus;2.17 (EXPLORATORY).</td></tr>
+<tr><td>Quote-to-fill drift, probe (2,035 fills, 7 TRAIN days)</td><td>Binance bid &minus;8.3 bps before the fill, &minus;0.46 after</td><td>The single expected hedge move (&minus;0.488 bps) covers about 5% of it.</td></tr>
+<tr><td>Markout curve on the hedge venue</td><td>&minus;0.28 (30 ms) to &minus;1.57 bps (30 s)</td><td>Bybit's own mid falls further (&minus;0.58 to &minus;3.04). Gross hedge edge before fees at 45 ms: &minus;2.2 bps.</td></tr>
+<tr><td>block_on_toxic</td><td>blocks 13.6% of orders</td><td>The blocked fills are not worse than the rest: the gate does not select adverse fills in the probe.</td></tr>
+<tr><td>Orders rest on empty levels</td><td>92% (probe), 88% (January)</td><td>No queue to protect the order; it fills only after the market has moved to it. Queue models, depletion ledger and placement book are inert on today's data.</td></tr>
+<tr><td>March stamp assumption</td><td>7 signals trusted vs 3 untrusted (4 slices)</td><td>The largest single driver of the March cell results; stays ASSUMED.</td></tr>
+</table></div>
+
+<h2>4. Phase B2: accounting switch-over</h2>
+<div class="wrap"><table>
+<tr><th>Step</th><th>State</th><th>Result</th></tr>
+<tr><td>1 Valuation (A2)</td><td class="ok">done</td><td>The core already had the common-timestamp valuation. Marking the core ledger with it closes the equity gap: 0.008 USDT on March 03-11 and 6.45 USDT on January 01-13 become about 1e-14. Runs unchanged.</td></tr>
+<tr><td>2 Funding in the shadow</td><td class="ok">done</td><td>Core <code>FundingEngine</code> against <code>funding_settler</code>, January 01-13: 4 settlements, same sign, position, rate and mark, largest payment difference 3.6e-18 USDT, no flags. Run unchanged. March has no funding file.</td></tr>
+<tr><td>3 Margin in the shadow</td><td class="todo">next</td><td>core <code>margin.py</code> against <code>margin_model</code>, rule A9 included</td></tr>
+<tr><td>4 to 8</td><td class="todo">pending</td><td>Switch fees (floats inside, Decimal at the fill boundary), funding, margin, ledger to the core, then retire the old modules. Each is a profile switch on v1_3 or later, measured alone against the frozen v1_2.</td></tr>
+</table></div>
+
+<h2>5. Built but off (modular, left for the trader or the owner)</h2>
+<ul>
+<li><b>Quote repricing (S0):</b> rule in the core passive tactic (<code>decide_reprice</code>), target from the strategy's edge at the current Binance price (<code>requote_target</code>), simulator glue in <code>new_backtest/requote.py</code>, setting <code>execution.primary.reprice</code>, profile v1_3 with every number null and the rule disabled. Amend loses queue priority; the old order stays fillable until the amend lands (H30); PostOnly is checked at arrival. A smoke run with illustrative numbers ran end to end and exposed one bug (max-age re-quote repeating), since fixed. <b>Needs the numbers.</b></li>
+<li><b>Placement on the truth book:</b> switch built, measured inert on 3 orders, left <code>view</code>.</li>
+<li><b>Through-print rule:</b> engine fixed (one print budget; a netted print still reaches it), off in v1_2 and off the freeze list.</li>
+<li><b>Cohort queue:</b> two fixes, sensitivity case only; refuses amend.</li>
+</ul>
+
+<h2>6. Not started, and what each needs first</h2>
+<ul>
+<li><b>Phase C</b> (the biggest): one hedge lifecycle state machine in the core, one shared reject-code table, retry limits and a maximum residual duration, the seven tests through the core path and all 40 catalogue cases. Needs your decision on the two conflicts recorded as DECISION_PENDING_CALIBRATION (unwind band 15 vs 10 bps, residual limit 30 vs 5 s). <code>p_fail</code> and <code>loss_fail_bps</code> become SCENARIO values (not calibrated) until real execution logs exist.</li>
+<li><b>Phase D, E, F:</b> follow C; E includes flatten on breaker trip (missing in both stacks) and the lot and minimum checks (no SOLUSDT rules stored).</li>
+<li><b>S1:</b> the adverse-selection table, fitted on the repricing strategy's fills on TRAIN, validated on SELECT only, shipped as a new profile version.</li>
+</ul>
+
+<h2>7. Decisions that wait for you</h2>
+<ol>
+<li>S0 numbers: the trader's (or the live bot's, labelled LIVE_VALUES), and the live rule's source if you want it copied exactly.</li>
+<li>The core repository's working tree carries 37 tracked-file changes that are not part of this work (staged deletions of <code>advanced_backtest/</code> and old documents): commit, restore, or leave and record.</li>
+<li>The two unwind and residual conflicts above, before Phase C.</li>
+<li>The fate of five EMS settings that nothing reads (<code>primary.price_rule</code>, <code>hedge.q</code>, <code>maker_maker.escalate_after_s</code>, <code>unwind.fallback</code>, <code>unwind.window_s</code>); frozen profiles name them.</li>
+</ol>
+
+<h2>8. Limits that travel with every number</h2>
+<ul>
+<li>March slices are 2 hours, Binance best bid/ask only, no funding file; stamps, latency preset and fees are ASSUMED.</li>
+<li>Hidden liquidity ahead of us and RPI orders on both venues are not modelled.</li>
+<li>The print-first leftover (a decrease larger than its print) is not order-independent (ratio below 1.2): a known limit.</li>
+<li>Strategy-fill samples are tiny (24 January fills, 2 March fills); the probe (2,035 fills) is Bybit-only with a 15 s order life.</li>
+<li><code>p_fail</code> is a placeholder and <code>loss_fail_bps</code> comes from a simulated study.</li>
+</ul>
+<p class="s">Detail: <code>core_integration_report.html</code> sections C1 to C23; plan: <code>single_platform_plan.md</code>; instructions: <code>core_backtest_integration_prompt.md</code>.</p>
+</main></body></html>
