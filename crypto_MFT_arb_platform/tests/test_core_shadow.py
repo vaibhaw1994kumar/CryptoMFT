@@ -81,5 +81,36 @@ class OffByDefault(unittest.TestCase):
         self.assertFalse(h.bt.config.core_shadow)
 
 
+class CommonTimestampMarks(unittest.TestCase):
+    """B2.1 (7 Nov): the core's own common_timestamp_valuation, applied to the core ledger, resolves A2; without it the per-venue last-mid shortcut still differs."""
+    def _shadow(self):
+        sh, inv = CoreShadow("SOLUSDT", VENUES), InventoryBook()
+        inv.ensure(VENUES)
+        book(sh, inv, fill("buy", "bybit", 1.0, 100.0, False, FEE_PRESETS["bybit_perp_mm"].maker_bps))
+        return sh, inv
+
+    def test_the_per_venue_last_mid_differs_and_the_core_function_marks_resolve_it(self):
+        sh, inv = self._shadow()
+        bt_eq = sum(inv.cash.values()) + inv.base["bybit"] * 99.0                                   # the backtester marks the long at the common-timestamp mid 99.0
+        r0 = sh.finish(inv, {"bybit": 100.0, "binance": 100.1}, bt_ending_equity=bt_eq)
+        self.assertIn("A2_VALUATION", [d["id"] for d in r0["differences"]])
+        sh2, inv2 = self._shadow()
+        val = {"available": True, "common_ts": 5.0, "marks": {"bybit": 99.0, "binance": 99.1}}
+        r1 = sh2.finish(inv2, {"bybit": 100.0, "binance": 100.1}, bt_ending_equity=bt_eq, valuation=val)
+        self.assertNotIn("A2_VALUATION", [d["id"] for d in r1["differences"]])
+        self.assertIn("RESOLVED", r1["equity"]["a2"])
+
+    def test_a_wrong_backtester_equity_is_still_reported_with_the_core_marks(self):
+        sh, inv = self._shadow()
+        val = {"available": True, "common_ts": 5.0, "marks": {"bybit": 99.0, "binance": 99.1}}
+        r = sh.finish(inv, {"bybit": 100.0, "binance": 100.1}, bt_ending_equity=sum(inv.cash.values()) + inv.base["bybit"] * 98.0, valuation=val)
+        self.assertIn("A2_VALUATION", [d["id"] for d in r["differences"]])
+
+    def test_an_unavailable_valuation_changes_nothing(self):
+        sh, inv = self._shadow()
+        r = sh.finish(inv, {"bybit": 100.0, "binance": 100.1}, bt_ending_equity=sum(inv.cash.values()) + inv.base["bybit"] * 99.0, valuation={"available": False, "reason": "no_price_on_venue"})
+        self.assertIn("A2_VALUATION", [d["id"] for d in r["differences"]])
+
+
 if __name__ == "__main__":
     unittest.main()

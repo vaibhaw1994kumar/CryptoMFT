@@ -83,8 +83,8 @@ class CoreShadow:
         if abs(core_pos - bt_pos) > TOL_BASE:
             self.mismatches.append({"fill": self.n, "venue": fill.venue, "what": "position", "bt": str(bt_pos), "core": str(core_pos), "diff": str(core_pos - bt_pos)})
 
-    def finish(self, inventory, mids: dict[str, float], bt_ending_equity: float | None, funding_paid: dict[str, float] | None = None) -> dict[str, Any]:
-        """The report. `mids`: each venue's last book mid; `bt_ending_equity`: the backtester's common-timestamp ending equity; `funding_paid`: funding the backtester settled into
+    def finish(self, inventory, mids: dict[str, float], bt_ending_equity: float | None, funding_paid: dict[str, float] | None = None, valuation: dict | None = None) -> dict[str, Any]:
+        """The report. `valuation`: the result of the core's own `crypto_stat_arb.valuation.common_timestamp_valuation` (B2.1): when it is available the core ledger is also marked at those prices, which resolves A2. `mids`: each venue's last book mid; `bt_ending_equity`: the backtester's common-timestamp ending equity; `funding_paid`: funding the backtester settled into
         each venue's cash (payment positive = paid). The core funding engine is not in the shadow, so that cash is taken out of the backtester's side before the comparison and reported."""
         funding_paid = {v: float(x) for v, x in (funding_paid or {}).items()}
         positions, cash = {}, {}
@@ -120,6 +120,19 @@ class CoreShadow:
             valuation_diff = gap + fee_diff                        # the part of the gap that is not the fee difference (core equity is net of the core fee, the backtester's of its own)
             equity = {"bt_common_timestamp": str(_dec(bt_ending_equity)), "core_per_venue_last_mid": str(core_eq), "diff": str(gap), "diff_not_explained_by_fees": str(valuation_diff),
                       "note": "A2: the backtester marks every venue at the last time all venues had data (R11); the core marks each venue at its own last mid."}
+            if valuation is not None and valuation.get("available"):
+                marks = {v: _dec(valuation["marks"][v]) for v in self.venues}
+                core_eq_c = sum((self.ledger.cash_deltas.get(self._venue(v), Decimal(0)) + self.ledger.positions.get((self._venue(v), self.instrument), Decimal(0)) * marks[v]
+                                 for v in self.venues), Decimal(0))
+                gap_c = core_eq_c - (_dec(bt_ending_equity) + sum((_dec(x) for x in funding_paid.values()), Decimal(0))) + fee_diff
+                equity["core_at_common_timestamp_marks"] = str(core_eq_c)
+                equity["diff_not_explained_by_fees_at_common_timestamp_marks"] = str(gap_c)
+                equity["common_ts"] = valuation.get("common_ts")
+                if abs(gap_c) <= TOL_USDT:
+                    equity["a2"] = "RESOLVED: the core's own common_timestamp_valuation, applied to the core ledger, gives the backtester's equity (the function lives in the core since Phase A; only the per-venue last-mid shortcut differed)"
+                    valuation_diff = Decimal(0)
+                else:
+                    valuation_diff = gap_c
             if abs(valuation_diff) > TOL_USDT:
                 diffs.append({"id": "A2_VALUATION", "class": "BY_DESIGN", "detail": f"equity differs by {valuation_diff} beyond the fee difference: common-timestamp against per-venue closing marks"})
         return {

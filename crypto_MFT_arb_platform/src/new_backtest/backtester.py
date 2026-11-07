@@ -2972,7 +2972,7 @@ class CrossVenueArbBacktester:
             res = self._build_result(feed, coverage, virtual_clock.real_time() - wall_start)
             if self._shadow is not None:
                 res.core_shadow = self._shadow.finish(self.inventory, {v: b.mid for v, b in self.books.items() if b.ready}, res.ending_equity,
-                                                      funding_paid=self.settler.report()["by_venue"] if self.settler is not None else None)
+                                                      funding_paid=self.settler.report()["by_venue"] if self.settler is not None else None, valuation=self._common_valuation())
             return res
         finally:
             virtual_clock.uninstall()

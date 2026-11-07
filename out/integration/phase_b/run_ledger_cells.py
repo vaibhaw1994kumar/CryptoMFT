@@ -31,7 +31,7 @@ MAR_PROF, JAN_PROF = "perp_perp_maker_taker_v1_2", "perp_perp_maker_taker_v1_1"
 ILLUSTRATIVE = {"enabled": True, "source": "ILLUSTRATIVE_NOT_FITTED", "band_down_bps": 2.0, "band_up_bps": None, "debounce_ms": None, "jump_bps": None, "min_interval_ms": 250.0, "max_age_s": 15.0,
                 "queue_hold": True, "amend_first": True}
 PROFILE_OF = {"v3": "perp_perp_maker_taker_v1_3", "v3on": "perp_perp_maker_taker_v1_3"}
-FINAL = {"fs": ({}, {}), "v3": ({}, {}), "v3on": ({}, {}), "f0": ({"depletion_ledger": False}, {"trust_local_ts": {"bybit": True, "binance": True}}),
+FINAL = {"fsh": ({}, {"core_shadow": True}), "fs": ({}, {}), "v3": ({}, {}), "v3on": ({}, {}), "f0": ({"depletion_ledger": False}, {"trust_local_ts": {"bybit": True, "binance": True}}),
          "f1": ({"depletion_ledger": True}, {"trust_local_ts": {"bybit": True, "binance": True}}),
          "ft": ({}, {}),
          "fp": ({}, {"placement_book": "truth"}),
