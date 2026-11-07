@@ -308,7 +308,7 @@ class FeesFromTheCore(unittest.TestCase):
             return out
         a, b = flat(load_profile("perp_perp_maker_taker_v1_3")), flat(load_profile("perp_perp_maker_taker_v1_4"))
         diff = {k for k in set(a) | set(b) if a.get(k) != b.get(k)}
-        self.assertEqual(diff, {"name", "description", "fee_source", "fee_presets.bybit", "fee_presets.binance", "decision_status.fees"})
+        self.assertEqual(diff, {"name", "description", "fee_source", "funding_source", "fee_presets.bybit", "fee_presets.binance", "decision_status.fees"})
 
     def test_the_earlier_profiles_keep_their_own_presets(self):
         for name in ("perp_perp_maker_taker_v1_2", "perp_perp_maker_taker_v1_3"):
@@ -319,7 +319,7 @@ class FeesFromTheCore(unittest.TestCase):
         from unittest import mock
         import new_backtest.config as C
         from new_backtest.backtester import CrossVenueArbBacktester
-        cfg = self._cfg()
+        cfg = self._cfg(funding_source="settler")                      # (v1_4 also sets funding_source core, which needs a rate directory: not what this test is about)
         cfg.allow_manifest_gap = "test"
         nonsense = {k: C.FeeSpec(maker_bps=99.0, taker_bps=99.0) for k in C.FEE_PRESETS}
         with mock.patch.dict(C.FEE_PRESETS, nonsense):
@@ -344,6 +344,128 @@ class FeesFromTheCore(unittest.TestCase):
         r = sh.finish(inv, {"bybit": 100.0, "binance": 100.1}, bt_ending_equity=sum(inv.cash.values()) + inv.base["bybit"] * 100.0 + inv.base["binance"] * 100.1)
         self.assertLess(abs(float(r["fees"]["diff"])), 1e-12)
         self.assertEqual(r["differences"], [])
+
+
+class FundingFromTheCore(unittest.TestCase):
+    """B2 step 5 (7 Nov): with funding_source core the core FundingEngine books the funding and its cash flow is the run's. Synthetic data: wiring only."""
+    def _setup(self, tmp, mark=None, mids=(2.0, 9.0, 11.0)):
+        d = Path(tmp)
+        for v, rate in (("bybit", "0.0001"), ("binance", "0.0002")):
+            row = {"funding_ts_ms": 10_000, "venue": v, "rate": rate, "instrument_id": "SOL-USDT-PERP"}
+            if mark is not None:
+                row["mark_price"] = str(mark)
+            (d / f"{v}.jsonl").write_text(json.dumps(row))
+        sh, inv = CoreShadow("SOLUSDT", VENUES, funding_rate_dir=str(d), start_date="1970-01-01", end_date="1970-01-01"), InventoryBook()
+        inv.ensure(VENUES)
+        book(sh, inv, fill("buy", "bybit", 2.0, 100.0, False, 0.0, ts=1.0))
+        book(sh, inv, fill("sell", "binance", 2.0, 100.0, True, 0.0, ts=1.0, sid=2))
+        for t in mids:
+            sh.on_mid("bybit", t, 100.0)
+            sh.on_mid("binance", t, 100.0)
+        return sh, inv
+
+    def test_the_core_books_the_settlement_into_the_runs_cash_and_flags_the_book_mid_mark(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmp:
+            sh, inv = self._setup(tmp)
+            st = sh.funding_settler()
+            cash0 = dict(inv.cash)
+            st.settle(11.0, inv, None)
+            self.assertAlmostEqual(inv.cash["bybit"] - cash0["bybit"], -0.02, places=12)          # long 2 on bybit pays 2 x 100 x 0.0001
+            self.assertAlmostEqual(inv.cash["binance"] - cash0["binance"], 0.04, places=12)       # short 2 on binance receives 2 x 100 x 0.0002
+            r = st.report()
+            self.assertAlmostEqual(r["funding_paid"], -0.02, places=12)
+            self.assertEqual(r["mark_sources"], {"record": 0, "book_mid": 2, "none": 0})
+            self.assertEqual(r["FUNDING_MARK_FALLBACK"], 2)                                         # flagged and counted
+            self.assertEqual(r["core_status"]["mark_basis"], "ESTIMATED")
+            self.assertEqual(r["core_status"]["economic_status"], "COMPLETE")                       # a fallback is booked, not missing
+
+    def test_a_row_with_odd_milliseconds_is_settled_when_the_timer_calls_at_exactly_its_time(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmp:
+            d = Path(tmp)
+            for v, rate, ms in (("bybit", "0.0001", 10_000), ("binance", "0.0002", 10_014)):
+                (d / f"{v}.jsonl").write_text(json.dumps({"funding_ts_ms": ms, "venue": v, "rate": rate, "instrument_id": "SOL-USDT-PERP"}))
+            sh, inv = CoreShadow("SOLUSDT", VENUES, funding_rate_dir=str(d), start_date="1970-01-01", end_date="1970-01-01"), InventoryBook()
+            inv.ensure(VENUES)
+            book(sh, inv, fill("buy", "bybit", 2.0, 100.0, False, 0.0, ts=1.0))
+            book(sh, inv, fill("sell", "binance", 2.0, 100.0, True, 0.0, ts=1.0, sid=2))
+            for t in (2.0, 9.0, 10.0, 10.014):
+                sh.on_mid("bybit", t, 100.0)
+                sh.on_mid("binance", t, 100.0)
+            st = sh.funding_settler()
+            st.settle(10.0, inv, None)
+            st.settle(10.014, inv, None)                  # the timer wheel calls at exactly the row's time, the next event is later: nothing may be left unsettled
+            st.settle(11.0, inv, None)
+            self.assertEqual(sorted(r["venue"] for r in st.report()["settlements"]), ["binance", "bybit"])
+
+    def test_a_settlement_is_booked_once_however_often_the_settler_is_called(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmp:
+            sh, inv = self._setup(tmp)
+            st = sh.funding_settler()
+            st.settle(11.0, inv, None)
+            cash = dict(inv.cash)
+            st.settle(12.0, inv, None)
+            st.settle(50.0, inv, None)
+            self.assertEqual(inv.cash, cash)
+            self.assertEqual(len(st.report()["settlements"]), 2)
+
+    def test_the_records_own_mark_is_used_without_a_fallback_flag(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmp:
+            sh, inv = self._setup(tmp, mark=101.0)
+            st = sh.funding_settler()
+            cash0 = inv.cash["bybit"]
+            st.settle(11.0, inv, None)
+            self.assertAlmostEqual(inv.cash["bybit"] - cash0, -2.0 * 101.0 * 0.0001, places=12)
+            r = st.report()
+            self.assertEqual((r["mark_sources"], r["FUNDING_MARK_FALLBACK"]), ({"record": 2, "book_mid": 0, "none": 0}, 0))
+            self.assertEqual(r["core_status"]["mark_basis"], "EXCHANGE_MARK")
+
+    def test_a_settlement_with_no_mark_at_all_is_flagged_and_never_dropped_silently(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmp:
+            sh, inv = self._setup(tmp, mids=())
+            for t in (2.0, 11.0):                                                                   # the engine saw the clock move but never a price
+                for v in ("BYBIT", "BINANCE"):
+                    sh.funding.observe(v, "SOL-USDT-PERP", int(t * 1e9), None)
+            st = sh.funding_settler()
+            cash = dict(inv.cash)
+            st.settle(11.0, inv, None)
+            self.assertEqual(inv.cash, cash)                                                        # nothing could be booked ...
+            r = st.report()
+            self.assertEqual(r["mark_sources"]["none"], 2)                                          # ... and the run says so
+            self.assertTrue(all(x["flag"] == "FUNDING_MARK_MISSING" for x in r["settlements"]))
+            self.assertEqual(r["core_status"]["economic_status"], "INCOMPLETE")
+
+    def test_a_core_funding_run_never_builds_the_backtesters_own_settler(self):
+        import tempfile
+        from unittest import mock
+        import new_backtest.funding_settler as FS
+        from new_backtest.backtester import CrossVenueArbBacktester
+        from new_backtest.profiles import apply_profile, load_profile
+        with tempfile.TemporaryDirectory() as tmp:
+            Path(tmp, "bybit.jsonl").write_text("")
+            cfg = apply_profile(load_profile("perp_perp_maker_taker_v1_4"), dataset="mar2024", data_root="/nonexistent", pair="SOLUSDT", start_date="2024-03-08", end_date="2024-03-08",
+                                output_dir="/tmp/x_fund", funding_rate_dir=tmp)
+            cfg.allow_manifest_gap = "test"
+            self.assertEqual(cfg.funding_source, "core")
+            with mock.patch.object(FS, "FundingSettler", side_effect=AssertionError("funding booked outside the core")):
+                bt = CrossVenueArbBacktester(cfg)
+            self.assertEqual(type(bt.settler).__name__, "CoreFundingSettler")
+        for name in ("perp_perp_maker_taker_v1_2", "perp_perp_maker_taker_v1_3"):
+            self.assertEqual(apply_profile(load_profile(name), dataset="mar2024", data_root="/nonexistent", pair="SOLUSDT", start_date="2024-03-08", end_date="2024-03-08", output_dir="/tmp/x_fund").funding_source, "settler")
+
+    def test_without_a_rate_directory_funding_is_not_modelled_exactly_as_with_the_settler(self):
+        from new_backtest.backtester import CrossVenueArbBacktester
+        from new_backtest.profiles import apply_profile, load_profile
+        cfg = apply_profile(load_profile("perp_perp_maker_taker_v1_4"), dataset="mar2024", data_root="/nonexistent", pair="SOLUSDT", start_date="2024-03-08", end_date="2024-03-08", output_dir="/tmp/x_fund")
+        cfg.allow_manifest_gap = "test"
+        bt = CrossVenueArbBacktester(cfg)
+        self.assertIsNone(bt.settler)
+        self.assertIsNone(bt._shadow)
+        self.assertIs(cfg.release_identity["funding_modelled"], False)                       # recorded: March has no funding file
 
 
 if __name__ == "__main__":

@@ -163,6 +163,8 @@ class ArbBacktestConfig:
     # When set, perpetual funding payments are settled during replay and
     # reported as funding_paid in ArbBacktestResult.  None = not modelled.
     funding_rate_dir: str | None = None
+    # B2 step 5: "settler" = funding_settler (v1, v1.1, v1_2, v1_3, legacy_v0); "core" = the core FundingEngine books the funding (record mark, else book mid flagged FUNDING_MARK_FALLBACK) and its cash flow is applied to the run.
+    funding_source: str = "settler"
     # Hedge-leg failure injection (hedge_faults.py). None = off and the replay is exactly as before.
     hedge_faults: HedgeFaultConfig | None = None
     # Opt-in margin / liquidation / cross-venue equity-transfer model (margin_model.py). None (default): infinite margin and no
@@ -573,9 +575,11 @@ class CrossVenueArbBacktester:
             for v in config.venues
         }
         self._shadow = None
-        if config.core_shadow:
+        if config.funding_source not in ("settler", "core"):
+            raise ValueError(f"funding_source must be 'settler' or 'core', got {config.funding_source!r}")
+        if config.core_shadow or (config.funding_source == "core" and config.funding_rate_dir):          # no rate directory = funding not modelled, as with the settler (March has no funding file)
             from .core_shadow import CoreShadow
-            self._shadow = CoreShadow(config.pair, tuple(config.venues), fee_rows=self.fee_rows, funding_rate_dir=config.funding_rate_dir, start_date=config.start_date, end_date=config.end_date,
+            self._shadow = CoreShadow(config.pair, tuple(config.venues), fee_rows=self.fee_rows, funding_venues=tuple(v for v in config.venues if self.product_by_venue.get(v) != "spot"), funding_rate_dir=config.funding_rate_dir, start_date=config.start_date, end_date=config.end_date,
                                        margin=config.margin)
         self._message_atomic = config.message_atomic_book
         self._frame_last = True                    # message-atomic mode: the event being applied is the last of its exchange message
@@ -630,7 +634,9 @@ class CrossVenueArbBacktester:
         self.settler: "FundingSettler | None" = None
         # WP7b: spot never pays funding — the settler only knows the perp venues (a spot-only run has no settler at all).
         funding_venues = tuple(v for v in config.venues if self.product_by_venue.get(v) != "spot")
-        if config.funding_rate_dir and funding_venues:
+        if config.funding_rate_dir and funding_venues and config.funding_source == "core":
+            self.settler = self._shadow.funding_settler()          # B2.5: the core engine books the funding; same interface as FundingSettler
+        elif config.funding_rate_dir and funding_venues:
             from .funding_settler import FundingSettler  # noqa: PLC0415
             self.settler = FundingSettler(
                 config.funding_rate_dir,

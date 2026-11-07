@@ -29,7 +29,7 @@ def _dec(x: float) -> Decimal:
 
 class CoreShadow:
     def __init__(self, pair: str, venues: tuple[str, ...], fee_rows: list[dict] | None = None, *, funding_rate_dir: str | None = None,
-                 start_date: str | None = None, end_date: str | None = None, margin=None, margin_flat_every: int = 600) -> None:
+                 start_date: str | None = None, end_date: str | None = None, margin=None, margin_flat_every: int = 600, funding_venues: tuple[str, ...] | None = None) -> None:
         from crypto_stat_arb.fees import FeeSchedule, Liquidity
         from crypto_stat_arb.ledger import Ledger
         from crypto_stat_arb.models import ChildOrder, Side
@@ -52,6 +52,9 @@ class CoreShadow:
         self.fee_rows: dict[str, Any] = {}
         self.last_mid: dict[str, float] = {}
         self.fee_by_venue: dict[str, list[Decimal]] = {v: [Decimal(0), Decimal(0)] for v in self.venues}       # [backtester fee, core fee], per venue (B2.3)
+        self.funding_venues = tuple(funding_venues) if funding_venues is not None else tuple(venues)       # perp venues only: a spot wallet never pays funding
+        self.funding_due: list[tuple[float, str, int]] = []   # B2.5: (settlement time in s, venue, ns) of every rate row in the window, sorted: when the core engine is asked to settle
+        self.funding_driven = False                           # B2.5: True when CoreFundingSettler drives the run's cash from this engine: nothing else may settle it
         self.funding = None                                   # B2.2: the core FundingEngine, fed the same rate files and the same fills as the backtester's funding_settler
         self._last_ns = 0
         if funding_rate_dir:
@@ -65,10 +68,10 @@ class CoreShadow:
         import datetime as dt
         from crypto_stat_arb.funding import FundingEngine, FundingRateBook, FundingSpec
         self.ledger.asset_resolver = lambda venue, instrument_id: (instrument_id, "USDT")        # the session's rule for a perpetual: the position asset is the instrument id
-        specs = [FundingSpec(self._venue(v), self.instrument, self.instrument, "USDT") for v in self.venues]
+        specs = [FundingSpec(self._venue(v), self.instrument, self.instrument, "USDT") for v in self.funding_venues]
         lo = dt.datetime.fromisoformat(start_date).replace(tzinfo=dt.timezone.utc).timestamp() if start_date else None
         hi = dt.datetime.fromisoformat(end_date).replace(tzinfo=dt.timezone.utc).timestamp() + 86_400 if end_date else None
-        book, mine = FundingRateBook(), {v.lower() for v in self.venues}
+        book, mine = FundingRateBook(), {v.lower() for v in self.funding_venues}
         for path in sorted(Path(directory).glob("*.jsonl")):
             for raw in path.read_text(encoding="utf-8").splitlines():
                 if not raw.strip():
@@ -80,7 +83,10 @@ class CoreShadow:
                 if ts is None or (lo is not None and ts < lo) or (hi is not None and ts >= hi):
                     continue
                 book.add_row(dict(row, venue=str(row["venue"]).upper(), instrument_id=self.instrument), "shadow")
+                exact_ns = int(row["funding_ts_ns"]) if row.get("funding_ts_ns") is not None else int(row["funding_ts_ms"]) * 1_000_000        # the engine's own key: a float round trip is off by up to 256 ns
+                self.funding_due.append((ts, str(row["venue"]).lower(), exact_ns))
         self.funding = FundingEngine(self.ledger, specs, book, mark_fallback="book_mid")
+        self.funding_due.sort()
 
     def _init_margin(self, cfg, flat_every: int) -> None:
         from crypto_stat_arb.economics import opening_balance_events
@@ -129,7 +135,7 @@ class CoreShadow:
             m["skipped_flat"] += 1
             return
         now_ns = int(now * 1_000_000_000)
-        if self.funding is not None:
+        if self.funding is not None and not self.funding_driven:
             self.funding.settle_until(now_ns - 1, final=True)        # the backtester pays funding into cash when it happens; the core engine settles only when asked
         report = self.margin.evaluate_margin(ledger=self.ledger, now_ns=now_ns, mark_prices={(self._venue(v), self.instrument): _dec(x) for v, x in marks.items()},
                                              open_orders={}, enforce_controls=False, dry_run=True)
@@ -273,6 +279,9 @@ class CoreShadow:
         return {"settlements_compared": len(rows), "max_abs_payment_diff": str(max_diff), "mark_differs_in": mark_diff, "unmatched_backtester": unmatched_bt, "core_only": core_only, "by_venue": by_venue,
                 "flags": [{"code": f["code"], "blocking": f["blocking"]} for f in self.funding.flags][:20], "rows": rows[:50]}
 
+    def funding_settler(self) -> "CoreFundingSettler":
+        return CoreFundingSettler(self)
+
     def finish(self, inventory, mids: dict[str, float], bt_ending_equity: float | None, funding_paid: dict[str, float] | None = None, valuation: dict | None = None,
                funding_settlements: list[dict] | None = None) -> dict[str, Any]:
         """The report. `valuation`: the result of the core's own `crypto_stat_arb.valuation.common_timestamp_valuation` (B2.1): when it is available the core ledger is also marked at those prices, which resolves A2. `mids`: each venue's last book mid; `bt_ending_equity`: the backtester's common-timestamp ending equity; `funding_paid`: funding the backtester settled into
@@ -280,7 +289,8 @@ class CoreShadow:
         funding_paid = {v: float(x) for v, x in (funding_paid or {}).items()}
         funding_report = None
         if self.funding is not None:
-            self.funding.settle_until(self._last_ns, final=True)
+            if not self.funding_driven:
+                self.funding.settle_until(self._last_ns, final=True)
             funding_report = self._compare_funding(funding_paid, funding_settlements or [])
             funding_paid_bt = funding_paid
             funding_paid = {}                                  # both ledgers now book funding into cash: nothing is taken out of the backtester's side
@@ -358,3 +368,68 @@ class CoreShadow:
             "fees": {"bt_total": str(self.bt_fee), "core_total": str(self.core_fee), "diff": str(fee_diff), "max_per_fill_abs_diff": str(self.max_fill_fee_diff), "core_rates_bps": self.fee_rows},
             "trade_cash_gap_after_removing_fee_difference": str(cash_gap), "funding_booked_by_backtester_not_compared": ({} if funding_report is not None else {v: str(_dec(x)) for v, x in funding_paid.items()}), "funding": funding_report, "margin": margin_report, "equity": equity, "differences": diffs, "mismatches_per_fill": self.mismatches[:20], "ok": not diffs,
         }
+
+
+class CoreFundingSettler:
+    """B2.5: the run's funding, booked by the core FundingEngine instead of funding_settler. Same interface as FundingSettler (settle, next_ts, report, funding_paid, loaded_records), so every consumer in the backtester is unchanged.
+
+    At each call, every rate row whose time has passed (same float comparison as the settler) is handed to the core engine, which settles it against the shadow ledger's position at that time (fills strictly before the
+    settlement count) and marks it with the funding record's own mark price where the file has one, otherwise the book mid at the settlement, flagged FUNDING_MARK_FALLBACK and counted in the report. The core's cash flow is applied
+    to the backtester's cash. A settlement the core could not book (no rate, no mark) is recorded with payment 0 and source "none", with the core's flag; it is never dropped without a trace."""
+    def __init__(self, shadow: CoreShadow) -> None:
+        if shadow.funding is None:
+            raise ValueError("funding_source core needs funding_rate_dir (the core engine has no rate book otherwise)")
+        self.sh = shadow
+        shadow.funding_driven = True
+        self.funding_paid = 0.0
+        self.settlements: list[dict] = []
+        self.loaded_records = len(shadow.funding_due)
+        self._ptr = 0
+        self._applied: set[str] = set()
+        self._flags_seen = 0
+
+    def next_ts(self) -> float | None:
+        due = self.sh.funding_due
+        return due[self._ptr][0] if self._ptr < len(due) else None
+
+    def settle(self, now_s: float, inventory, books) -> None:
+        due, sh = self.sh.funding_due, self.sh
+        if self._ptr >= len(due) or due[self._ptr][0] > now_s:
+            return
+        hi = self._ptr
+        while hi < len(due) and due[hi][0] <= now_s:
+            hi += 1
+        until_ns = max(int(round(now_s * 1e9)), max(ns for _, _, ns in due[self._ptr:hi]))
+        self._ptr = hi
+        sh.funding.settle_until(until_ns, final=True)
+        for e in sh.funding.settled_events():
+            if e.event_id in self._applied:
+                continue
+            self._applied.add(e.event_id)
+            d = dict(e.details)
+            amount = float(e.postings[0].quantity)                     # the holder's cash flow: negative when paid
+            venue = e.venue.lower()
+            inventory.apply(venue, 0.0, amount)
+            self.funding_paid += -amount
+            self.settlements.append({"venue": venue, "ts": e.ts_ns / 1e9, "position_base": float(d["position"]), "mark": float(d["mark_price"]),
+                                     "mark_source": "record" if "funding record" in e.valuation_source else "book_mid", "rate": float(d["rate"]), "payment": -amount})
+        for f in sh.funding.flags[self._flags_seen:]:
+            if f["blocking"]:
+                self.settlements.append({"venue": f["venue"].lower(), "ts": f["funding_ts_ns"] / 1e9, "position_base": float(f["position"]), "mark": 0.0, "mark_source": "none",
+                                         "rate": None, "payment": 0.0, "flag": f["code"]})
+        self._flags_seen = len(sh.funding.flags)
+
+    def report(self) -> dict:
+        by_venue: dict[str, float] = {}
+        for r in self.settlements:
+            by_venue[r["venue"]] = by_venue.get(r["venue"], 0.0) + r["payment"]
+        core = self.sh.funding.report()
+        codes: dict[str, int] = {}
+        for f in self.sh.funding.flags:
+            codes[f["code"]] = codes.get(f["code"], 0) + 1
+        return {"funding_paid": self.funding_paid, "by_venue": by_venue, "loaded_records": self.loaded_records, "contract_multiplier": 1.0, "settlement_currency": "USDT",
+                "mark_sources": {k: sum(1 for r in self.settlements if r["mark_source"] == k) for k in ("record", "book_mid", "none")},
+                "source": "core crypto_stat_arb.funding.FundingEngine", "mark_rule": "the funding record's mark price where present, otherwise the book mid at the settlement (flagged FUNDING_MARK_FALLBACK, counted)",
+                "FUNDING_MARK_FALLBACK": codes.get("FUNDING_MARK_FALLBACK", 0), "core_flags": codes,
+                "core_status": {k: core.get(k) for k in ("status", "economic_status", "data_coverage", "mark_basis", "settlements_booked", "settlements_on_book_mid")},
+                "settlements": list(self.settlements)}

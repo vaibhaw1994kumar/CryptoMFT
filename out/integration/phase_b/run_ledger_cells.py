@@ -35,7 +35,7 @@ ILLUSTRATIVE = {"enabled": True, "source": "ILLUSTRATIVE_NOT_FITTED", "band_down
 # g1 = the v1_4 headline, Bybit VIP 5 + Binance VIP 9 (2.7 bps, PUBLIC_SCHEDULE_UNVERIFIED); g2 = MM-rebate scenario, bybit_perp_mm + Binance VIP 9 (1.2 bps, the rebate UNCONFIRMED).
 PROFILE_OF = {"v3": "perp_perp_maker_taker_v1_3", "v3on": "perp_perp_maker_taker_v1_3", "g0": "perp_perp_maker_taker_v1_4", "g1": "perp_perp_maker_taker_v1_4", "g2": "perp_perp_maker_taker_v1_4"}
 EXTRA_ARGS = {"g0": ["--fee", "mm", "--binance-fee", "vip0"], "g1": ["--fee", "profile", "--binance-fee", "profile"], "g2": ["--fee", "mm", "--binance-fee", "vip9"]}
-FINAL = {"g0": ({}, {"core_shadow": True}), "g1": ({}, {"core_shadow": True}), "g2": ({}, {"core_shadow": True}), "jsh": ({}, {"core_shadow": True}), "fsh": ({}, {"core_shadow": True}), "jsm": ({}, {"core_shadow": True}), "fsm": ({}, {"core_shadow": True}), "fs": ({}, {}), "v3": ({}, {}), "v3on": ({}, {}), "f0": ({"depletion_ledger": False}, {"trust_local_ts": {"bybit": True, "binance": True}}),
+FINAL = {"jc": ({}, {"funding_source": "core"}), "g0": ({}, {"core_shadow": True}), "g1": ({}, {"core_shadow": True}), "g2": ({}, {"core_shadow": True}), "jsh": ({}, {"core_shadow": True}), "fsh": ({}, {"core_shadow": True}), "jsm": ({}, {"core_shadow": True}), "fsm": ({}, {"core_shadow": True}), "fs": ({}, {}), "v3": ({}, {}), "v3on": ({}, {}), "f0": ({"depletion_ledger": False}, {"trust_local_ts": {"bybit": True, "binance": True}}),
          "f1": ({"depletion_ledger": True}, {"trust_local_ts": {"bybit": True, "binance": True}}),
          "ft": ({}, {}),
          "fp": ({}, {"placement_book": "truth"}),
