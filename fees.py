@@ -35,6 +35,8 @@ class Liquidity(StrEnum):
 class FeeSource(StrEnum):
     VERIFIED = "VERIFIED"
     ASSUMED = "ASSUMED"
+    # B2 (owner 7 Nov): a public schedule for the account's tier, not yet read from the account. Treated as unverified everywhere (conservative_unverified applies); the label survives on every booked fee.
+    PUBLIC_SCHEDULE_UNVERIFIED = "PUBLIC_SCHEDULE_UNVERIFIED"
 
 
 def parse_effective_ns(value: Any) -> int:
@@ -78,6 +80,8 @@ class FeeRule:
             return bps, FeeSource.VERIFIED.value
         if self.conservative_unverified and bps < 0:
             return Decimal("0"), "CONSERVATIVE_ASSUMED"
+        if self.source == FeeSource.PUBLIC_SCHEDULE_UNVERIFIED:
+            return bps, "ASSUMED_" + FeeSource.PUBLIC_SCHEDULE_UNVERIFIED.value      # still an ASSUMED fee for the ledger, with its own label
         return bps, FeeSource.ASSUMED.value
 
 
@@ -169,3 +173,35 @@ class FeeSchedule:
             )
             for row in rows
         )
+
+
+# Named fee tiers for the backtester's profiles (B2 step 4). One place for every number a perp-perp run books: a profile names a tier per venue, the run builds its schedule from these rows.
+# Rates are per instrument class (a linear USDT perp, SOLUSDT); the instrument id is filled in when the rows are built. They are NOT the live/paper config (config/perp_research.json).
+FEE_TIERS: dict[str, dict[str, Any]] = {
+    "bybit_perp_mm": {"venue": "BYBIT", "maker_fee_bps": "-0.5", "taker_fee_bps": "5.5", "fee_source": "ASSUMED", "conservative_unverified": False,
+                      "tier": "bybit_perp_mm: SCENARIO (maker rebate unconfirmed: needs the market maker program; the rebate is credited here on purpose)"},
+    "binance_perp_vip0": {"venue": "BINANCE", "maker_fee_bps": "2.0", "taker_fee_bps": "5.0", "fee_source": "ASSUMED", "conservative_unverified": False,
+                          "tier": "binance_perp_vip0: ASSUMED default tier"},
+    "bybit_perp_vip5": {"venue": "BYBIT", "maker_fee_bps": "1.0", "taker_fee_bps": "3.2", "fee_source": "PUBLIC_SCHEDULE_UNVERIFIED", "conservative_unverified": True,
+                        "tier": "bybit_perp_vip5: linear VIP 5 (owner-confirmed tier), public schedule as given by the owner 7 Nov 2026, account SOLUSDT rates not read"},
+    "binance_perp_vip9": {"venue": "BINANCE", "maker_fee_bps": "0.0", "taker_fee_bps": "1.7", "fee_source": "PUBLIC_SCHEDULE_UNVERIFIED", "conservative_unverified": True,
+                          "tier": "binance_perp_vip9: USD-M VIP 9 (owner-confirmed tier), public schedule as given by the owner 7 Nov 2026, account SOLUSDT rates not read; "
+                                  "with BNB the taker is 1.53 (recorded, not built: a BNB fee needs a BNB price)"},
+}
+
+
+def tier_rows(tiers: dict[str, str], instrument_id: str) -> list[dict[str, Any]]:
+    """Config rows (the format FeeSchedule.from_config reads) for {venue name: tier name}; the venue is the tier's own, so a tier cannot be applied to the wrong venue."""
+    rows = []
+    for venue_name, tier_name in tiers.items():
+        if tier_name not in FEE_TIERS:
+            raise ValueError(f"unknown fee tier {tier_name!r}; known: {sorted(FEE_TIERS)}")
+        row = dict(FEE_TIERS[tier_name])
+        if row["venue"].lower() != venue_name.lower():
+            raise ValueError(f"fee tier {tier_name!r} belongs to {row['venue']}, not {venue_name}")
+        rows.append({"instrument_id": instrument_id, "effective_from": "1970-01-01T00:00:00Z", **row})
+    return rows
+
+
+def schedule_for(tiers: dict[str, str], instrument_id: str) -> "FeeSchedule":
+    return FeeSchedule.from_config(tier_rows(tiers, instrument_id))
