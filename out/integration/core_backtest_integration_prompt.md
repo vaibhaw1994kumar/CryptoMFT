@@ -1,4 +1,4 @@
-STATUS (7 Nov 2026): Phases 0, A, B0 and B done; v1_2 FROZEN 7 Nov (tag v1_2-freeze, outer 0804b28, core 3569d0b). S0 built and off (v1_3, outer cffb339 / core c9a09db). CURRENT: Phase B2, steps 1-8 done and committed (step 8: outer a37977c), next the B2 gate (full 13 + 4 gate and full suite, solo, covering steps 1-8). WAITING FOR THE OWNER: approval at the B2 gate; the live bot's repricing rule or its values (S0); the Bybit rebate (verified or not); margin mode and capital per venue; permission to download the SOLUSDT margin tier tables (REF03); the account's own fee rates (until then PUBLIC_SCHEDULE_UNVERIFIED).
+STATUS (7 Nov 2026): Phases 0, A, B0 and B done; v1_2 FROZEN 7 Nov (tag v1_2-freeze, outer 0804b28, core 3569d0b). S0 built and off (v1_3, outer cffb339 / core c9a09db). CURRENT: Phase B2, steps 1-8 done and committed (step 8: outer a37977c), B2 gate RUN 8 Nov (13 + 4 replays all byte-identical; full suite 92 failed + 1 error, names identical to Phase 0, none new), awaiting owner review; Phase C not started. WAITING FOR THE OWNER: approval at the B2 gate; the live bot's repricing rule or its values (S0); the Bybit rebate (verified or not); margin mode and capital per venue; permission to download the SOLUSDT margin tier tables (REF03); the account's own fee rates (until then PUBLIC_SCHEDULE_UNVERIFIED).
 
 TASK: Make one shared platform. Backtest and live use the same rules and the same code. Work through the phases below, one gate at a time.
 
@@ -131,7 +131,7 @@ Steps (one change each, measured alone; v1.1 byte-identical and the 13 + 4 basel
 - Step 6, margin decided by the core: done (C27, outer 3b41047). Detail: margin decided by the core (`margin_source: core`, `CoreMarginModel`: core RiskEngine breach state and worst-case admission; A9 redundant). March v1_4 and January 01-13: byte-identical to the model runs, margin statistics equal; no real check near maintenance, so breach and refusal are agreed by synthetic differential tests only. BY_DESIGN: worst-case gate (a reducing clip is not netted). Refused on the core path: transfers, isolated mode, utilisation limit. Not provided by the core: liquidation price/distance. Open: the liquidation fee is not in the core ledger (step 7).
 - Step 7, ledger, strict bridge and economics gate from the core: done (C28, outer 24e829c, core c35e517). Detail: 7a funding schedule (8 h; core funding status COMPLETE), 7b MARK_MISSING in the core (ledger, reconcile, gate), 7c `ledger_source: core` (headline equity and cash P&L from the core ledger, strict bridge `economics.strict_bridge` incl. float inventory vs ledger, reconcile + economics gate written to the run directory, liquidation booked as LIQUIDATION). March and January: files byte-identical, headline scalars differ <= 6.6e-14, bridge OK, gate PASS. Open: `core_shadow.py` now holds the run's accounting object (a rename is a new file: ask at the gate); float inventory still drives the strategy; `_exec_reconcile` still reads float cash.
 - Step 8, reference-profile registry and guard: done (C29, outer a37977c; core unchanged). Identity on March 03-11: legacy_v0, v1, v1.1 equal b1; v1_2 and v1_4 equal their earlier cells; 7 guard tests, 351 focused tests pass. Full 13 + 4 gate and full suite deferred to the B2 gate. Detail: registry in `profiles.py` (`REFERENCE_PROFILES`, `CONTROL_PROFILES`, `profile_status`, `profile_label`, `require_core_accounting`), called in `apply_profile` and at the top of `CrossVenueArbBacktester.__init__`; `release_identity.profile_status`; runners print the label (stdout only, result files unchanged). Guard tests: class `WorkingProfilesUseOnlyTheCore` in `tests/test_core_shadow.py` (7 tests, incl. every old entry point poisoned on a v1_4 backtester).
-- Next: the B2 gate. Stop for review.
+- B2 gate run 8 Nov: see the B2 gate section of the report. Next: owner review; Phase C not started.
 GATE.
 
 STEP S0: Quote repricing (owner 7 Nov; decided for right after the v1_2 freeze, built 7 Nov before B2 began; from step 8 on it is measured inside v1_4, repricing on vs off)
@@ -171,12 +171,25 @@ PHASE D: One runtime
 - Shadow queue trackers: only after the adapter is stable, build a single-pass tracker for all models and add the range to every result. Fills differ by model, so hedges, inventory and later signals differ too: first show it agrees with the full replays, or label it an approximation.
 GATE.
 
+SIMULATOR VALIDATION (owner 7 Nov; after PHASE D and before S1)
+- **Status:** design only, DO NOT BUILD (owner 7 Nov, at the B2 gate). Report only until data exists. Position: after Phase D, before S1 (and before any strategy result is treated as more than EXPLORATORY).
+- **Roles:** the core simulates both roles on both venues: maker (queue simulator) and taker (book walk at arrival). Today the maker venue is Bybit and the hedge venue Binance.
+- **Independent module (design first):** order-level replay validation in `new_backtest/validation/`, calling the core simulator with no strategy. Input: our real orders (send time, price, size, type) and the market data recorded at the same time. Output, per order: simulated vs real fill (yes or no, time, quantity, price), PostOnly reject, cancel race, partial fills; then rates and differences, with tolerances set before looking. Reuse the order lifecycle logger format (`ollog`) and the earlier real-order OMS replay and PostOnly validation work.
+- **Evidence levels:** testnet = MEASURED_TESTNET, mechanics only (rules, statuses, PostOnly, cancel race), never fill rates, markouts or latency. Mainnet PostOnly probes and the live bot's fills = economics.
+- **Data to collect on the production host:** full order books on both venues (including Binance depth), trades and mark prices with real receive times, plus our orders and fills for the same period.
+- **Approval:** placing any order (testnet or mainnet), using any API key, touching the VM or changing a recorder needs the owner's explicit approval first. Keys only from environment variables; never printed or stored.
+- **Isolation:** it may run in a separate Claude Code session only in its own git worktree, fixed at a tag, writing only to its own output folder.
+- **Until it passes:** every result stays EXPLORATORY, and decisions must hold across the 4 cancel models and the latency presets.
+- **No training on simulated fills:** no gate or strategy model may be trained on the simulator's own strategy fills.
+GATE (design review before any build).
+
 PHASE E: Risk gate, pairing, venue selector
 - Use the brief at the end of out/integration/reports/execution_layer_progress_report.html, but build in crypto_stat_arb/ems/, on the core RiskEngine. Includes breaker pause vs trip, flatten on trip, ghost hedge fix (stay within 1x on 2022-01-05), a refusal shown on real replay data, pairing and venue selector. Mutation checks as listed there.
 GATE.
 
 PHASE F: Clean up
 - Retire duplicates to discarded/<version>/, remove re-exports, merge the runners into batch_backtest.py, move hard-coded run settings into profiles, fix result.json and exact-time markouts, move the calibration harness into scripts/.
+- (Owner 7 Nov, B2 gate) Give `scripts/perp_fault_run.py` and the `out/perp_lifecycle` grid copy (`grid_src/scripts/perp_fault_run.py`) the REFERENCE_ONLY label every other runner prints (they run v1 only and print no profile label today).
 - Update CLAUDE.md, single_platform_plan.md and every row of report_claims_register.md.
 - Check against requirements_checklist.md: Backtest-ready means AT-01 to AT-11 and AT-14.
 
