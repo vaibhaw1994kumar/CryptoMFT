@@ -28,7 +28,7 @@ from .margin import LiquidationEngine, MarginConfig
 from .transfers import RebalanceRule, TransferEngine, TransferRoute
 from .risk import InventoryModel
 from .ledger import Ledger
-from .models import EventType, MarketEvent, Opportunity, PlanState, TradeEvent
+from .models import BookState, EventType, MarketEvent, Opportunity, PlanState, TradeEvent
 from .oms import OMS, instrument_assets
 from .orderbook import OrderBook
 from .plan_store import ParentPlanStore
@@ -171,6 +171,8 @@ class TradingSession:
         strategies: list[Any] | None = None,
         dispatch_policy: DispatchPolicy = DispatchPolicy.DETERMINISTIC_SEQUENTIAL,
         maker_venues: tuple[str, ...] = (),
+        resync_delay_ns: int | None = None,
+        resync_source: Callable[[str, str, int], MarketEvent | None] | None = None,
     ) -> None:
         execution_mode = ExecutionMode(execution_mode)
         assert_execution_mode(
@@ -179,6 +181,13 @@ class TradingSession:
         self.cfg = cfg
         self.execution_mode = execution_mode
         self.maker_venues = tuple(maker_venues)      # Phase D: under FILL_TRIGGERED the maker leg rests on the first of these venues that the opportunity trades on (the profile's arb.maker_venues)
+        # Replay book policy (Phase D, owner 8 Nov): see `_schedule_resync`. None = off (live and every existing caller: the book stays invalid until the venue's own next snapshot).
+        if (resync_delay_ns is None) != (resync_source is None):
+            raise ValueError("a resync delay and a resync source go together")
+        self.resync_delay_ns = resync_delay_ns
+        self.resync_source = resync_source
+        self._resync_due: dict[tuple[str, str], tuple[int, int, str]] = {}      # (venue, instrument) -> (due ns, invalid since ns, reason)
+        self.resync_log: list[dict[str, Any]] = []
         self.live_data = live_data
         self.clock_ns = clock_ns
         self.wall_ns = wall_ns
@@ -350,6 +359,8 @@ class TradingSession:
     ) -> Opportunity | None:
         wall_start = self.wall_ns()
         now = self._now(event, now_ns)
+        if self.resync_delay_ns is not None:
+            self._resync_due_books(now)
         self.events_processed += 1
         self.last_event_ts_ns = max(self.last_event_ts_ns, now)
         self.last_seen_ts_by_venue[event.venue] = event.receive_ts_ns
@@ -366,6 +377,7 @@ class TradingSession:
             # next snapshot (minutes on Bybit), so replay must apply it too.
             if apply_book and event.event_type in (EventType.BOOK_SNAPSHOT, EventType.BOOK_DELTA):
                 self.books[(event.venue, event.instrument_id)].apply(event)
+                self._schedule_resync(now)
             return None
         if event.event_type not in (EventType.BOOK_SNAPSHOT, EventType.BOOK_DELTA):
             return None
@@ -377,6 +389,7 @@ class TradingSession:
         self.oms.advance_time(now, self.books)
         if apply_book:
             self.books[(event.venue, event.instrument_id)].apply(event)
+            self._schedule_resync(now)
         self.oms.on_book_update(event.venue, event.instrument_id, now)
         book_key = (event.venue, event.instrument_id)
         if book_key not in self.opening_marks:
@@ -440,6 +453,56 @@ class TradingSession:
             self._dispatch(strategy, opportunity, now, decided, event)
             last = opportunity
         return last
+
+    # Book states that only a new snapshot can leave. PRICE_ANOMALY and STALE end by themselves (the next sane update); SYNCING before the first snapshot is the start-up wait.
+    _NEEDS_SNAPSHOT = (BookState.GAP_DETECTED, BookState.CHECKSUM_FAILED, BookState.INVALID_DATA)
+
+    def _schedule_resync(self, now: int) -> None:
+        """The one replay rule for a book that went invalid with no snapshot in the data to repair it: trading stays suspended (the book gate blocks on the invalid book) and, after
+        `resync_delay_ns` (ASSUMED: the live feed's reconnect backoff plus a snapshot round trip), the venue is resubscribed and a fresh snapshot of the exchange state is applied. The
+        snapshot comes from `resync_source(venue, instrument_id, now_ns)`, which the replay feed answers from the data's own state at `now` (no later information); None = nothing to
+        resync from, the wait is repeated. A snapshot of the data itself that arrives first ends the wait. Nothing waits for a snapshot the data does not have."""
+        if self.resync_delay_ns is None:
+            return
+        for venue in self.cfg.venues:
+            key = (venue, self.cfg.instrument_id)
+            book = self.books[key]
+            if book.state in self._NEEDS_SNAPSHOT:
+                if key not in self._resync_due:
+                    self._resync_due[key] = (now + self.resync_delay_ns, now, f"{book.state.value}:{book.invalid_reason}")
+            elif key in self._resync_due and book.state == BookState.VALID:
+                due, since, reason = self._resync_due.pop(key)
+                self.resync_log.append({"venue": venue, "invalid_since_ns": since, "resync_at_ns": now, "wait_ns": now - since, "reason": reason, "by": "DATA_SNAPSHOT", "state_after": book.state.value})
+
+    def _resync_due_books(self, now: int) -> None:
+        for key, (due, since, reason) in list(self._resync_due.items()):
+            if now < due:
+                continue
+            venue, instrument_id = key
+            snapshot = self.resync_source(venue, instrument_id, now)
+            if snapshot is None:
+                self._resync_due[key] = (now + self.resync_delay_ns, since, reason)
+                self.resync_log.append({"venue": venue, "invalid_since_ns": since, "resync_at_ns": now, "wait_ns": now - since, "reason": reason, "by": "UNAVAILABLE", "state_after": self.books[key].state.value})
+                continue
+            book = self.books[key]
+            del self._resync_due[key]
+            book.start_resync("replay_resubscribe")
+            book.apply(snapshot)
+            self.resync_log.append({"venue": venue, "invalid_since_ns": since, "resync_at_ns": now, "wait_ns": now - since, "reason": reason, "by": "RESYNC_SOURCE_ASSUMED_DELAY", "state_after": book.state.value})
+
+    def book_policy_report(self, now_ns: int) -> dict[str, Any]:
+        """For the run manifest: the book policy, every resync, and the suspended seconds per UTC day and cause (any reason the book gate blocked, start-up included)."""
+        by_day = self.book_gate.suspended_seconds_by_day(now_ns)
+        return {
+            "invalid_book_policy": "RESUBSCRIBE_AFTER_ASSUMED_DELAY" if self.resync_delay_ns is not None else "WAIT_FOR_DATA_SNAPSHOT",
+            "resync_delay_s": None if self.resync_delay_ns is None else self.resync_delay_ns / 1e9,
+            "resync_delay_label": "ASSUMED" if self.resync_delay_ns is not None else None,
+            "resyncs": list(self.resync_log),
+            "resyncs_by_source": {by: sum(1 for r in self.resync_log if r["by"] == by) for by in sorted({r["by"] for r in self.resync_log})},
+            "suspension_intervals_ns": [list(w) for w in self.book_gate.open_intervals(now_ns)],
+            "suspended_seconds_by_day": by_day,
+            "suspended_seconds_total_by_day": {day: round(sum(causes.values()), 9) for day, causes in by_day.items()},     # a cause that changes mid-suspension splits it across keys: the total is the number to quote
+        }
 
     def on_trade(self, trade: TradeEvent, *, now_ns: int | None = None) -> int:
         """Phase D (D2): a public trade print reaches the venue simulator (queue fills come from trades, never from a book update). It does not feed the book gate, the time monitor or the strategy; a venue adapter without an ``on_trade`` hook ignores it. Applies even when the last book event was blocked on its timestamps: the venue matches whatever our clock says."""

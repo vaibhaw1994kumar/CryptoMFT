@@ -2,11 +2,13 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass, field
+import time
 
 from .models import BookState
 from .orderbook import OrderBook
 
 
+_DAY_NS = 86_400 * 1_000_000_000
 CancelCallback = Callable[[str, int], int]
 VenueControlCallback = Callable[[str, bool, str, int], int]
 
@@ -26,6 +28,12 @@ class BookIntegrityGate:
     venue_control_callback: VenueControlCallback | None = None
     venue_validity: dict[str, bool] = field(default_factory=dict)
     venue_transitions: int = 0
+    # Suspended time (Phase D, owner 8 Nov): every interval the gate spent blocking, split at UTC midnight and keyed by cause ("BYBIT:CHECKSUM_FAILED", "BINANCE:SYNCING"...).
+    # Measured between the receive times of the calls to ``allow``, so it is as fine as the event stream. Observation only: it changes no decision.
+    suspended_ns_by_day: dict[str, dict[str, int]] = field(default_factory=dict)
+    suspension_intervals: list[tuple[int, int, str]] = field(default_factory=list)      # (start ns, end ns, cause): the windows a parity comparison masks
+    _since_ns: int | None = None
+    _since_cause: str = ""
 
     def allow(
         self, books: tuple[OrderBook, ...], now_ns: int,
@@ -54,6 +62,7 @@ class BookIntegrityGate:
                         self.cancel_requests += 1
                         self.cancelled_orders += cancelled
         blocked = [book for book in books if book.state != BookState.VALID]
+        self._account(now_ns, "+".join(sorted(f"{book.venue}:{book.state.value}" for book in blocked)) or None)
         if blocked:
             reason = ";".join(
                 f"{book.venue}:{book.state.value}:{book.invalid_reason}" for book in blocked
@@ -71,6 +80,35 @@ class BookIntegrityGate:
             self.reason = ""
             self.resume_count += 1
         return True
+
+    def _account(self, now_ns: int, cause: str | None) -> None:
+        if self._since_ns is not None and cause != self._since_cause:
+            self.suspension_intervals.append((self._since_ns, now_ns, self._since_cause))
+            for day, ns in self._segments(self._since_ns, now_ns):
+                bucket = self.suspended_ns_by_day.setdefault(day, {})
+                bucket[self._since_cause] = bucket.get(self._since_cause, 0) + ns
+            self._since_ns = None
+        if cause is not None and self._since_ns is None:
+            self._since_ns, self._since_cause = now_ns, cause
+
+    @staticmethod
+    def _segments(start_ns: int, end_ns: int):
+        while start_ns < end_ns:
+            stop = min(end_ns, (start_ns // _DAY_NS + 1) * _DAY_NS)
+            yield time.strftime("%Y-%m-%d", time.gmtime(start_ns // 1_000_000_000)), stop - start_ns
+            start_ns = stop
+
+    def open_intervals(self, now_ns: int) -> list[tuple[int, int, str]]:
+        """Every suspension window so far, closed ones and the one still open at ``now_ns``."""
+        return self.suspension_intervals + ([(self._since_ns, now_ns, self._since_cause)] if self._since_ns is not None else [])
+
+    def suspended_seconds_by_day(self, now_ns: int) -> dict[str, dict[str, float]]:
+        """Suspended seconds per UTC day and cause, including a suspension that is still open at ``now_ns``."""
+        out = {day: dict(causes) for day, causes in self.suspended_ns_by_day.items()}
+        if self._since_ns is not None:
+            for day, ns in self._segments(self._since_ns, now_ns):
+                out.setdefault(day, {})[self._since_cause] = out.get(day, {}).get(self._since_cause, 0) + ns
+        return {day: {cause: ns / 1e9 for cause, ns in sorted(causes.items())} for day, causes in sorted(out.items())}
 
     def venue_state(self, venue: str) -> str:
         return "ACTIVE" if self.venue_validity.get(venue, False) else "RISK_REDUCING_ONLY"
