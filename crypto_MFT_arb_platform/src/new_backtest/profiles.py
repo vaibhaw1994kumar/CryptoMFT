@@ -66,6 +66,19 @@ def require_core_accounting(cfg, name: str | None = None) -> None:
                            f"(the old modules are for the reference profiles {sorted(REFERENCE_PROFILES)} only, they move to discarded/ in Phase F)")
 
 
+RUNTIMES = ("backtester", "session")
+
+
+def require_runtime(cfg, name: str | None = None) -> None:
+    """Phase D (owner 8 Nov): the session runtime (TradingSession behind the QueueAwareVenueAdapter) is for v1_5 and later. A reference profile refuses it, at profile load and again when the
+    backtester starts, so an override or a later edit is caught too. Parity is v1_5 against v1_4, so v1_4 itself stays on the backtester's loop by default."""
+    runtime = getattr(cfg, "runtime", "backtester")
+    if runtime not in RUNTIMES:
+        raise ProfileError(f"runtime must be one of {RUNTIMES}, got {runtime!r}")
+    name = name or (getattr(cfg, "release_identity", None) or {}).get("profile")
+    if runtime == "session" and name is not None and profile_status(name) != "WORKING":
+        raise ProfileError(f"profile {name} is a reference profile ({profile_status(name)}) and refuses the session runtime: reference results reproduce on the backtester's own loop only")
+
 @dataclass(frozen=True)
 class Switch:
     key: str                  # dotted path into the profile document (and into ArbBacktestConfig unless `target` says otherwise)
@@ -123,6 +136,7 @@ SWITCHES: tuple[Switch, ...] = (
     Switch("funding_source", "LEGACY_COMPAT", note="settler in v1 / v1.1 / v1_2 / v1_3 / legacy_v0 (funding_settler, mark = the record's mark price else the book mid, a settlement with no mark books 0 with source none); core in v1_4 (B2 step 5): the core FundingEngine books it, same mark rule, a book-mid mark is flagged FUNDING_MARK_FALLBACK and counted in every result, a settlement with no mark is flagged FUNDING_MARK_MISSING (blocking)"),
     Switch("margin_source", "LEGACY_COMPAT", note="model in v1 / v1.1 / v1_2 / v1_3 / legacy_v0 (margin_model.py decides breach and admission); core in v1_4 (B2 step 6): the core RiskEngine margin path decides (tiers, ledger collateral, cross, A9 fail-closed above the last tier, worst-case admission); above_last_tier is then redundant; transfers, isolated mode and a utilisation limit are refused"),
     Switch("ledger_source", "LEGACY_COMPAT", note="backtester in v1 / v1.1 / v1_2 / v1_3 / legacy_v0 (equity, cash P&L and the equity bridge from the float books); core in v1_4 (B2 step 7): from the core ledger at the common-timestamp marks, with the strict bridge, reconciliation and economics gate of the core (a run stops on a failed bridge or a failed gate unless equity_bridge is warn)"),
+    Switch("runtime", "LEGACY_COMPAT", note="backtester in every profile up to v1_4 (the backtester's own event loop); session in v1_5 (Phase D): the core TradingSession behind the QueueAwareVenueAdapter, fed by the canonical feed converter. Reference profiles refuse it; parity is v1_5 against v1_4"),
     Switch("trust_local_ts", "CALIBRATED", note="ASSUMED. True on both venues in v1 / v1.1 (a recorded local_ts is the receive time); v1.2 sets False per venue for the March data, whose local stamps are constructed (exchange + exactly 2.000 ms): the latency preset feed delay applies instead, one sample per exchange message"),
     Switch("maker.fill_through_prints", "LEGACY_COMPAT", note="False in v1 / v1.1 (a print through our price only burns queue); v1.2 sets True together with through_print_volume_limited: the order fills when a print goes through its price, limited by the print's volume. True alone (the full version) is refused at startup"),
     Switch("maker.through_print_volume_limited", "LEGACY_COMPAT", note="False in v1 / v1.1; v1.2 True: the through-print fill is limited by the print volume, one budget shared by every order the print went through"),
@@ -272,6 +286,7 @@ def apply_profile(doc: dict, dataset: str | None = None, **overrides):
     if hm:
         cfg.arb.expected_hedge_move_bps_bid, cfg.arb.expected_hedge_move_bps_ask, hm_info = load_hedge_move_calibration(doc, hm, cfg.start_date)
     require_core_accounting(cfg, doc.get("name"))
+    require_runtime(cfg, doc.get("name"))
     cfg.release_identity = release_identity(cfg, doc)
     if ds_applied:
         cfg.release_identity["dataset_settings"] = ds_applied
@@ -432,7 +447,7 @@ def release_identity(cfg, doc: dict | None = None) -> dict:
             "decision_status": (doc or {}).get("decision_status"),
             "code": code_hash(),
             "data": data_manifest_hash(cfg.data_root, cfg.pair, cfg.venues, cfg.start_date, cfg.end_date),
-            "fee_snapshot_sha256": fee_snapshot, "fee_schedule": fee_schedule, "funding_source": getattr(cfg, "funding_source", "settler"), "margin_source": getattr(cfg, "margin_source", "model"), "ledger_source": getattr(cfg, "ledger_source", "backtester"), "funding_modelled": bool(getattr(cfg, "funding_rate_dir", None)), "fee_presets": {"bybit": cfg.bybit_fee_preset, "binance": cfg.binance_fee_preset},
+            "fee_snapshot_sha256": fee_snapshot, "fee_schedule": fee_schedule, "funding_source": getattr(cfg, "funding_source", "settler"), "margin_source": getattr(cfg, "margin_source", "model"), "ledger_source": getattr(cfg, "ledger_source", "backtester"), "runtime": getattr(cfg, "runtime", "backtester"), "funding_modelled": bool(getattr(cfg, "funding_rate_dir", None)), "fee_presets": {"bybit": cfg.bybit_fee_preset, "binance": cfg.binance_fee_preset},
             "instrument_master_sha256": _sha_files(cm_files) if cm_files else None,
             "calibration_file": str(calib) if calib.exists() else None, "calibration_cutoff": cutoff, "calibration": calib_info,
             "git": {"outer": _git_state(root), "core": _git_state(CORE_DIR)},

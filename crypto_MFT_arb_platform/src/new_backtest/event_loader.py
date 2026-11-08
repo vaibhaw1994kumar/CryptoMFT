@@ -24,6 +24,7 @@ import gzip
 import itertools
 import json
 from dataclasses import dataclass
+from decimal import Decimal
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Iterator
@@ -57,7 +58,8 @@ def truncation_report() -> dict:
     return {"truncated_files": len(_TRUNCATED), "files": sorted(_TRUNCATED), "note": "gzip streams that ended early; the rows read before the cut are used, nothing after it exists"}
 
 
-def _iter_jsonl_gz(path: Path) -> Iterator[dict]:
+def _iter_jsonl_gz(path: Path, parse_float=None) -> Iterator[dict]:
+    """parse_float=Decimal (Phase D, D4): the record's numbers are read from their JSON text as exact Decimals, never through a float. Default None: floats, as before."""
     try:
         with gzip.open(path, "rt") as fh:
             while True:
@@ -72,7 +74,7 @@ def _iter_jsonl_gz(path: Path) -> Iterator[dict]:
                 if not line:
                     continue
                 try:
-                    yield json.loads(line)
+                    yield json.loads(line, parse_float=parse_float)
                 except json.JSONDecodeError:
                     continue
     except (OSError, EOFError) as e:
@@ -194,7 +196,7 @@ def _merge_sorted(
 
 def _stream_dir(
     root: Path, stream: str, pair: str, day: str, key: str,
-    stats: dict[str, int] | None = None, multiset: bool = False,
+    stats: dict[str, int] | None = None, multiset: bool = False, parse_float=None,
 ) -> Iterator[dict]:
     """All files for one stream/day, merged on `key`.
 
@@ -211,7 +213,7 @@ def _stream_dir(
     if not files:
         return iter(())
     return _merge_sorted(
-        [_iter_jsonl_gz(f) for f in files], key,
+        [_iter_jsonl_gz(f, parse_float) for f in files], key,
         dedupe_fields=_DEDUPE_FIELDS.get(stream), stats=stats, multiset=multiset, stream=stream,
     )
 
@@ -258,6 +260,7 @@ def iter_venue_events(
     stats: dict[str, int] | None = None,
     trade_dedupe: str = "set",
     event_order: str = "legacy",
+    decimal_numbers: bool = False,
 ) -> Iterator[RawEvent]:
     """Chronological (exchange_ts) merge of one venue's three streams.
 
@@ -275,11 +278,12 @@ def iter_venue_events(
     if event_order not in ("legacy", "capture"):
         raise ValueError(f"event_order must be 'legacy' or 'capture', got {event_order!r}")
     root = venue_root(data_root, venue)
+    parse_float = Decimal if decimal_numbers else None
 
     for day in _day_range(start_day, end_day):
-        snaps = _stream_dir(root, "book_snapshots", pair, day, "timestamp", stats) if include_snapshots else iter(())
-        deltas = _stream_dir(root, "book_events", pair, day, "exchange_ts", stats) if include_deltas else iter(())
-        trades = (_stream_dir(root, "trades", pair, day, "exchange_ts", stats, multiset=(trade_dedupe == "multiset"))
+        snaps = _stream_dir(root, "book_snapshots", pair, day, "timestamp", stats, parse_float=parse_float) if include_snapshots else iter(())
+        deltas = _stream_dir(root, "book_events", pair, day, "exchange_ts", stats, parse_float=parse_float) if include_deltas else iter(())
+        trades = (_stream_dir(root, "trades", pair, day, "exchange_ts", stats, multiset=(trade_dedupe == "multiset"), parse_float=parse_float)
                   if include_trades else iter(()))
 
         if event_order == "capture":

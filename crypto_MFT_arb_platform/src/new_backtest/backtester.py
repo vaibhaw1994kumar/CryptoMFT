@@ -170,6 +170,9 @@ class ArbBacktestConfig:
     # B2 step 7: "backtester" = headline equity, cash P&L and the equity bridge from the backtester's float books (v1, v1.1, v1_2, v1_3, legacy_v0); "core" = from the core ledger at the common-timestamp marks, the strict
     # bridge in the core (trade-log rebuild, fees against the schedule, equity, the float inventory against the ledger), the core reconciliation and the economics gate (written to the run directory).
     ledger_source: str = "backtester"
+    # Phase D (owner 8 Nov): which runtime replays the feed. "backtester" = this class's own event loop (every profile up to v1_4). "session" = the core TradingSession behind the
+    # QueueAwareVenueAdapter (v1_5 and later; the reference profiles refuse it). The session path is wired in step D5: until then a config that asks for it is refused at start.
+    runtime: str = "backtester"
     # Hedge-leg failure injection (hedge_faults.py). None = off and the replay is exactly as before.
     hedge_faults: HedgeFaultConfig | None = None
     # Opt-in margin / liquidation / cross-venue equity-transfer model (margin_model.py). None (default): infinite margin and no
@@ -435,13 +438,13 @@ def _fee_preset_family(preset: str) -> str:
 _ARBCONFIG_DEFAULT_SIZE = ArbConfig().max_position_base   # 1.0; the sentinel for "not explicitly chosen"
 
 
-_SAME_STAMP_S = 1e-6        # message-atomic mode: receive stamps closer than this belong to one exchange message (the feed adds one float step per record to keep them strictly increasing)
+from .canonical_feed import SAME_STAMP_S as _SAME_STAMP_S      # message-atomic mode: receive stamps closer than this (1 microsecond) belong to one exchange message (the feed adds one float step per record to keep them strictly increasing); defined once, in canonical_feed
 
 
 class CrossVenueArbBacktester:
     def __init__(self, config: ArbBacktestConfig) -> None:
         self.config = config
-        from .profiles import require_core_accounting
+        from .profiles import require_core_accounting, require_runtime
         require_core_accounting(config)                    # B2 step 8: a working profile (v1_4 and later) never runs on an old accounting module
         if config.maker.fill_through_prints and not config.maker.through_print_volume_limited:
             raise ValueError("fill_through_prints without through_print_volume_limited is refused at startup (owner 6 Nov): the full version fills the whole order on any print through its price, "
@@ -588,6 +591,12 @@ class CrossVenueArbBacktester:
             raise ValueError(f"margin_source must be 'model' or 'core', got {config.margin_source!r}")
         if config.ledger_source not in ("backtester", "core"):
             raise ValueError(f"ledger_source must be 'backtester' or 'core', got {config.ledger_source!r}")
+        if config.runtime not in ("backtester", "session"):
+            raise ValueError(f"runtime must be 'backtester' or 'session', got {config.runtime!r}")
+        from .profiles import require_runtime
+        require_runtime(config)
+        if config.runtime == "session":
+            raise NotImplementedError("runtime 'session' is not wired yet (Phase D step D5): refusing to replay it on the backtester's own loop")
         if config.ledger_source == "core" and config.margin is None:
             raise ValueError("ledger_source 'core' needs a margin configuration (the core ledger's opening balances come from the per-venue capital)")
         if config.ledger_source == "core" and config.funding_rate_dir and config.funding_source != "core":
@@ -939,41 +948,12 @@ class CrossVenueArbBacktester:
         ends it. The feed makes receive times strictly increasing per venue by one float step per record (LatencyBook.observe_receive_ts, about 0.24 microseconds each at today's
         epoch), so a 400-delta message spans 0.1 ms and another venue's event can fall inside that span: such events are held and applied right after the message (they move by at
         most the span; the order inside a span is not data, it is the float step). 'The same receive stamp' means within _SAME_STAMP_S (1 microsecond) of the previous delta."""
-        from collections import deque
-        it = iter(stream)
-        pending: deque = deque()
+        from .canonical_feed import message_frames          # the one grouping rule, shared with the canonical feed converter (D4)
 
-        def pull():
-            return pending.popleft() if pending else next(it, None)
+        def moved(n: int) -> None:
+            self.timing_stats["message_atomic_other_venue_events_moved_after_message"] += n
 
-        while True:
-            ev = pull()
-            if ev is None:
-                return
-            if ev.kind != DELTA:
-                self._frame_last = True
-                yield ev
-                continue
-            frame, held, held_at, last = [ev], [], [], ev
-            while True:
-                nx = pull()
-                if nx is None:
-                    break
-                if nx.venue != ev.venue:
-                    held.append(nx)
-                    held_at.append(len(frame))                  # how many of the message's deltas had been read when it showed up
-                    continue
-                if nx.kind == DELTA and nx.exchange_ts == ev.exchange_ts and abs(nx.receive_ts - last.receive_ts) < _SAME_STAMP_S:
-                    frame.append(nx)
-                    last = nx
-                    continue
-                pending.appendleft(nx)
-                break
-            for h in reversed(held):
-                pending.appendleft(h)
-            moved = sum(1 for n in held_at if n < len(frame))       # only events that sat BETWEEN two deltas of the message were moved
-            if moved:
-                self.timing_stats["message_atomic_other_venue_events_moved_after_message"] += moved
+        for frame in message_frames(stream, on_moved=moved):
             for k, f in enumerate(frame):
                 self._frame_last = k == len(frame) - 1
                 yield f

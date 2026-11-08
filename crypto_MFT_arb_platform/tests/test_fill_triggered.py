@@ -573,5 +573,46 @@ class ReportAndSettings(Base):
         self.assertEqual(set(values.values()), {3}, values)
 
 
+class SessionPassesTheMakerVenue(unittest.TestCase):
+    """Phase D (owner 8 Nov): the session takes the maker venue from the profile's maker_venues, so fill-triggered hedging engages; with no usable maker venue it refuses instead of guessing."""
+
+    def _session(self, **kw):
+        from crypto_stat_arb.config import load_config
+        from crypto_stat_arb.session import ExecutionMode, TradingSession
+        cfg, _ = load_config(Path(__file__).resolve().parents[1] / "config/perp_research.json")
+        return TradingSession(cfg, execution_mode=ExecutionMode.INTERNAL_SIMULATION, **kw)
+
+    class _Strategy:
+        strategy_id = "s-1"
+
+    def _dispatch(self, session):
+        from unittest import mock
+        seen = {}
+
+        def execute(opportunity, books, dispatch_ts_ns=None, maker_venue=None):
+            seen["maker_venue"] = maker_venue
+            return mock.Mock(parent_id="p", state=PlanState.CREATED)
+
+        with mock.patch.object(session.oms, "execute", side_effect=execute):
+            session._dispatch(self._Strategy(), opportunity(), 5, 5)
+        return seen
+
+    def test_fill_triggered_gets_the_first_listed_maker_venue_the_opportunity_trades_on(self):
+        s = self._session(dispatch_policy=DispatchPolicy.FILL_TRIGGERED, maker_venues=("KRAKEN", "BYBIT"))
+        self.assertEqual(self._dispatch(s), {"maker_venue": "BYBIT"})
+        self.assertEqual(s.oms.dispatch_policy, DispatchPolicy.FILL_TRIGGERED)
+
+    def test_fill_triggered_without_a_usable_maker_venue_is_refused_not_guessed(self):
+        for venues in ((), ("KRAKEN",)):
+            s = self._session(dispatch_policy=DispatchPolicy.FILL_TRIGGERED, maker_venues=venues)
+            with self.assertRaisesRegex(ValueError, "needs a maker venue"):
+                self._dispatch(s)
+
+    def test_the_default_policy_passes_no_maker_venue_and_is_unchanged(self):
+        s = self._session(maker_venues=("BYBIT",))
+        self.assertEqual(s.oms.dispatch_policy, DispatchPolicy.DETERMINISTIC_SEQUENTIAL)
+        self.assertEqual(self._dispatch(s), {"maker_venue": None})
+
+
 if __name__ == "__main__":
     unittest.main()

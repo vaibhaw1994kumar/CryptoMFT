@@ -139,5 +139,34 @@ class QueueAdapterTests(unittest.TestCase):
         self.assertEqual((results[0].callbacks[0].event_type, results[0].callbacks[0].event_ts_ns), (ExecutionEventType.FILLED, 7 * S))
 
 
+class ArrivalTimeTests(unittest.TestCase):
+    """A request travels for the entry latency: the queue adapter must place (and cancel) at ARRIVAL, against the book as it is then, not at the creation time the request carries."""
+
+    def test_a_delayed_submit_is_placed_and_cancelled_at_its_arrival_time(self):
+        from test_execution_realism import fixed_model, instrument_master
+        from test_oms import make_book
+        a = adapter()
+        router = StrategyDirectedRouter(instrument_master(), adapters={"BYBIT": a}, latency_model=fixed_model(entry_ms=10, cancel_ms=10))
+        book = make_book("BYBIT", "59990.00", "60000.00", "5")
+        spot = "BTC-USDT-SPOT"
+        place = CanonicalOrderRequest.create(
+            action=OrderAction.SUBMIT, order_id="m1", parent_opportunity_id="op", parent_order_id="parent", instrument_id=spot, venue="BYBIT", side=Side.BUY,
+            price=Decimal("59990.00"), quantity=Decimal("1"), order_type=OrderType.LIMIT, time_in_force=TimeInForce.GTC, post_only=True, created_ts_ns=2 * S,
+        )
+        router.route(place, book)
+        self.assertEqual(a.executor.live_orders("BYBIT"), [])                                   # still in flight
+        router.process_throttled(2 * S + 10_000_000)
+        (maker,) = a.executor.live_orders("BYBIT")
+        self.assertEqual((maker.placed_ts, maker.arrival_ts), (2.01, 2.01))                       # arrival = creation + 10 ms entry latency, not the creation time
+        cancel = CanonicalOrderRequest.create(
+            action=OrderAction.CANCEL, order_id="c1", parent_opportunity_id="op", parent_order_id="parent", instrument_id=spot, venue="BYBIT", side=Side.BUY,
+            price=Decimal("59990.00"), quantity=Decimal("1"), order_type=OrderType.LIMIT, time_in_force=TimeInForce.GTC, created_ts_ns=3 * S, target_order_id="m1",
+        )
+        router.route(cancel, book)
+        self.assertEqual(len(a.executor.live_orders("BYBIT")), 1)                              # the cancel is still travelling: the order rests and can still fill until it lands
+        router.process_throttled(3 * S + 10_000_000)
+        self.assertEqual(a.executor.live_orders("BYBIT"), [])
+
+
 if __name__ == "__main__":
     unittest.main()

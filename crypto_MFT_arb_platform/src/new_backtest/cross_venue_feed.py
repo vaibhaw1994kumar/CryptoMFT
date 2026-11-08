@@ -86,6 +86,7 @@ class CrossVenueFeed:
         trade_dedupe: str = "set",
         event_order: str = "legacy",
         skip_snapshots: tuple[str, ...] = (),
+        decimal_numbers: bool = False,
     ) -> None:
         self.data_root = Path(data_root)
         self.pair = pair
@@ -99,6 +100,7 @@ class CrossVenueFeed:
         self._run_quality_preflight = quality_preflight
         self.trade_dedupe = trade_dedupe
         self.event_order = event_order
+        self.decimal_numbers = decimal_numbers          # Phase D (D4): the records' numbers as exact Decimals read from text (the canonical feed converter); off = floats as before
         self.skip_snapshots = tuple(skip_snapshots)       # venues whose book_snapshots stream is ignored (placeholder snapshots); their book is rebuilt from deltas only
         self._quality_report_only = quality_report_only
 
@@ -127,6 +129,7 @@ class CrossVenueFeed:
             stats=self.loader_stats[venue],
             trade_dedupe=self.trade_dedupe,
             event_order=self.event_order,
+            decimal_numbers=self.decimal_numbers,
         ):
             if trust and ev.local_ts > 0.0:
                 recv, measured = vl.observe_receive_ts(ev.exchange_ts, ev.local_ts)

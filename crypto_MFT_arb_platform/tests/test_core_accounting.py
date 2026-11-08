@@ -776,5 +776,50 @@ class WorkingProfilesUseOnlyTheCore(unittest.TestCase):
             self.assertEqual([(s.fees.maker_bps, s.fees.taker_bps) for s in bt.venue_specs.values()], [(1.0, 3.2), (0.0, 1.7)])
 
 
+class SessionRuntimeSwitch(unittest.TestCase):
+    """Phase D (owner 8 Nov 2026): `runtime` is a profile setting, off by default. v1_5 = v1_4 + `runtime: session`; the reference profiles refuse it; parity is v1_5 against v1_4. The session path itself is wired in step D5."""
+
+    KW = WorkingProfilesUseOnlyTheCore.KW
+    REFERENCE = WorkingProfilesUseOnlyTheCore.REFERENCE
+
+    def test_off_by_default_and_on_only_in_v1_5(self):
+        from new_backtest.profiles import PROFILES_DIR, apply_profile, load_profile
+        for n in sorted(p.stem for p in PROFILES_DIR.glob("*.yaml")):
+            cfg = apply_profile(load_profile(n), **self.KW)
+            self.assertEqual(cfg.runtime, "session" if n == "perp_perp_maker_taker_v1_5" else "backtester", n)
+            self.assertEqual(cfg.release_identity["runtime"], cfg.runtime)
+
+    def test_v1_5_is_v1_4_plus_the_runtime_and_nothing_else(self):
+        from new_backtest.profiles import load_profile
+        a, b = load_profile("perp_perp_maker_taker_v1_4"), load_profile("perp_perp_maker_taker_v1_5")
+        differ = {k for k in set(a) | set(b) if not k.startswith("_") and a.get(k) != b.get(k)}
+        self.assertEqual(differ, {"name", "description", "runtime"})
+        self.assertEqual(b["runtime"], "session")
+
+    def test_a_reference_profile_refuses_the_session_runtime_at_load_and_at_start(self):
+        from new_backtest.backtester import CrossVenueArbBacktester
+        from new_backtest.profiles import ProfileError, apply_profile, load_profile
+        for n in self.REFERENCE:
+            with self.assertRaises(ProfileError, msg=n):
+                apply_profile(load_profile(n), **self.KW, runtime="session")
+        cfg = apply_profile(load_profile("perp_perp_maker_taker_v1_3"), **self.KW)
+        cfg.runtime = "session"                                                               # edited after the load
+        with self.assertRaises(ProfileError):
+            CrossVenueArbBacktester(cfg)
+
+    def test_an_unknown_runtime_is_refused(self):
+        from new_backtest.profiles import ProfileError, apply_profile, load_profile
+        with self.assertRaises(ProfileError):
+            apply_profile(load_profile("perp_perp_maker_taker_v1_4"), **self.KW, runtime="paper")
+
+    def test_the_backtester_does_not_silently_replay_a_session_profile_on_its_own_loop(self):
+        from new_backtest.backtester import CrossVenueArbBacktester
+        from new_backtest.profiles import apply_profile, load_profile
+        cfg = apply_profile(load_profile("perp_perp_maker_taker_v1_5"), **self.KW)
+        cfg.allow_manifest_gap = "test"
+        with self.assertRaisesRegex(NotImplementedError, "not wired yet"):
+            CrossVenueArbBacktester(cfg)
+
+
 if __name__ == "__main__":
     unittest.main()
