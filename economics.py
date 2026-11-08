@@ -390,6 +390,7 @@ def reconcile(
     legacy_transfer_fees_by_venue: Mapping[str, Decimal] | None = None,
     mark_missing: Iterable[str] = (),
     identity_tolerance: Decimal = ZERO,
+    legacy_fee_tolerance: Decimal = ZERO,
 ) -> dict[str, Any]:
     """Closing equity = opening + inventory revaluation + trading + fees/rebates
     + funding - borrow + transfers + external flows + valuation adjustments.
@@ -589,8 +590,9 @@ def reconcile(
             legacy = legacy_fees_by_venue.get(venue, ZERO)
             checks.append({
                 "check": f"{venue}_fees_match_trade_ledger",
-                "passed": (fee_cost - rebates) == legacy,
-                "detail": f"economic net fees {fee_cost - rebates} vs trade ledger {legacy}",
+                "passed": abs((fee_cost - rebates) - legacy) <= legacy_fee_tolerance,
+                # A caller that fed the ledger from binary floats (the backtester) has fees whose 17th digit is float noise: it passes a stated, tiny tolerance, reported here, never a silent one.
+                "detail": f"economic net fees {fee_cost - rebates} vs trade ledger {legacy}" + (f" (tolerance {legacy_fee_tolerance})" if legacy_fee_tolerance else ""),
             })
         if legacy_funding_by_venue is not None and venue in funding_modelled:
             legacy = legacy_funding_by_venue.get(venue, ZERO)
