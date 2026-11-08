@@ -587,3 +587,39 @@ def live_paper_setup(profile_name: str) -> dict:
                                    view_books=lambda: {v: paper._views[names[v]] for v in venues})]
 
     return {"session_kwargs": session_kwargs, "queue_simulation": asdict(cfg.maker), "strategy_builder": build}
+
+
+def load_recorded_events(session_dir) -> list:
+    """A recorded LIVE session (the recorder's directory) as one event list in the recorder's own arrival order (trace.jsonl): books from canonical.jsonl, public prints from trades.jsonl. Ticker, control and
+    derivative frames are not market events; the book connection's control frames are `load_keepalive_notes`."""
+    can, trades, order = {}, {}, []
+    for part in sorted(Path(session_dir).glob("part-*")):
+        for line in (part / "canonical.jsonl").open():
+            row = json.loads(line)
+            can[row["event_id"]] = row
+        for line in (part / "trades.jsonl").open():
+            row = json.loads(line)
+            trades[row["event_id"]] = row
+        order += [json.loads(line) for line in (part / "trace.jsonl").open()]
+    out = []
+    for row in order:
+        if row["disposition"] == "CANONICAL":
+            out.append(MarketEvent.from_dict(can[row["canonical_event_id"]]))
+        elif row["disposition"] == "TRADE":
+            out.append(TradeEvent.from_dict(trades[row["canonical_event_id"]]))
+    return out
+
+
+def load_keepalive_notes(session_dir) -> list[tuple[int, str]]:
+    """(receive_ts_ns, venue) of every frame on a BOOK connection that is not a book update: Bybit pongs and acknowledgements, any non-book Binance depth-channel frame, read from the recorder's wire file.
+    Applied as `TradingSession.note_venue_message`, the rule the live service uses (a frame on the book stream proves it alive; owner 9 Nov)."""
+    notes = []
+    for part in sorted(Path(session_dir).glob("part-*")):
+        for line in (part / "wire.jsonl").open():
+            w = json.loads(line)
+            ch, fd = w["channel"], w["frame_data"]
+            if w["venue"] == "BYBIT" and ch.startswith("orderbook") and '"topic":"orderbook' not in fd:
+                notes.append((w["receive_ts_ns"], "BYBIT"))
+            elif w["venue"] == "BINANCE" and "depth" in ch and '"e":"depthUpdate"' not in fd and '"lastUpdateId"' not in fd:
+                notes.append((w["receive_ts_ns"], "BINANCE"))
+    return sorted(notes)

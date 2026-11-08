@@ -1,0 +1,87 @@
+{
+ "label": "EXPLORATORY: D7d offline step, recorded Mac shakedown stream; not a strategy result",
+ "session": "d7d-run1",
+ "minutes": 30.0,
+ "profile": "perp_perp_maker_taker_v1_5",
+ "events": 82817,
+ "keepalive_notes": 7134,
+ "identical": {
+  "ledger_events": true,
+  "positions": true,
+  "cash": true,
+  "plans": true,
+  "strategy_counters": true
+ },
+ "ledger_events_replay_paper": [
+  20,
+  20
+ ],
+ "first_differing_ledger_rows": [],
+ "edge_diagnostics": {
+  "headroom_bps_to_a_quote_at_the_maker_touch": {
+   "bid": {
+    "n": 53303,
+    "p1": -8.592945811613594,
+    "p10": -8.583563594776667,
+    "p50": -7.469452421964507,
+    "p90": -6.353222363581113,
+    "p99": -6.351344662359292,
+    "max": -1.8733985795315784,
+    "share_headroom_ge_0": 0.0
+   },
+   "ask": {
+    "n": 53303,
+    "p1": -3.7757322797618116,
+    "p10": -3.7738530964262917,
+    "p50": -2.656616692881627,
+    "p90": -1.5415008484213188,
+    "p99": -1.5321112252814826,
+    "max": 1.8195957129682396,
+    "share_headroom_ge_0": 0.00020636737144250793
+   }
+  },
+  "maker_venue": "BYBIT",
+  "hedge_venue": "BINANCE",
+  "required_fee_bps_maker_plus_taker": null
+ },
+ "replay": {
+  "ledger_event_count": 20,
+  "positions": {},
+  "cash": {},
+  "plans": [],
+  "orders_in_plans": 0,
+  "strategy": {
+   "evaluations": 53293,
+   "signals": 0,
+   "best_edge_seen_bps": null,
+   "rejects": {
+    "stale": 50,
+    "toxic": 8889,
+    "no_edge": 44888,
+    "cross_venue_skew": 1888
+   },
+   "entry_threshold_min_net_edge_bps": 1.0,
+   "safety_buffer_bps": 0.5
+  }
+ },
+ "paper": {
+  "ledger_event_count": 20,
+  "positions": {},
+  "cash": {},
+  "plans": [],
+  "orders_in_plans": 0,
+  "strategy": {
+   "evaluations": 53293,
+   "signals": 0,
+   "best_edge_seen_bps": null,
+   "rejects": {
+    "stale": 50,
+    "toxic": 8889,
+    "no_edge": 44888,
+    "cross_venue_skew": 1888
+   },
+   "entry_threshold_min_net_edge_bps": 1.0,
+   "safety_buffer_bps": 0.5
+  }
+ }
+}

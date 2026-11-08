@@ -70,3 +70,5 @@ out/integration/paper_live/*.out
 out/integration/fill_model_real/__pycache__/
 out/integration/fill_model_real/retrain.log
 out/integration/fill_model_real/out/superseded_first_run/
+
+out/integration/paper_live/run2/

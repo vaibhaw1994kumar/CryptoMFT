@@ -1,0 +1,774 @@
+{
+ "session": "d7d-run2",
+ "span_s": 3282.796289,
+ "book_data_frames": {
+  "BYBIT": {
+   "frames": 125172,
+   "gap_ms": {
+    "p50": 20.844,
+    "p90": 47.908,
+    "p99": 108.302,
+    "p999": 220.004,
+    "max": 3890.139
+   },
+   "gaps_over_ms": {
+    "500": 16,
+    "1000": 10,
+    "2000": 6
+   }
+  },
+  "BINANCE": {
+   "frames": 31047,
+   "gap_ms": {
+    "p50": 104.02,
+    "p90": 121.443,
+    "p99": 172.389,
+    "p999": 432.162,
+    "max": 6493.885
+   },
+   "gaps_over_ms": {
+    "500": 25,
+    "1000": 12,
+    "2000": 6
+   }
+  }
+ },
+ "book_connection_any_frame": {
+  "BYBIT": {
+   "frames": 137988,
+   "gap_ms": {
+    "p50": 19.927,
+    "p90": 44.765,
+    "p99": 99.987,
+    "p999": 196.332,
+    "max": 3890.139
+   },
+   "gaps_over_ms": {
+    "500": 16,
+    "1000": 10,
+    "2000": 6
+   }
+  },
+  "BINANCE": {
+   "frames": 31047,
+   "gap_ms": {
+    "p50": 104.02,
+    "p90": 121.443,
+    "p99": 172.389,
+    "p999": 432.162,
+    "max": 6493.885
+   },
+   "gaps_over_ms": {
+    "500": 25,
+    "1000": 12,
+    "2000": 6
+   }
+  }
+ },
+ "trade_frames": {
+  "BYBIT": {
+   "frames": 9701,
+   "gap_ms": {
+    "p50": 126.885,
+    "p90": 932.405,
+    "p99": 2620.315,
+    "p999": 5025.049,
+    "max": 8313.36
+   },
+   "gaps_over_ms": {
+    "500": 2117,
+    "1000": 859,
+    "2000": 206
+   }
+  }
+ },
+ "bybit_book_quiet_by_10min": {
+  "0": {
+   "gaps_over_500ms": 0,
+   "max_gap_ms": 416.203
+  },
+  "1": {
+   "gaps_over_500ms": 1,
+   "max_gap_ms": 721.015
+  },
+  "2": {
+   "gaps_over_500ms": 9,
+   "max_gap_ms": 3890.139
+  },
+  "3": {
+   "gaps_over_500ms": 3,
+   "max_gap_ms": 3758.453
+  },
+  "4": {
+   "gaps_over_500ms": 1,
+   "max_gap_ms": 883.634
+  },
+  "5": {
+   "gaps_over_500ms": 2,
+   "max_gap_ms": 3093.388
+  }
+ },
+ "sequence_continuity": {
+  "BYBIT": {
+   "events": 125172,
+   "non_consecutive": 0,
+   "backwards": 0,
+   "snapshots": 7
+  },
+  "BINANCE": {
+   "events": 31047,
+   "chain_breaks": 13,
+   "backwards": 0,
+   "snapshots": 7
+  }
+ },
+ "sequence_note": "Bybit update ids are venue ids; Binance U/u are venue ids; neither is synthetic in this recording (March 2024 sequences were SYNTHETIC)",
+ "structured_log_counts": {
+  "BOOK_STATE|BINANCE": 19,
+  "BOOK_STATE|BYBIT": 10,
+  "BOOK_STREAM_SILENCE|BINANCE": 6,
+  "BOOK_STREAM_SILENCE|BYBIT": 6,
+  "CONNECTED|BINANCE": 7,
+  "CONNECTED|BYBIT": 7,
+  "CONNECTION_ATTEMPT|BINANCE": 7,
+  "CONNECTION_ATTEMPT|BYBIT": 7,
+  "DERIVATIVE_CONNECTED|BINANCE": 1,
+  "DERIVATIVE_CONNECTED|BYBIT": 1,
+  "HOST_CLOCK_STATE|BINANCE": 1,
+  "HOST_CLOCK_STATE|BYBIT": 4,
+  "RECONNECT_SCHEDULED|BINANCE": 6,
+  "RECONNECT_SCHEDULED|BYBIT": 6,
+  "RESYNC_REQUIRED|BINANCE": 6,
+  "RESYNC_REQUIRED|BYBIT": 6,
+  "SESSION_STARTED|": 1,
+  "SESSION_STOPPED|": 1,
+  "TRADE_CONNECTED|BINANCE": 1,
+  "TRADE_CONNECTED|BYBIT": 1,
+  "TRADE_CONNECTION_ATTEMPT|BINANCE": 1,
+  "TRADE_CONNECTION_ATTEMPT|BYBIT": 1
+ },
+ "connection_events": [
+  {
+   "t_s": 1371.4,
+   "event": "RESYNC_REQUIRED",
+   "venue": "BINANCE",
+   "message": "market_data_stale"
+  },
+  {
+   "t_s": 1371.5,
+   "event": "RECONNECT_SCHEDULED",
+   "venue": "BINANCE",
+   "message": "order-book reconnect scheduled"
+  },
+  {
+   "t_s": 1398.9,
+   "event": "RESYNC_REQUIRED",
+   "venue": "BINANCE",
+   "message": "market_data_stale"
+  },
+  {
+   "t_s": 1398.9,
+   "event": "RECONNECT_SCHEDULED",
+   "venue": "BINANCE",
+   "message": "order-book reconnect scheduled"
+  },
+  {
+   "t_s": 1484.0,
+   "event": "RESYNC_REQUIRED",
+   "venue": "BINANCE",
+   "message": "market_data_stale"
+  },
+  {
+   "t_s": 1484.1,
+   "event": "RECONNECT_SCHEDULED",
+   "venue": "BINANCE",
+   "message": "order-book reconnect scheduled"
+  },
+  {
+   "t_s": 1487.7,
+   "event": "RESYNC_REQUIRED",
+   "venue": "BYBIT",
+   "message": "market_data_stale"
+  },
+  {
+   "t_s": 1487.7,
+   "event": "RECONNECT_SCHEDULED",
+   "venue": "BYBIT",
+   "message": "order-book reconnect scheduled"
+  },
+  {
+   "t_s": 1491.4,
+   "event": "RESYNC_REQUIRED",
+   "venue": "BINANCE",
+   "message": "market_data_stale"
+  },
+  {
+   "t_s": 1491.4,
+   "event": "RECONNECT_SCHEDULED",
+   "venue": "BINANCE",
+   "message": "order-book reconnect scheduled"
+  },
+  {
+   "t_s": 1499.0,
+   "event": "RESYNC_REQUIRED",
+   "venue": "BYBIT",
+   "message": "market_data_stale"
+  },
+  {
+   "t_s": 1499.0,
+   "event": "RECONNECT_SCHEDULED",
+   "venue": "BYBIT",
+   "message": "order-book reconnect scheduled"
+  },
+  {
+   "t_s": 1500.9,
+   "event": "RESYNC_REQUIRED",
+   "venue": "BINANCE",
+   "message": "market_data_stale"
+  },
+  {
+   "t_s": 1500.9,
+   "event": "RECONNECT_SCHEDULED",
+   "venue": "BINANCE",
+   "message": "order-book reconnect scheduled"
+  },
+  {
+   "t_s": 1720.0,
+   "event": "RESYNC_REQUIRED",
+   "venue": "BYBIT",
+   "message": "market_data_stale"
+  },
+  {
+   "t_s": 1720.0,
+   "event": "RECONNECT_SCHEDULED",
+   "venue": "BYBIT",
+   "message": "order-book reconnect scheduled"
+  },
+  {
+   "t_s": 1742.4,
+   "event": "RESYNC_REQUIRED",
+   "venue": "BYBIT",
+   "message": "market_data_stale"
+  },
+  {
+   "t_s": 1742.4,
+   "event": "RECONNECT_SCHEDULED",
+   "venue": "BYBIT",
+   "message": "order-book reconnect scheduled"
+  },
+  {
+   "t_s": 2204.2,
+   "event": "RESYNC_REQUIRED",
+   "venue": "BINANCE",
+   "message": "market_data_stale"
+  },
+  {
+   "t_s": 2204.3,
+   "event": "RECONNECT_SCHEDULED",
+   "venue": "BINANCE",
+   "message": "order-book reconnect scheduled"
+  },
+  {
+   "t_s": 2367.8,
+   "event": "RESYNC_REQUIRED",
+   "venue": "BYBIT",
+   "message": "market_data_stale"
+  },
+  {
+   "t_s": 2367.8,
+   "event": "RECONNECT_SCHEDULED",
+   "venue": "BYBIT",
+   "message": "order-book reconnect scheduled"
+  },
+  {
+   "t_s": 3249.0,
+   "event": "RESYNC_REQUIRED",
+   "venue": "BYBIT",
+   "message": "market_data_stale"
+  },
+  {
+   "t_s": 3249.0,
+   "event": "RECONNECT_SCHEDULED",
+   "venue": "BYBIT",
+   "message": "order-book reconnect scheduled"
+  }
+ ],
+ "data_quality_report": {
+  "active_flags": [
+   {
+    "code": "STALE_INTERVALS",
+    "level": "CRITICAL",
+    "message": "stale_intervals exceeded configured threshold",
+    "metric": "stale_intervals",
+    "observed": 27,
+    "scope": "LIVE_PAPER_SESSION",
+    "threshold": 0
+   },
+   {
+    "code": "NEGATIVE_LATENCY",
+    "level": "CRITICAL",
+    "message": "negative_latency exceeded configured threshold",
+    "metric": "negative_latency",
+    "observed": 659,
+    "scope": "LIVE_PAPER_SESSION",
+    "threshold": 0
+   }
+  ],
+  "approval_attestation_sha256": "f3e7245fafd23262da0b76a90bb32338d9425166541eff2865ccd7c060b43dca",
+  "correlation_id": "d7d-run2",
+  "counts": {
+   "corrected_negative_latency": 115581,
+   "crossed_books": 0,
+   "duplicates": 0,
+   "events": 156219,
+   "gaps": 0,
+   "impossible_latency": 0,
+   "invalid_levels": 0,
+   "invalid_trades": 0,
+   "negative_latency": 659,
+   "out_of_order": 0,
+   "persistence_lag_ns": 0,
+   "price_jumps": 0,
+   "rejected_partitions": 0,
+   "rejected_records": 0,
+   "schema_exceptions": 0,
+   "silent_feeds": 0,
+   "stale_intervals": 27,
+   "unknown_instrument_rules": 0,
+   "unpersisted_bytes": 0,
+   "wide_spreads": 0
+  },
+  "created_at": "2026-11-08T23:10:37.240023+00:00",
+  "decision": "REJECTED",
+  "defect_count": 2,
+  "defect_log_sha256": "3268ca35ce84395b7ae240887080c51ac18cdbfc4ca465e1b3e878645811b2a4",
+  "health": "CRITICAL",
+  "limitations": [
+   "INTERNAL_PAPER: fills are simulated against live public books with the configured latency model; no venue order was sent.",
+   "Receive latency is measured on the host clock after offset correction."
+  ],
+  "schema_version": "1.0.0",
+  "scope": "LIVE_PAPER_SESSION",
+  "terminal_defect_hash": "a2ef1b6b8a403cc23284f5b7e5ea7432b7c6f6e13968333becdfd6b35ee727de",
+  "thresholds": {
+   "max_crossed_books": 0,
+   "max_duplicates": 0,
+   "max_gaps": 0,
+   "max_impossible_latency": 0,
+   "max_invalid_levels": 0,
+   "max_invalid_trades": 0,
+   "max_negative_latency": 0,
+   "max_out_of_order": 0,
+   "max_persistence_lag_ns": 5000000000,
+   "max_price_jumps": 0,
+   "max_rejected_partitions": 0,
+   "max_schema_exceptions": 0,
+   "max_silent_feeds": 0,
+   "max_stale_intervals": 0,
+   "max_unknown_instrument_rules": 0,
+   "max_unpersisted_bytes": 0,
+   "max_wide_spreads": 0,
+   "min_events": 1
+  }
+ },
+ "time_integrity_report": {
+  "blocked_events": 659,
+  "created_at": "2026-11-08T23:10:37.211405+00:00",
+  "cross_venue_alignment": {
+   "breaches": 1416,
+   "maximum_skew_ns": 6492636000,
+   "rule": "compare latest local receive timestamps; do not rewrite venue clocks",
+   "samples": 156213,
+   "threshold_ns": 500000000
+  },
+  "events": 156219,
+  "host_clock": {
+   "last_observed_ts_ns": 1794179424471216000,
+   "latest_drift_ppm": 0.0,
+   "latest_offset_ns": 0,
+   "max_abs_drift_ppm": 1068.1750753176727,
+   "max_abs_offset_ns": 75921000,
+   "max_drift_ppm": 500.0,
+   "max_offset_ns": 100000000,
+   "samples": 1555,
+   "source": "EXCHANGE_TIMESTAMP_LOW_QUANTILE",
+   "state": "SYNCED"
+  },
+  "host_offset_correction": {
+   "aligner": {
+    "accepted_samples": 155285.0,
+    "host_minus_exchange_ms": 14.493942260742188,
+    "negative_raw_drift_share": 0.7484303055671829,
+    "rejected_backlogged": 934.0,
+    "reseeds": 0.0,
+    "warmup_records": 20.0
+   },
+   "clock_offset_estimate_ns": 0,
+   "enabled": true,
+   "quantile": 0.01,
+   "tolerance_ns": 0,
+   "window_samples": 2000
+  },
+  "ordering_rule": [
+   "receive_ts_ns",
+   "exchange_ts_ns",
+   "source_ts_ns",
+   "venue",
+   "sequence_start",
+   "sequence",
+   "event_id"
+  ],
+  "policy": {
+   "correct_host_offset": true,
+   "host_offset_min_samples": 20,
+   "host_offset_quantile": 0.01,
+   "host_offset_window": 2000,
+   "max_cross_venue_skew_ns": 500000000,
+   "max_event_latency_ns": 60000000000,
+   "max_feed_age_ns": 500000000,
+   "max_feed_delay_ns": null,
+   "max_host_drift_ppm": 500.0,
+   "max_host_offset_ns": 100000000,
+   "negative_latency_tolerance_ns": 0
+  },
+  "schema_version": "1.0.0",
+  "timestamp_unit": "nanoseconds_since_unix_epoch_utc",
+  "venues": {
+   "BINANCE": {
+    "corrected_negative_latency_events": 17636,
+    "events": 31047,
+    "feed_age_ns_max": 1340950000,
+    "feed_delayed_events": 0,
+    "impossible_latency_events": 0,
+    "latency_ns_max": 1712893000,
+    "latency_ns_mean": 6541960,
+    "latency_ns_min": -47301000,
+    "latency_ns_p50": -5333000,
+    "latency_ns_p95": 54732000,
+    "latency_percentile_window": 31047,
+    "max_corrected_delay_ns": 1760947000,
+    "negative_latency_events": 2,
+    "stale_feed_events": 3
+   },
+   "BYBIT": {
+    "corrected_negative_latency_events": 97945,
+    "events": 125172,
+    "feed_age_ns_max": 1939199000,
+    "feed_delayed_events": 0,
+    "impossible_latency_events": 0,
+    "latency_ns_max": 2450245000,
+    "latency_ns_mean": -24094033,
+    "latency_ns_min": -76695000,
+    "latency_ns_p50": -36286000,
+    "latency_ns_p95": 18990000,
+    "latency_percentile_window": 125172,
+    "max_corrected_delay_ns": 2503545000,
+    "negative_latency_events": 657,
+    "stale_feed_events": 3
+   }
+  }
+ },
+ "latency_report": {
+  "execution_mode": "INTERNAL_PAPER",
+  "limitations": [
+   "Market-data latency is measured from recorded receive and exchange timestamps after host-offset correction; it is not re-drawn during replay.",
+   "Resting orders fill only when the book trades through them; queue-position fills are modelled in the advanced SDK backtester."
+  ],
+  "measured": {
+   "defaulted_venues": [],
+   "profiles": {},
+   "schema_version": "1.0.0",
+   "seed": 0,
+   "source": "measured",
+   "stages": {
+    "BINANCE.market_data": {
+     "count": 31045,
+     "event_pair": [
+      "exchange_ts",
+      "receive_ts"
+     ],
+     "max_ns": 1760947000,
+     "mean_ns": 46897945,
+     "p50_ns": 37180000,
+     "p95_ns": 71398000,
+     "p99_ns": 216100000,
+     "window": 31045
+    },
+    "BYBIT.market_data": {
+     "count": 124515,
+     "event_pair": [
+      "exchange_ts",
+      "receive_ts"
+     ],
+     "max_ns": 2503545000,
+     "mean_ns": 17560676,
+     "p50_ns": 7365000,
+     "p95_ns": 36121000,
+     "p99_ns": 197701000,
+     "window": 100000
+    },
+    "BYBIT.risk": {
+     "count": 1,
+     "event_pair": [
+      "decision_ts",
+      "route_decision_ts"
+     ],
+     "max_ns": 1730000,
+     "mean_ns": 1730000,
+     "p50_ns": 1730000,
+     "p95_ns": 1730000,
+     "p99_ns": 1730000,
+     "window": 1
+    },
+    "BYBIT.strategy": {
+     "count": 1,
+     "event_pair": [
+      "receive_ts",
+      "decision_ts"
+     ],
+     "max_ns": 1363000,
+     "mean_ns": 1363000,
+     "p50_ns": 1363000,
+     "p95_ns": 1363000,
+     "p99_ns": 1363000,
+     "window": 1
+    }
+   }
+  },
+  "model": {
+   "source": "timelines:profile",
+   "stage_map": {
+    "cancel": "cancel",
+    "cancel_report": "cancel_report",
+    "entry": "entry",
+    "submit_reject": "ack_report"
+   },
+   "timelines": {
+    "binance.ack_report": {
+     "draws": 0,
+     "jitter_ms": 8.0,
+     "mean_ms": 36.0,
+     "source": "ASSUMED:latency_preset"
+    },
+    "binance.cancel": {
+     "draws": 0,
+     "jitter_ms": 8.0,
+     "mean_ms": 40.0,
+     "source": "ASSUMED:floor_ms"
+    },
+    "binance.cancel_report": {
+     "draws": 0,
+     "jitter_ms": 8.0,
+     "mean_ms": 36.0,
+     "source": "ASSUMED:latency_preset"
+    },
+    "binance.entry": {
+     "draws": 2,
+     "jitter_ms": 8.0,
+     "mean_ms": 40.0,
+     "source": "ASSUMED:floor_ms"
+    },
+    "binance.feed": {
+     "draws": 0,
+     "jitter_ms": 8.0,
+     "mean_ms": 36.0,
+     "source": "ASSUMED:latency_preset"
+    },
+    "binance.fill_report": {
+     "draws": 0,
+     "jitter_ms": 8.0,
+     "mean_ms": 36.0,
+     "source": "ASSUMED:latency_preset"
+    },
+    "bybit.ack_report": {
+     "draws": 0,
+     "jitter_ms": 2.5,
+     "mean_ms": 2.0,
+     "source": "ASSUMED:latency_preset"
+    },
+    "bybit.cancel": {
+     "draws": 0,
+     "jitter_ms": 2.5,
+     "mean_ms": 6.0,
+     "source": "ASSUMED:latency_preset"
+    },
+    "bybit.cancel_report": {
+     "draws": 0,
+     "jitter_ms": 2.5,
+     "mean_ms": 2.0,
+     "source": "ASSUMED:latency_preset"
+    },
+    "bybit.entry": {
+     "draws": 1,
+     "jitter_ms": 2.5,
+     "mean_ms": 6.0,
+     "source": "ASSUMED:latency_preset"
+    },
+    "bybit.feed": {
+     "draws": 0,
+     "jitter_ms": 2.5,
+     "mean_ms": 2.0,
+     "source": "ASSUMED:latency_preset"
+    },
+    "bybit.fill_report": {
+     "draws": 2,
+     "jitter_ms": 2.5,
+     "mean_ms": 2.0,
+     "source": "ASSUMED:latency_preset"
+    }
+   },
+   "zero_stages": {
+    "fill": 2,
+    "submit_ack": 3
+   },
+   "zero_stages_label": "ASSUMED_ZERO (owner 8 Nov: realistic values come later as a new profile version, once measured)"
+  },
+  "schema_version": "1.0.0",
+  "wall_clock_stages": {
+   "feed_to_strategy_ns": {
+    "count": 154036,
+    "max_ns": 200821500,
+    "mean_ns": 202826,
+    "p50_ns": 103666,
+    "p95_ns": 533875,
+    "p99_ns": 1266084
+   },
+   "paper_frame_overhead_ns": {
+    "count": 156219,
+    "max_ns": 1936849917,
+    "mean_ns": 570475,
+    "p50_ns": 375625,
+    "p95_ns": 1176541,
+    "p99_ns": 1931333
+   },
+   "route_decision_ns": {
+    "count": 1,
+    "max_ns": 1733541,
+    "mean_ns": 1733541,
+    "p50_ns": 1733541,
+    "p95_ns": 1733541,
+    "p99_ns": 1733541
+   },
+   "strategy_eval_ns": {
+    "count": 154036,
+    "max_ns": 120357542,
+    "mean_ns": 170936,
+    "p50_ns": 151333,
+    "p95_ns": 289125,
+    "p99_ns": 413333
+   }
+  }
+ },
+ "data_quality_defects": [
+  {
+   "code": "STALE_INTERVALS",
+   "level": "CRITICAL",
+   "metric": "stale_intervals",
+   "observed": 27,
+   "threshold": 0
+  },
+  {
+   "code": "NEGATIVE_LATENCY",
+   "level": "CRITICAL",
+   "metric": "negative_latency",
+   "observed": 659,
+   "threshold": 0
+  }
+ ],
+ "book_integrity_gate": {
+  "cancel_requests": 0,
+  "cancelled_orders": 0,
+  "reason": "INITIAL_SYNC",
+  "resume_count": 0,
+  "suspend_count": 0,
+  "suspended": true,
+  "venue_transitions": 0,
+  "venues": {
+   "BINANCE": "RISK_REDUCING_ONLY",
+   "BYBIT": "RISK_REDUCING_ONLY"
+  }
+ },
+ "session_strategies": {
+  "flattening": false,
+  "strategies": {
+   "cross_venue_arb": {
+    "closed_plans": 1,
+    "fees": "0.02314930",
+    "gross_pnl": "0.00500",
+    "net_pnl": "-0.01814930",
+    "opportunities": 1,
+    "outcomes": {
+     "FILLED": 1
+    },
+    "plans": 1,
+    "summary": {
+     "type": "ArbSessionStrategy"
+    },
+    "type": "ArbSessionStrategy"
+   }
+  }
+ },
+ "opportunities": 1,
+ "closed_plans": 1,
+ "events_dropped_from_memory": null,
+ "recorder": {
+  "wire_records": 350693,
+  "canonical_events": 156219,
+  "trade_ticks": 179406,
+  "derivative_ticks": 32064,
+  "control_frames": 13501,
+  "rejected_frames": 0,
+  "frame_accounting": {
+   "captured": 350693,
+   "consistent": true,
+   "dispositions": {
+    "CANONICAL": 156219,
+    "CONTROL": 13501,
+    "DERIVATIVE": 32064,
+    "TRADE": 148909
+   },
+   "unresolved": 0,
+   "unresolved_wire_refs": []
+  },
+  "session_sha256": "0f8ab68876e5af670e07e41c3708794a7da5040755f68063c179f051a138d276"
+ },
+ "venue_stats": {
+  "BINANCE": {
+   "connections": 7,
+   "book_stream_frames": 31040,
+   "book_stream_silences": 6,
+   "stale_disconnects": 6,
+   "validation_errors": 0,
+   "parse_errors": 0,
+   "control_frames": 683,
+   "book_syncs": 19,
+   "feed_delayed_events": 0,
+   "reconciles_ok": 0
+  },
+  "BYBIT": {
+   "connections": 7,
+   "book_stream_frames": 137988,
+   "book_stream_silences": 6,
+   "stale_disconnects": 6,
+   "validation_errors": 0,
+   "parse_errors": 0,
+   "control_frames": 12818,
+   "book_syncs": 10,
+   "feed_delayed_events": 0,
+   "reconciles_ok": 0
+  }
+ },
+ "strategy_gate": {
+  "cancel_requests": 26,
+  "cancelled_orders": 0,
+  "reason": "",
+  "resume_count": 24,
+  "suspend_count": 23,
+  "suspended": false,
+  "venue_transitions": 56,
+  "venues": {
+   "BINANCE": "ACTIVE",
+   "BYBIT": "ACTIVE"
+  }
+ }
+}

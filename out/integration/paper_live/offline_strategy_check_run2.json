@@ -1,0 +1,214 @@
+{
+ "label": "EXPLORATORY: D7d offline step, recorded Mac shakedown stream; not a strategy result",
+ "session": "d7d-run2",
+ "minutes": 60.0,
+ "profile": "perp_perp_maker_taker_v1_5",
+ "events": 335625,
+ "keepalive_notes": 12823,
+ "identical": {
+  "ledger_events": false,
+  "positions": true,
+  "cash": true,
+  "plans": true,
+  "strategy_counters": true
+ },
+ "ledger_difference": {
+  "event_type_counts_replay": {
+   "BOOK_INTEGRITY_CANCEL_ALL": 1,
+   "CHILD_DISPATCH_COMPLETED": 3,
+   "CHILD_DISPATCH_IN_FLIGHT": 3,
+   "CHILD_DISPATCH_STARTED": 3,
+   "CHILD_REPORT_OBSERVED": 7,
+   "FEED_CONTROL_STATE_TRANSITION": 39,
+   "FEED_CONTROL_VENUE_CANCEL": 19,
+   "FILL": 4,
+   "HEDGE_CAP_BREACH_AT_DISPATCH": 2,
+   "HEDGE_CHAIN_OPENED": 2,
+   "HEDGE_STATE": 8,
+   "HEDGE_SUBMIT": 2,
+   "KILL_SWITCH_CANCEL_ALL_COMPLETE": 1,
+   "KILL_SWITCH_STATE_TRANSITION": 7,
+   "LEGGING_LIMIT_BOUND": 1,
+   "LEGGING_LIMIT_CLEARED": 1,
+   "MARGIN_BUFFER_ALERT": 7,
+   "MARGIN_STATE_TRANSITION": 17,
+   "OPPORTUNITY": 1,
+   "ORDER_LIFECYCLE": 13,
+   "ORDER_REPORT_DEADLINE_SET": 2,
+   "ORDER_STATE_UPDATE_APPLIED": 10,
+   "PACKAGE_DISPATCH_COMPLETED": 1,
+   "PACKAGE_DISPATCH_STARTED": 1,
+   "PACKAGE_DISPATCH_THROTTLED": 1,
+   "PACKAGE_RISK_RELEASED": 1,
+   "PACKAGE_RISK_RESERVED": 1,
+   "PLAN_CLOSED": 1,
+   "PLAN_STATE_TRANSITION": 8,
+   "PRE_TRADE_VALIDATION": 1,
+   "RMS_INTERNAL_RECONCILIATION": 1,
+   "ROUTE_ELIGIBILITY": 1,
+   "TIME_INTEGRITY_BLOCK": 659
+  },
+  "event_type_counts_paper": {
+   "BOOK_INTEGRITY_CANCEL_ALL": 1,
+   "CHILD_DISPATCH_COMPLETED": 3,
+   "CHILD_DISPATCH_IN_FLIGHT": 3,
+   "CHILD_DISPATCH_STARTED": 3,
+   "CHILD_REPORT_OBSERVED": 7,
+   "FEED_CONTROL_STATE_TRANSITION": 39,
+   "FEED_CONTROL_VENUE_CANCEL": 19,
+   "FILL": 4,
+   "HEDGE_CAP_BREACH_AT_DISPATCH": 2,
+   "HEDGE_CHAIN_OPENED": 2,
+   "HEDGE_STATE": 8,
+   "HEDGE_SUBMIT": 2,
+   "KILL_SWITCH_CANCEL_ALL_COMPLETE": 1,
+   "KILL_SWITCH_STATE_TRANSITION": 9,
+   "LEGGING_LIMIT_BOUND": 1,
+   "LEGGING_LIMIT_CLEARED": 1,
+   "MARGIN_BUFFER_ALERT": 9,
+   "MARGIN_STATE_TRANSITION": 21,
+   "OPPORTUNITY": 1,
+   "ORDER_LIFECYCLE": 13,
+   "ORDER_REPORT_DEADLINE_SET": 2,
+   "ORDER_STATE_UPDATE_APPLIED": 10,
+   "PACKAGE_DISPATCH_COMPLETED": 1,
+   "PACKAGE_DISPATCH_STARTED": 1,
+   "PACKAGE_DISPATCH_THROTTLED": 1,
+   "PACKAGE_RISK_RELEASED": 1,
+   "PACKAGE_RISK_RESERVED": 1,
+   "PLAN_CLOSED": 1,
+   "PLAN_STATE_TRANSITION": 8,
+   "PRE_TRADE_VALIDATION": 1,
+   "RMS_INTERNAL_RECONCILIATION": 1,
+   "ROUTE_ELIGIBILITY": 1,
+   "TIME_INTEGRITY_BLOCK": 659
+  },
+  "only_in_replay_by_type": {
+   "BOOK_INTEGRITY_CANCEL_ALL": 1,
+   "FEED_CONTROL_STATE_TRANSITION": 2,
+   "FEED_CONTROL_VENUE_CANCEL": 1,
+   "KILL_SWITCH_CANCEL_ALL_COMPLETE": 1,
+   "KILL_SWITCH_STATE_TRANSITION": 6,
+   "MARGIN_BUFFER_ALERT": 6,
+   "MARGIN_STATE_TRANSITION": 6
+  },
+  "only_in_paper_by_type": {
+   "BOOK_INTEGRITY_CANCEL_ALL": 1,
+   "FEED_CONTROL_STATE_TRANSITION": 2,
+   "FEED_CONTROL_VENUE_CANCEL": 1,
+   "KILL_SWITCH_CANCEL_ALL_COMPLETE": 1,
+   "KILL_SWITCH_STATE_TRANSITION": 8,
+   "MARGIN_BUFFER_ALERT": 8,
+   "MARGIN_STATE_TRANSITION": 10
+  }
+ },
+ "ledger_events_replay_paper": [
+  829,
+  837
+ ],
+ "first_differing_ledger_rows": [
+  0,
+  17,
+  18,
+  56,
+  93,
+  94,
+  95,
+  96,
+  97,
+  98
+ ],
+ "edge_diagnostics": {
+  "headroom_bps_to_a_quote_at_the_maker_touch": {
+   "bid": {
+    "n": 156213,
+    "p1": -6.397814027946173,
+    "p10": -5.233736895043316,
+    "p50": -4.07559480198171,
+    "p90": -2.909372647808976,
+    "p99": -1.7459738626691352,
+    "max": 1.7711220675357904,
+    "share_headroom_ge_0": 0.0005249243020747313
+   },
+   "ask": {
+    "n": 156213,
+    "p1": -8.385238738330212,
+    "p10": -7.22052612353049,
+    "p50": -6.053528843010199,
+    "p90": -4.894347479613394,
+    "p99": -3.729226442293216,
+    "max": 6.649317395752203,
+    "share_headroom_ge_0": 0.0010498486041494626
+   }
+  },
+  "maker_venue": "BYBIT",
+  "hedge_venue": "BINANCE",
+  "required_fee_bps_maker_plus_taker": null
+ },
+ "replay": {
+  "ledger_event_count": 829,
+  "positions": {
+   "BINANCE|SOL-USDT-PERP": "-1.0",
+   "BYBIT|SOL-USDT-PERP": "1.0"
+  },
+  "cash": {
+   "BINANCE": "85.72542420",
+   "BYBIT": "-85.74357350"
+  },
+  "plans": [
+   [
+    "CLOSED",
+    3
+   ]
+  ],
+  "orders_in_plans": 3,
+  "strategy": {
+   "evaluations": 154132,
+   "signals": 1,
+   "best_edge_seen_bps": 1.1019504220072431,
+   "rejects": {
+    "stale": 95,
+    "toxic": 26120,
+    "no_edge": 128232,
+    "clip_too_small": 46,
+    "maker_limit": 7,
+    "cross_venue_skew": 1440
+   },
+   "entry_threshold_min_net_edge_bps": 1.0,
+   "safety_buffer_bps": 0.5
+  }
+ },
+ "paper": {
+  "ledger_event_count": 837,
+  "positions": {
+   "BINANCE|SOL-USDT-PERP": "-1.0",
+   "BYBIT|SOL-USDT-PERP": "1.0"
+  },
+  "cash": {
+   "BINANCE": "85.72542420",
+   "BYBIT": "-85.74357350"
+  },
+  "plans": [
+   [
+    "CLOSED",
+    3
+   ]
+  ],
+  "orders_in_plans": 3,
+  "strategy": {
+   "evaluations": 154132,
+   "signals": 1,
+   "best_edge_seen_bps": 1.1019504220072431,
+   "rejects": {
+    "stale": 95,
+    "toxic": 26120,
+    "no_edge": 128232,
+    "clip_too_small": 46,
+    "maker_limit": 7,
+    "cross_venue_skew": 1440
+   },
+   "entry_threshold_min_net_edge_bps": 1.0,
+   "safety_buffer_bps": 0.5
+  }
+ }
+}

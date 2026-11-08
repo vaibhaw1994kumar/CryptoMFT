@@ -50,39 +50,7 @@ rep = SessionReplay(bt_cfg, profile)
 cfg = rep.app_config
 cfg.strategies["maker_simulation"] = {"enabled": True, "quote_size": "1.0", "max_inventory": "2.0", "engine": "auto", "quote_interval_ms": 1000, "depth": 50}
 t0 = time.time()
-def load_recorded(session_dir):
-    """The recorded live session as one event list in the recorder's arrival order (trace.jsonl): books from canonical.jsonl, prints from trades.jsonl; ticker, control and derivative frames are not market events."""
-    can, trades, order = {}, {}, []
-    for part in sorted(Path(session_dir).glob("part-*")):
-        for line in (part / "canonical.jsonl").open():
-            row = json.loads(line)
-            can[row["event_id"]] = row
-        for line in (part / "trades.jsonl").open():
-            row = json.loads(line)
-            trades[row["event_id"]] = row
-        order += [json.loads(line) for line in (part / "trace.jsonl").open()]
-    out = []
-    for row in order:
-        if row["disposition"] == "CANONICAL":
-            out.append(MarketEvent.from_dict(can[row["canonical_event_id"]]))
-        elif row["disposition"] == "TRADE":
-            out.append(TradeEvent.from_dict(trades[row["canonical_event_id"]]))
-    return out
-
-
-def load_keepalive_notes(session_dir):
-    """(receive_ts_ns, venue) of every frame on a BOOK connection that is not a book update: Bybit pongs and acknowledgements, any non-book Binance depth-channel frame. Read from the recorder's wire file."""
-    notes = []
-    for part in sorted(Path(session_dir).glob("part-*")):
-        for line in (part / "wire.jsonl").open():
-            w = json.loads(line)
-            ch, fd = w["channel"], w["frame_data"]
-            if w["venue"] == "BYBIT" and ch.startswith("orderbook") and '"topic":"orderbook' not in fd:
-                notes.append((w["receive_ts_ns"], "BYBIT"))
-            elif w["venue"] == "BINANCE" and "depth" in ch and '"e":"depthUpdate"' not in fd and '"lastUpdateId"' not in fd:
-                notes.append((w["receive_ts_ns"], "BINANCE"))
-    return sorted(notes)
-
+from new_backtest.session_replay import load_keepalive_notes, load_recorded_events as load_recorded      # the recorded-session readers live in session_replay (one place)
 
 NOTES = load_keepalive_notes(RECORDED) if (RECORDED and not NO_NOTES) else []
 
