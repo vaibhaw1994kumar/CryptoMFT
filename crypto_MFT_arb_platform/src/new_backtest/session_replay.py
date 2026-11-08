@@ -25,6 +25,7 @@ from typing import Any, Iterable
 
 from crypto_stat_arb.config import config_from_raw, raw_config_from_profile
 from crypto_stat_arb.execution import DispatchPolicy
+from crypto_stat_arb.hedge_lifecycle import HedgePolicy
 from crypto_stat_arb.models import EventType, MarketEvent, TradeEvent
 from crypto_stat_arb.session import ExecutionMode, TradingSession
 from crypto_stat_arb.simulation.order_book import float_mirror
@@ -84,10 +85,14 @@ class SessionReplay:
             truth_books = {v: OrderBook(v, config.pair, self.venue_specs[v].delta_semantics, tape_repair=config.book_tape_repair, own_overlay=config.own_impact == "overlay",
                                         message_atomic=config.message_atomic_book) for v in venues}
             self.truth = TruthBooks(truth_books, self._truth_apply, message_atomic=config.message_atomic_book, aligner_of=lambda: self.latency.aligner, stats=self.timing_stats)
+        # The float VIEW books the strategy reads and the maker executor is judged against: persistent, message-atomic, touch ages kept, a cross repaired at message end: the backtester's own books,
+        # fed here from the converted events. The core books (below, in the session) serve the core's gates, OMS and risk.
+        self.views = {v: OrderBook(v, config.pair, self.venue_specs[v].delta_semantics, tape_repair=config.book_tape_repair, own_overlay=config.own_impact == "overlay",
+                                   message_atomic=config.message_atomic_book) for v in venues}
         executor = MakerExecutor(EmpiricalFillModel(), config.maker)
         executor.own_overlay = config.own_impact == "overlay"
         self.adapters = {self.names[v]: QueueAwareVenueAdapter(self.names[v], executor, tick_size=self.ticks[v], maker_fee_bps=self.venue_specs[v].fees.maker_bps, pair=config.pair,
-                                                               state=self.states[v], truth=self.truth, feed_venue=v) for v in venues}
+                                                               state=self.states[v], truth=self.truth, feed_venue=v, view_book=(lambda v=v: self.views[v]), driver_fed=True) for v in venues}
         self.resync_delay_s = float(getattr(config, "resync_delay_s", 5.0))
         # Timing is a RULE, the same on both runtimes (owner 9 Nov): the profile's timing block (latency preset, floors, jitter) drives the feed delay, the clock and every order delay.
         self.latency = LatencyBook({v: s.latency for v, s in self.venue_specs.items()}, seed=config.seed)
@@ -99,14 +104,20 @@ class SessionReplay:
                 vl.aligner = aligner
                 vl.feed = self.timelines.sampler(v, "feed")
         self.latency_model = TimelinesLatencyModel(self.timelines) if self.timelines is not None else None
+        hf, hedge_cfg = config.hedge_faults, (config.execution.hedge if getattr(config, "execution", None) is not None else {})
+        hedge_policy = HedgePolicy(retry_limit=int(getattr(hf, "max_retries", 0) or 0), retry_backoff_ns=int(float(getattr(hf, "retry_backoff_s", 0.0) or 0.0) * _NS),
+                                   query_attempt_limit=int(getattr(hf, "unknown_query_max_attempts", 3) or 3),
+                                   touch_slack_bps=max(float(config.arb.max_walk_bps), float(hedge_cfg.get("slack_bps_floor", 5.0))) if hedge_cfg.get("cap") == "touch_slack" else None)
         self.session = TradingSession(
             self.app_config, execution_mode=ExecutionMode.INTERNAL_SIMULATION, adapters=self.adapters, strategies=[],
             dispatch_policy=DispatchPolicy.FILL_TRIGGERED, maker_venues=tuple(self.names[v] for v in config.arb.maker_venues),
-            resync_delay_ns=int(self.resync_delay_s * _NS), resync_source=self.feed.resync_snapshot, latency_model=self.latency_model,
+            resync_delay_ns=int(self.resync_delay_s * _NS), resync_source=self.feed.resync_snapshot, latency_model=self.latency_model, hedge_policy=hedge_policy,
         )
+        if config.arb.maker_max_age_s > 0:
+            self.session.oms.order_lifetime_ns = int(config.arb.maker_max_age_s * _NS)     # the profile's MANDATORY maker order lifetime (a rule, the same on both runtimes)
         self.strategy = CrossVenueArbStrategy(config.pair, self.venue_specs, config.arb)
         self.shim = ArbSessionStrategy(self.strategy, ledger=self.session.ledger, oms=self.session.oms, states=self.states, instruments=self.app_config.instruments,
-                                       instrument_id=self.instrument_id, venue_names=self.names, eligibility_policy=self.session.alignment_policy)
+                                       instrument_id=self.instrument_id, venue_names=self.names, eligibility_policy=self.session.alignment_policy, view_books=lambda: self.views)
         self.session.strategies.append(self.shim)
         self.session.strategy = self.shim
         self._stream = stream
@@ -169,23 +180,59 @@ class SessionReplay:
     def _feed_venue(self, core_name: str) -> str:
         return next(v for v, n in self.names.items() if n == core_name)
 
+    def _ets(self, exchange_ts_ns: int) -> float | None:
+        """When the event executed at the exchange, on the host clock (the backtester's `_event_host_ts`); None until the aligner has a sample."""
+        aligner = self.latency.aligner
+        return aligner.to_host(exchange_ts_ns / _NS) if aligner.ready else None
+
+    def _deliver(self, adapter, produced, now_ns: int, exchange_ts_ns: int) -> None:
+        if produced:
+            self.session.router._deliver_resting_fills(adapter.venue, produced, now_ns, exchange_ts_ns=exchange_ts_ns)
+
     def _book(self, event: MarketEvent) -> None:
+        """The backtester's `_apply_event` for a book event: the view book and venue state, then the maker executor (snapshot, or each level of the message, then the cross check), then the core session."""
         now = event.receive_ts_ns
+        now_s = now / _NS
         self.events["book"] += 1
         self.session.resync_if_due(now)
         self.session.oms.advance_time(now, self.session.books)         # in-flight orders land and timers fire BEFORE this event is applied (the backtester's _advance_to): an order sent at t - latency never sees an event received at t
-        book = self.session.books[(event.venue, event.instrument_id)]
-        book.apply(event)
-        if book.state.value == "VALID" and book.bids and book.asks:
-            self.states[self._feed_venue(event.venue)].on_book(float_mirror(event.venue, self.config.pair, book.bids, book.asks, now / _NS), now / _NS)
+        self.session.books[(event.venue, event.instrument_id)].apply(event)
+        fv = self._feed_venue(event.venue)
+        view, state, adapter, ets = self.views[fv], self.states[fv], self.adapters[event.venue], self._ets(event.exchange_ts_ns)
+        produced: list = []
+        if event.event_type == EventType.BOOK_SNAPSHOT:
+            bids, asks = [[float(l.price), float(l.quantity)] for l in event.bids], [[float(l.price), float(l.quantity)] for l in event.asks]
+            if bids and asks:
+                view.apply_snapshot(bids, asks, now_s)
+                state.on_book(view, now_s)
+                produced += adapter.feed_snapshot(view, now_s, ets)
+        else:
+            levels = [("bid", float(l.price), float(l.quantity)) for l in event.bids] + [("ask", float(l.price), float(l.quantity)) for l in event.asks]
+            for side, price, size in levels:
+                view.apply_delta(side, price, size, "modify", now_s)
+            view.end_message()
+            state.on_book(view, now_s)
+            for side, price, size in levels:
+                produced += adapter.feed_delta(side, price, view.level_size(side, price) if self.config.delta_uses_book_size else size, now_s, ets)
+        produced += adapter.feed_cross(view, now_s, ets)
+        self._deliver(adapter, produced, now, event.exchange_ts_ns)
         self.session.on_event(event, apply_book=False)
 
     def _trade(self, trade: TradeEvent) -> None:
+        now = trade.receive_ts_ns
+        now_s = now / _NS
+        price, volume = float(trade.price), float(trade.quantity)
+        if price <= 0 or volume <= 0:
+            return
         self.events["trade"] += 1
+        self.session.oms.advance_time(now, self.session.books)
         sign = 1 if trade.aggressor_side == "BUY" else -1
-        self.session.oms.advance_time(trade.receive_ts_ns, self.session.books)
-        self.states[self._feed_venue(trade.venue)].on_trade(trade.receive_ts_ns / _NS, float(trade.price), float(trade.quantity), sign)
-        self.session.on_trade(trade, now_ns=trade.receive_ts_ns)
+        fv = self._feed_venue(trade.venue)
+        view, state, adapter, ets = self.views[fv], self.states[fv], self.adapters[trade.venue], self._ets(trade.exchange_ts_ns)
+        view.on_trade(price, volume, sign, now_s)
+        state.on_trade(now_s, price, volume, sign)
+        produced = list(adapter.feed_trade(price, volume, sign, now_s, ets)) + list(adapter.feed_cross(view, now_s, ets))
+        self._deliver(adapter, produced, now, trade.exchange_ts_ns)
 
     # -- result ------------------------------------------------------------------------------------------------------------
 

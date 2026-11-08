@@ -139,6 +139,16 @@ class QueueAdapterTests(unittest.TestCase):
         self.assertEqual((results[0].callbacks[0].event_type, results[0].callbacks[0].event_ts_ns), (ExecutionEventType.FILLED, 7 * S))
 
 
+class UnfilledIocTests(unittest.TestCase):
+    def test_an_ioc_that_finds_nothing_inside_its_limit_ends_unfilled_not_rejected(self):
+        """The venue ends such an order unfilled (Bybit Cancelled, Binance EXPIRED). A reject with an unclassified reason would fail closed to an unwind at once; the OMS reads an unfilled IOC as retry-or-unwind by its own rule."""
+        a, book = adapter(), core_book(BIDS, ASKS)
+        (cb,) = a.handle(request("h1", Side.SELL, "100.10", "1", tif=TimeInForce.IOC, post_only=False), book)          # the best bid is 100.00: nothing at or above 100.10
+        self.assertEqual((cb.event_type, cb.cumulative_filled_quantity), (ExecutionEventType.CANCELLED, Decimal("0")))
+        reports = a.handle(request("h2", Side.SELL, "99.90", "1", tif=TimeInForce.IOC, post_only=False), book)         # inside the book: filled
+        self.assertIn(ExecutionEventType.FILLED, [r.event_type for r in reports])
+
+
 class ArrivalTimeTests(unittest.TestCase):
     """A request travels for the entry latency: the queue adapter must place (and cancel) at ARRIVAL, against the book as it is then, not at the creation time the request carries."""
 
