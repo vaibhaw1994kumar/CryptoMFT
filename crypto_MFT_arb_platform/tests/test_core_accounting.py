@@ -777,7 +777,7 @@ class WorkingProfilesUseOnlyTheCore(unittest.TestCase):
 
 
 class SessionRuntimeSwitch(unittest.TestCase):
-    """Phase D (owner 8 Nov 2026): `runtime` is a profile setting, off by default. v1_5 = v1_4 + `runtime: session`; the reference profiles refuse it; parity is v1_5 against v1_4. The session path itself is wired in step D5."""
+    """Phase D (owner 8 Nov 2026): `runtime` is a profile setting, off by default. v1_5 = v1_4 + `runtime: session` (and its `resync_delay_s`, ASSUMED); the reference profiles refuse it; parity is v1_5 against v1_4. The session path itself is wired in step D5."""
 
     KW = WorkingProfilesUseOnlyTheCore.KW
     REFERENCE = WorkingProfilesUseOnlyTheCore.REFERENCE
@@ -793,7 +793,7 @@ class SessionRuntimeSwitch(unittest.TestCase):
         from new_backtest.profiles import load_profile
         a, b = load_profile("perp_perp_maker_taker_v1_4"), load_profile("perp_perp_maker_taker_v1_5")
         differ = {k for k in set(a) | set(b) if not k.startswith("_") and a.get(k) != b.get(k)}
-        self.assertEqual(differ, {"name", "description", "runtime"})
+        self.assertEqual(differ, {"name", "description", "runtime", "resync_delay_s"})            # the delay is the session runtime's own setting (ASSUMED), ignored by the backtester loop
         self.assertEqual(b["runtime"], "session")
 
     def test_a_reference_profile_refuses_the_session_runtime_at_load_and_at_start(self):

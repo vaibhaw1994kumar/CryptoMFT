@@ -173,6 +173,10 @@ class ArbBacktestConfig:
     # Phase D (owner 8 Nov): which runtime replays the feed. "backtester" = this class's own event loop (every profile up to v1_4). "session" = the core TradingSession behind the
     # QueueAwareVenueAdapter (v1_5 and later; the reference profiles refuse it). The session path is wired in step D5: until then a config that asks for it is refused at start.
     runtime: str = "backtester"
+    # Phase D (owner 8 Nov), session runtime only: the one rule for a book that goes invalid with no snapshot in the data (core `TradingSession._schedule_resync`): trading is suspended and, after this
+    # many seconds, the venue is resubscribed and the book is resynced from the data's own state. ASSUMED (the live feed's 1 s reconnect backoff plus a snapshot round trip and the start-up gate; longer =
+    # more opportunity lost, so it errs against the strategy). Ignored by the backtester runtime, whose book repairs a cross at once.
+    resync_delay_s: float = 5.0
     # Hedge-leg failure injection (hedge_faults.py). None = off and the replay is exactly as before.
     hedge_faults: HedgeFaultConfig | None = None
     # Opt-in margin / liquidation / cross-venue equity-transfer model (margin_model.py). None (default): infinite margin and no
@@ -595,6 +599,8 @@ class CrossVenueArbBacktester:
             raise ValueError(f"runtime must be 'backtester' or 'session', got {config.runtime!r}")
         from .profiles import require_runtime
         require_runtime(config)
+        if not config.resync_delay_s > 0:
+            raise ValueError(f"resync_delay_s must be positive, got {config.resync_delay_s!r}")
         if config.runtime == "session":
             raise NotImplementedError("runtime 'session' is not wired yet (Phase D step D5): refusing to replay it on the backtester's own loop")
         if config.ledger_source == "core" and config.margin is None:

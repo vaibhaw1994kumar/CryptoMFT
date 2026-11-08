@@ -374,6 +374,8 @@ def scan_venue_day_checks(data_root: Path | str, venue: str, pair: str, day: str
     import time
 
     from crypto_stat_arb.dataset_manifest import ArrivalChecks
+
+    from .canonical_feed import continues_message
     from crypto_stat_arb.simulation.order_book import OrderBook
 
     t0 = time.perf_counter()
@@ -412,8 +414,8 @@ def scan_venue_day_checks(data_root: Path | str, venue: str, pair: str, day: str
         t = ev.local_ts if ev.local_ts > 0 else ev.exchange_ts
         if ev.kind == DELTA:
             ev_n["delta"] += 1
-            key = (ev.exchange_ts, ev.local_ts)
-            if msg_key is not None and key != msg_key:
+            key = (ev.exchange_ts, ev.local_ts if ev.local_ts > 0 else ev.exchange_ts)
+            if msg_key is not None and not continues_message(msg_key, key):          # the one frame rule, shared with the backtester and the canonical feed
                 close_message()
             msg_key = key
             msg_n += 1

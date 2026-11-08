@@ -110,5 +110,38 @@ class BookIntegrityGateTests(unittest.TestCase):
         )
 
 
+NS = 1_000_000_000
+T0 = 1_709_251_200 * NS          # 2024-03-01 00:00:00 UTC
+
+
+class GateSuspendedTimeTests(unittest.TestCase):
+    """Phase D (owner 8 Nov): the gate reports how long it blocked, per UTC day and cause. Observation only."""
+
+    def setUp(self):
+        self.binance = OrderBook("BINANCE", "BTC-USDT-SPOT")
+        self.bybit = OrderBook("BYBIT", "BTC-USDT-SPOT")
+        self.gate = BookIntegrityGate(max_book_age_ns=10 * NS, cancel_callback=lambda reason, now: 0)
+
+    def test_a_suspension_across_midnight_is_split_by_day_and_named_by_its_cause(self):
+        self.binance.apply(event("BINANCE", 10, "BOOK_SNAPSHOT", T0 + 86_390 * NS))
+        self.bybit.apply(event("BYBIT", 20, "BOOK_SNAPSHOT", T0 + 86_390 * NS))
+        self.assertTrue(self.gate.allow((self.binance, self.bybit), T0 + 86_390 * NS))
+        self.binance.apply(event("BINANCE", 12, "BOOK_DELTA", T0 + 86_395 * NS))               # a hole: GAP_DETECTED
+        self.assertFalse(self.gate.allow((self.binance, self.bybit), T0 + 86_395 * NS))        # blocked from here
+        self.assertEqual(self.gate.suspended_seconds_by_day(T0 + 86_400 * NS + 20 * NS), {"2024-03-01": {"BINANCE:GAP_DETECTED": 5.0}, "2024-03-02": {"BINANCE:GAP_DETECTED": 20.0}})   # an open interval counts
+        self.binance.apply(event("BINANCE", 13, "BOOK_SNAPSHOT", T0 + 86_400 * NS + 30 * NS))
+        self.bybit.apply(event("BYBIT", 21, "BOOK_SNAPSHOT", T0 + 86_400 * NS + 30 * NS))      # both books fresh again (the age limit is 10 s)
+        self.assertTrue(self.gate.allow((self.binance, self.bybit), T0 + 86_400 * NS + 30 * NS))
+        self.assertEqual(self.gate.suspended_seconds_by_day(T0 + 99 * 86_400 * NS), {"2024-03-01": {"BINANCE:GAP_DETECTED": 5.0}, "2024-03-02": {"BINANCE:GAP_DETECTED": 30.0}})
+
+    def test_the_start_up_wait_is_counted_too_and_a_cause_change_closes_the_interval(self):
+        self.assertFalse(self.gate.allow((self.binance, self.bybit), T0))                      # nothing synced yet
+        self.binance.apply(event("BINANCE", 10, "BOOK_SNAPSHOT", T0 + 2 * NS))
+        self.assertFalse(self.gate.allow((self.binance, self.bybit), T0 + 2 * NS))             # BYBIT still waits: the cause changes
+        self.bybit.apply(event("BYBIT", 20, "BOOK_SNAPSHOT", T0 + 3 * NS))
+        self.assertTrue(self.gate.allow((self.binance, self.bybit), T0 + 3 * NS))
+        self.assertEqual(self.gate.suspended_seconds_by_day(T0 + 10 * NS), {"2024-03-01": {"BINANCE:SYNCING+BYBIT:SYNCING": 2.0, "BYBIT:SYNCING": 1.0}})
+
+
 if __name__ == "__main__":
     unittest.main()
