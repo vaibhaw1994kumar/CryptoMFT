@@ -172,6 +172,7 @@ class TradingSession:
         dispatch_policy: DispatchPolicy = DispatchPolicy.DETERMINISTIC_SEQUENTIAL,
         maker_venues: tuple[str, ...] = (),
         hedge_policy=None,
+        resync_silence_ns: int | None = None,
         resync_delay_ns: int | None = None,
         resync_source: Callable[[str, str, int], MarketEvent | None] | None = None,
     ) -> None:
@@ -186,6 +187,8 @@ class TradingSession:
         if (resync_delay_ns is None) != (resync_source is None):
             raise ValueError("a resync delay and a resync source go together")
         self.resync_delay_ns = resync_delay_ns
+        self.resync_silence_ns = resync_silence_ns           # a venue silent this long (any message) is treated as a dropped feed: resubscribe after the same delay (Q-G2: the 5 s is a resubscribe trigger, not a blocking gate)
+        self.resync_unavailable = 0
         self.resync_source = resync_source
         self._resync_due: dict[tuple[str, str], tuple[int, int, str]] = {}      # (venue, instrument) -> (due ns, invalid since ns, reason)
         self.resync_log: list[dict[str, Any]] = []
@@ -468,12 +471,19 @@ class TradingSession:
         for venue in self.cfg.venues:
             key = (venue, self.cfg.instrument_id)
             book = self.books[key]
-            if book.state in self._NEEDS_SNAPSHOT:
+            silent = (self.resync_silence_ns is not None and book.last_receive_ts_ns is not None and now - book.last_receive_ts_ns >= self.resync_silence_ns)
+            if book.state in self._NEEDS_SNAPSHOT or silent:
                 if key not in self._resync_due:
-                    self._resync_due[key] = (now + self.resync_delay_ns, now, f"{book.state.value}:{book.invalid_reason}")
+                    self._resync_due[key] = (now + self.resync_delay_ns, now, f"{book.state.value}:{book.invalid_reason}" if book.state in self._NEEDS_SNAPSHOT else f"FEED_SILENT:{(now - book.last_receive_ts_ns) / 1e9:.1f}s")
             elif key in self._resync_due and book.state == BookState.VALID:
                 due, since, reason = self._resync_due.pop(key)
                 self.resync_log.append({"venue": venue, "invalid_since_ns": since, "resync_at_ns": now, "wait_ns": now - since, "reason": reason, "by": "DATA_SNAPSHOT", "state_after": book.state.value})
+
+    def note_venue_message(self, venue: str, ts_ns: int) -> None:
+        """A message of any kind from a venue (a trade print, a heartbeat) proves its feed alive: its books' age is measured from it (Q-G1)."""
+        for (v, _), book in self.books.items():
+            if v == venue:
+                book.note_venue_message(ts_ns)
 
     def resync_if_due(self, now_ns: int) -> None:
         """For a caller that applies books itself: resync any book whose wait is over BEFORE applying the next event (`on_event` does the same at its start)."""
@@ -488,7 +498,9 @@ class TradingSession:
             snapshot = self.resync_source(venue, instrument_id, now)
             if snapshot is None:
                 self._resync_due[key] = (now + self.resync_delay_ns, since, reason)
-                self.resync_log.append({"venue": venue, "invalid_since_ns": since, "resync_at_ns": now, "wait_ns": now - since, "reason": reason, "by": "UNAVAILABLE", "state_after": self.books[key].state.value})
+                self.resync_unavailable += 1
+                if self.resync_unavailable <= 50:                      # a long outage repeats every delay: the first 50 are logged, all are counted
+                    self.resync_log.append({"venue": venue, "invalid_since_ns": since, "resync_at_ns": now, "wait_ns": now - since, "reason": reason, "by": "UNAVAILABLE", "state_after": self.books[key].state.value})
                 continue
             book = self.books[key]
             del self._resync_due[key]
@@ -504,6 +516,7 @@ class TradingSession:
             "resync_delay_s": None if self.resync_delay_ns is None else self.resync_delay_ns / 1e9,
             "resync_delay_label": "ASSUMED" if self.resync_delay_ns is not None else None,
             "resyncs": list(self.resync_log),
+            "resync_unavailable_count": self.resync_unavailable,
             "resyncs_by_source": {by: sum(1 for r in self.resync_log if r["by"] == by) for by in sorted({r["by"] for r in self.resync_log})},
             "suspension_intervals_ns": [list(w) for w in self.book_gate.open_intervals(now_ns)],
             "suspended_seconds_by_day": by_day,
@@ -512,6 +525,7 @@ class TradingSession:
 
     def on_trade(self, trade: TradeEvent, *, now_ns: int | None = None) -> int:
         """Phase D (D2): a public trade print reaches the venue simulator (queue fills come from trades, never from a book update). It does not feed the book gate, the time monitor or the strategy; a venue adapter without an ``on_trade`` hook ignores it. Applies even when the last book event was blocked on its timestamps: the venue matches whatever our clock says."""
+        self.note_venue_message(trade.venue, trade.receive_ts_ns)          # a print proves the feed alive (age is measured from the last message of any kind)
         now = trade.receive_ts_ns if now_ns is None else now_ns
         if self.clock_ns is not None and now_ns is None:
             now = int(self.clock_ns())

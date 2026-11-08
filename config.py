@@ -455,8 +455,8 @@ def raw_config_from_profile(
             continue
         margin_venues[v.upper()] = {"mode": "CROSS", "liquidation": {"enabled": False}, "tiers": {instrument_id: {"source": str(row.get("source", "ASSUMED")), "tiers": [
             {"max_notional": repr(t["max_notional"]), "maintenance_rate": repr(t["maintenance_rate"]), "initial_rate": repr(t["initial_rate"])} for t in row["tiers"]]}}}
-    for key, why in (("book_sanity", "core defaults (500 bps mid jump and spread); the backtester has no price-sanity gate: a block by it is a gate window in the parity comparison"),
-                     ("time", "core defaults except feed age = max_book_age_s; replay receive stamps are the backtester's"), ("quality", "core defaults (preflight limits are not used by the session)"),
+    for key, why in (("book_sanity", "core defaults (500 bps mid jump and spread), KEPT (owner 8 Nov, Q-G3); the backtester has no price-sanity gate; triggers are counted in the manifest"),
+                     ("time", "core defaults except feed age = max_book_age_s and correct_host_offset true (owner 8 Nov, Q-G4); replay receive stamps are the backtester's"), ("quality", "core defaults (preflight limits are not used by the session)"),
                      ("monitoring", "core defaults"), ("oms.timeouts", "core defaults"), ("risk.limits", "notional and gross limits set far above any clip: the backtester's own limits are position and margin based")):
         notes[key] = why
     raw = {
@@ -465,6 +465,7 @@ def raw_config_from_profile(
         "execution_mode": "INTERNAL_SIMULATION",
         "latency": {"enabled": True, "seed": seed, "preset": str(profile.get("latency_preset", "singapore")), "profiles": {}},
         "backtest": {"drain_horizon_ms": 10_000},
+        "time": {"correct_host_offset": True},          # owner 8 Nov (Q-G4): the time-integrity monitor stays, with host-offset correction
         "fees": fee_rows,
         "risk": {
             "initial_capital_by_venue": capital, "max_order_notional": "1000000000", "max_gross_notional": "1000000000", "max_residual_base": size,

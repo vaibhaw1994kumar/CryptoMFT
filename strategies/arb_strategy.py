@@ -974,11 +974,13 @@ class ArbSessionStrategy:
 
     def __init__(
         self, strategy: CrossVenueArbStrategy, *, ledger, oms, states: dict[str, Any], instruments, instrument_id: str,
-        venue_names: dict[str, str] | None = None, eligibility_policy=None, view_books=None,
+        venue_names: dict[str, str] | None = None, eligibility_policy=None, view_books=None, entry_gate=None,
     ) -> None:
         self.strategy = strategy
         self.eligibility_policy = eligibility_policy       # the session's shared validity/freshness rule: a signal is only made when it passes, and carries its fingerprint to the router
         self.eligibility_blocked = 0
+        self.entry_gate = entry_gate          # callable(now_s) -> True blocks the decision (the profile's MANDATORY dead-feed gate, the backtester's own rule); None = no such gate
+        self.entry_gate_blocked = 0
         self.view_books = view_books          # a runtime that owns persistent float view books (touch ages, message-atomic repair) passes them; else a mirror of the core books is built per decision
         self.ledger, self.oms, self.states = ledger, oms, states
         self.instruments, self.instrument_id = instruments, instrument_id
@@ -1032,6 +1034,9 @@ class ArbSessionStrategy:
                 self.eligibility_blocked += 1
                 return None
             fingerprint = decision.fingerprint
+        if self.entry_gate is not None and self.entry_gate(now_s):
+            self.entry_gate_blocked += 1
+            return None
         floats = self.view_books() if self.view_books is not None else self.float_books(books, now_s)
         if floats is None:
             return None

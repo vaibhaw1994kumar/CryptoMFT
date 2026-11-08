@@ -216,7 +216,7 @@ class TimelinesLatencyModel:
         return 0 if name is None else int(self.timelines.sampler(venue.lower(), name).spec.mean_ms * 1e6)
 
     def to_dict(self) -> dict:
-        return {"source": self.source, "stage_map": dict(self._MAP), "zero_stages": dict(self.zero_stages)}
+        return {"source": self.source, "stage_map": dict(self._MAP), "zero_stages": dict(self.zero_stages), "zero_stages_label": "ASSUMED_ZERO (owner 8 Nov: realistic values come later as a new profile version, once measured)"}
 
     def report(self) -> dict:
         return {**self.to_dict(), "timelines": self.timelines.report()}
@@ -417,6 +417,23 @@ def feed_state(age_s: float, max_book_age_s: float, dead_feed_s: float) -> str:
     if age_s > max_book_age_s:
         return "stale"
     return "valid"
+
+
+def dead_feed_blocks(ages_s: dict, max_age_s: float, dead_feed_s: float, state_by_venue: dict, stats) -> bool:
+    """WP3 dead-feed gate on ABSOLUTE age per venue (moved here from the backtester so the session path runs the same rule): a dead venue, or every venue stale at once, blocks entry. Counts every
+    state transition per venue and every block in `stats`; `state_by_venue` is the caller's memory of each venue's last state."""
+    states = {v: feed_state(age, max_age_s, dead_feed_s) for v, age in ages_s.items()}
+    for v, st in states.items():
+        if st != state_by_venue.get(v):
+            stats[f"feed_{st}_transitions_{v}"] += 1
+            state_by_venue[v] = st
+    if any(st == "dead" for st in states.values()):
+        stats["signals_blocked_by_dead_feed"] += 1
+        return True
+    if all(st != "valid" for st in states.values()):
+        stats["entry_blocked_both_stale"] += 1
+        return True
+    return False
 
 
 def s_to_ns(seconds: float) -> int:

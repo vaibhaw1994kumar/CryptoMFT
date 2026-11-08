@@ -78,6 +78,12 @@ class OrderBook:
     # this cannot restore the book (those updates are known to be missing).
     dropped_through: int | None = None
 
+    def note_venue_message(self, ts_ns: int) -> None:
+        """Owner 8 Nov (Q-G1): a book's age is measured from the venue's last message of ANY kind (a trade proves the feed is alive), not only from a book change: a quiet best-bid/ask feed is not a stale one.
+        The age rule itself (500 ms) is unchanged. Never moves the book's time backwards."""
+        if self.last_receive_ts_ns is not None and ts_ns > self.last_receive_ts_ns:
+            self.last_receive_ts_ns = ts_ns
+
     def start_resync(self, reason: str = "connection_resynchronizing") -> None:
         """Discard an unsafe native state and require a new venue snapshot."""
         self.recovery_pending = self.recovery_pending or self.sequence is not None
