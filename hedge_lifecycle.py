@@ -77,6 +77,12 @@ INTENT_TO_HEDGE: dict[str, tuple[HedgeState, ...]] = {   # ems.intent.IntentStat
 }
 
 
+def touch_slack_price(side: str, touch, slack_bps):
+    """The touch_slack cap: the hedge-venue touch moved against us by `slack_bps` (a buy may pay up to it, a sell may receive down to it). The one formula (EMS layer and the OMS hedge dispatch)."""
+    slack = touch * slack_bps / 10_000
+    return touch + slack if side.lower() == "buy" else touch - slack
+
+
 @dataclass(frozen=True)
 class HedgePolicy:
     """The hedge rules the OMS applies under FILL_TRIGGERED. No production value is invented: retrying is OFF until a caller sets a limit, and every number below is
@@ -85,6 +91,7 @@ class HedgePolicy:
     retry_backoff_ns: int = 0
     query_attempt_limit: int = 3              # venue status queries for an UNKNOWN hedge before the alarm (H16: alarm, see OMS._hedge_unknown_escalation)
     max_book_age_ns: int | None = None        # a hedge book older than this at dispatch counts as not valid; None = the book's own state decides
+    touch_slack_bps: float | None = None      # cap rule touch_slack (profile execution.hedge.cap): each hedge attempt is capped at the hedge venue's CURRENT touch moved against us by this many bps; None = the cap is the opportunity's price
     calibration_label: str = "DECISION_PENDING_CALIBRATION"
 
 

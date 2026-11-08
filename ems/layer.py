@@ -19,6 +19,7 @@ from __future__ import annotations
 from collections import Counter
 from typing import Callable
 
+from ..hedge_lifecycle import touch_slack_price
 from .config import ExecutionConfig
 from .intent import ExecutionIntent, IntentError, IntentState, RiskRefused, Role
 from .risk import ReservationBook, RiskLimits
@@ -180,8 +181,7 @@ class ExecutionLayer:
 
     def touch_slack_cap(self, side: str, touch: float, max_walk_bps: float) -> float:
         """Cap rule `touch_slack`: the hedge-venue touch moved against us by max(max_walk_bps, slack_bps_floor) bps."""
-        slack = touch * max(max_walk_bps, float(self.cfg.hedge.get("slack_bps_floor", 5.0))) / 10_000.0
-        return touch + slack if side == "buy" else touch - slack
+        return touch_slack_price(side, touch, max(max_walk_bps, float(self.cfg.hedge.get("slack_bps_floor", 5.0))))
 
     def tactic_name(self, intent: ExecutionIntent, leg) -> str:
         if intent.role == Role.HEDGE:

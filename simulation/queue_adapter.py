@@ -38,7 +38,7 @@ _EPS = 1e-12
 class QueueAwareVenueAdapter(DeterministicVenueAdapter):
     def __init__(
         self, venue: str, executor: MakerExecutor, *, tick_size: float, maker_fee_bps: float, pair: str = "",
-        state: VenueState | None = None, truth=None, feed_venue: str = "",
+        state: VenueState | None = None, truth=None, feed_venue: str = "", view_book=None, driver_fed: bool = False,
     ) -> None:
         if executor.config.fill_evidence not in EVIDENCE_REQUIRED_MODES:
             raise ValueError(
@@ -50,6 +50,10 @@ class QueueAwareVenueAdapter(DeterministicVenueAdapter):
         self.tick_size = float(tick_size)
         self.maker_fee_bps = float(maker_fee_bps)
         self.pair = pair
+        # A replay driver that owns the float view books (`view_book()` returns this venue's persistent view) and feeds the executor itself, exactly as the backtester's event loop does (`feed_*`): the
+        # router's per-event hooks below then do nothing, so the executor sees every snapshot, delta, print and cross check once.
+        self.view_book = view_book
+        self.driver_fed = driver_fed
         self.truth = truth                                             # timing.TruthBooks (the shared rule) or None: taker arrivals execute against the venue-truth book, PostOnly is judged on it when complete
         self.feed_venue = feed_venue or venue.lower()
         self._owns_state = state is None
@@ -73,6 +77,9 @@ class QueueAwareVenueAdapter(DeterministicVenueAdapter):
         if self._owns_state:
             self.state.on_book(mirror, now)               # an externally supplied state is updated by its owner, once per market event
         return mirror
+
+    def _view(self, book: CoreBook, now: float) -> SimBook:
+        return self.view_book() if self.view_book is not None else self._mirror(book, now)
 
     def _decimal(self, value: float) -> Decimal:
         return Decimal(repr(round(value, 12)))
@@ -98,7 +105,14 @@ class QueueAwareVenueAdapter(DeterministicVenueAdapter):
             and request.order_type == OrderType.LIMIT
         )
         if not (mine or replace_mine or resting):
-            return super().handle(request, self._taker_book(request, book))      # IOC / FOK / market: a taker fill, the deterministic walk
+            callbacks = super().handle(request, self._taker_book(request, book))      # IOC / FOK / market: a taker fill, the deterministic walk
+            if (request.time_in_force == TimeInForce.IOC and len(callbacks) == 1 and callbacks[0].event_type == ExecutionEventType.REJECTED
+                    and callbacks[0].reason == "no executable liquidity"):
+                # An IOC that finds nothing inside its limit is not a venue reject: the exchange ends it unfilled (Bybit "Cancelled", Binance "EXPIRED"). The OMS then sees an unfilled IOC (retry or unwind by its own rule)
+                # instead of an unclassified reject (which fails closed to an unwind at once).
+                callbacks = (self._callback(request, ExecutionEventType.CANCELLED, reason="IOC expired unfilled"),)
+                self._remember(callbacks)
+            return callbacks
         if resting and not request.post_only:
             callbacks: tuple[ExecutionCallback, ...] = (self._callback(
                 request, ExecutionEventType.REJECTED,
@@ -118,7 +132,7 @@ class QueueAwareVenueAdapter(DeterministicVenueAdapter):
         if self.truth is None or self._arrival_ns is None or book is None or request.action != OrderAction.SUBMIT:
             return book
         now = self._secs(self._arrival_ns)
-        view = self._mirror(book, now)
+        view = self._view(book, now)
         chosen = self.truth.at_arrival(self.feed_venue, now, view)
         return book if chosen is view else core_book_from_float(self.venue, book.instrument_id, chosen, self._arrival_ns)
 
@@ -127,20 +141,26 @@ class QueueAwareVenueAdapter(DeterministicVenueAdapter):
             return (self._callback(request, ExecutionEventType.REJECTED, reason="no valid book at arrival"),)
         side = "buy" if request.side == CoreSide.BUY else "sell"
         best_bid, best_ask = float(book.best_bid), float(book.best_ask)
-        if self.truth is not None and self._arrival_ns is not None and self.truth.complete_at(self.feed_venue, self._secs(self._arrival_ns)):
-            tb = self.truth.books[self.feed_venue]                                     # PostOnly is judged at ARRIVAL on the book the matching engine held (postonly_reject_model 'on'), when that book is complete
-            best_bid, best_ask = tb.best_bid, tb.best_ask
-            self.truth.stats["postonly_checks_truth_at_arrival"] += 1
+        if self.truth is not None and self._arrival_ns is not None:
+            if self.truth.complete_at(self.feed_venue, self._secs(self._arrival_ns)):
+                tb = self.truth.books[self.feed_venue]                                 # PostOnly is judged at ARRIVAL on the book the matching engine held (postonly_reject_model 'on'), when that book is complete
+                best_bid, best_ask = tb.best_bid, tb.best_ask
+                self.truth.stats["postonly_checks_truth_at_arrival"] += 1
+            else:                                                                      # the backtester waits for a later event here; this path checks the view now (counted: BUILD item if it ever happens)
+                self.truth.stats["postonly_view_fallback_truth_incomplete"] += 1
         if would_cross(side, float(request.price), best_bid, best_ask):
             return (self._callback(request, ExecutionEventType.REJECTED, reason="postonly_would_take_liquidity"),)
         now = self._at(request)
-        mirror = self._mirror(book, now)
+        mirror = self._view(book, now)
         order = self.executor.place(
             venue=self.venue, pair=self.pair or request.instrument_id, symbol=self.pair or request.instrument_id,
             side=SimSide.BID if side == "buy" else SimSide.ASK, price=float(request.price), size=float(request.quantity),
             book=mirror, state=self.state.to_market_state(mirror, now), regime_bucket=self.state.regime().bucket, now=now,
             active_ts=now, tick_size=self.tick_size, arrival_ts=now,        # placed at arrival: queue position and the pre-arrival gate are judged from then
         )
+        lc_accept = getattr(self.executor, "lc_accept", None)
+        if lc_accept is not None:
+            lc_accept(order.order_id, order, now, "modelled")             # the executor's lifecycle record, as the backtester's _place_passive
         self._maker_id[request.order_id] = order.order_id
         self._order[order.order_id] = request
         self._cum[request.order_id] = (0.0, 0.0)
@@ -168,7 +188,7 @@ class QueueAwareVenueAdapter(DeterministicVenueAdapter):
     # ---- market data ----------------------------------------------------------------------------------------------------------
 
     def on_trade(self, trade: TradeEvent) -> tuple[tuple[CanonicalOrderRequest, ExecutionCallback], ...]:
-        if trade.venue != self.venue:
+        if trade.venue != self.venue or self.driver_fed:
             return ()
         now = self._secs(trade.receive_ts_ns)
         sign = 1 if trade.aggressor_side == CoreSide.BUY.value else -1
@@ -181,6 +201,8 @@ class QueueAwareVenueAdapter(DeterministicVenueAdapter):
         return self._relay(fills)
 
     def on_book_update(self, book: CoreBook) -> tuple[tuple[CanonicalOrderRequest, ExecutionCallback], ...]:
+        if self.driver_fed:
+            return ()
         live = self.executor.live_orders(self.venue)
         if not live or not book.is_tradable:
             self._seen_size.clear()
@@ -197,6 +219,23 @@ class QueueAwareVenueAdapter(DeterministicVenueAdapter):
         if self.executor.config.opposite_cross_fills:
             fills += self.executor.on_opposite_cross(self.venue, self._mirror(book, now), now, self.maker_fee_bps)
         return self._relay(fills)
+
+    # ---- the driver feeds the executor (the backtester loop's calls, in its order) ---------------------------------------------
+
+    def feed_snapshot(self, view: SimBook, now: float, ets: float | None):
+        self.executor.mark_adverse(self.venue, view, now, self.tick_size)
+        return self._relay(self.executor.on_snapshot(self.venue, view, now, self.tick_size, self.maker_fee_bps, event_ts=ets))
+
+    def feed_delta(self, side: str, price: float, new_size: float, now: float, ets: float | None):
+        return self._relay(self.executor.on_delta(self.venue, side, price, new_size, now, self.tick_size, self.maker_fee_bps, event_ts=ets))
+
+    def feed_trade(self, price: float, volume: float, sign: int, now: float, ets: float | None):
+        return self._relay(self.executor.on_trade(self.venue, price, volume, sign, now, self.maker_fee_bps, event_ts=ets))
+
+    def feed_cross(self, view: SimBook, now: float, ets: float | None):
+        if not self.executor.config.opposite_cross_fills:
+            return ()
+        return self._relay(self.executor.on_opposite_cross(self.venue, view, now, self.maker_fee_bps, event_ts=ets))
 
     # ---- fills -> reports -----------------------------------------------------------------------------------------------------
 

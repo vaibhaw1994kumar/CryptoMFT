@@ -974,11 +974,12 @@ class ArbSessionStrategy:
 
     def __init__(
         self, strategy: CrossVenueArbStrategy, *, ledger, oms, states: dict[str, Any], instruments, instrument_id: str,
-        venue_names: dict[str, str] | None = None, eligibility_policy=None,
+        venue_names: dict[str, str] | None = None, eligibility_policy=None, view_books=None,
     ) -> None:
         self.strategy = strategy
         self.eligibility_policy = eligibility_policy       # the session's shared validity/freshness rule: a signal is only made when it passes, and carries its fingerprint to the router
         self.eligibility_blocked = 0
+        self.view_books = view_books          # a runtime that owns persistent float view books (touch ages, message-atomic repair) passes them; else a mirror of the core books is built per decision
         self.ledger, self.oms, self.states = ledger, oms, states
         self.instruments, self.instrument_id = instruments, instrument_id
         self.venue_names = venue_names or {v: v.upper() for v in strategy.venue_names}        # feed name -> core venue name
@@ -1031,7 +1032,7 @@ class ArbSessionStrategy:
                 self.eligibility_blocked += 1
                 return None
             fingerprint = decision.fingerprint
-        floats = self.float_books(books, now_s)
+        floats = self.view_books() if self.view_books is not None else self.float_books(books, now_s)
         if floats is None:
             return None
         pending, live_makers = self.pending_and_live_makers()

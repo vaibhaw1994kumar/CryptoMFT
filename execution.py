@@ -1243,7 +1243,8 @@ class StrategyDirectedRouter:
                         ExecutionEventType.PARTIAL, ExecutionEventType.FILLED,
                     }
                     else "submit_reject" if callback.event_type == ExecutionEventType.REJECTED
-                    else "cancel_report" if callback.event_type == ExecutionEventType.CANCELLED
+                    else "cancel_report" if callback.event_type == ExecutionEventType.CANCELLED and request.action == OrderAction.CANCEL
+                    else "submit_reject" if callback.event_type == ExecutionEventType.CANCELLED          # an IOC ended unfilled: the same report timeline as a reject notice (the backtester's `_ack_s`)
                     else "submit_ack"
                 )
                 latency_ns = 0 if fixed_latency_ns is not None else self.latency_model.draw(callback.venue, stage)

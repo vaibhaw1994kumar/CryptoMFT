@@ -171,6 +171,7 @@ class TradingSession:
         strategies: list[Any] | None = None,
         dispatch_policy: DispatchPolicy = DispatchPolicy.DETERMINISTIC_SEQUENTIAL,
         maker_venues: tuple[str, ...] = (),
+        hedge_policy=None,
         resync_delay_ns: int | None = None,
         resync_source: Callable[[str, str, int], MarketEvent | None] | None = None,
     ) -> None:
@@ -280,7 +281,7 @@ class TradingSession:
                 cfg.instruments, self.risk, self.ledger,
                 eligibility_policy=self.alignment_policy, router=self.router,
                 residual_policy=cfg.residual_policy, plan_store=plan_store,
-                order_timeout_policy=cfg.order_timeout_policy, dispatch_policy=dispatch_policy,
+                order_timeout_policy=cfg.order_timeout_policy, dispatch_policy=dispatch_policy, hedge_policy=hedge_policy,
             )
         finally:
             # Keep what the OMS registered (reservation consumption) after the

@@ -22,7 +22,7 @@ from .models import (
     stable_id,
 )
 from .orderbook import BookState, OrderBook
-from .hedge_lifecycle import HedgeLifecycle, HedgePolicy, HedgeState
+from .hedge_lifecycle import HedgeLifecycle, HedgePolicy, HedgeState, touch_slack_price
 from .venue_semantics_perp import BINANCE as _MKT_BINANCE, BYBIT as _MKT_BYBIT, classify_reject
 from .risk import (
     PreTradeDecision, ReconciliationReport, RiskEngine, VenueRiskSnapshot,
@@ -330,6 +330,9 @@ class OMS:
         self._last_execution_ts_ns = 0
         self.dispatch_measurements: list[ChildDispatchMeasurement] = []
         self.eligibility_policy = eligibility_policy
+        # Resting-order lifetime (Phase D, D5c; profile arb.maker_max_age_s, MANDATORY there): a post-only order is cancelled this long after the venue accepted it. None = no lifetime (every other caller).
+        self.order_lifetime_ns: int | None = None
+        self._lifetime_deadlines: dict[str, int] = {}
         self.alignment_rejections = 0
         self.plans: dict[str, ParentPlan] = (
             self.plan_store.load_all() if self.plan_store is not None else {}
@@ -2222,7 +2225,24 @@ class OMS:
         if router_due is not None:
             candidates.append(router_due)
         candidates.extend(self._hedge_timer_candidates())
+        candidates.extend(self._lifetime_deadlines.values())
         return min(candidates) if candidates else None
+
+    def _expire_due_orders(self, now_ns: int) -> None:
+        """Cancel every resting post-only order whose lifetime ended at or before ``now_ns``, at its own deadline (the cancel then takes its cancel latency)."""
+        for order_id, deadline in sorted(self._lifetime_deadlines.items(), key=lambda item: item[1]):
+            if deadline > now_ns:
+                break
+            del self._lifetime_deadlines[order_id]
+            for plan in self.plans.values():
+                order = next((x for x in plan.children if x.order_id == order_id), None)
+                if order is None:
+                    continue
+                if order.state in LIVE_ORDER_STATES and not self.router.has_pending_order(order_id):
+                    self.ledger.record("ORDER_LIFETIME_EXPIRED", deadline, parent_id=plan.parent_id, order_id=order_id, venue=order.venue, lifetime_ns=self.order_lifetime_ns)
+                    self.note_cancel_requested(order_id, deadline)
+                    self._cancel_working_orders(plan, [order], deadline)
+                break
 
     def advance_time(
         self, now_ns: int, books: dict[tuple[str, str], OrderBook] | None = None,
@@ -2239,6 +2259,7 @@ class OMS:
             self.process_throttled_routes(due)
             self.check_order_deadlines(due)
             self._hedge_progress_all(due)
+            self._expire_due_orders(due)
             steps += 1
             if steps >= max_steps:
                 raise RuntimeError("EMS timers did not converge")
@@ -2551,6 +2572,11 @@ class OMS:
                 winner=order.state.value,
             )
         self._after_order_state_change(plan, order, previous_state, update)
+        if self.order_lifetime_ns is not None:
+            if update.state == ExecutionEventType.ACKNOWLEDGED and order.post_only and order.state in LIVE_ORDER_STATES:
+                self._lifetime_deadlines.setdefault(order.order_id, update.event_ts_ns + self.order_lifetime_ns)
+            elif order.state in TERMINAL_ORDER_STATES:
+                self._lifetime_deadlines.pop(order.order_id, None)
         self._derive_execution_state(plan, update.observed_ts_ns)
         if plan.parent_id in self._hedge_specs:
             self._fill_triggered_react(plan, order, update.observed_ts_ns)
@@ -3251,9 +3277,14 @@ class OMS:
         done = sum((o.filled_quantity for o in plan.children if o.order_id in self._chain_children[chain.chain_id]), Decimal("0"))
         qty = Decimal(str(chain.exposure_qty)) - done
         attempt = len(self._chain_children[chain.chain_id])
+        cap = spec["limit_price"]
+        if self.hedge_policy.touch_slack_bps is not None:        # cap rule touch_slack: re-taken from the CURRENT hedge touch on every attempt, on the venue's price grid, never inside the cap
+            tick = self.instruments.get(spec["venue"], spec["instrument_id"]).tick_size
+            raw = touch_slack_price(spec["side"].value, touch, Decimal(str(self.hedge_policy.touch_slack_bps)))
+            cap = (raw / tick).to_integral_value(rounding="ROUND_FLOOR" if spec["side"] == Side.BUY else "ROUND_CEILING") * tick
         child = ChildOrder(
             order_id=stable_id("child", plan.parent_id, "HEDGE", chain.chain_id, attempt), parent_id=plan.parent_id, opportunity_id=spec["opportunity_id"],
-            venue=spec["venue"], instrument_id=spec["instrument_id"], side=spec["side"], quantity=qty, limit_price=spec["limit_price"], order_role="HEDGE")
+            venue=spec["venue"], instrument_id=spec["instrument_id"], side=spec["side"], quantity=qty, limit_price=cap, order_role="HEDGE")
         try:
             self.instruments.validate_order(child, ts_ns)
         except ValueError as exc:
