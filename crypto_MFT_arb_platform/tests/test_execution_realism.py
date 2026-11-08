@@ -33,7 +33,7 @@ from crypto_stat_arb.latency import (
 )
 from crypto_stat_arb.ledger import Ledger
 from crypto_stat_arb.models import (
-    BookState, Instrument, MarketEvent, OrderState, PlanState, Side,
+    BookState, Instrument, MarketEvent, OrderState, PlanState, Side, TradeEvent,
 )
 from crypto_stat_arb.oms import OMS
 from crypto_stat_arb.orderbook import OrderBook
@@ -621,6 +621,71 @@ class LateReportAfterCloseTests(unittest.TestCase):
         self.assertTrue(engine.kill_switch)
         self.assertEqual(activations, 1)
         self.assertEqual(engine.kill_switch_reason, "fill discovered after plan close")
+
+
+class TradeHookTests(unittest.TestCase):
+    """Phase D, step D2: a public trade print reaches the venue simulator through the router and the OMS. Nothing consumes it yet, so with the deterministic adapter every result is unchanged."""
+
+    @staticmethod
+    def _trade(price="59995.00", quantity="0.010", venue="BINANCE", side="SELL"):
+        return TradeEvent(
+            event_id="t1", venue=venue, instrument_id=INSTRUMENT, trade_id="1", exchange_ts_ns=3, source_ts_ns=3,
+            receive_ts_ns=3, price=Decimal(price), quantity=Decimal(quantity), aggressor_side=side,
+        )
+
+    def test_the_deterministic_adapter_and_a_missing_adapter_ignore_a_trade(self):
+        router = StrategyDirectedRouter(instrument_master())
+        book = make_book("BINANCE", "59990.00", "60000.00", "1")
+        router.route(submit("rest", "59995.00", "0.010", tif=TimeInForce.GTC), book)
+        self.assertEqual(router.on_trade("BINANCE", self._trade(), 3), 0)       # no on_trade hook: a fill never comes from a print here (F9)
+        self.assertEqual(router.on_trade("BYBIT", self._trade(venue="BYBIT"), 3), 0)       # no adapter for the venue
+        self.assertEqual(router.process_throttled(3), ())
+
+    def test_an_adapter_with_the_hook_fills_through_the_same_delivery_as_a_book_update(self):
+        class PrintFills(DeterministicVenueAdapter):
+            def on_trade(self, trade):
+                out = []
+                for order_id, request in sorted(self.open_orders.items()):
+                    if request.price is not None and trade.price <= request.price:
+                        del self.open_orders[order_id]
+                        callback = self._callback(request, ExecutionEventType.FILLED, filled=request.quantity,
+                                                  last_fill=request.quantity, average_price=request.price)
+                        self._remember((callback,))
+                        out.append((request, callback))
+                return tuple(out)
+
+        router = StrategyDirectedRouter(instrument_master(), adapters={"BINANCE": PrintFills("BINANCE")})
+        book = make_book("BINANCE", "59990.00", "60000.00", "1")
+        router.route(submit("rest", "59995.00", "0.010", tif=TimeInForce.GTC), book)
+        self.assertEqual(router.on_trade("BINANCE", self._trade(), 7), 1)
+        results = router.process_throttled(7)
+        self.assertEqual(results[0].callbacks[0].event_type, ExecutionEventType.FILLED)
+        self.assertEqual(results[0].callbacks[0].event_ts_ns, 7)          # stamped with the match time, as for a book update
+        self.assertEqual(router.adapters["BINANCE"].query_order("rest").state, ExecutionEventType.FILLED)
+
+    def test_the_oms_passes_the_trade_on_and_counts_nothing_without_a_hook(self):
+        oms = OMS(instrument_master(), risk(), Ledger(), router=StrategyDirectedRouter(instrument_master()))
+        self.assertEqual(oms.on_trade("BINANCE", self._trade(), 3), 0)
+
+    def test_the_session_hands_a_trade_to_the_venue_hook_and_leaves_the_book_gate_and_time_monitor_alone(self):
+        from crypto_stat_arb.config import load_config
+        from crypto_stat_arb.session import ExecutionMode, TradingSession
+        cfg, _ = load_config(Path(__file__).resolve().parents[1] / "config/perp_research.json")
+        session = TradingSession(cfg, execution_mode=ExecutionMode.INTERNAL_SIMULATION)
+        venue = cfg.venues[0]
+        seen = []
+
+        class Hook:
+            def on_trade(self, trade):
+                seen.append(trade)
+                return ()
+
+        session.router.adapters[venue] = Hook()
+        trade = replace(self._trade(venue=venue), instrument_id=cfg.instrument_id, receive_ts_ns=9)
+        events_before, seen_before = session.events_processed, dict(session.last_seen_ts_by_venue)
+        self.assertEqual(session.on_trade(trade), 0)
+        self.assertEqual(seen, [trade])
+        self.assertEqual((session.events_processed, session.last_seen_ts_by_venue), (events_before, seen_before))
 
 if __name__ == "__main__":
     unittest.main()
