@@ -40,6 +40,9 @@ decision_status:                         # carried into every result's release_i
   breaker: DECISION_PENDING_CALIBRATION
   unwind_band_bps: DECISION_PENDING_CALIBRATION
   unwind_max_attempts: DECISION_PENDING_CALIBRATION
+  residual_limit: DECISION_PENDING_CALIBRATION   # owner 8 Nov 2026: the core's two stages, hold new risk at 5 s and kill switch at 30 s (the backtester's own 5 s net-exposure breaker stays until Phase D)
+  unwind_band_core: DECISION_PENDING_CALIBRATION   # owner 8 Nov 2026: 15 bps in the core too (it was 10)
+  hedge_unknown_escalation: DECISION_PENDING_CALIBRATION   # H16, accepted 8 Nov 2026: FAILED with alarm and kill switch, in the core
   p_fail: SCENARIO_NOT_CALIBRATED          # Phase C (owner 7 Nov): no execution logs exist; failure costs are reported per scenario, never as a measured rate
   loss_fail_bps: SCENARIO_NOT_CALIBRATED   # 7.8 came from a simulated hedge-failure study, not execution logs
   fees: PUBLIC_SCHEDULE_UNVERIFIED_BYBIT_VIP5_BINANCE_VIP9   # B2 step 4: owner-confirmed tiers, public rates as given 7 Nov 2026; the account's own SOLUSDT rates are not read; the Bybit -0.5 rebate is a scenario, not the headline

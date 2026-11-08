@@ -174,12 +174,14 @@
         "BYBIT"
       ],
       "unwind_urgency": "NORMAL",
-      "unwind_price_slippage_bps": "10",
+      "unwind_price_slippage_bps": "15",
       "allow_risk_reducing_under_stop": true,
       "max_unwind_attempts": 3,
       "max_one_sided_notional": "1000",
       "hold_new_risk_on_breach": true,
-      "kill_after_ms": 30000
+      "kill_after_ms": 30000,
+      "decision_status": {"unwind_price_slippage_bps": "DECISION_PENDING_CALIBRATION", "max_unwind_attempts": "DECISION_PENDING_CALIBRATION", "max_residual_age_ms": "DECISION_PENDING_CALIBRATION", "kill_after_ms": "DECISION_PENDING_CALIBRATION"},
+      "decision_notes": {"unwind_price_slippage_bps": "owner 8 Nov 2026: 15 bps (was 10 in the core; the backtester profile v1_2 already used 15)", "max_unwind_attempts": "owner 8 Nov 2026: 3. It was 2 in this config copy until 8 Nov (the code default was 3 since 2 Nov); the change gives one more unwind attempt before the alarm and changes live behaviour", "max_residual_age_ms": "owner 8 Nov 2026: stage 1 of the core's two-stage residual limit: hold new risk at 5 s", "kill_after_ms": "owner 8 Nov 2026: stage 2: kill switch at 30 s if the breach is still open"}
     },
     "timeouts": {
       "report_timeout_ms": 2000,

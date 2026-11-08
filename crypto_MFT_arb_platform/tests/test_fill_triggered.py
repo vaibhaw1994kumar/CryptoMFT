@@ -240,6 +240,46 @@ class CarriedOverFromTheOpportunityTests(Base):
             store2.close()
 
 
+
+class ConcurrentChainsAreCappedByThePackageReservation(Base):
+    """Several partial maker fills while earlier hedges are still in flight: every fill opens its own chain, and the TOTAL hedged or in flight never exceeds what the one package
+    reservation holds for the hedge leg (the maker size), even when the venue over-reports the maker's cumulative fill (refused by the reducer, and bounded again by max_qty). The reservation is made once, at execute, and released at close."""
+
+    def total_hedge(self):
+        return sum((o.quantity for o in self.hedge_children()), Decimal("0"))
+
+    def reserved_hedge_leg(self):
+        return abs(Decimal(self.oms.risk.stats_snapshot()["reserved_position"]["BINANCE"]))
+
+    def test_total_exposure_across_concurrent_chains_never_exceeds_the_reservation(self):
+        self.build(hedge=["ack", "ack", "ack", "ack", "ack"])                         # every hedge is accepted and left resting: all chains stay in flight
+        reserved = self.reserved_hedge_leg()
+        self.assertEqual(reserved, Decimal("0.01"))
+        for n, cum in enumerate(("0.002", "0.005", "0.009", "0.010"), start=1):
+            self.fill(cum, ts=(10 + n) * MS)
+            self.assertLessEqual(self.total_hedge(), reserved, f"after cumulative {cum}")
+            self.assertEqual(self.oms.risk.stats_snapshot()["active_reservations"], 1)   # one package reservation throughout, never topped up
+            self.assertEqual(self.reserved_hedge_leg(), reserved)
+        with self.assertRaises(ValueError):                                            # a venue that over-reports the maker (0.012 of 0.01) is refused by the reducer first...
+            self.fill("0.012", ts=20 * MS)
+        self.assertEqual(self.total_hedge(), Decimal("0.01"))                          # ...and even past the reducer the hedge is bounded by max_qty (see the cap in _hedge_for_maker_fill)
+        self.assertEqual(len(self.chains), 4)                                          # 0.002, 0.003, 0.004 and the 0.001 that completes the package
+        self.assertEqual([c.exposure_qty for c in self.chains], [0.002, 0.003, 0.004, 0.001])
+        self.assertEqual(self.total_hedge(), Decimal("0.01"))
+        self.assertTrue(all(c.state == H.SUBMITTED for c in self.chains))              # all four still in flight at once
+        self.assertEqual(len([o for o in self.hedge_children() if o.state == OrderState.ACKNOWLEDGED]), 4)
+
+    def test_the_cap_holds_while_chains_fill_retry_and_unwind_in_any_mix(self):
+        self.build(hedge=[("fill", None), "ack", ("reject", "-1003"), ("fill", None), ("fill", None)], policy=HedgePolicy(retry_limit=1, retry_backoff_ns=10 * MS))
+        reserved = self.reserved_hedge_leg()
+        for n, cum in enumerate(("0.003", "0.006", "0.008", "0.010"), start=1):
+            self.fill(cum, ts=(100 + n) * MS)
+        self.oms.advance_time(1 * S)
+        chain_exposure = sum(c.exposure_qty for c in self.chains)
+        self.assertAlmostEqual(chain_exposure, 0.010, places=9)                        # chains together cover exactly the maker size
+        self.assertLessEqual(sum((o.quantity for o in self.hedge_children() if o.state in (OrderState.FILLED, OrderState.ACKNOWLEDGED)), Decimal("0")), reserved)
+
+
 class RejectsRetryAndUnwind(Base):
     def test_repeated_rejection_is_retried_within_the_budget_and_the_intervals_are_recorded(self):
         self.build(hedge=[("reject", "-1003"), ("reject", "-1003"), ("fill", None)], policy=HedgePolicy(retry_limit=2, retry_backoff_ns=250 * MS))
@@ -494,6 +534,35 @@ class ReportAndSettings(Base):
         self.assertEqual(len(c["retry_intervals_s"]), 1)
         self.assertIsNotNone(c["residual_exposure_duration_s"])
         self.assertEqual(rep["p_fail_and_loss_fail_bps"].split(" ")[0], "SCENARIO")
+
+    def test_the_maker_child_is_post_only_gtc_so_it_is_priced_as_maker_and_never_read_as_an_unknown_ioc(self):
+        self.build()
+        self.assertEqual((self.maker.post_only, self.maker.time_in_force), (True, "GTC"))
+        self.oms.advance_time(600 * S)                                                # a quiet resting maker is never queried as unknown
+        self.assertEqual(self.maker.state, OrderState.ACKNOWLEDGED)
+
+    def test_owner_decisions_of_8_nov_are_labelled_in_every_config_copy_and_in_the_policy(self):
+        import json
+        root = Path(__file__).resolve().parents[1]
+        for rel in ("src/crypto_stat_arb/config/research.json", "src/crypto_stat_arb/config/perp_research.json", "src/crypto_stat_arb/config/paper_watch.json",
+                    "config/research.json", "config/perp_research.json", "config/paper_watch.json"):
+            r = json.load(open(root / rel))["oms"]["residual"]
+            self.assertEqual(r["unwind_price_slippage_bps"], "15", rel)
+            self.assertEqual({k: r["decision_status"][k] for k in ("unwind_price_slippage_bps", "max_unwind_attempts", "max_residual_age_ms", "kill_after_ms")},
+                             {k: "DECISION_PENDING_CALIBRATION" for k in ("unwind_price_slippage_bps", "max_unwind_attempts", "max_residual_age_ms", "kill_after_ms")}, rel)
+            self.assertIn("was 2", r["decision_notes"]["max_unwind_attempts"])         # the change from 2 is recorded, and says it changes live behaviour
+            self.assertIn("live behaviour", r["decision_notes"]["max_unwind_attempts"])
+        from crypto_stat_arb.execution import ResidualPolicy
+        self.assertEqual(ResidualPolicy(max_residual_base=Decimal("1"), max_residual_age_ns=5 * S).unwind_price_slippage_bps, Decimal("15"))
+        self.assertEqual(ResidualPolicy(max_residual_base=Decimal("1"), max_residual_age_ns=5 * S).max_unwind_attempts, 3)
+
+    def test_the_config_loader_carries_the_labels_into_the_policy(self):
+        from crypto_stat_arb.config import load_config
+        root = Path(__file__).resolve().parents[1]
+        cfg, _raw = load_config(root / "config" / "perp_research.json")
+        rp = cfg.residual_policy
+        self.assertEqual(rp.decision_status["unwind_price_slippage_bps"], "DECISION_PENDING_CALIBRATION")
+        self.assertEqual((rp.unwind_price_slippage_bps, rp.max_unwind_attempts, rp.max_residual_age_ns, rp.kill_after_ns), (Decimal("15"), 3, 5 * S, 30 * S))
 
     def test_the_core_config_copies_agree_on_the_unwind_attempt_budget(self):
         import json
