@@ -149,6 +149,19 @@ if a.scenario != "clean":
     cfg.hedge_faults = dataclasses.replace(cfg.hedge_faults, **over)
     scenario_desc = over
 
+if cfg.runtime == "session":          # Phase D (D5): the core TradingSession replays the feed (profile v1_5 and later); the files below are what the parity comparison reads
+    from new_backtest.session_replay import SessionReplay, write_result
+    _t0 = time.time()
+    _rep = SessionReplay(cfg, doc)
+    _res = _rep.run()
+    write_result(_res, out)
+    from new_backtest.session_replay import order_times_new as _otn
+    (out / "order_times.json").write_text(json.dumps(_otn(_rep), indent=1, default=str))
+    (out / "summary.json").write_text(json.dumps({"label": _res["label"], "runtime": "session", "group": a.group, "cell": a.cell, "day": a.day, "profile": a.profile, "size_base": cfg.arb.max_position_base,
+                                                  "signals": len(_res["signals"]), "orders": len(_res["orders"]), "fills": len(_res["fills"]), "events": _res["events"], "wall_s": time.time() - _t0,
+                                                  "suspended_seconds_total_by_day": _res["manifest"]["invalid_book_policy"]["suspended_seconds_total_by_day"], "release_identity": cfg.release_identity}, indent=1, default=str))
+    print(a.group, a.cell, a.day, f"SESSION wall {time.time() - _t0:.0f}s sig {len(_res['signals'])} orders {len(_res['orders'])} fills {len(_res['fills'])}", flush=True)
+    raise SystemExit(0)
 split = json.loads(Path(a.split_file).read_text()) if Path(a.split_file).exists() else None
 t0 = time.time()
 with warnings.catch_warnings(record=True) as caught:

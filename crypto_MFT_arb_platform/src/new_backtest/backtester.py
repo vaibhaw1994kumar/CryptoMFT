@@ -56,7 +56,7 @@ from .execution import ExecutionConfig, ExecutionLayer, Role
 from .execution.ioc_runtime import IocRuntime
 from .hedge_faults import DisconnectGen, ExposureTracker, HedgeFaultConfig, Outage
 from .margin_model import MarginModel, MarginModelConfig
-from .timing import FixedOffsetAligner, Timelines, TimingConfig, feed_state
+from .timing import FixedOffsetAligner, Timelines, TimingConfig, TruthBooks, feed_state
 from .valuation import MidHistory, common_timestamp_valuation
 from .latency_model import InFlightOrder, LatencyBook, MarkoutTracker, PendingOrderQueue
 from .models import Side
@@ -583,6 +583,8 @@ class CrossVenueArbBacktester:
             if self._truth_on:
                 self.truth_books = {v: OrderBook(v, config.pair, self.venue_specs[v].delta_semantics, tape_repair=config.book_tape_repair,
                                                  own_overlay=config.own_impact == "overlay", message_atomic=config.message_atomic_book) for v in config.venues}
+                self._truth = TruthBooks(self.truth_books, self._truth_apply, message_atomic=config.message_atomic_book, aligner_of=lambda: self.latency.aligner, stats=self.timing_stats)
+                self._ahead = self._truth.ahead                    # the same deques: the placement code below reads them directly
         self.books: dict[str, OrderBook] = {
             v: OrderBook(v, config.pair, self.venue_specs[v].delta_semantics, tape_repair=config.book_tape_repair,
                          own_overlay=config.own_impact == "overlay", message_atomic=config.message_atomic_book)
@@ -1480,14 +1482,8 @@ class CrossVenueArbBacktester:
         self._place_passive(order, now, at_arrival=True)
 
     def _truth_complete_at(self, order: InFlightOrder) -> bool:
-        """True when the truth book of the order's venue is known to be complete at the arrival's exchange time: the catch-up
-        has run and an event stamped after that time is already held (so nothing stamped before it is still to come)."""
-        aligner = self.latency.aligner
-        x = aligner.to_exchange(order.release_ts) if aligner.ready else order.release_ts
-        self._truth_catch_up(order.venue, x, order.release_ts)
-        q = self._ahead[order.venue]
-        tb = self.truth_books[order.venue]
-        return tb.ready and bool(q) and (getattr(q[0], "exchange_ts", None) or 0.0) > x
+        """True when the truth book of the order's venue is complete at the arrival's exchange time (`timing.TruthBooks.complete_at`)."""
+        return self._truth.complete_at(order.venue, order.release_ts)
 
     def _placement_book(self, order: InFlightOrder, view: OrderBook, at_arrival: bool) -> tuple[OrderBook, dict]:
         """placement_book == "truth": the book this order joins. The venue-truth book at the arrival's exchange time when the order is placed AT its arrival and that book is complete there (the
@@ -1967,24 +1963,14 @@ class CrossVenueArbBacktester:
         return max(t.feed.max_ms for t in self.timing_cfg.venues.values()) / 1000.0
 
     def _with_lookahead(self, feed):
-        """Yield the feed in receive order while holding a window of later events per venue (self._ahead), so an arrival at
-        exchange time x can see venue events that the exchange had already processed but the collector had not yet delivered."""
+        """Yield the feed in receive order while holding a window of later events per venue (self._ahead): the shared rule, `timing.TruthBooks.with_lookahead`."""
         self._ahead_mode = True
-        window = self._lookahead_s()
-        buf: deque = deque()
-        it = iter(feed)
-        for ev in it:
-            buf.append(ev)
-            self._ahead[ev.venue].append(ev)
-            while buf and buf[-1].receive_ts - buf[0].receive_ts >= window:
-                yield buf.popleft()
-        while buf:
-            yield buf.popleft()
+        return self._truth.with_lookahead(feed, self._lookahead_s())
 
     def _truth_ingest(self, ev) -> None:
         """Test hook: hand the truth layer an event the feed will deliver later (what _with_lookahead does from the feed)."""
         self._ahead_mode = True
-        self._ahead[ev.venue].append(ev)
+        self._truth.ingest(ev)
 
     def _truth_apply(self, ev, tb: OrderBook) -> None:
         if ev.kind == BOOK:
@@ -1997,64 +1983,23 @@ class CrossVenueArbBacktester:
                 tb.apply_delta(side, price, volume, event_type, getattr(ev, "exchange_ts", None) or ev.receive_ts)
 
     def _truth_catch_up(self, venue: str, x_exchange: float | None, ref_host_ts: float | None = None) -> None:
-        """Apply to the venue-truth book every held event of `venue` stamped at or before exchange time x. ref_host_ts: the host
-        time of whatever is being evaluated (an arrival's release time); events received after it are counted as applied
-        before receipt — the look-ahead the truth layer exists for."""
+        """The shared rule (`timing.TruthBooks.catch_up`): apply to the venue-truth book every held event of `venue` stamped at or before exchange time x."""
         if not self._truth_on:
             return
-        q = self._ahead[venue]
-        tb = self.truth_books[venue]
-        while q:
-            ev = q[0]
-            ets = getattr(ev, "exchange_ts", None)
-            if x_exchange is not None and ets is not None and ets > x_exchange:
-                break
-            q.popleft()
-            if ets is not None and ets < tb.last_update_ts:
-                self.timing_stats["truth_events_out_of_exchange_order"] += 1
-            self._truth_apply(ev, tb)
-            if ref_host_ts is not None and ev.receive_ts > ref_host_ts:
-                self.timing_stats["truth_events_applied_before_receipt"] += 1
-        if self._message_atomic:
-            tb.end_message()                                # message-atomic truth book: every held event of a message shares its exchange time, so a message is never split here
+        self._truth.catch_up(venue, x_exchange, ref_host_ts)
 
     def _truth_sync_event(self, ev) -> None:
-        """Called for every event the strategy view applies: the truth book must be at least as far along."""
+        """Called for every event the strategy view applies: the truth book must be at least as far along (`timing.TruthBooks.sync_event`)."""
         if not self._truth_on:
             return
-        if self._ahead_mode:
-            self._truth_catch_up(ev.venue, getattr(ev, "exchange_ts", None), ev.receive_ts)
-            q = self._ahead[ev.venue]
-            if q and q[0] is ev:                       # exchange_ts missing or out of order: apply it now anyway
-                q.popleft()
-                self._truth_apply(ev, self.truth_books[ev.venue])
-                if self._message_atomic:
-                    self.truth_books[ev.venue].end_message()
-        else:
-            self._truth_apply(ev, self.truth_books[ev.venue])
-            if self._message_atomic:
-                self.truth_books[ev.venue].end_message()
+        self._truth.ahead_mode = self._ahead_mode
+        self._truth.sync_event(ev)
 
     def _arrival_book(self, order: InFlightOrder) -> OrderBook:
-        """The book a taker arrival executes against: the venue-truth book at the arrival's exchange time under WP3, else the
-        strategy view."""
+        """The book a taker arrival executes against: the venue-truth book at the arrival's exchange time under WP3 (`timing.TruthBooks.at_arrival`), else the strategy view."""
         if not self._truth_on:
             return self.books[order.venue]
-        aligner = self.latency.aligner
-        x = aligner.to_exchange(order.release_ts) if aligner.ready else order.release_ts
-        self._truth_catch_up(order.venue, x, order.release_ts)
-        tb = self.truth_books[order.venue]
-        view = self.books[order.venue]
-        if not tb.ready:
-            self.timing_stats["truth_book_not_ready_at_arrival"] += 1
-            return view
-        self.timing_stats["truth_arrivals"] += 1
-        if view.ready and view.mid > 0:
-            d = abs(tb.mid - view.mid) / view.mid * 1e4
-            self.timing_stats["truth_vs_view_mid_bps_sum"] += d
-            if d > self.timing_stats.get("truth_vs_view_mid_bps_max", 0.0):
-                self.timing_stats["truth_vs_view_mid_bps_max"] = d
-        return tb
+        return self._truth.at_arrival(order.venue, order.release_ts, self.books[order.venue])
 
     def _dead_feed_blocks(self, now: float) -> bool:
         """WP3 dead-feed gate on ABSOLUTE age per venue: a dead venue, or every venue stale at once, blocks entry."""
