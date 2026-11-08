@@ -29,7 +29,7 @@ from crypto_stat_arb.hedge_lifecycle import HedgePolicy
 from crypto_stat_arb.models import EventType, MarketEvent, TradeEvent
 from crypto_stat_arb.session import ExecutionMode, TradingSession
 from crypto_stat_arb.simulation.order_book import float_mirror
-from crypto_stat_arb.simulation.queue_adapter import QueueAwareVenueAdapter
+from crypto_stat_arb.simulation.queue_adapter import QueueAwareVenueAdapter, SimulatedVenueFeeder
 from crypto_stat_arb.simulation.venue_state import VenueState
 from crypto_stat_arb.strategies.arb_strategy import ArbSessionStrategy, CrossVenueArbStrategy
 
@@ -136,6 +136,7 @@ class SessionReplay:
         self.strategy = CrossVenueArbStrategy(config.pair, self.venue_specs, config.arb)
         self.shim = ArbSessionStrategy(self.strategy, ledger=self.session.ledger, oms=self.session.oms, states=self.states, instruments=self.app_config.instruments,
                                        instrument_id=self.instrument_id, venue_names=self.names, eligibility_policy=self.session.alignment_policy, view_books=lambda: self.views)
+        self.feeder = SimulatedVenueFeeder(self.session, self.names, self.views, self.states, self.adapters, ets_of=self._ets, delta_uses_book_size=config.delta_uses_book_size)
         self.session.strategies.append(self.shim)
         self.session.strategy = self.shim
         self._stream = stream
@@ -254,6 +255,63 @@ class SessionReplay:
         aligner = self.latency.aligner
         return aligner.to_host(exchange_ts_ns / _NS) if aligner.ready else None
 
+    def _book(self, event: MarketEvent) -> None:
+        """Replay of one book event: the shared feeder (`SimulatedVenueFeeder`, core) does the backtester loop's work, this driver keeps only its own accounting."""
+        now = event.receive_ts_ns
+        self.events["book"] += 1
+        span = self.venue_span.setdefault(self._feed_venue(event.venue), [now, now])
+        span[1] = max(span[1], now)
+        self.feeder.on_book(event)
+        self._book_only_suspension(event.venue, now)
+
+    def _book_only_suspension(self, venue: str, now_ns: int) -> None:
+        """Owner 8 Nov (Q-G1): suspended seconds reported BOTH ways. The session's gate measures age from the venue's last message of any kind; this counts the same blocks with age from the last BOOK
+        change only (the older reading), so the part of the suspension that is only a quiet best-bid/ask feed shows."""
+        self._last_book_ns[venue] = now_ns
+        limit = self.session.cfg.max_book_age_ns
+        blocked = any(
+            (now_ns - self._last_book_ns.get(v, -10 ** 18)) > limit or self.session.books[(v, self.instrument_id)].state.value in ("SYNCING", "GAP_DETECTED", "CHECKSUM_FAILED", "INVALID_DATA", "PRICE_ANOMALY")
+            for v in (self.names[x] for x in self.venues))
+        if blocked and self._bo_since is None:
+            self._bo_since = now_ns
+        elif not blocked and self._bo_since is not None:
+            self._bo_intervals.append((self._bo_since, now_ns))
+            self._bo_since = None
+
+    def _common_window_ns(self) -> tuple[int, int] | None:
+        """The span in which BOTH venues have data (owner 8 Nov): from the later first message to the earlier last message. The Binance tape ends at about 17 h on 2022-01-05 and 2022-01-13."""
+        if len(self.venue_span) < len(self.venues):
+            return None
+        return max(v[0] for v in self.venue_span.values()), min(v[1] for v in self.venue_span.values())
+
+    def _seconds_by_day(self, intervals, clip: tuple[int, int] | None) -> dict[str, float]:
+        out: dict[str, int] = {}
+        for a, b in intervals:
+            if clip is not None:
+                a, b = max(a, clip[0]), min(b, clip[1])
+            for day, ns in self.session.book_gate._segments(a, b):
+                out[day] = out.get(day, 0) + ns
+        return {d: ns / 1e9 for d, ns in sorted(out.items())}
+
+    def _book_only_seconds(self, clip) -> dict[str, float]:
+        """Book-change-age reading, per UTC day, including a suspension still open at the last event, clipped to the common window."""
+        intervals = list(self._bo_intervals) + ([(self._bo_since, self.last_ns)] if self._bo_since is not None else [])
+        return self._seconds_by_day(intervals, clip)
+
+    def _coverage(self) -> dict:
+        w = self._common_window_ns()
+        spans = {v: {"first_ns": a, "last_ns": b} for v, (a, b) in self.venue_span.items()}
+        if w is None:
+            return {"venues": spans, "common_window_ns": None}
+        excluded_after = [{"venue_with_data_until": v, "excluded_from_ns": w[1], "excluded_to_ns": span["last_ns"], "excluded_seconds": (span["last_ns"] - w[1]) / 1e9} for v, span in spans.items() if span["last_ns"] > w[1]]
+        return {"venues": spans, "common_window_ns": list(w), "common_window_hours": (w[1] - w[0]) / 3.6e12, "excluded_span": excluded_after,
+                "label": "DATA_LIMITATION: the span after one venue's data ends is excluded from the comparison and from the suspended seconds; it is not a suspension"}
+
+    def _ets(self, exchange_ts_ns: int) -> float | None:
+        """When the event executed at the exchange, on the host clock (the backtester's `_event_host_ts`); None until the aligner has a sample."""
+        aligner = self.latency.aligner
+        return aligner.to_host(exchange_ts_ns / _NS) if aligner.ready else None
+
     def _deliver(self, adapter, produced, now_ns: int, exchange_ts_ns: int) -> None:
         if produced:
             self.session.router._deliver_resting_fills(adapter.venue, produced, now_ns, exchange_ts_ns=exchange_ts_ns)
@@ -291,23 +349,12 @@ class SessionReplay:
         self._book_only_suspension(event.venue, now)
 
     def _trade(self, trade: TradeEvent) -> None:
-        now = trade.receive_ts_ns
-        now_s = now / _NS
-        price, volume = float(trade.price), float(trade.quantity)
-        if price <= 0 or volume <= 0:
+        if not self.feeder.on_trade(trade):
             return
+        now = trade.receive_ts_ns
         self.events["trade"] += 1
         span = self.venue_span.setdefault(self._feed_venue(trade.venue), [now, now])
         span[1] = max(span[1], now)
-        self.session.oms.advance_time(now, self.session.books)
-        self.session.note_venue_message(trade.venue, now)                  # Q-G1: a print is a message of the venue: its books' age is measured from it
-        sign = 1 if trade.aggressor_side == "BUY" else -1
-        fv = self._feed_venue(trade.venue)
-        view, state, adapter, ets = self.views[fv], self.states[fv], self.adapters[trade.venue], self._ets(trade.exchange_ts_ns)
-        view.on_trade(price, volume, sign, now_s)
-        state.on_trade(now_s, price, volume, sign)
-        produced = list(adapter.feed_trade(price, volume, sign, now_s, ets)) + list(adapter.feed_cross(view, now_s, ets))
-        self._deliver(adapter, produced, now, trade.exchange_ts_ns)
 
     # -- result ------------------------------------------------------------------------------------------------------------
 
