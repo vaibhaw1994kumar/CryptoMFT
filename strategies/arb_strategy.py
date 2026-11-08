@@ -974,9 +974,11 @@ class ArbSessionStrategy:
 
     def __init__(
         self, strategy: CrossVenueArbStrategy, *, ledger, oms, states: dict[str, Any], instruments, instrument_id: str,
-        venue_names: dict[str, str] | None = None,
+        venue_names: dict[str, str] | None = None, eligibility_policy=None,
     ) -> None:
         self.strategy = strategy
+        self.eligibility_policy = eligibility_policy       # the session's shared validity/freshness rule: a signal is only made when it passes, and carries its fingerprint to the router
+        self.eligibility_blocked = 0
         self.ledger, self.oms, self.states = ledger, oms, states
         self.instruments, self.instrument_id = instruments, instrument_id
         self.venue_names = venue_names or {v: v.upper() for v in strategy.venue_names}        # feed name -> core venue name
@@ -1022,6 +1024,13 @@ class ArbSessionStrategy:
 
     def evaluate(self, books: dict, now_ns: int) -> Opportunity | None:
         now_s = now_ns / 1_000_000_000          # int / int is correctly rounded; / 1e9 is not at today's epoch
+        fingerprint = ""
+        if self.eligibility_policy is not None:
+            decision = self.eligibility_policy.evaluate(books, now_ns)
+            if not decision.eligible:
+                self.eligibility_blocked += 1
+                return None
+            fingerprint = decision.fingerprint
         floats = self.float_books(books, now_s)
         if floats is None:
             return None
@@ -1032,7 +1041,7 @@ class ArbSessionStrategy:
         )
         if signal is None:
             return None
-        opportunity = self.to_opportunity(signal, now_ns)
+        opportunity = self.to_opportunity(signal, now_ns, books, fingerprint)
         self.signals[opportunity.opportunity_id] = signal
         self.last_signal = signal
         return opportunity
@@ -1050,7 +1059,7 @@ class ArbSessionStrategy:
         units = value / step
         return (units.to_integral_value(rounding="ROUND_FLOOR" if floor else "ROUND_CEILING")) * step
 
-    def to_opportunity(self, signal: ArbSignal, now_ns: int) -> Opportunity:
+    def to_opportunity(self, signal: ArbSignal, now_ns: int, books: dict | None = None, eligibility_fingerprint: str = "") -> Opportunity:
         buy_core, sell_core = self.venue_names[signal.buy_venue], self.venue_names[signal.sell_venue]
         buy_spec = self.instruments.get(buy_core, self.instrument_id)
         sell_spec = self.instruments.get(sell_core, self.instrument_id)
@@ -1060,6 +1069,7 @@ class ArbSessionStrategy:
             observed_ts_ns=now_ns, buy_venue=buy_core, sell_venue=sell_core,
             buy_price=self._snap(self._exact(signal.buy_price), buy_spec.tick_size, "price", floor=True),         # a bid that is off the grid rests lower, never through its limit
             sell_price=self._snap(self._exact(signal.sell_price), sell_spec.tick_size, "price", floor=False),
-            quantity=quantity, gross_edge_bps=self._exact(signal.gross_edge_bps), estimated_net_edge_bps=self._exact(signal.net_edge_bps),
-            source_event_ids=(),
+            quantity=quantity, gross_edge_bps=self._exact(signal.gross_edge_bps), estimated_net_edge_bps=self._exact(signal.net_edge_bps), eligibility_fingerprint=eligibility_fingerprint,
+            # the router refuses a plan whose books moved between the decision and the dispatch: it compares these with the books' last applied events
+            source_event_ids=() if books is None else (books[(buy_core, self.instrument_id)].last_event_id or "", books[(sell_core, self.instrument_id)].last_event_id or ""),
         )

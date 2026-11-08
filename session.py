@@ -377,7 +377,7 @@ class TradingSession:
             # next snapshot (minutes on Bybit), so replay must apply it too.
             if apply_book and event.event_type in (EventType.BOOK_SNAPSHOT, EventType.BOOK_DELTA):
                 self.books[(event.venue, event.instrument_id)].apply(event)
-                self._schedule_resync(now)
+            self._schedule_resync(now)
             return None
         if event.event_type not in (EventType.BOOK_SNAPSHOT, EventType.BOOK_DELTA):
             return None
@@ -389,7 +389,7 @@ class TradingSession:
         self.oms.advance_time(now, self.books)
         if apply_book:
             self.books[(event.venue, event.instrument_id)].apply(event)
-            self._schedule_resync(now)
+        self._schedule_resync(now)                      # also when the caller applied the book itself (apply_book=False)
         self.oms.on_book_update(event.venue, event.instrument_id, now)
         book_key = (event.venue, event.instrument_id)
         if book_key not in self.opening_marks:
@@ -473,6 +473,11 @@ class TradingSession:
             elif key in self._resync_due and book.state == BookState.VALID:
                 due, since, reason = self._resync_due.pop(key)
                 self.resync_log.append({"venue": venue, "invalid_since_ns": since, "resync_at_ns": now, "wait_ns": now - since, "reason": reason, "by": "DATA_SNAPSHOT", "state_after": book.state.value})
+
+    def resync_if_due(self, now_ns: int) -> None:
+        """For a caller that applies books itself: resync any book whose wait is over BEFORE applying the next event (`on_event` does the same at its start)."""
+        if self.resync_delay_ns is not None:
+            self._resync_due_books(now_ns)
 
     def _resync_due_books(self, now: int) -> None:
         for key, (due, since, reason) in list(self._resync_due.items()):

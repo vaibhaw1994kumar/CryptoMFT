@@ -131,7 +131,12 @@ def _perpetual_fields(x: dict) -> dict[str, Any]:
 
 
 def load_config(path: Path) -> tuple[AppConfig, dict]:
-    raw = json.loads(path.read_text(encoding="utf-8"))
+    return config_from_raw(json.loads(path.read_text(encoding="utf-8")))
+
+
+def config_from_raw(raw: dict) -> tuple[AppConfig, dict]:
+    """The config file's content (already parsed) to the validated AppConfig. The one place that turns the schema into objects: a file (`load_config`) and a run profile
+    (`raw_config_from_profile`) both end here."""
     reject_plaintext_credentials(raw)
     validate_config_keys(raw)
     _validate_strategy_venues(raw)
@@ -421,6 +426,62 @@ def load_config(path: Path) -> tuple[AppConfig, dict]:
         transfers=_transfer_section(raw),
     )
     return cfg, raw
+
+
+def raw_config_from_profile(
+    profile: dict, *, pair: str, venues: tuple[str, ...], ticks: dict[str, str | float], quantity_steps: dict[str, str | float], size_base: float,
+    seed: int = 7, max_book_age_s: float = 0.5,
+) -> tuple[dict, dict[str, str]]:
+    """The run profile (a plain mapping: the YAML after any dataset settings and run overrides were merged) as the raw config the core reads, so a replay and a live run build
+    their `AppConfig` from the same profile through `config_from_raw`. Returns (raw, notes): `notes` names every value that the profile does not state and that was chosen here,
+    with its source, for the run manifest. Nothing here imports the backtester. `ticks` and `quantity_steps` are per lower-case venue and are the dated grid of the dataset
+    (Bybit 0.005 in January 2022, 0.001 in March 2024); `size_base` is the run's clip (max position base at the profile's net ceiling multiple)."""
+    from .fees import tier_rows
+
+    base, quote = pair[:-4], pair[-4:]
+    instrument_id = f"{base}-{quote}-PERP"
+    names = tuple(v.upper() for v in venues)
+    arb, hedge, margin, notes = profile.get("arb") or {}, profile.get("hedge_faults") or {}, profile.get("margin") or {}, {}
+    tiers = {names[i]: (profile.get("fee_presets") or {})[venues[i]] for i in range(len(venues))}
+    fee_rows = tier_rows(tiers, instrument_id)
+    taker = {row["venue"]: row["taker_fee_bps"] for row in fee_rows}
+    size = str(size_base)
+    ceiling = float(arb.get("net_ceiling_multiple", 1.0)) * size_base + float(arb.get("fill_headroom_base", 0.0)) * size_base
+    capital = {v.upper(): str((margin.get("venues") or {}).get(v, {}).get("initial_capital", 1000.0)) for v in venues}
+    margin_venues = {}
+    for v in venues:
+        row = (margin.get("venues") or {}).get(v)
+        if row is None:
+            continue
+        margin_venues[v.upper()] = {"mode": "CROSS", "liquidation": {"enabled": False}, "tiers": {instrument_id: {"source": str(row.get("source", "ASSUMED")), "tiers": [
+            {"max_notional": repr(t["max_notional"]), "maintenance_rate": repr(t["maintenance_rate"]), "initial_rate": repr(t["initial_rate"])} for t in row["tiers"]]}}}
+    for key, why in (("book_sanity", "core defaults (500 bps mid jump and spread); the backtester has no price-sanity gate: a block by it is a gate window in the parity comparison"),
+                     ("time", "core defaults except feed age = max_book_age_s; replay receive stamps are the backtester's"), ("quality", "core defaults (preflight limits are not used by the session)"),
+                     ("monitoring", "core defaults"), ("oms.timeouts", "core defaults"), ("risk.limits", "notional and gross limits set far above any clip: the backtester's own limits are position and margin based")):
+        notes[key] = why
+    raw = {
+        "strategy": {"strategy_id": str(profile.get("name", "profile")), "instrument_id": instrument_id, "venues": list(names), "quantity": size, "entry_bps": "0",
+                     "min_net_edge_bps": str(arb.get("min_net_edge_bps", 0)), "max_book_age_ms": int(round(max_book_age_s * 1000))},
+        "execution_mode": "INTERNAL_SIMULATION",
+        "latency": {"enabled": True, "seed": seed, "preset": str(profile.get("latency_preset", "singapore")), "profiles": {}},
+        "backtest": {"drain_horizon_ms": 10_000},
+        "fees": fee_rows,
+        "risk": {
+            "initial_capital_by_venue": capital, "max_order_notional": "1000000000", "max_gross_notional": "1000000000", "max_residual_base": size,
+            "max_position_base": str(ceiling), "inventory": {"model": "unconstrained"},
+            "margin": {"evaluate_interval_ms": int(float(margin.get("check_every_s", 1.0)) * 1000), "flatten_after_liquidation": bool(margin.get("flatten_other_venue", True)), "venues": margin_venues},
+            "margin_accounts": {v: {"margin_enabled": True} for v in margin_venues},
+        },
+        "oms": {"residual": {"max_residual_base": size, "max_residual_age_ms": 5_000, "hedge_venue_priority": [names[-1], names[0]], "unwind_price_slippage_bps": str(hedge.get("unwind_band_bps", 15.0)),
+                             "max_unwind_attempts": int(hedge.get("unwind_max_attempts", 3)), "hold_new_risk_on_breach": True, "kill_after_ms": 30_000}},
+        "instruments": [{"instrument_id": instrument_id, "venue": n, "symbol": pair, "base": base, "quote": quote, "tick_size": str(ticks[v]), "quantity_step": str(quantity_steps[v]),
+                         "min_quantity": str(quantity_steps[v]), "min_notional": "1", "taker_fee_bps": str(taker[n]), "product_type": "PERP", "leverage": "10", "contract_type": "LINEAR",
+                         "settlement_asset": quote, "funding_interval_hours": 8, "funding_anchor": "1970-01-01T00:00:00Z"} for v, n in zip(venues, names)],
+        "funding": {"rates": [], "settle_lag_ms": 5000, "mark_fallback": "exchange_mark", "max_mark_age_ms": 60000, "max_abs_rate": "0.03"},
+    }
+    notes["tick_and_step"] = "the dated grid passed by the caller (not read from the profile's venue_ticks)"
+    notes["resync_delay_s"] = f"{profile.get('resync_delay_s', 5.0)} ASSUMED (profile setting; read by the replay driver, not part of AppConfig)"
+    return raw, notes
 
 
 def _transfer_section(raw: dict) -> dict[str, Any]:
