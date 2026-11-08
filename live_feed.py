@@ -1833,18 +1833,25 @@ class LiveOrderBookService:
     async def _recv_fresh(
         self, venue: str, websocket: WebSocketLike
     ) -> str | bytes:
+        timeout = self._remaining_fresh_seconds(venue)
+        armed_state = self.books[venue].state.value
         try:
-            frame = await asyncio.wait_for(
-                websocket.recv(), timeout=self._remaining_fresh_seconds(venue)
-            )
+            frame = await asyncio.wait_for(websocket.recv(), timeout=timeout)
         except TimeoutError as exc:
-            self._mark_stale(venue)
+            self._mark_stale(venue, armed_s=timeout, armed_state=armed_state)
             raise ResyncRequired("market_data_stale") from exc
         return frame
 
-    def _mark_stale(self, venue: str) -> None:
+    def _mark_stale(self, venue: str, *, armed_s: float | None = None, armed_state: str = "") -> None:
         book = self.books[venue]
         age = self._book_ages().get(venue)
+        # D7d live check: the silences were detected 1.3 to 4.3 s after the stream went quiet, not at the 0.5 s limit. This record says how long the receive timeout was armed for (a book that is not VALID when
+        # it is armed gets the 15 s initial-sync timeout), in which book state, and how old the stream was when it fired.
+        self._connector_log(
+            "BOOK_STREAM_SILENCE", StructuredLogLevel.WARNING, "book stream silent: receive timeout fired", venue=venue,
+            payload={"armed_timeout_s": armed_s, "book_state_when_armed": armed_state, "book_state_at_fire": book.state.value,
+                     "stream_age_ms_at_fire": None if age is None else age / 1e6, "age_limit_ms": self.config.max_book_age_ns / 1e6},
+        )
         if age is not None:
             book.mark_stale_age(age, self.config.max_book_age_ns)
         self.stats[venue].book_stream_silences += 1
@@ -2040,6 +2047,7 @@ class LiveOrderBookService:
     ) -> BookState | None:
         receive_ts_ns = self.clock_ns()
         self._last_book_frame_mono_ns[venue] = self.monotonic_ns()           # any frame on the book connection proves the stream alive, before it is parsed or judged
+        self.books[venue].note_venue_message(receive_ts_ns)                  # and so is the book's age for the session's eligibility rule, which reads last_receive_ts_ns (D7d finding: without this a quiet book was marked stale by it)
         self.stats[venue].book_stream_frames += 1
         adapter_version = (
             "binance-depth-v1" if venue == "BINANCE" else "bybit-depth-v1"

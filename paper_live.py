@@ -84,6 +84,8 @@ class LivePaperSession:
         maker_simulator: Any | None = None,
         flatten_lead_seconds: float = 20.0,
         queue_simulation: dict | None = None,
+        session_kwargs: dict | None = None,
+        strategy_builder: Callable[["LivePaperSession"], list] | None = None,
     ) -> None:
         self.cfg, _ = load_config(Path(config_path))
         settings = settings or LiveFeedSettings(udp_enabled=False)
@@ -114,11 +116,21 @@ class LivePaperSession:
             adapters, self._views, self._states, self.queue_executor = build_queue_simulation(self.cfg, queue_simulation)
         self.session = TradingSession(
             self.cfg, execution_mode=execution_mode, live_data=True,
-            adapters=adapters, books=books, clock_ns=clock_ns,
+            adapters=adapters, books=books, clock_ns=clock_ns, **(session_kwargs or {}),
         )
         if queue_simulation is not None:
             # exchange-time eligibility stays off (ets None) until a measured host-clock offset exists (D7d); the venue names are the feed's own, so the name map is the identity
             self.feeder = SimulatedVenueFeeder(self.session, {v: v for v in self.cfg.venues}, self._views, self._states, adapters, ets_of=lambda ns: None)
+        if strategy_builder is not None:
+            # Phase D, D7d (owner 9 Nov): the strategy of the profile (ArbSessionStrategy for v1_5), built by a caller-supplied builder that reads this session's own ledger, OMS, views and states: the same
+            # strategy object the replay runs, in place of the default spread strategy. The core never imports the builder's package: it is handed in by name (cli `--strategy-setup`).
+            if self.feeder is None:
+                raise ValueError("a strategy builder needs queue_simulation: it reads the simulator's float views and venue states")
+            built = list(strategy_builder(self))
+            if not built:
+                raise ValueError("the strategy builder returned no strategy")
+            self.session.strategies[:] = built
+            self.session.strategy = built[0]
         self.output_dir = self.service.recorder.session_dir / "paper"
         self.output_dir.mkdir(parents=True, exist_ok=True)
         self._timestamps = (self.output_dir / "paper_timestamps.jsonl").open(

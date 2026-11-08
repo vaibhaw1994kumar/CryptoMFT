@@ -198,6 +198,11 @@ class TimelinesLatencyModel:
         self.timelines = timelines
         self.zero_stages: dict[str, int] = {}
 
+    @property
+    def seed(self) -> int:
+        """The timing block's seed: the session artifact writer (`write_session_artifacts`) reports `latency_model.seed` for every latency model (found by the D7d live check: it crashed here)."""
+        return self.timelines.cfg.seed
+
     def draw(self, venue: str, stage: str) -> int:
         name = self._MAP.get(stage)
         if name is None:

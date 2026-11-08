@@ -65,6 +65,13 @@ class ExecutionLayer:
         self._limits_fn: Callable[[], RiskLimits] | None = None
         self._base_fn: Callable[[], dict[str, float]] | None = None
 
+    def suggest_tactic(self, state, cfg=None):
+        """Gap F: the tactic choose_tactic picks for this market state, or None while execution.tactic_choice is off (it never changes what the layer sends; the caller decides what to do with the answer)."""
+        if self.cfg.tactic_choice == "off":
+            return None
+        from .tactics.base import choose_tactic
+        return choose_tactic(state, cfg, allow_market_banded=self.cfg.pairing == "maker_maker")      # MARKET_BANDED is for the market-making pairing only, and then only for its emergency reasons
+
     # ── risk wiring ──────────────────────────────────────────────────────────
     def set_risk(self, limits_fn: Callable[[], RiskLimits], base_fn: Callable[[], dict[str, float]]) -> None:
         self._limits_fn, self._base_fn = limits_fn, base_fn

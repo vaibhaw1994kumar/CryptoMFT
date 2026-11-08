@@ -8,6 +8,7 @@ from dataclasses import dataclass, field
 PAIRINGS = ("maker_taker", "maker_maker", "taker_taker")
 ONE_HEDGE_CHILD = ("off", "count", "enforce")
 RISK_RESERVATION = ("off", "count", "enforce")
+TACTIC_CHOICES = ("off", "market_state")        # execution.tactic_choice: off = the profile's tactics as written (every arb profile); market_state = choose_tactic (tactics/base.py), not allowed with the arb pairing maker_taker
 PLACEMENTS = ("touch", "improve", "deep")
 PRICE_RULES = ("conditional_edge", "naive_edge")   # execution.primary.price_rule: conditional_edge (every perp profile) is the edge the signal was gated on; naive_edge is legacy_v0's, kept for that reference only
 # execution.hedge.cap: touch_slack = today's rule, re-taken from the touch on every attempt; conditional_edge_breakeven = the capped_ioc_dp
@@ -43,6 +44,7 @@ class ExecutionConfig:
     price_cap_required: bool = True
     one_hedge_child: str = "count"
     risk_reservation: str = "count"             # MANDATORY in perp: atomic check-and-reserve of primary exposure (4h.2)
+    tactic_choice: str = "off"                  # Gap F: "market_state" lets ExecutionLayer.suggest_tactic answer from the market state; refused with pairing maker_taker; absent from as_dict (and so from the hash) while off
 
     def __post_init__(self) -> None:
         if self.pairing not in PAIRINGS:
@@ -51,6 +53,10 @@ class ExecutionConfig:
             raise ExecutionConfigError(f"execution.one_hedge_child must be one of {ONE_HEDGE_CHILD}")
         if self.risk_reservation not in RISK_RESERVATION:
             raise ExecutionConfigError(f"execution.risk_reservation must be one of {RISK_RESERVATION}")
+        if self.tactic_choice not in TACTIC_CHOICES:
+            raise ExecutionConfigError(f"execution.tactic_choice must be one of {TACTIC_CHOICES}")
+        if self.tactic_choice != "off" and self.pairing == "maker_taker":
+            raise ExecutionConfigError("execution.tactic_choice is never set with the arb pairing maker_taker (the arb profiles keep their tactics as written)")
         for name, want in SECTION_TACTIC.items():
             t = getattr(self, name).get("tactic", want)
             if t in _RENAMED:
@@ -78,9 +84,12 @@ class ExecutionConfig:
                 raise ExecutionConfigError("execution.hedge.cap breakeven_plus_buffer needs cap_buffer_bps >= 0 (bps given up against the break-even price)")
 
     def as_dict(self) -> dict:
-        return {"pairing": self.pairing, "primary": dict(self.primary), "hedge": dict(self.hedge), "maker_maker": dict(self.maker_maker),
-                "unwind": dict(self.unwind), "price_cap_required": self.price_cap_required, "one_hedge_child": self.one_hedge_child,
-                "risk_reservation": self.risk_reservation}
+        out = {"pairing": self.pairing, "primary": dict(self.primary), "hedge": dict(self.hedge), "maker_maker": dict(self.maker_maker),
+               "unwind": dict(self.unwind), "price_cap_required": self.price_cap_required, "one_hedge_child": self.one_hedge_child,
+               "risk_reservation": self.risk_reservation}
+        if self.tactic_choice != "off":
+            out["tactic_choice"] = self.tactic_choice          # only when on, so every existing profile's identity is unchanged
+        return out
 
     def sha256(self) -> str:
         return hashlib.sha256(json.dumps(self.as_dict(), sort_keys=True, default=str).encode()).hexdigest()

@@ -69,6 +69,7 @@ def _live_settings(args: argparse.Namespace) -> LiveFeedSettings:
         udp_max_datagram_bytes=args.udp_max_datagram_bytes,
         monitor_interval_seconds=args.monitor_interval_seconds,
         rest_reconcile_seconds=args.rest_reconcile_seconds,
+        book_heartbeat_seconds=args.book_heartbeat_seconds,
     )
 
 
@@ -107,6 +108,8 @@ def _print_live_result(result: dict) -> None:
 
 
 async def _run_live_paper(args: argparse.Namespace) -> dict:
+    if args.queue_sim and args.maker_dry_run:
+        raise SystemExit("--queue-sim and --maker-dry-run are two different simulated venues: choose one")
     if args.execution_mode == "venue_testnet":
         raise SystemExit(
             "VENUE_TESTNET needs a CredentialBroker backed by your secret manager: "
@@ -115,12 +118,27 @@ async def _run_live_paper(args: argparse.Namespace) -> dict:
             "from Python. Credentials are never accepted on the command line."
         )
     settings = _live_settings(args)
+    queue_simulation = {} if args.queue_sim else None
+    session_kwargs, strategy_builder = None, None
+    if args.strategy_setup:
+        # D7d (owner 9 Nov): the profile's own strategy and simulator settings, from a setup function named on the command line (`package.module:function`, called with `--strategy-profile`);
+        # it returns {"session_kwargs", "queue_simulation", "strategy_builder"}. Imported by name so the core imports no backtester package.
+        if not args.queue_sim:
+            raise SystemExit("--strategy-setup needs --queue-sim (the strategy reads the queue simulator's views and states)")
+        if not args.strategy_profile:
+            raise SystemExit("--strategy-setup needs --strategy-profile")
+        import importlib
+        module_name, _, function = args.strategy_setup.partition(":")
+        setup = getattr(importlib.import_module(module_name), function)(args.strategy_profile)
+        session_kwargs, strategy_builder = setup["session_kwargs"], setup["strategy_builder"]
+        queue_simulation = dict(setup["queue_simulation"])
     paper = LivePaperSession(
         args.config, args.output_dir,
         args.session_id or default_live_session_id(), settings,
         execution_mode=ExecutionMode.INTERNAL_PAPER,
         status_poll_seconds=max(args.status_poll_seconds, 1.0),
         flatten_lead_seconds=args.flatten_lead_seconds,
+        queue_simulation=queue_simulation, session_kwargs=session_kwargs, strategy_builder=strategy_builder,
     )
     if args.maker_dry_run:
         paper.cfg.strategies.setdefault("maker_simulation", {})["enabled"] = True
@@ -194,6 +212,11 @@ def _add_live_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--monitor-interval-seconds", type=float, default=1.0)
     parser.add_argument("--no-udp", action="store_true")
     parser.add_argument("--no-fsync", action="store_true")
+    parser.add_argument(
+        "--book-heartbeat-seconds", type=float, default=0.0,
+        help="Bybit book connection: send an application ping this often so a quiet book still shows a live stream "
+             "(0 = off); the pong counts as a book-stream frame",
+    )
 
 
 def main() -> None:
@@ -316,6 +339,16 @@ def main() -> None:
         "--maker-dry-run", action="store_true",
         help="run the sim_engine queue-aware maker model on live books and trades",
     )
+    paper.add_argument(
+        "--queue-sim", action="store_true",
+        help="simulated venue = the Python queue simulator (queue v2) behind QueueAwareVenueAdapter, the same rules as the replay (Phase D, D7); "
+             "orders stay internal, no venue is contacted for trading",
+    )
+    paper.add_argument(
+        "--strategy-setup", help="`package.module:function`: build the profile's own strategy and queue-simulator settings (needs --queue-sim and --strategy-profile); "
+                                 "e.g. new_backtest.session_replay:live_paper_setup",
+    )
+    paper.add_argument("--strategy-profile", help="the profile name handed to --strategy-setup, e.g. perp_perp_maker_taker_v1_5")
     paper.add_argument("--flatten-lead-seconds", type=float, default=20.0)
     paper.add_argument(
         "--status-only", action="store_true",
