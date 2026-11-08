@@ -8,7 +8,7 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from new_backtest.order_state_machine import Kind
-from new_backtest.venue_semantics_perp import (BINANCE, BYBIT, ERROR_CODE, UnmappedVenueStatus, map_rest_reject, map_stream_update, mapping_table)
+from crypto_stat_arb.venue_semantics_perp import (BINANCE, BYBIT, ERROR_CODE, RETRYABLE_LABELS, UnmappedVenueStatus, classify_reject, map_rest_reject, map_stream_update, mapping_table)
 
 # (market, shape of the recorded message, expected kind, expected label)
 STREAM_SHAPES = [
@@ -82,3 +82,41 @@ def test_table_marks_every_row_observed_or_spec_and_never_defaults_to_cancel():
     assert all(r["label"] != "cancel_confirmed" for r in rows if r["reason_or_code"] == "EC_PostOnlyWillTakeLiquidity")
     spec_rows = [r for r in rows if r["basis"] == "spec"]
     assert spec_rows and all(r["note"] or r["label"] for r in spec_rows)
+
+
+# ---- Phase C (8 Nov 2026): the table lives in the core, every reject row says whether the same request may be sent again ----
+
+def test_the_backtester_name_is_the_same_module_as_the_core():
+    import new_backtest.venue_semantics_perp as old
+    import crypto_stat_arb.venue_semantics_perp as core
+    assert old is core
+
+
+def test_every_reject_row_has_a_retry_answer_and_only_transient_refusals_are_retryable():
+    rejects = [r for r in mapping_table() if r["kind"] == Kind.REJECT.value]
+    assert rejects, "the table has reject rows"
+    assert {r["label"] for r in rejects if r["label"] in RETRYABLE_LABELS} == {"rate_limit"}                       # venue rows: only the transient refusal
+    assert classify_reject(None, "ioc_expired_unfilled")[:2] == ("ioc_unfilled", True)           # engine rows, kept out of the venue table
+    assert classify_reject(None, "price_cap_exceeded")[:2] == ("price_cap_exceeded", True)
+    for market, code in ((BYBIT, "10006"), (BINANCE, "-1003"), (BINANCE, "-1015")):
+        assert map_rest_reject(market, code).retry_permitted is True
+    for market, code in ((BYBIT, "110007"), (BYBIT, "110094"), (BINANCE, "-2019"), (BINANCE, "-5022"), (BINANCE, "-4061")):
+        assert map_rest_reject(market, code).retry_permitted is False
+    assert map_stream_update(BYBIT, "Cancelled", "EC_PostOnlyWillTakeLiquidity").retry_permitted is False
+    assert map_stream_update(BYBIT, "New", "EC_NoError").retry_permitted is None          # not a reject: the question does not apply
+
+
+@pytest.mark.parametrize("market,reason,label,retry", [
+    (None, "-1003", "rate_limit", True), (BINANCE, "-1015", "rate_limit", True), (BYBIT, "10006", "rate_limit", True),
+    (BYBIT, "110007", "margin_insufficient", False), (None, "-5022", "postonly_reject", False),
+    (BYBIT, "EC_PostOnlyWillTakeLiquidity", "postonly_reject", False),
+])
+def test_classify_reject_finds_a_code_as_rest_or_stream_reason(market, reason, label, retry):
+    v = classify_reject(market, reason)
+    assert (v.label, v.retry_permitted, v.classified) == (label, retry, True)
+
+
+@pytest.mark.parametrize("reason", ["", "no executable liquidity", "residual_breach_hold", "999999", "UNKNOWN_TO_VENUE"])
+def test_an_unknown_reason_is_unclassified_and_never_retryable(reason):
+    v = classify_reject(None, reason)
+    assert (v.label, v.retry_permitted, v.classified, v.basis) == ("unclassified", False, False, "none")

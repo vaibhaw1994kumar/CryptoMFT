@@ -613,5 +613,62 @@ class OMSTests(unittest.TestCase):
         self.assertEqual(rejected[0]["dispatched_children"], 0)
 
 
+class Ems01RevalidationAtReleaseTests(unittest.TestCase):
+    """EMS01 (Phase C): a request queued for a rate limit is re-checked when it is released, against the market as it is then. It is expired (rejected as
+    `expired_at_release`, never sent) when the book is no longer valid, the touch has moved past its limit, the kill switch is on, or it waited too long."""
+
+    def build(self, **policy):
+        from crypto_stat_arb.execution import ReleasePolicy
+        self.instruments = instrument_master()
+        self.books = {("BINANCE", "BTC-USDT-SPOT"): make_book("BINANCE", "59999.90", "60000.00"), ("BYBIT", "BTC-USDT-SPOT"): make_book("BYBIT", "60060.00", "60060.10")}
+        self.ledger = Ledger()
+        self.router = StrategyDirectedRouter(self.instruments, route_status={
+            venue: VenueRouteStatus(rate_limit_capacity=1, rate_limit_used=1, rate_limit_window_ns=1_000, rate_limit_policy=RateLimitPolicy.QUEUE) for venue in ("BINANCE", "BYBIT")})
+        self.engine = risk()
+        self.oms = OMS(self.instruments, self.engine, self.ledger, router=self.router, release_policy=ReleasePolicy(**policy) if policy else None)
+        self.plan = self.oms.execute(opportunity(), self.books)
+        self.assertEqual(self.router.rate_limit_snapshot()["pending_requests"], 2)
+        return self
+
+    def test_an_unchanged_market_releases_as_before(self):
+        self.build()
+        self.assertEqual(len(self.oms.process_throttled_routes(1_000)), 2)
+        self.assertEqual(self.plan.terminal_outcome, PlanState.FILLED.value)
+        self.assertEqual(self.oms.expired_at_release, [])
+
+    def test_a_book_that_is_no_longer_valid_expires_the_queued_requests_and_nothing_is_sent(self):
+        self.build()
+        self.oms._books[("BINANCE", "BTC-USDT-SPOT")].start_resync("test")
+        self.oms.process_throttled_routes(1_000)
+        why = {r["venue"]: r["reason"] for r in self.oms.expired_at_release}
+        self.assertTrue(why["BINANCE"].startswith("book_"), why)
+        buy = next(o for o in self.plan.children if o.venue == "BINANCE")
+        self.assertEqual((buy.state.value, buy.filled_quantity), ("REJECTED", Decimal("0")))
+        self.assertTrue(buy.reject_reason.startswith("expired_at_release"))
+        self.assertEqual([r["label"] for r in self.oms.reject_records if r["order_id"] == buy.order_id], ["expired_at_release"])
+        self.assertFalse([r for r in self.oms.reject_records if r["order_id"] == buy.order_id and r["retry_permitted"]])      # not retried blind
+        self.assertTrue(any(e["record_type"] == "THROTTLE_EXPIRED" for e in self.router.trace))
+
+    def test_a_touch_that_moved_past_the_limit_expires_the_taker_request(self):
+        self.build()
+        self.oms._books[("BINANCE", "BTC-USDT-SPOT")] = make_book("BINANCE", "60099.90", "60100.00")      # the buy limit was 60000
+        self.oms.process_throttled_routes(1_000)
+        self.assertEqual({r["venue"]: r["reason"] for r in self.oms.expired_at_release}, {"BINANCE": "price_moved_past_limit"})
+
+    def test_the_kill_switch_expires_new_risk_waiting_in_the_queue(self):
+        self.build()
+        self.engine.activate_kill_switch(now_ns=500, reason="test", source="TEST", ledger=self.ledger)
+        self.oms.process_throttled_routes(1_000)
+        self.assertEqual({r["reason"] for r in self.oms.expired_at_release}, {"kill_switch_active"})
+
+    def test_a_queue_age_limit_expires_a_request_that_waited_too_long_and_none_means_no_limit(self):
+        self.build(max_queue_age_ns=500)
+        self.oms.process_throttled_routes(1_000)
+        self.assertEqual({r["reason"] for r in self.oms.expired_at_release}, {"queue_age"})
+        self.build()                                                              # the default invents no limit
+        self.oms.process_throttled_routes(10_000_000_000)
+        self.assertEqual(self.oms.expired_at_release, [])
+
+
 if __name__ == "__main__":
     unittest.main()

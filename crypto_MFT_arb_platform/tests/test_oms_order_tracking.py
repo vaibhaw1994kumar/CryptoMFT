@@ -218,6 +218,11 @@ class AmbiguousSubmissionTests(unittest.TestCase):
         self.assertEqual(self.sell.state, OrderState.REJECTED)
         self.assertEqual(self.sell.filled_quantity, Decimal("0"))
         self.assertEqual(self.adapter.submits, 1)
+        rec = [r for r in self.oms.reject_records if r["order_id"] == self.sell.order_id]       # Phase C: every reject is classified once, by the venue code table
+        self.assertEqual(len(rec), 1)
+        self.assertFalse(rec[0]["classified"])                                       # a venue "unknown order" answer is no table code: not retryable, counted
+        self.assertFalse(rec[0]["retry_permitted"])
+        self.assertEqual(self.oms.realism_counters["reject_unclassified"], 1)
         self.assertEqual(self.buy.filled_quantity, Decimal("0.01"))                  # the executed leg is kept and handled as residual
         self.assertEqual(fills(self.ledger)[0], Decimal("0.01"))
 

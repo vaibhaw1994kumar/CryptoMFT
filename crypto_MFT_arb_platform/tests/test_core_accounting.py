@@ -308,7 +308,7 @@ class FeesFromTheCore(unittest.TestCase):
             return out
         a, b = flat(load_profile("perp_perp_maker_taker_v1_3")), flat(load_profile("perp_perp_maker_taker_v1_4"))
         diff = {k for k in set(a) | set(b) if a.get(k) != b.get(k)}
-        self.assertEqual(diff, {"name", "description", "fee_source", "funding_source", "margin_source", "ledger_source", "fee_presets.bybit", "fee_presets.binance", "decision_status.fees"})
+        self.assertEqual(diff, {"name", "description", "fee_source", "funding_source", "margin_source", "ledger_source", "fee_presets.bybit", "fee_presets.binance", "decision_status.loss_fail_bps", "decision_status.p_fail", "decision_status.fees"})
 
     def test_the_earlier_profiles_keep_their_own_presets(self):
         for name in ("perp_perp_maker_taker_v1_2", "perp_perp_maker_taker_v1_3"):

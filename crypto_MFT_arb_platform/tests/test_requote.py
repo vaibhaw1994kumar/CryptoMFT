@@ -208,8 +208,9 @@ class Glue(unittest.TestCase):
 
 class NoUnusedSettings(unittest.TestCase):
     """Owner 7 Nov: no strategy setting may be declared and unused. A field of ArbConfig or RepriceConfig that nothing reads, or an EMS section key that nothing reads, fails here.
-    The EMS keys below are declared by ExecutionConfig, named in the frozen profiles and read by nothing today: a listed debt, not a licence (a new unused key fails)."""
-    KNOWN_UNUSED_EMS_KEYS = {"primary": {"price_rule"}, "hedge": {"q"}, "maker_maker": {"escalate_after_s"}, "unwind": {"fallback", "window_s"}}
+    Phase C (8 Nov): the five EMS keys that nothing read are settled: `primary.price_rule` is validated against PRICE_RULES and read by the passive tactic; `hedge.q`,
+    `maker_maker.escalate_after_s`, `unwind.window_s` and `unwind.fallback` were set by no profile and are removed (a profile that names one is refused). The list is empty and stays empty."""
+    KNOWN_UNUSED_EMS_KEYS: dict = {}
 
     @staticmethod
     def _source():
@@ -237,6 +238,26 @@ class NoUnusedSettings(unittest.TestCase):
         unused = {sec: sorted(k for k in keys if not re.search(rf"[\"']{k}[\"']", blob)) for sec, keys in _SECTION_KEYS.items()}
         for sec, ks in unused.items():
             self.assertEqual(set(ks) - self.KNOWN_UNUSED_EMS_KEYS.get(sec, set()), set(), f"execution.{sec}: keys declared and read by nothing")
+
+
+class FiveFormerlyUnreadEmsSettings(unittest.TestCase):
+    def test_the_four_removed_keys_are_refused_and_no_profile_names_them(self):
+        from pathlib import Path
+        from crypto_stat_arb.ems.config import ExecutionConfig, ExecutionConfigError
+        for sec, key in (("hedge", "q"), ("maker_maker", "escalate_after_s"), ("unwind", "window_s"), ("unwind", "fallback")):
+            with self.assertRaises(ExecutionConfigError):
+                ExecutionConfig(**{sec: {key: 1}})
+        text = "\n".join(p.read_text() for p in (Path(__file__).resolve().parents[1] / "profiles").glob("*.yaml"))
+        for key in ("escalate_after_s", "window_s:", "fallback:"):
+            self.assertNotIn(f"  {key}", text.replace("unknown_queue_fallback:", ""), key)
+
+    def test_price_rule_is_validated_and_read_by_the_passive_tactic(self):
+        from crypto_stat_arb.ems.config import ExecutionConfig, ExecutionConfigError
+        from crypto_stat_arb.ems.tactics import get_tactic
+        cfg = ExecutionConfig()
+        self.assertEqual(get_tactic("PASSIVE", cfg).price_rule, "conditional_edge")
+        with self.assertRaises(ExecutionConfigError):
+            ExecutionConfig(primary={"tactic": "PASSIVE", "placement": "deep", "price_rule": "mid"})
 
 
 class ProfileV1_3(unittest.TestCase):
