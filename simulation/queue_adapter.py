@@ -20,7 +20,8 @@ from decimal import Decimal
 from ..execution import (
     CanonicalOrderRequest, DeterministicVenueAdapter, ExecutionCallback, ExecutionEventType, OrderAction, OrderType, TimeInForce,
 )
-from ..models import Side as CoreSide
+from ..models import EventType
+from ..models import MarketEvent, Side as CoreSide
 from ..models import TradeEvent
 from ..orderbook import OrderBook as CoreBook
 from .fill_engine import Fill, MakerExecutor
@@ -261,3 +262,107 @@ class QueueAwareVenueAdapter(DeterministicVenueAdapter):
             self._remember((callback,))
             out.append((request, callback))
         return tuple(out)
+
+
+_NS_PER_S = 1_000_000_000
+
+
+class SimulatedVenueFeeder:
+    """Phase D, D7a: the per-event feeding of the venue simulator, shared by replay and paper (moved here from the replay driver; the core never imports `new_backtest`).
+
+    For every market event it does what the backtester's event loop does, in its order: first a book whose resync wait is over is resynced and the OMS timers and in-flight arrivals up to the event time
+    run (an order sent at t - latency never sees an event received at t), then the core book applies the event (replay) or already has (live, `apply_core=False`), the persistent float VIEW book and
+    the venue state read it, the maker executor is fed through the venue's adapter (a snapshot, or each level of the message, then the opposite-cross check), the fills it produces reach the router at the
+    time the strategy would learn of them, and last the core session runs its gates, strategy and dispatch. A print goes to the view book, the venue state and the executor in the same way.
+
+    `views` and `states` are keyed by the data source's venue name, `adapters` by the core venue name, `names` maps the first to the second; `ets_of(exchange_ts_ns)` gives the event's host-clock time
+    (None until the clock has a sample); `delta_uses_book_size` is the profile's depth-size rule (the executor gets the level's new size, read back from the view book)."""
+
+    def __init__(self, session, names: dict[str, str], views: dict, states: dict, adapters: dict, *, ets_of, delta_uses_book_size: bool = True) -> None:
+        self.session, self.names, self.views, self.states, self.adapters = session, names, views, states, adapters
+        self._feed_name = {core: feed for feed, core in names.items()}
+        self.ets_of = ets_of
+        self.delta_uses_book_size = delta_uses_book_size
+
+    def _deliver(self, adapter, produced, now_ns: int, exchange_ts_ns: int) -> None:
+        if produced:
+            self.session.router._deliver_resting_fills(adapter.venue, produced, now_ns, exchange_ts_ns=exchange_ts_ns)
+
+    def on_book(self, event: MarketEvent, *, apply_core: bool = True, gate_allowed: bool | None = None):
+        session, now = self.session, event.receive_ts_ns
+        now_s = now / _NS_PER_S
+        session.resync_if_due(now)
+        session.oms.advance_time(now, session.books)
+        if apply_core:
+            session.books[(event.venue, event.instrument_id)].apply(event)
+        fv = self._feed_name[event.venue]
+        view, state, adapter, ets = self.views[fv], self.states[fv], self.adapters[event.venue], self.ets_of(event.exchange_ts_ns)
+        produced: list = []
+        if event.event_type == EventType.BOOK_SNAPSHOT:
+            bids, asks = [[float(l.price), float(l.quantity)] for l in event.bids], [[float(l.price), float(l.quantity)] for l in event.asks]
+            if bids and asks:
+                view.apply_snapshot(bids, asks, now_s)
+                state.on_book(view, now_s)
+                produced += adapter.feed_snapshot(view, now_s, ets)
+        else:
+            if not view.ready:                                            # a live feed can start with a REST snapshot that never reached us as an event: the view is seeded from the core book once it is valid
+                core = session.books[(event.venue, event.instrument_id)]
+                if core.state.value == "VALID" and core.bids and core.asks:
+                    view.apply_snapshot([[float(p), float(q)] for p, q in core.bids.items()], [[float(p), float(q)] for p, q in core.asks.items()], now_s)
+            levels = [("bid", float(l.price), float(l.quantity)) for l in event.bids] + [("ask", float(l.price), float(l.quantity)) for l in event.asks]
+            for side, price, size in levels:
+                view.apply_delta(side, price, size, "modify", now_s)
+            view.end_message()
+            state.on_book(view, now_s)
+            for side, price, size in levels:
+                produced += adapter.feed_delta(side, price, view.level_size(side, price) if self.delta_uses_book_size else size, now_s, ets)
+        produced += adapter.feed_cross(view, now_s, ets)
+        self._deliver(adapter, produced, now, event.exchange_ts_ns)
+        return session.on_event(event, apply_book=False, **({} if gate_allowed is None else {"gate_allowed": gate_allowed}))
+
+    def on_trade(self, trade: TradeEvent) -> bool:
+        """False when the print is unusable (non-positive price or size) and nothing was done."""
+        session, now = self.session, trade.receive_ts_ns
+        now_s = now / _NS_PER_S
+        price, volume = float(trade.price), float(trade.quantity)
+        if price <= 0 or volume <= 0:
+            return False
+        session.oms.advance_time(now, session.books)
+        session.note_venue_message(trade.venue, now)                      # a print proves the feed alive: its books' age runs from it (owner 8 Nov, Q-G1)
+        sign = 1 if trade.aggressor_side == "BUY" else -1
+        fv = self._feed_name[trade.venue]
+        view, state, adapter, ets = self.views[fv], self.states[fv], self.adapters[trade.venue], self.ets_of(trade.exchange_ts_ns)
+        view.on_trade(price, volume, sign, now_s)
+        state.on_trade(now_s, price, volume, sign)
+        produced = list(adapter.feed_trade(price, volume, sign, now_s, ets)) + list(adapter.feed_cross(view, now_s, ets))
+        self._deliver(adapter, produced, now, trade.exchange_ts_ns)
+        return True
+
+
+class NullOrderEventSink:
+    """The maker executor writes one record per completed order to its fill model's sink (research training data). Paper trading needs none of it and never trains on simulator fills: a sink that keeps nothing."""
+
+    def record_order_event(self, *args, **kwargs) -> None:
+        return None
+
+
+def build_queue_simulation(session_cfg, maker: dict | None = None):
+    """Phase D, D7b: the venue simulator for a paper session, from the session's own config: one shared `MakerExecutor` (queue v2) behind one `QueueAwareVenueAdapter` per venue, persistent float view
+    books and venue states, and nothing else. Returns (adapters, views, states, executor); the caller builds the `TradingSession` with `adapters` and a `SimulatedVenueFeeder` over the rest.
+    `maker` overrides `MakerConfig` fields; `fill_evidence` is always a trade-confirm mode (a fill needs a real trade)."""
+    from ..fees import Liquidity
+    from .fill_engine import MakerConfig
+
+    settings = {"fill_evidence": "trade_confirm", **(maker or {})}
+    executor = MakerExecutor(NullOrderEventSink(), MakerConfig(**settings))
+    pair = session_cfg.instrument_id
+    adapters, views, states = {}, {}, {}
+    for venue in session_cfg.venues:
+        spec = session_cfg.instruments.get(venue, session_cfg.instrument_id)
+        views[venue] = SimBook(venue, pair, delta_semantics="absolute", tape_repair=False, message_atomic=True)       # tape repair off: a public print never edits the view book (plan: live books must never be edited from trades)
+        states[venue] = VenueState(venue)
+        adapters[venue] = QueueAwareVenueAdapter(
+            venue, executor, tick_size=float(spec.tick_size), maker_fee_bps=float(session_cfg.instruments.fee_bps(venue, session_cfg.instrument_id, Liquidity.MAKER)), pair=pair,
+            state=states[venue], view_book=(lambda v=venue: views[v]), driver_fed=True,
+        )
+    return adapters, views, states, executor

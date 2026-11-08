@@ -83,6 +83,7 @@ class LivePaperSession:
         max_events_in_memory: int = 2_000_000,
         maker_simulator: Any | None = None,
         flatten_lead_seconds: float = 20.0,
+        queue_simulation: dict | None = None,
     ) -> None:
         self.cfg, _ = load_config(Path(config_path))
         settings = settings or LiveFeedSettings(udp_enabled=False)
@@ -103,10 +104,21 @@ class LivePaperSession:
             (venue, self.cfg.instrument_id): book
             for venue, book in self.service.books.items()
         }
+        # Phase D, D7b: the simulated venue behind paper trading is the Python queue simulator (queue v2) through `QueueAwareVenueAdapter`, fed per event by the shared `SimulatedVenueFeeder`; the C++
+        # `maker_simulator` stays a separate, older evidence tool until the D7c comparison is reported. `queue_simulation` = {} turns it on with the executor's defaults, or holds `MakerConfig` overrides.
+        self.feeder = None
+        if queue_simulation is not None:
+            if adapters is not None or execution_mode != ExecutionMode.INTERNAL_PAPER:
+                raise ValueError("queue_simulation replaces the simulated venue adapters: INTERNAL_PAPER only, with no adapters supplied")
+            from .simulation.queue_adapter import SimulatedVenueFeeder, build_queue_simulation
+            adapters, self._views, self._states, self.queue_executor = build_queue_simulation(self.cfg, queue_simulation)
         self.session = TradingSession(
             self.cfg, execution_mode=execution_mode, live_data=True,
             adapters=adapters, books=books, clock_ns=clock_ns,
         )
+        if queue_simulation is not None:
+            # exchange-time eligibility stays off (ets None) until a measured host-clock offset exists (D7d); the venue names are the feed's own, so the name map is the identity
+            self.feeder = SimulatedVenueFeeder(self.session, {v: v for v in self.cfg.venues}, self._views, self._states, adapters, ets_of=lambda ns: None)
         self.output_dir = self.service.recorder.session_dir / "paper"
         self.output_dir.mkdir(parents=True, exist_ok=True)
         self._timestamps = (self.output_dir / "paper_timestamps.jsonl").open(
@@ -149,10 +161,13 @@ class LivePaperSession:
             self.events.append(event)
         else:
             self.dropped_from_memory += 1
-        self.session.on_event(
-            event, now_ns=now, apply_book=False,
-            gate_allowed=not self.service.book_gate.suspended,
-        )
+        if self.feeder is not None:
+            self.feeder.on_book(event, apply_core=False, gate_allowed=not self.service.book_gate.suspended)
+        else:
+            self.session.on_event(
+                event, now_ns=now, apply_book=False,
+                gate_allowed=not self.service.book_gate.suspended,
+            )
         if self.maker_simulator is not None:
             # Event time, not processing time: the same clock a replay uses.
             self.maker_simulator.on_book(event.venue, book, event.receive_ts_ns, event.event_id)
@@ -171,6 +186,8 @@ class LivePaperSession:
             session.on_derivative(ticker)
 
     def _on_trade(self, tick) -> None:
+        if self.feeder is not None:
+            self.feeder.on_trade(tick)
         if self.maker_simulator is not None:
             self.maker_simulator.on_trade_tick(tick)
 
