@@ -22,7 +22,8 @@ from new_backtest.profiles import apply_profile, load_profile
 from new_backtest.session_replay import SessionReplay
 
 day, minutes, out_path = sys.argv[1], float(sys.argv[2]), Path(sys.argv[3])
-maker_overrides = json.loads(sys.argv[4]) if len(sys.argv) > 4 else {}
+maker_overrides = json.loads(sys.argv[4]) if len(sys.argv) > 4 and sys.argv[4] != "profile" else {}
+use_profile_maker = len(sys.argv) > 4 and sys.argv[4] == "profile"
 SLICES = "/Users/vaibhav/Documents/Newproject/out/queue_v2/slices_mar2024"
 X = Path("/Users/vaibhav/Documents/Newproject/out/queue_v2")
 profile = load_profile("perp_perp_maker_taker_v1_5")
@@ -58,6 +59,9 @@ counts = replay_stream(cfg, sim, [("TRADE" if isinstance(e, TradeEvent) else "BO
 print(f"old path ({sim.engine}): {counts}, orders {len(sim.orders)}, fills {len(sim.fills)} in {time.time() - t1:.0f}s", flush=True)
 
 # ---- new path ----
+if use_profile_maker:        # the profile's own maker settings (dedupe_trade_depth, share_trade_volume, depletion ledger, cancel model, ...) as the replay runs use them
+    maker_overrides = {k: v for k, v in dataclasses.asdict(bt_cfg.maker).items()}
+    maker_overrides["unknown_queue_fit"] = str(X / "unknown_queue_fit_mar2024_NONE.json")
 adapters, views, states, executor = build_queue_simulation(cfg, maker_overrides)
 session = TradingSession(cfg, execution_mode=ExecutionMode.INTERNAL_SIMULATION, adapters=adapters, strategies=[])
 feeder = SimulatedVenueFeeder(session, {v: v for v in cfg.venues}, views, states, adapters, ets_of=lambda ns: None)
@@ -123,7 +127,7 @@ only_new = [r for r in rows if r["new_fills"] and not r["old_fills"]]
 exact = [r for r in both if abs(sum(q for _, q, _, _ in r["old_fills"]) - sum(q for _, q, _ in r["new_fills"])) < 1e-9 and abs(r["old_fills"][0][0] - r["new_fills"][0][0]) <= 1_000_000]
 qa = [(r["queue_ahead_old"], r["queue_ahead_new"]) for r in rows if r["queue_ahead_old"] is not None and r["queue_ahead_new"] is not None]
 summary = {
-    "label": "EXPLORATORY: D7c, probe orders of the old paper simulator on a recorded March slice; not a strategy result", "day": day, "minutes": minutes, "new_path_maker_overrides": maker_overrides, "events": len(events), "engine_old": sim.engine,
+    "label": "EXPLORATORY: D7c, probe orders of the old paper simulator on a recorded March slice; not a strategy result", "day": day, "minutes": minutes, "new_path_maker_overrides": ("PROFILE maker settings" if use_profile_maker else maker_overrides), "events": len(events), "engine_old": sim.engine,
     "orders": len(rows), "same_acceptance": same_ack, "old_filled_orders": sum(1 for r in rows if r["old_fills"]), "new_filled_orders": sum(1 for r in rows if r["new_fills"]),
     "filled_by_both": len(both), "filled_only_by_old": len(only_old), "filled_only_by_new": len(only_new), "both_same_qty_and_first_fill_within_1ms": len(exact),
     "old_fill_rows": len(sim.fills), "new_fill_rows": len(new_fills), "old_filled_qty": sum(f["quantity"] for f in sim.fills), "new_filled_qty": sum(f["qty"] for f in new_fills),
