@@ -1694,7 +1694,9 @@ class StrategyDirectedRouter:
         adapter = self.adapters.setdefault(
             request.venue, DeterministicVenueAdapter(request.venue)
         )
-        callbacks = adapter.handle(request, book)
+        # An adapter that models queue position needs the time the request reached the venue, not the time it was created (the difference is the entry latency): it offers `handle_at`.
+        handle_at = getattr(adapter, "handle_at", None)
+        callbacks = handle_at(request, book, venue_ts_ns) if handle_at is not None and venue_ts_ns is not None else adapter.handle(request, book)
         if venue_ts_ns is not None:
             callbacks = tuple(
                 replace(callback, event_ts_ns=venue_ts_ns) for callback in callbacks

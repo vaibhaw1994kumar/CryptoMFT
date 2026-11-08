@@ -25,13 +25,13 @@ from ..models import TradeEvent
 from ..orderbook import OrderBook as CoreBook
 from .fill_engine import Fill, MakerExecutor
 from .models import Side as SimSide
-from .order_book import OrderBook as SimBook
+from .order_book import OrderBook as SimBook, float_mirror
 from .postonly import would_cross
 from .venue_state import VenueState
 
 # fill_evidence modes in which every fill that rests on a depth change needs a confirming print (see MakerConfig.fill_evidence).
 EVIDENCE_REQUIRED_MODES = ("trade_confirm", "trade_confirm+fractional", "confirm_delta_snapshot", "confirm_delta")
-_NS = 1_000_000_000.0
+_NS = 1_000_000_000          # an int: ns / _NS is the correctly rounded float seconds (dividing by 1e9 loses about 100 ns at today's epoch)
 _EPS = 1e-12
 
 
@@ -50,11 +50,13 @@ class QueueAwareVenueAdapter(DeterministicVenueAdapter):
         self.tick_size = float(tick_size)
         self.maker_fee_bps = float(maker_fee_bps)
         self.pair = pair
+        self._owns_state = state is None
         self.state = state or VenueState(venue)
         self._maker_id: dict[str, int] = {}                            # core order id -> executor order id
         self._order: dict[int, CanonicalOrderRequest] = {}             # executor order id -> the request that placed it
         self._cum: dict[str, tuple[float, float]] = {}                 # core order id -> (filled quantity, notional)
         self._seen_size: dict[tuple[str, float], float] = {}           # (side, price) -> displayed size at the last book update we looked at
+        self._arrival_ns: int | None = None                            # set by handle_at for the one request being handled
         self.fills_by_source: dict[str, int] = {}                      # cause of each fill the executor produced (trade, delta, ...): evidence for the parity manifest
 
     # ---- boundary conversions -------------------------------------------------------------------------------------------------
@@ -65,18 +67,26 @@ class QueueAwareVenueAdapter(DeterministicVenueAdapter):
 
     def _mirror(self, book: CoreBook, now: float) -> SimBook:
         """The core's Decimal book as the float book the executor reads. Rebuilt from the current levels, never mutated by our orders."""
-        mirror = SimBook(self.venue, self.pair or book.instrument_id)
-        mirror.apply_snapshot(
-            [[float(p), float(q)] for p, q in book.bids.items()],
-            [[float(p), float(q)] for p, q in book.asks.items()], now,
-        )
-        self.state.on_book(mirror, now)
+        mirror = float_mirror(self.venue, self.pair or book.instrument_id, book.bids, book.asks, now)
+        if self._owns_state:
+            self.state.on_book(mirror, now)               # an externally supplied state is updated by its owner, once per market event
         return mirror
 
     def _decimal(self, value: float) -> Decimal:
         return Decimal(repr(round(value, 12)))
 
     # ---- requests -------------------------------------------------------------------------------------------------------------
+
+    def handle_at(self, request: CanonicalOrderRequest, book: CoreBook | None, arrival_ts_ns: int) -> tuple[ExecutionCallback, ...]:
+        """The router calls this with the time the request reached the venue (creation time plus entry latency): the order is placed, or cancelled, then, against the book as it is at arrival."""
+        self._arrival_ns = arrival_ts_ns
+        try:
+            return self.handle(request, book)
+        finally:
+            self._arrival_ns = None
+
+    def _at(self, request: CanonicalOrderRequest) -> float:
+        return self._secs(request.created_ts_ns if self._arrival_ns is None else self._arrival_ns)
 
     def handle(self, request: CanonicalOrderRequest, book: CoreBook | None) -> tuple[ExecutionCallback, ...]:
         mine = request.action == OrderAction.CANCEL and (request.target_order_id or request.order_id) in self._maker_id
@@ -107,13 +117,13 @@ class QueueAwareVenueAdapter(DeterministicVenueAdapter):
         side = "buy" if request.side == CoreSide.BUY else "sell"
         if would_cross(side, float(request.price), float(book.best_bid), float(book.best_ask)):
             return (self._callback(request, ExecutionEventType.REJECTED, reason="postonly_would_take_liquidity"),)
-        now = self._secs(request.created_ts_ns)
+        now = self._at(request)
         mirror = self._mirror(book, now)
         order = self.executor.place(
             venue=self.venue, pair=self.pair or request.instrument_id, symbol=self.pair or request.instrument_id,
             side=SimSide.BID if side == "buy" else SimSide.ASK, price=float(request.price), size=float(request.quantity),
             book=mirror, state=self.state.to_market_state(mirror, now), regime_bucket=self.state.regime().bucket, now=now,
-            active_ts=now, tick_size=self.tick_size, arrival_ts=now,
+            active_ts=now, tick_size=self.tick_size, arrival_ts=now,        # placed at arrival: queue position and the pre-arrival gate are judged from then
         )
         self._maker_id[request.order_id] = order.order_id
         self._order[order.order_id] = request
@@ -122,7 +132,7 @@ class QueueAwareVenueAdapter(DeterministicVenueAdapter):
 
     def _cancel_own(self, request: CanonicalOrderRequest) -> tuple[ExecutionCallback, ...]:
         target = request.target_order_id or request.order_id
-        order = self.executor.cancel(self._maker_id[target], self._secs(request.created_ts_ns))
+        order = self.executor.cancel(self._maker_id[target], self._at(request))
         if order is None:
             return (self._callback(request, ExecutionEventType.REJECTED, reason="cancel target is not open"),)
         filled, notional = self._cum.get(target, (0.0, 0.0))
@@ -133,7 +143,7 @@ class QueueAwareVenueAdapter(DeterministicVenueAdapter):
 
     def _replace_own(self, request: CanonicalOrderRequest, book: CoreBook | None) -> tuple[ExecutionCallback, ...]:
         target = request.target_order_id or ""
-        old = self.executor.cancel(self._maker_id[target], self._secs(request.created_ts_ns))
+        old = self.executor.cancel(self._maker_id[target], self._at(request))
         if old is None:
             return (self._callback(request, ExecutionEventType.REJECTED, reason="replace target is not open"),)
         replaced = self._callback(request, ExecutionEventType.REPLACED)

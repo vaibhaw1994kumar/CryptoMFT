@@ -18,7 +18,7 @@ from typing import Any, Callable
 from .alignment import CrossVenueEligibilityPolicy
 from .book_gate import BookIntegrityGate
 from .config import AppConfig
-from .execution import StrategyDirectedRouter, VenueExecutionAdapter
+from .execution import DispatchPolicy, StrategyDirectedRouter, VenueExecutionAdapter
 from .latency import LatencyModel, latency_model_from_config
 from .economics import opening_balance_events
 from .borrow import BorrowEngine, BorrowLine, BorrowRecall
@@ -169,6 +169,8 @@ class TradingSession:
         clock_ns: Callable[[], int] | None = None,
         wall_ns: Callable[[], int] = time.perf_counter_ns,
         strategies: list[Any] | None = None,
+        dispatch_policy: DispatchPolicy = DispatchPolicy.DETERMINISTIC_SEQUENTIAL,
+        maker_venues: tuple[str, ...] = (),
     ) -> None:
         execution_mode = ExecutionMode(execution_mode)
         assert_execution_mode(
@@ -176,6 +178,7 @@ class TradingSession:
         )
         self.cfg = cfg
         self.execution_mode = execution_mode
+        self.maker_venues = tuple(maker_venues)      # Phase D: under FILL_TRIGGERED the maker leg rests on the first of these venues that the opportunity trades on (the profile's arb.maker_venues)
         self.live_data = live_data
         self.clock_ns = clock_ns
         self.wall_ns = wall_ns
@@ -268,7 +271,7 @@ class TradingSession:
                 cfg.instruments, self.risk, self.ledger,
                 eligibility_policy=self.alignment_policy, router=self.router,
                 residual_policy=cfg.residual_policy, plan_store=plan_store,
-                order_timeout_policy=cfg.order_timeout_policy,
+                order_timeout_policy=cfg.order_timeout_policy, dispatch_policy=dispatch_policy,
             )
         finally:
             # Keep what the OMS registered (reservation consumption) after the
@@ -471,7 +474,12 @@ class TradingSession:
                 + self.latency_model.draw(opportunity.buy_venue, "strategy")
                 + self.latency_model.draw(opportunity.buy_venue, "risk")
             )
-        plan = self.oms.execute(opportunity, self.books, dispatch_ts_ns=dispatch_ts)
+        maker_venue = None
+        if self.oms.dispatch_policy == DispatchPolicy.FILL_TRIGGERED:
+            maker_venue = next((v for v in self.maker_venues if v in (opportunity.buy_venue, opportunity.sell_venue)), None)
+            if maker_venue is None:
+                raise ValueError(f"FILL_TRIGGERED needs a maker venue: none of maker_venues {self.maker_venues} is a venue of the opportunity ({opportunity.buy_venue}, {opportunity.sell_venue})")
+        plan = self.oms.execute(opportunity, self.books, dispatch_ts_ns=dispatch_ts, maker_venue=maker_venue)
         if hasattr(strategy, "on_plan_closed"):
             self._tracked_plans[plan.parent_id] = strategy
         wall_routed = self.wall_ns()

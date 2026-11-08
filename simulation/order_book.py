@@ -663,3 +663,11 @@ class OrderBook:
             f"{self.best_ask:.6g} x {self.best_ask_size:.4g} "
             f"spread={self.spread_bps:.2f}bps>"
         )
+
+
+def float_mirror(venue: str, pair: str, bids, asks, ts: float) -> OrderBook:
+    """Phase D (D4): the float book of a core (Decimal) book's levels at `ts`: `bids` and `asks` map price to size. The one place the core book becomes the float book the strategy and the queue simulator read
+    (the QueueAwareVenueAdapter and ArbSessionStrategy both call it), so the Decimal-to-float conversion exists once. A fresh book each call: our own orders never change it."""
+    book = OrderBook(venue, pair)
+    book.apply_snapshot([[float(p), float(q)] for p, q in bids.items()], [[float(p), float(q)] for p, q in asks.items()], ts)
+    return book

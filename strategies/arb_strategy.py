@@ -47,10 +47,12 @@ from __future__ import annotations
 import itertools
 import math
 from dataclasses import dataclass, field
+from decimal import Decimal
 from typing import Any
 
+from ..models import Opportunity, OrderState, stable_id
 from ..simulation.models import Side
-from ..simulation.order_book import OrderBook
+from ..simulation.order_book import OrderBook, float_mirror
 from ..simulation.venue_state import VenueState
 from . import edge as edge_mod
 
@@ -952,3 +954,112 @@ class CrossVenueArbStrategy:
             "rejects_total": float(total_rejects),
             **{f"reject_{k}": float(v) for k, v in self.rejects.items()},
         }
+
+
+_LIVE_CHILD_STATES = frozenset({OrderState.CREATED, OrderState.SENT, OrderState.CANCEL_PENDING, OrderState.ACKNOWLEDGED, OrderState.PARTIAL})
+
+
+class ArbSessionStrategy:
+    """The arb strategy as a `TradingSession` strategy (Phase D, D4): `evaluate(books, now_ns) -> Opportunity | None`.
+
+    It wraps `CrossVenueArbStrategy` unchanged. What the backtester kept in float side books is supplied here from the core instead:
+      * books      the float mirror of each core book (`float_mirror`, the one conversion, shared with the QueueAwareVenueAdapter), stamped with the core book's own last receive time so the strategy's
+                   staleness check still sees the real age
+      * inventory  per-venue base and cash from the CORE LEDGER (`ledger.positions`, `ledger.cash_deltas`), not a float inventory the strategy keeps
+      * pending    base still to be bought or sold by orders that are not in the ledger yet, and the live maker order count, from the OMS plans
+      * states     the per-venue market state, owned and updated by the runtime once per market event (read-only here)
+    The signal becomes an `Opportunity`. Float to Decimal goes through the shortest round-trip text, so it is lossless (`float(Decimal(repr(x))) == x`); the only rounding is the instrument's tick (price) and
+    step (quantity), applied where the signal is not already on the grid. `last_signal` and `signals` keep the strategy's own signal by opportunity id for the hedge and the parity manifest."""
+    strategy_id = "cross_venue_arb"
+
+    def __init__(
+        self, strategy: CrossVenueArbStrategy, *, ledger, oms, states: dict[str, Any], instruments, instrument_id: str,
+        venue_names: dict[str, str] | None = None,
+    ) -> None:
+        self.strategy = strategy
+        self.ledger, self.oms, self.states = ledger, oms, states
+        self.instruments, self.instrument_id = instruments, instrument_id
+        self.venue_names = venue_names or {v: v.upper() for v in strategy.venue_names}        # feed name -> core venue name
+        self._feed_name = {core: feed for feed, core in self.venue_names.items()}
+        self.signals: dict[str, ArbSignal] = {}
+        self.last_signal: ArbSignal | None = None
+        self.grid_snaps = {"price": 0, "quantity": 0}                                         # how often the instrument grid changed a signal value (0 when the strategy already quotes on the grid)
+
+    # -- inputs from the core ------------------------------------------------------------------------------------------------
+
+    def inventory(self) -> InventoryBook:
+        inv = InventoryBook()
+        inv.ensure(tuple(self.venue_names))
+        for feed, core in self.venue_names.items():
+            inv.base[feed] = float(self.ledger.positions.get((core, self.instrument_id), Decimal(0)))
+            inv.cash[feed] = float(self.ledger.cash_deltas.get(core, Decimal(0)))
+        return inv
+
+    def pending_and_live_makers(self) -> tuple[PendingExposure, int]:
+        pending, makers = PendingExposure(), 0
+        for plan in self.oms.plans.values():
+            for child in plan.children:
+                if child.state not in _LIVE_CHILD_STATES or child.venue not in self._feed_name:
+                    continue
+                remaining = float(child.quantity - child.filled_quantity)
+                if remaining <= 0:
+                    continue
+                pending.add(self._feed_name[child.venue], child.side.value.lower(), remaining)
+                makers += int(child.post_only)
+        return pending, makers
+
+    def float_books(self, books: dict, now_s: float) -> dict[str, OrderBook] | None:
+        out = {}
+        for feed, core in self.venue_names.items():
+            book = books.get((core, self.instrument_id))
+            if book is None or not book.bids or not book.asks:
+                return None
+            ts = book.last_receive_ts_ns / 1_000_000_000 if book.last_receive_ts_ns else now_s
+            out[feed] = float_mirror(feed, self.strategy.pair, book.bids, book.asks, ts)
+        return out
+
+    # -- the session's call -------------------------------------------------------------------------------------------------
+
+    def evaluate(self, books: dict, now_ns: int) -> Opportunity | None:
+        now_s = now_ns / 1_000_000_000          # int / int is correctly rounded; / 1e9 is not at today's epoch
+        floats = self.float_books(books, now_s)
+        if floats is None:
+            return None
+        pending, live_makers = self.pending_and_live_makers()
+        signal = self.strategy.evaluate(
+            floats, self.states, self.inventory(), now_s, live_maker_orders=live_makers,
+            pending=pending if self.strategy.config.count_pending_exposure else None,
+        )
+        if signal is None:
+            return None
+        opportunity = self.to_opportunity(signal, now_ns)
+        self.signals[opportunity.opportunity_id] = signal
+        self.last_signal = signal
+        return opportunity
+
+    # -- signal to Opportunity ----------------------------------------------------------------------------------------------
+
+    @staticmethod
+    def _exact(x: float) -> Decimal:
+        return Decimal(repr(float(x)))
+
+    def _snap(self, value: Decimal, step: Decimal, kind: str, *, floor: bool = True) -> Decimal:
+        if not step or value % step == 0:
+            return value
+        self.grid_snaps[kind] += 1
+        units = value / step
+        return (units.to_integral_value(rounding="ROUND_FLOOR" if floor else "ROUND_CEILING")) * step
+
+    def to_opportunity(self, signal: ArbSignal, now_ns: int) -> Opportunity:
+        buy_core, sell_core = self.venue_names[signal.buy_venue], self.venue_names[signal.sell_venue]
+        buy_spec = self.instruments.get(buy_core, self.instrument_id)
+        sell_spec = self.instruments.get(sell_core, self.instrument_id)
+        quantity = self._snap(self._exact(signal.qty), max(buy_spec.quantity_step, sell_spec.quantity_step), "quantity")
+        return Opportunity(
+            opportunity_id=stable_id("arb-signal", self.strategy.pair, signal.signal_id, now_ns), strategy_id=self.strategy_id, instrument_id=self.instrument_id,
+            observed_ts_ns=now_ns, buy_venue=buy_core, sell_venue=sell_core,
+            buy_price=self._snap(self._exact(signal.buy_price), buy_spec.tick_size, "price", floor=True),         # a bid that is off the grid rests lower, never through its limit
+            sell_price=self._snap(self._exact(signal.sell_price), sell_spec.tick_size, "price", floor=False),
+            quantity=quantity, gross_edge_bps=self._exact(signal.gross_edge_bps), estimated_net_edge_bps=self._exact(signal.net_edge_bps),
+            source_event_ids=(),
+        )
