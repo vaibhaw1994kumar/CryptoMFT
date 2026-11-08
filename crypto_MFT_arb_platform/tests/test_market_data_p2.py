@@ -163,6 +163,37 @@ class BookStreamLivenessTests(unittest.TestCase):
             self.assertTrue(self.valid_after(live))
             live.close()
 
+    def test_a_pong_keeps_the_book_fresh_for_the_sessions_eligibility_rule_too(self):
+        """D7d finding: the paper session's CrossVenueEligibilityPolicy re-applies a receive-time age rule to the live books (book.mark_stale on last_receive_ts_ns); a frame on the book stream must move that time as well."""
+        from crypto_stat_arb.alignment import CrossVenueEligibilityPolicy
+        with tempfile.TemporaryDirectory() as directory:
+            live = Service(directory)
+            live.frame(bybit("snapshot", 10, live.wall_ms()))
+            policy = CrossVenueEligibilityPolicy(("BYBIT",), "BTC-USDT-SPOT", 500 * MS)
+            books = {("BYBIT", "BTC-USDT-SPOT"): live.service.books["BYBIT"]}
+            for _ in range(4):                                       # 4 x 400 ms of book quiet, a pong each time: eligible throughout
+                live.wall.ns += 400 * MS
+                live.mono.ns += 400 * MS
+                live.frame(json.dumps({"success": True, "ret_msg": "pong", "op": "ping"}))
+                self.assertTrue(policy.evaluate(books, live.wall.ns).eligible)
+            self.assertEqual(live.service.books["BYBIT"].state, BookState.VALID)
+            live.wall.ns += 700 * MS                                 # then a real silence on the stream
+            self.assertFalse(policy.evaluate(books, live.wall.ns).eligible)
+            live.close()
+
+    def test_a_silence_is_logged_with_the_armed_timeout_and_the_book_state(self):
+        with tempfile.TemporaryDirectory() as directory:
+            live = Service(directory)
+            live.frame(bybit("snapshot", 10, live.wall_ms()))
+            live.mono.ns += 3_000 * MS
+            live.service._mark_stale("BYBIT", armed_s=0.4, armed_state="VALID")
+            rows = live.logged("BOOK_STREAM_SILENCE")
+            self.assertEqual(len(rows), 1)
+            payload = rows[0]["payload"]
+            self.assertEqual((payload["armed_timeout_s"], payload["book_state_when_armed"]), (0.4, "VALID"))
+            self.assertAlmostEqual(payload["stream_age_ms_at_fire"], 3000.0, places=3)
+            live.close()
+
     def test_connection_start_forgets_the_old_liveness(self):
         with tempfile.TemporaryDirectory() as directory:
             live = Service(directory)

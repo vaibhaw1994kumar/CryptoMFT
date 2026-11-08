@@ -1,0 +1,727 @@
+{
+ "session": "d7d-run1",
+ "span_s": 2688.374896,
+ "book_data_frames": {
+  "BYBIT": {
+   "frames": 51658,
+   "gap_ms": {
+    "p50": 28.798,
+    "p90": 117.509,
+    "p99": 320.515,
+    "p999": 583.251,
+    "max": 4295.935
+   },
+   "gaps_over_ms": {
+    "500": 108,
+    "1000": 6,
+    "2000": 3
+   }
+  },
+  "BINANCE": {
+   "frames": 25029,
+   "gap_ms": {
+    "p50": 105.759,
+    "p90": 121.94,
+    "p99": 167.867,
+    "p999": 302.565,
+    "max": 4360.951
+   },
+   "gaps_over_ms": {
+    "500": 3,
+    "1000": 3,
+    "2000": 3
+   }
+  }
+ },
+ "book_connection_any_frame": {
+  "BYBIT": {
+   "frames": 62271,
+   "gap_ms": {
+    "p50": 25.862,
+    "p90": 99.597,
+    "p99": 232.604,
+    "p999": 273.627,
+    "max": 4295.935
+   },
+   "gaps_over_ms": {
+    "500": 3,
+    "1000": 3,
+    "2000": 3
+   }
+  },
+  "BINANCE": {
+   "frames": 25029,
+   "gap_ms": {
+    "p50": 105.759,
+    "p90": 121.94,
+    "p99": 167.867,
+    "p999": 302.565,
+    "max": 4360.951
+   },
+   "gaps_over_ms": {
+    "500": 3,
+    "1000": 3,
+    "2000": 3
+   }
+  }
+ },
+ "trade_frames": {
+  "BYBIT": {
+   "frames": 1433,
+   "gap_ms": {
+    "p50": 626.491,
+    "p90": 5534.268,
+    "p99": 13527.709,
+    "p999": 21710.818,
+    "max": 28240.062
+   },
+   "gaps_over_ms": {
+    "500": 771,
+    "1000": 604,
+    "2000": 402
+   }
+  }
+ },
+ "bybit_book_quiet_by_10min": {
+  "0": {
+   "gaps_over_500ms": 5,
+   "max_gap_ms": 688.738
+  },
+  "1": {
+   "gaps_over_500ms": 6,
+   "max_gap_ms": 560.372
+  },
+  "2": {
+   "gaps_over_500ms": 34,
+   "max_gap_ms": 1001.907
+  },
+  "3": {
+   "gaps_over_500ms": 33,
+   "max_gap_ms": 4295.935
+  },
+  "4": {
+   "gaps_over_500ms": 30,
+   "max_gap_ms": 3773.26
+  }
+ },
+ "sequence_continuity": {
+  "BYBIT": {
+   "events": 51658,
+   "non_consecutive": 0,
+   "backwards": 0,
+   "snapshots": 4
+  },
+  "BINANCE": {
+   "events": 25029,
+   "chain_breaks": 7,
+   "backwards": 0,
+   "snapshots": 4
+  }
+ },
+ "sequence_note": "Bybit update ids are venue ids; Binance U/u are venue ids; neither is synthetic in this recording (March 2024 sequences were SYNTHETIC)",
+ "structured_log_counts": {
+  "BOOK_STATE|BINANCE": 4,
+  "BOOK_STATE|BYBIT": 72,
+  "CONNECTED|BINANCE": 4,
+  "CONNECTED|BYBIT": 4,
+  "CONNECTION_ATTEMPT|BINANCE": 4,
+  "CONNECTION_ATTEMPT|BYBIT": 4,
+  "DERIVATIVE_CONNECTED|BINANCE": 1,
+  "DERIVATIVE_CONNECTED|BYBIT": 1,
+  "HOST_CLOCK_STATE|BINANCE": 1,
+  "HOST_CLOCK_STATE|BYBIT": 2,
+  "RECONNECT_SCHEDULED|BINANCE": 3,
+  "RECONNECT_SCHEDULED|BYBIT": 3,
+  "RESYNC_REQUIRED|BINANCE": 3,
+  "RESYNC_REQUIRED|BYBIT": 3,
+  "SESSION_STARTED|": 1,
+  "SESSION_STOPPED|": 1,
+  "TRADE_CONNECTED|BINANCE": 1,
+  "TRADE_CONNECTED|BYBIT": 1,
+  "TRADE_CONNECTION_ATTEMPT|BINANCE": 1,
+  "TRADE_CONNECTION_ATTEMPT|BYBIT": 1
+ },
+ "connection_events": [
+  {
+   "t_s": 1820.1,
+   "event": "RESYNC_REQUIRED",
+   "venue": "BINANCE",
+   "message": "market_data_stale"
+  },
+  {
+   "t_s": 1820.1,
+   "event": "RECONNECT_SCHEDULED",
+   "venue": "BINANCE",
+   "message": "order-book reconnect scheduled"
+  },
+  {
+   "t_s": 1820.1,
+   "event": "RESYNC_REQUIRED",
+   "venue": "BYBIT",
+   "message": "market_data_stale"
+  },
+  {
+   "t_s": 1820.1,
+   "event": "RECONNECT_SCHEDULED",
+   "venue": "BYBIT",
+   "message": "order-book reconnect scheduled"
+  },
+  {
+   "t_s": 2608.1,
+   "event": "RESYNC_REQUIRED",
+   "venue": "BYBIT",
+   "message": "market_data_stale"
+  },
+  {
+   "t_s": 2608.1,
+   "event": "RECONNECT_SCHEDULED",
+   "venue": "BYBIT",
+   "message": "order-book reconnect scheduled"
+  },
+  {
+   "t_s": 2608.5,
+   "event": "RESYNC_REQUIRED",
+   "venue": "BINANCE",
+   "message": "market_data_stale"
+  },
+  {
+   "t_s": 2608.5,
+   "event": "RECONNECT_SCHEDULED",
+   "venue": "BINANCE",
+   "message": "order-book reconnect scheduled"
+  },
+  {
+   "t_s": 2621.3,
+   "event": "RESYNC_REQUIRED",
+   "venue": "BYBIT",
+   "message": "market_data_stale"
+  },
+  {
+   "t_s": 2621.3,
+   "event": "RECONNECT_SCHEDULED",
+   "venue": "BYBIT",
+   "message": "order-book reconnect scheduled"
+  },
+  {
+   "t_s": 2623.2,
+   "event": "RESYNC_REQUIRED",
+   "venue": "BINANCE",
+   "message": "market_data_stale"
+  },
+  {
+   "t_s": 2623.2,
+   "event": "RECONNECT_SCHEDULED",
+   "venue": "BINANCE",
+   "message": "order-book reconnect scheduled"
+  }
+ ],
+ "data_quality_report": {
+  "active_flags": [
+   {
+    "code": "STALE_INTERVALS",
+    "level": "CRITICAL",
+    "message": "stale_intervals exceeded configured threshold",
+    "metric": "stale_intervals",
+    "observed": 74,
+    "scope": "LIVE_PAPER_SESSION",
+    "threshold": 0
+   },
+   {
+    "code": "NEGATIVE_LATENCY",
+    "level": "CRITICAL",
+    "message": "negative_latency exceeded configured threshold",
+    "metric": "negative_latency",
+    "observed": 101,
+    "scope": "LIVE_PAPER_SESSION",
+    "threshold": 0
+   }
+  ],
+  "approval_attestation_sha256": "e6e6d48bfb908c92fc0c6557335a70556aa9a40ee122ec53593d99ffe09a4d55",
+  "correlation_id": "d7d-run1",
+  "counts": {
+   "corrected_negative_latency": 43284,
+   "crossed_books": 0,
+   "duplicates": 0,
+   "events": 76687,
+   "gaps": 0,
+   "impossible_latency": 0,
+   "invalid_levels": 0,
+   "invalid_trades": 0,
+   "negative_latency": 101,
+   "out_of_order": 0,
+   "persistence_lag_ns": 0,
+   "price_jumps": 0,
+   "rejected_partitions": 0,
+   "rejected_records": 0,
+   "schema_exceptions": 0,
+   "silent_feeds": 0,
+   "stale_intervals": 74,
+   "unknown_instrument_rules": 0,
+   "unpersisted_bytes": 0,
+   "wide_spreads": 0
+  },
+  "created_at": "2026-11-08T19:45:19.817183+00:00",
+  "decision": "REJECTED",
+  "defect_count": 2,
+  "defect_log_sha256": "1cbc59d29c27f81c423ca1de9f3499efc19253eb9a3fb28e1230ffd596dec1ee",
+  "health": "CRITICAL",
+  "limitations": [
+   "INTERNAL_PAPER: fills are simulated against live public books with the configured latency model; no venue order was sent.",
+   "Receive latency is measured on the host clock after offset correction."
+  ],
+  "schema_version": "1.0.0",
+  "scope": "LIVE_PAPER_SESSION",
+  "terminal_defect_hash": "459df91f7115960329fa7a177f0d84a1dbafc4b71528b88490d52e46b3b0a9f5",
+  "thresholds": {
+   "max_crossed_books": 0,
+   "max_duplicates": 0,
+   "max_gaps": 0,
+   "max_impossible_latency": 0,
+   "max_invalid_levels": 0,
+   "max_invalid_trades": 0,
+   "max_negative_latency": 0,
+   "max_out_of_order": 0,
+   "max_persistence_lag_ns": 5000000000,
+   "max_price_jumps": 0,
+   "max_rejected_partitions": 0,
+   "max_schema_exceptions": 0,
+   "max_silent_feeds": 0,
+   "max_stale_intervals": 0,
+   "max_unknown_instrument_rules": 0,
+   "max_unpersisted_bytes": 0,
+   "max_wide_spreads": 0,
+   "min_events": 1
+  }
+ },
+ "time_integrity_report": {
+  "blocked_events": 101,
+  "created_at": "2026-11-08T19:45:19.811677+00:00",
+  "cross_venue_alignment": {
+   "breaches": 169,
+   "maximum_skew_ns": 4343090000,
+   "rule": "compare latest local receive timestamps; do not rewrite venue clocks",
+   "samples": 76678,
+   "threshold_ns": 500000000
+  },
+  "events": 76687,
+  "host_clock": {
+   "last_observed_ts_ns": 1794167110268490000,
+   "latest_drift_ppm": 43.52877960701314,
+   "latest_offset_ns": -39809000,
+   "max_abs_drift_ppm": 17012.426488528425,
+   "max_abs_offset_ns": 57901000,
+   "max_drift_ppm": 500.0,
+   "max_offset_ns": 100000000,
+   "samples": 766,
+   "source": "EXCHANGE_TIMESTAMP_LOW_QUANTILE",
+   "state": "SYNCED"
+  },
+  "host_offset_correction": {
+   "aligner": {
+    "accepted_samples": 76663.0,
+    "host_minus_exchange_ms": -19.05202865600586,
+    "negative_raw_drift_share": 0.5657357525794712,
+    "rejected_backlogged": 24.0,
+    "reseeds": 0.0,
+    "warmup_records": 20.0
+   },
+   "clock_offset_estimate_ns": -39800000,
+   "enabled": true,
+   "quantile": 0.01,
+   "tolerance_ns": 0,
+   "window_samples": 2000
+  },
+  "ordering_rule": [
+   "receive_ts_ns",
+   "exchange_ts_ns",
+   "source_ts_ns",
+   "venue",
+   "sequence_start",
+   "sequence",
+   "event_id"
+  ],
+  "policy": {
+   "correct_host_offset": true,
+   "host_offset_min_samples": 20,
+   "host_offset_quantile": 0.01,
+   "host_offset_window": 2000,
+   "max_cross_venue_skew_ns": 500000000,
+   "max_event_latency_ns": 60000000000,
+   "max_feed_age_ns": 500000000,
+   "max_feed_delay_ns": null,
+   "max_host_drift_ppm": 500.0,
+   "max_host_offset_ns": 100000000,
+   "negative_latency_tolerance_ns": 0
+  },
+  "schema_version": "1.0.0",
+  "timestamp_unit": "nanoseconds_since_unix_epoch_utc",
+  "venues": {
+   "BINANCE": {
+    "corrected_negative_latency_events": 9249,
+    "events": 25029,
+    "feed_age_ns_max": 407708000,
+    "feed_delayed_events": 0,
+    "impossible_latency_events": 0,
+    "latency_ns_max": 379528000,
+    "latency_ns_mean": 17991156,
+    "latency_ns_min": -29787000,
+    "latency_ns_p50": 15778000,
+    "latency_ns_p95": 62284000,
+    "latency_percentile_window": 25029,
+    "max_corrected_delay_ns": 379528000,
+    "negative_latency_events": 11,
+    "stale_feed_events": 0
+   },
+   "BYBIT": {
+    "corrected_negative_latency_events": 34035,
+    "events": 51658,
+    "feed_age_ns_max": 197860000,
+    "feed_delayed_events": 0,
+    "impossible_latency_events": 0,
+    "latency_ns_max": 389773000,
+    "latency_ns_mean": -11267195,
+    "latency_ns_min": -58018000,
+    "latency_ns_p50": -13576000,
+    "latency_ns_p95": 32126000,
+    "latency_percentile_window": 51658,
+    "max_corrected_delay_ns": 431708000,
+    "negative_latency_events": 90,
+    "stale_feed_events": 0
+   }
+  }
+ },
+ "latency_report": {
+  "execution_mode": "INTERNAL_PAPER",
+  "limitations": [
+   "Market-data latency is measured from recorded receive and exchange timestamps after host-offset correction; it is not re-drawn during replay.",
+   "Resting orders fill only when the book trades through them; queue-position fills are modelled in the advanced SDK backtester."
+  ],
+  "measured": {
+   "defaulted_venues": [],
+   "profiles": {},
+   "schema_version": "1.0.0",
+   "seed": 0,
+   "source": "measured",
+   "stages": {
+    "BINANCE.market_data": {
+     "count": 25018,
+     "event_pair": [
+      "exchange_ts",
+      "receive_ts"
+     ],
+     "max_ns": 379528000,
+     "mean_ns": 43074553,
+     "p50_ns": 37644000,
+     "p95_ns": 65316000,
+     "p99_ns": 123539000,
+     "window": 25018
+    },
+    "BYBIT.market_data": {
+     "count": 51568,
+     "event_pair": [
+      "exchange_ts",
+      "receive_ts"
+     ],
+     "max_ns": 431708000,
+     "mean_ns": 14485745,
+     "p50_ns": 8871000,
+     "p95_ns": 36572000,
+     "p99_ns": 105381000,
+     "window": 51568
+    }
+   }
+  },
+  "model": {
+   "defaulted_venues": [],
+   "profiles": {
+    "BINANCE": {
+     "cancel": {
+      "base_ns": 40000000,
+      "jitter_ns": 0,
+      "max_ns": 2000000000,
+      "min_ns": 300000,
+      "model": "lognormal",
+      "std_ns": 8000000,
+      "tail_ns": 0,
+      "tail_probability": 0.0
+     },
+     "entry": {
+      "base_ns": 40000000,
+      "jitter_ns": 0,
+      "max_ns": 2000000000,
+      "min_ns": 300000,
+      "model": "lognormal",
+      "std_ns": 8000000,
+      "tail_ns": 0,
+      "tail_probability": 0.0
+     },
+     "fill": {
+      "base_ns": 36000000,
+      "jitter_ns": 0,
+      "max_ns": 2000000000,
+      "min_ns": 300000,
+      "model": "lognormal",
+      "std_ns": 8000000,
+      "tail_ns": 0,
+      "tail_probability": 0.0
+     },
+     "market_data": {
+      "base_ns": 36000000,
+      "jitter_ns": 0,
+      "max_ns": 2000000000,
+      "min_ns": 300000,
+      "model": "lognormal",
+      "std_ns": 8000000,
+      "tail_ns": 0,
+      "tail_probability": 0.0
+     },
+     "risk": {
+      "base_ns": 100000,
+      "jitter_ns": 50000,
+      "max_ns": 0,
+      "min_ns": 0,
+      "model": "uniform",
+      "std_ns": 0,
+      "tail_ns": 0,
+      "tail_probability": 0.0
+     },
+     "strategy": {
+      "base_ns": 200000,
+      "jitter_ns": 100000,
+      "max_ns": 0,
+      "min_ns": 0,
+      "model": "uniform",
+      "std_ns": 0,
+      "tail_ns": 0,
+      "tail_probability": 0.0
+     },
+     "submit_ack": {
+      "base_ns": 36000000,
+      "jitter_ns": 0,
+      "max_ns": 2000000000,
+      "min_ns": 300000,
+      "model": "lognormal",
+      "std_ns": 8000000,
+      "tail_ns": 0,
+      "tail_probability": 0.0
+     },
+     "venue": "BINANCE"
+    },
+    "BYBIT": {
+     "cancel": {
+      "base_ns": 6000000,
+      "jitter_ns": 0,
+      "max_ns": 2000000000,
+      "min_ns": 300000,
+      "model": "lognormal",
+      "std_ns": 2500000,
+      "tail_ns": 0,
+      "tail_probability": 0.0
+     },
+     "entry": {
+      "base_ns": 6000000,
+      "jitter_ns": 0,
+      "max_ns": 2000000000,
+      "min_ns": 300000,
+      "model": "lognormal",
+      "std_ns": 2500000,
+      "tail_ns": 0,
+      "tail_probability": 0.0
+     },
+     "fill": {
+      "base_ns": 2000000,
+      "jitter_ns": 0,
+      "max_ns": 2000000000,
+      "min_ns": 300000,
+      "model": "lognormal",
+      "std_ns": 2500000,
+      "tail_ns": 0,
+      "tail_probability": 0.0
+     },
+     "market_data": {
+      "base_ns": 2000000,
+      "jitter_ns": 0,
+      "max_ns": 2000000000,
+      "min_ns": 300000,
+      "model": "lognormal",
+      "std_ns": 2500000,
+      "tail_ns": 0,
+      "tail_probability": 0.0
+     },
+     "risk": {
+      "base_ns": 100000,
+      "jitter_ns": 50000,
+      "max_ns": 0,
+      "min_ns": 0,
+      "model": "uniform",
+      "std_ns": 0,
+      "tail_ns": 0,
+      "tail_probability": 0.0
+     },
+     "strategy": {
+      "base_ns": 200000,
+      "jitter_ns": 100000,
+      "max_ns": 0,
+      "min_ns": 0,
+      "model": "uniform",
+      "std_ns": 0,
+      "tail_ns": 0,
+      "tail_probability": 0.0
+     },
+     "submit_ack": {
+      "base_ns": 2000000,
+      "jitter_ns": 0,
+      "max_ns": 2000000000,
+      "min_ns": 300000,
+      "model": "lognormal",
+      "std_ns": 2500000,
+      "tail_ns": 0,
+      "tail_probability": 0.0
+     },
+     "venue": "BYBIT"
+    }
+   },
+   "schema_version": "1.0.0",
+   "seed": 7,
+   "source": "preset:singapore",
+   "stages": {}
+  },
+  "schema_version": "1.0.0",
+  "wall_clock_stages": {
+   "feed_to_strategy_ns": {
+    "count": 76442,
+    "max_ns": 28699083,
+    "mean_ns": 244927,
+    "p50_ns": 128792,
+    "p95_ns": 649083,
+    "p99_ns": 1269709
+   },
+   "paper_frame_overhead_ns": {
+    "count": 76687,
+    "max_ns": 38841500,
+    "mean_ns": 831632,
+    "p50_ns": 715708,
+    "p95_ns": 1595417,
+    "p99_ns": 2297750
+   },
+   "strategy_eval_ns": {
+    "count": 76442,
+    "max_ns": 31282917,
+    "mean_ns": 437374,
+    "p50_ns": 428417,
+    "p95_ns": 682250,
+    "p99_ns": 927500
+   }
+  }
+ },
+ "data_quality_defects": [
+  {
+   "code": "STALE_INTERVALS",
+   "level": "CRITICAL",
+   "metric": "stale_intervals",
+   "observed": 74,
+   "threshold": 0
+  },
+  {
+   "code": "NEGATIVE_LATENCY",
+   "level": "CRITICAL",
+   "metric": "negative_latency",
+   "observed": 101,
+   "threshold": 0
+  }
+ ],
+ "book_integrity_gate": {
+  "cancel_requests": 0,
+  "cancelled_orders": 0,
+  "reason": "INITIAL_SYNC",
+  "resume_count": 0,
+  "suspend_count": 0,
+  "suspended": true,
+  "venue_transitions": 0,
+  "venues": {
+   "BINANCE": "RISK_REDUCING_ONLY",
+   "BYBIT": "RISK_REDUCING_ONLY"
+  }
+ },
+ "session_strategies": {
+  "flattening": false,
+  "strategies": {
+   "perp_perp_maker_taker_v1_5": {
+    "closed_plans": 0,
+    "fees": "0",
+    "gross_pnl": "0",
+    "net_pnl": "0",
+    "opportunities": 0,
+    "outcomes": {},
+    "plans": 0,
+    "summary": {
+     "type": "CrossVenueSpreadStrategy"
+    },
+    "type": "CrossVenueSpreadStrategy"
+   }
+  }
+ },
+ "opportunities": 0,
+ "closed_plans": 0,
+ "events_dropped_from_memory": null,
+ "recorder": {
+  "wire_records": 137468,
+  "canonical_events": 76687,
+  "trade_ticks": 38222,
+  "derivative_ticks": 16185,
+  "control_frames": 10943,
+  "rejected_frames": 0,
+  "frame_accounting": {
+   "captured": 137468,
+   "consistent": true,
+   "dispositions": {
+    "CANONICAL": 76687,
+    "CONTROL": 10943,
+    "DERIVATIVE": 16185,
+    "TRADE": 33653
+   },
+   "unresolved": 0,
+   "unresolved_wire_refs": []
+  },
+  "session_sha256": "d75e9a44d1eb7c79b561fc55d662e7ea821c023635bdf68274dc0f913393fdef"
+ },
+ "venue_stats": {
+  "BINANCE": {
+   "connections": 4,
+   "book_stream_frames": 25025,
+   "book_stream_silences": 3,
+   "stale_disconnects": 3,
+   "validation_errors": 0,
+   "parse_errors": 0,
+   "control_frames": 328,
+   "book_syncs": 4,
+   "feed_delayed_events": 0,
+   "reconciles_ok": 0
+  },
+  "BYBIT": {
+   "connections": 4,
+   "book_stream_frames": 62271,
+   "book_stream_silences": 3,
+   "stale_disconnects": 3,
+   "validation_errors": 0,
+   "parse_errors": 0,
+   "control_frames": 10615,
+   "book_syncs": 72,
+   "feed_delayed_events": 0,
+   "reconciles_ok": 0
+  }
+ },
+ "strategy_gate": {
+  "cancel_requests": 31,
+  "cancelled_orders": 0,
+  "reason": "",
+  "resume_count": 29,
+  "suspend_count": 28,
+  "suspended": false,
+  "venue_transitions": 66,
+  "venues": {
+   "BINANCE": "ACTIVE",
+   "BYBIT": "ACTIVE"
+  }
+ }
+}

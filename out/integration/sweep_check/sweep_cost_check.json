@@ -1,0 +1,43 @@
+{
+ "label": "UNVALIDATED_SWEEP_COST until the owner accepts this comparison",
+ "orders_in_archive_by_kind": {
+  "linear|Market|IOC": 67,
+  "linear|Limit|IOC": 2,
+  "spot|Limit|IOC": 35,
+  "spot|Market|IOC": 144
+ },
+ "spot_orders_in_collector_week": 82,
+ "dropped": {
+  "snapshot_older_than_2s": 16
+ },
+ "compared_orders": 66,
+ "real_multi_level_sweeps_in_archive_spot_and_linear": 8,
+ "real_multi_level_in_compared_set": 0,
+ "sim_multi_level_in_compared_set": 1,
+ "cost_bps_vs_touch": {
+  "real": {
+   "mean": 0.009972043652181902,
+   "p50": -0.0,
+   "p90": 1.1200797262158562e-12
+  },
+  "sim": {
+   "mean": 0.004920219413480303,
+   "p50": -0.0,
+   "p90": -0.0
+  },
+  "sim_minus_real": {
+   "mean": -0.0050518242387016,
+   "p10": -1.1200797262158562e-12,
+   "p50": 0.0,
+   "p90": 1.2683044971499229e-12,
+   "min": -1.0680337498675638,
+   "max": 1.084128360797799,
+   "orders_outside_0.5bps": 5,
+   "share_sim_within_0.5bps": 0.9242424242424242
+  }
+ },
+ "multi_level_real_orders": [],
+ "depth_exhausted_in_sim": 0,
+ "real_partially_filled": 0,
+ "note": "single-level orders test the touch and the one-level price; the multi-level sample is too small to test a depth walk; the snapshot is up to 2 s old"
+}

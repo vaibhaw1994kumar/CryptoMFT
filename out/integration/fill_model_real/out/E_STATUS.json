@@ -1,0 +1,63 @@
+{
+ "status": "BLOCKED_NO_CENSORED_ROWS",
+ "reason": "no cancelled or unfilled order has book features: every order of the collector week 2026-04-19..25 was executed; the Cancelled orders of the archive are on ['2026-04-30', '2026-05-01', '2026-05-02'] and the spot collector holds no books for those days; the only linear cancel is on 2026-05-02 and the perp collector holds no 2026 books",
+ "archive_unfilled_inventory_counts_by_kind_status_day": {
+  "linear|Cancelled": {
+   "2026-05-02": 1
+  },
+  "linear|Deactivated": {
+   "2026-04-29": 3
+  },
+  "spot|Cancelled": {
+   "2026-04-30": 9,
+   "2026-05-01": 2637,
+   "2026-05-02": 5280
+  },
+  "spot|PartiallyFilledCanceled": {
+   "2026-04-08": 1,
+   "2026-04-20": 3,
+   "2026-04-22": 2,
+   "2026-04-23": 1,
+   "2026-04-24": 2,
+   "2026-04-25": 6,
+   "2026-04-26": 1,
+   "2026-04-27": 1,
+   "2026-04-28": 2,
+   "2026-04-29": 2,
+   "2026-04-30": 2
+  },
+  "spot|Rejected": {
+   "2026-05-01": 405,
+   "2026-05-02": 191
+  }
+ },
+ "spot_collector_days_2026_first_and_count": [
+  "2026-03-21",
+  65
+ ],
+ "rows_with_book_features": 5967,
+ "funnel": {
+  "orders_seen": 29572,
+  "in_window": 13107,
+  "status_Filled": 12902,
+  "kept_before_book_rules": 12916,
+  "not_postonly_limit": 191,
+  "status_PartiallyFilledCanceled": 14,
+  "dropped_by_book_rules": {
+   "snapshot_older_than_2s": 6150,
+   "crossing_postonly_price": 747,
+   "no_volatility_lookback": 9,
+   "no_snapshot": 20,
+   "beyond_depth": 23
+  },
+  "final_orders": 5967
+ },
+ "sets": {
+  "n_train_orders": 3285,
+  "n_holdout_orders": 2682,
+  "cancelled_without_execution_train": 0,
+  "cancelled_without_execution_holdout": 0,
+  "coins": 22
+ },
+ "not_published": "no fill-probability model and no quote filter is written; a model fitted on executed orders only answers P(first execution within h | executed), not P(fill)"
+}

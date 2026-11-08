@@ -277,3 +277,137 @@ class EngineIntegrationTests(unittest.TestCase):
 
 if __name__ == "__main__":  # pragma: no cover
     unittest.main()
+
+
+class TacticChoiceTests(unittest.TestCase):
+    """Gap F: choose_tactic is one pure function with a reason code per branch; the switch is the single tactic switch for every strategy, off by default, refused with the arb pairing;
+    MARKET_BANDED is for the market-making pairing only and only for the emergency reasons (time to limit, breaker flatten)."""
+
+    def state(self, **kw):
+        from crypto_stat_arb.ems.tactics import MarketState
+        base = dict(book_age_s=0.1, spread_bps=2.0, volatility_bucket="normal", inventory_age_s=0.0, inventory_pressure=0.0, time_to_limit_s=None, breaker_flatten=False)
+        base.update(kw)
+        return MarketState(**base)
+
+    def pick(self, mm=True, **kw):
+        from crypto_stat_arb.ems.tactics import choose_tactic
+        c = choose_tactic(self.state(**kw), allow_market_banded=mm)
+        return c.tactic, c.reason
+
+    def test_breaker_flatten_is_a_banded_market_order_and_is_not_blocked_by_book_age(self):
+        self.assertEqual(self.pick(breaker_flatten=True, inventory_pressure=0.4), ("MARKET_BANDED", "BREAKER_FLATTEN"))
+        self.assertEqual(self.pick(breaker_flatten=True, book_age_s=3.0), ("MARKET_BANDED", "BREAKER_FLATTEN"))
+
+    def test_stale_book_never_gets_an_aggressive_tactic_unless_the_breaker_orders_flat(self):
+        self.assertEqual(self.pick(book_age_s=0.6, inventory_pressure=1.5, time_to_limit_s=1.0), ("PASSIVE", "BOOK_STALE_NO_AGGRESSION"))
+
+    def test_time_to_limit_with_inventory_flattens_with_a_banded_market_order(self):
+        self.assertEqual(self.pick(inventory_pressure=0.2, time_to_limit_s=20.0), ("MARKET_BANDED", "TIME_TO_LIMIT_FLATTEN"))
+
+    def test_time_to_limit_on_a_very_wide_spread_uses_the_capped_ioc(self):
+        self.assertEqual(self.pick(inventory_pressure=0.2, time_to_limit_s=5.0, spread_bps=40.0), ("IOC_CAPPED", "TIME_TO_LIMIT_WIDE_SPREAD_CAPPED"))
+
+    def test_time_to_limit_without_inventory_has_nothing_to_flatten_and_before_the_lead_does_not_flatten(self):
+        self.assertEqual(self.pick(inventory_pressure=0.0, time_to_limit_s=1.0), ("PASSIVE", "DEFAULT_PASSIVE"))
+        self.assertEqual(self.pick(inventory_pressure=0.2, time_to_limit_s=20.5), ("PASSIVE", "DEFAULT_PASSIVE"))
+
+    def test_inventory_at_the_limit_is_a_normal_exit_and_gets_a_capped_ioc_never_a_market_order(self):
+        for kw in (dict(inventory_pressure=1.0), dict(inventory_pressure=1.4, spread_bps=25.0), dict(inventory_pressure=1.0, spread_bps=45.0)):
+            self.assertEqual(self.pick(**kw), ("IOC_CAPPED", "INVENTORY_AT_LIMIT_CAPPED"), kw)
+
+    def test_a_wide_spread_keeps_every_soft_reason_passive(self):
+        for kw in (dict(inventory_pressure=0.7), dict(inventory_pressure=0.3, inventory_age_s=120.0), dict(inventory_pressure=0.4, volatility_bucket="high")):
+            self.assertEqual(self.pick(spread_bps=10.5, **kw), ("PASSIVE", "SPREAD_WIDE_STAY_PASSIVE"), kw)
+
+    def test_soft_pressure_aged_inventory_and_high_volatility_reduce_with_a_capped_ioc(self):
+        self.assertEqual(self.pick(inventory_pressure=0.6), ("IOC_CAPPED", "INVENTORY_PRESSURE_REDUCE"))
+        self.assertEqual(self.pick(inventory_pressure=0.59), ("PASSIVE", "DEFAULT_PASSIVE"))
+        self.assertEqual(self.pick(inventory_pressure=0.1, inventory_age_s=60.0), ("IOC_CAPPED", "INVENTORY_AGED"))
+        self.assertEqual(self.pick(inventory_pressure=0.0, inventory_age_s=600.0), ("PASSIVE", "DEFAULT_PASSIVE"))
+        self.assertEqual(self.pick(inventory_pressure=0.25, volatility_bucket="high"), ("IOC_CAPPED", "HIGH_VOL_WITH_INVENTORY"))
+        self.assertEqual(self.pick(inventory_pressure=0.24, volatility_bucket="high"), ("PASSIVE", "DEFAULT_PASSIVE"))
+
+    def test_default_is_passive(self):
+        self.assertEqual(self.pick(), ("PASSIVE", "DEFAULT_PASSIVE"))
+
+    def test_every_reason_code_is_reachable_and_documented(self):
+        from crypto_stat_arb.ems.tactics import TACTIC_CHOICE_REASONS
+        seen = {self.pick(breaker_flatten=True)[1], self.pick(mm=False, breaker_flatten=True)[1], self.pick(book_age_s=0.6)[1], self.pick(inventory_pressure=0.2, time_to_limit_s=1.0)[1],
+                self.pick(inventory_pressure=0.2, time_to_limit_s=1.0, spread_bps=40.0)[1], self.pick(mm=False, inventory_pressure=0.2, time_to_limit_s=1.0)[1],
+                self.pick(inventory_pressure=1.0)[1], self.pick(spread_bps=11.0)[1], self.pick(inventory_pressure=0.7)[1], self.pick(inventory_pressure=0.1, inventory_age_s=61.0)[1],
+                self.pick(inventory_pressure=0.3, volatility_bucket="high")[1], self.pick()[1]}
+        self.assertEqual(seen, set(TACTIC_CHOICE_REASONS))
+
+    def grid(self):
+        import itertools
+        for age, spread, vol, inv_age, pressure, ttl, brk in itertools.product((0.0, 0.4, 0.6), (1.0, 10.0, 20.0, 35.0), ("low", "normal", "high"), (0.0, 30.0, 90.0),
+                                                                              (0.0, 0.1, 0.3, 0.7, 1.0, 1.6), (None, 100.0, 20.0, 3.0), (False, True)):
+            yield self.state(book_age_s=age, spread_bps=spread, volatility_bucket=vol, inventory_age_s=inv_age, inventory_pressure=pressure, time_to_limit_s=ttl, breaker_flatten=brk)
+
+    def test_limit_market_banded_only_for_the_emergency_reasons_over_every_state(self):
+        from crypto_stat_arb.ems.tactics import MARKET_BANDED_REASONS, choose_tactic
+        self.assertEqual(set(MARKET_BANDED_REASONS), {"TIME_TO_LIMIT_FLATTEN", "BREAKER_FLATTEN"})
+        n = 0
+        for st in self.grid():
+            c = choose_tactic(st, allow_market_banded=True)
+            if c.tactic == "MARKET_BANDED":
+                n += 1
+                self.assertIn(c.reason, MARKET_BANDED_REASONS, st)
+                self.assertTrue(st.breaker_flatten or (st.time_to_limit_s is not None and st.time_to_limit_s <= 20.0 and st.inventory_pressure > 0), st)
+        self.assertGreater(n, 0)
+
+    def test_limit_market_banded_never_when_it_is_not_allowed(self):
+        from crypto_stat_arb.ems.tactics import choose_tactic
+        for st in self.grid():
+            self.assertNotEqual(choose_tactic(st).tactic, "MARKET_BANDED", st)                                   # the default is not allowed
+            self.assertNotEqual(choose_tactic(st, allow_market_banded=False).tactic, "MARKET_BANDED", st)
+
+    def test_limit_normal_exits_and_quotes_never_get_a_market_order(self):
+        from crypto_stat_arb.ems.tactics import choose_tactic
+        for st in self.grid():
+            if st.breaker_flatten or (st.time_to_limit_s is not None and st.time_to_limit_s <= 20.0 and st.inventory_pressure > 0):
+                continue                                              # the two emergencies
+            self.assertIn(choose_tactic(st, allow_market_banded=True).tactic, ("PASSIVE", "IOC_CAPPED"), st)
+            if st.inventory_pressure == 0.0:
+                self.assertEqual(choose_tactic(st, allow_market_banded=True).tactic, "PASSIVE", st)            # flat: only quotes
+
+    def test_bad_input_is_refused_not_answered(self):
+        from crypto_stat_arb.ems.tactics import choose_tactic
+        for kw in (dict(volatility_bucket="extreme"), dict(book_age_s=-0.1), dict(spread_bps=float("nan")), dict(inventory_pressure=-1.0), dict(inventory_age_s=True),
+                   dict(time_to_limit_s=float("nan")), dict(breaker_flatten="yes")):
+            with self.assertRaises(ValueError, msg=str(kw)):
+                choose_tactic(self.state(**kw))
+
+    def test_the_switch_is_off_by_default_and_leaves_the_config_identity_unchanged(self):
+        from crypto_stat_arb.ems.config import ExecutionConfig
+        cfg = ExecutionConfig()
+        self.assertEqual(cfg.tactic_choice, "off")
+        self.assertNotIn("tactic_choice", cfg.as_dict())
+        self.assertEqual(set(cfg.as_dict()), {"pairing", "primary", "hedge", "maker_maker", "unwind", "price_cap_required", "one_hedge_child", "risk_reservation"})
+
+    def test_limit_the_switch_is_refused_with_the_arb_pairing_and_on_a_bad_value(self):
+        from crypto_stat_arb.ems.config import ExecutionConfig, ExecutionConfigError
+        with self.assertRaises(ExecutionConfigError):
+            ExecutionConfig(pairing="maker_taker", tactic_choice="market_state")
+        with self.assertRaises(ExecutionConfigError):
+            ExecutionConfig(pairing="maker_maker", tactic_choice="sometimes")
+        self.assertEqual(ExecutionConfig(pairing="maker_maker", tactic_choice="market_state").as_dict()["tactic_choice"], "market_state")
+
+    def test_no_arb_profile_sets_the_switch(self):
+        from pathlib import Path
+        for path in sorted((Path(__file__).parents[1] / "profiles").glob("*.yaml")):
+            self.assertNotIn("tactic_choice", path.read_text(), path.name)
+
+    def test_limit_the_layer_allows_the_market_order_to_the_market_making_pairing_only(self):
+        from crypto_stat_arb.ems.config import ExecutionConfig
+        from crypto_stat_arb.ems.layer import ExecutionLayer
+        emergency = self.state(breaker_flatten=True, inventory_pressure=0.5)
+        off = ExecutionLayer(ExecutionConfig(pairing="maker_maker"), instrument="SOLUSDT")
+        self.assertIsNone(off.suggest_tactic(emergency))
+        mm = ExecutionLayer(ExecutionConfig(pairing="maker_maker", tactic_choice="market_state"), instrument="SOLUSDT")
+        got = mm.suggest_tactic(emergency)
+        self.assertEqual((got.tactic, got.reason), ("MARKET_BANDED", "BREAKER_FLATTEN"))
+        other = ExecutionLayer(ExecutionConfig(pairing="taker_taker", tactic_choice="market_state"), instrument="SOLUSDT")
+        got = other.suggest_tactic(emergency)
+        self.assertEqual((got.tactic, got.reason), ("IOC_CAPPED", "BREAKER_FLATTEN_MARKET_NOT_ALLOWED"))
+        self.assertEqual(other.suggest_tactic(self.state(inventory_pressure=1.2)).tactic, "IOC_CAPPED")

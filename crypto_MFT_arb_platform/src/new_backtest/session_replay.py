@@ -546,3 +546,44 @@ def compare_order_times(old_rows: list[dict], new_rows: list[dict], tolerance_s:
             row[name] = {"old": x, "new": y, "diff_s": None if x is None or y is None else y - x, "within_tolerance": None if x is None or y is None else abs(y - x) <= tolerance_s}
         out.append(row)
     return out
+
+
+def live_paper_setup(profile_name: str) -> dict:
+    """Phase D, D7d (owner 9 Nov): what `live-paper --strategy-setup new_backtest.session_replay:live_paper_setup --strategy-profile NAME` needs to run the PROFILE's strategy in a paper session: the same
+    `ArbSessionStrategy` over `CrossVenueArbStrategy` the session replay builds, the profile's maker settings for the queue simulator, and the session rules the replay passes to `TradingSession`
+    (fill-triggered dispatch, the maker venue, the hedge policy, the timing latency model, the maker order lifetime). Returns {"session_kwargs", "queue_simulation", "strategy_builder"}.
+    The live feed supplies books and time; nothing here reads a dataset (the run-specific fields given to apply_profile are placeholders; the tick sizes come from the live config file, which `out/integration/paper_live/make_config.py` builds with the dated March ticks)."""
+    from dataclasses import asdict
+
+    from .profiles import apply_profile, load_profile
+
+    profile = load_profile(profile_name)
+    cfg = apply_profile(profile, pair="SOLUSDT", start_date="2024-03-11", end_date="2024-03-11", data_root="", output_dir="")
+    if cfg.runtime != "session":
+        raise ValueError(f"profile {profile_name} does not select the session runtime")
+    venues = tuple(cfg.venues)
+    names = {v: v.upper() for v in venues}
+    fee_specs, _ = core_fee_specs(cfg.pair, cfg.bybit_fee_preset, cfg.binance_fee_preset)
+    specs = make_venues(cfg.latency_preset, cfg.bybit_fee_preset, cfg.binance_fee_preset, fee_specs=fee_specs)
+    venue_specs = {v: specs[v] for v in venues}
+    for v, trust in (cfg.trust_local_ts or {}).items():
+        if v in venue_specs:
+            venue_specs[v] = replace(venue_specs[v], trust_local_ts=bool(trust))
+    hf, hedge_cfg = cfg.hedge_faults, (cfg.execution.hedge if getattr(cfg, "execution", None) is not None else {})
+    hedge_policy = HedgePolicy(retry_limit=int(getattr(hf, "max_retries", 0) or 0), retry_backoff_ns=int(float(getattr(hf, "retry_backoff_s", 0.0) or 0.0) * _NS),
+                               query_attempt_limit=int(getattr(hf, "unknown_query_max_attempts", 3) or 3),
+                               touch_slack_bps=max(float(cfg.arb.max_walk_bps), float(hedge_cfg.get("slack_bps_floor", 5.0))) if hedge_cfg.get("cap") == "touch_slack" else None)
+    timelines = Timelines(cfg.timing) if cfg.timing is not None else None
+    session_kwargs = {"dispatch_policy": DispatchPolicy.FILL_TRIGGERED, "maker_venues": tuple(names[v] for v in cfg.arb.maker_venues), "hedge_policy": hedge_policy,
+                      "latency_model": TimelinesLatencyModel(timelines) if timelines is not None else None}
+
+    def build(paper) -> list:
+        session = paper.session
+        if cfg.arb.maker_max_age_s > 0:
+            session.oms.order_lifetime_ns = int(cfg.arb.maker_max_age_s * _NS)       # the profile's MANDATORY maker order lifetime, the same rule as the replay
+        strategy = CrossVenueArbStrategy(cfg.pair, venue_specs, cfg.arb)
+        return [ArbSessionStrategy(strategy, ledger=session.ledger, oms=session.oms, states={v: paper._states[names[v]] for v in venues}, instruments=paper.cfg.instruments,
+                                   instrument_id=paper.cfg.instrument_id, venue_names=names, eligibility_policy=session.alignment_policy,
+                                   view_books=lambda: {v: paper._views[names[v]] for v in venues})]
+
+    return {"session_kwargs": session_kwargs, "queue_simulation": asdict(cfg.maker), "strategy_builder": build}

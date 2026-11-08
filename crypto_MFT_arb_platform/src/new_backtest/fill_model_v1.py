@@ -506,3 +506,57 @@ def load_fill_model(path: "str | Path"):
     if data.get("version", 1) >= 2 or "per_horizon" in data:
         return FillModelV2.load_json(path)
     return FillModelV1.load_json(path)
+
+
+# ── calibration report on real orders (Gap E) ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+def calibration_report(y, p, weights=None, *, baseline_p=None, n_bins: int = 10, n_boot: int = 1000, seed: int = 7) -> dict:
+    """Brier score, reliability table and bootstrap confidence intervals of fill probabilities `p` against outcomes `y` (1 filled, 0 not).
+
+    weights       optional per-row weights (the IPCW weights of `fill_label.compute_ipcw_weights`); the Brier score and the observed rates are weighted, the counts are not
+    baseline_p    a second set of probabilities for the same rows (a simple baseline): its Brier score and the paired difference model minus baseline, with a bootstrap interval
+    n_bins        equal-COUNT bins of `p` for the reliability table (mean predicted, observed rate, Wilson 95% interval on the unweighted count)
+    The bootstrap resamples ROWS with replacement (percentile interval, 95%, seed fixed); it does not resample cancel behaviour, so it understates the uncertainty of the censoring correction.
+    Pure numpy, no model object: it scores any probabilities."""
+    import numpy as np  # noqa: PLC0415
+
+    y = np.asarray(y, dtype=float)
+    p = np.asarray(p, dtype=float)
+    w = np.ones_like(y) if weights is None else np.asarray(weights, dtype=float)
+    if not (len(y) == len(p) == len(w)) or len(y) == 0:
+        raise ValueError("y, p and weights need the same non-zero length")
+    if baseline_p is not None and len(baseline_p) != len(y):
+        raise ValueError("baseline_p needs the same length as y")
+    rng = np.random.default_rng(seed)
+    idx = rng.integers(0, len(y), size=(n_boot, len(y)))
+
+    def brier(pp):
+        return float(np.sum(w * (pp - y) ** 2) / np.sum(w))
+
+    def brier_rows(pp):
+        e = w * (pp - y) ** 2
+        return e[idx].sum(axis=1) / w[idx].sum(axis=1)
+
+    out = {"n": int(len(y)), "weighted": weights is not None, "observed_rate": float(np.sum(w * y) / np.sum(w)), "brier": brier(p)}
+    lo, hi = np.percentile(brier_rows(p), [2.5, 97.5])
+    out["brier_ci95"] = [float(lo), float(hi)]
+    if baseline_p is not None:
+        b = np.asarray(baseline_p, dtype=float)
+        out["baseline_brier"] = brier(b)
+        out["baseline_brier_ci95"] = [float(v) for v in np.percentile(brier_rows(b), [2.5, 97.5])]
+        diff = brier_rows(p) - brier_rows(b)
+        out["brier_model_minus_baseline"] = brier(p) - brier(b)
+        out["brier_model_minus_baseline_ci95"] = [float(v) for v in np.percentile(diff, [2.5, 97.5])]
+    order = np.argsort(p, kind="stable")
+    table = []
+    for chunk in np.array_split(order, min(n_bins, len(y))):
+        if len(chunk) == 0:
+            continue
+        k = float(np.sum(y[chunk]))
+        n = len(chunk)
+        z = 1.96
+        centre = (k / n + z * z / (2 * n)) / (1 + z * z / n)
+        half = z * np.sqrt(k / n * (1 - k / n) / n + z * z / (4 * n * n)) / (1 + z * z / n)
+        table.append({"n": int(n), "mean_predicted": float(np.sum(w[chunk] * p[chunk]) / np.sum(w[chunk])), "observed_rate": float(np.sum(w[chunk] * y[chunk]) / np.sum(w[chunk])),
+                      "observed_wilson95": [float(max(0.0, centre - half)), float(min(1.0, centre + half))]})
+    out["reliability"] = table
+    return out

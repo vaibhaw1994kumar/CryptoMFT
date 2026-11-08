@@ -1,5 +1,7 @@
 """Phase D, D7c (a run wrapper, offline, no network): the full comparison on a whole recorded slice.
-Usage: d7c_full.py DAY MINUTES OUT_JSON
+Usage: d7c_full.py DAY MINUTES OUT_JSON [--recorded SESSION_DIR [--no-keepalive-notes]]
+  --recorded: (D7d, owner 9 Nov) the book connection's non-book frames (the Bybit pongs and acknowledgements) are applied as venue-message notes, the same rule the live service uses (a frame on the book stream proves it alive); --no-keepalive-notes leaves them out, as a replay without pong frames does.
+  --recorded: the stream is a recorded LIVE session (D7d) instead of the March slice: its canonical books and trades in the recorder's own arrival order (trace.jsonl). The markouts need the March slice's book files, so they are not computed in this mode.
 Three paths on the SAME recorded stream and the SAME probe orders (the orders the old paper simulator sent, injected at the same times):
   OLD     maker_sim.MakerDryRunSimulator, the C++ engine (the old paper path)
   REPLAY  the new path as the replay runs it: SimulatedVenueFeeder with the core session applying the books
@@ -21,7 +23,7 @@ sys.path.insert(0, "/Users/vaibhav/Documents/Newproject/crypto_MFT_arb_platform/
 from crypto_stat_arb.execution import CanonicalOrderRequest, OrderAction, OrderType, TimeInForce
 from crypto_stat_arb.live_feed import LiveFeedSettings
 from crypto_stat_arb.maker_sim import maker_simulator_from_config
-from crypto_stat_arb.models import Side, TradeEvent
+from crypto_stat_arb.models import MarketEvent, Side, TradeEvent
 from crypto_stat_arb.paper_live import LivePaperSession
 from crypto_stat_arb.session import ExecutionMode, TradingSession
 from crypto_stat_arb.simulation.queue_adapter import SimulatedVenueFeeder, build_queue_simulation
@@ -30,6 +32,14 @@ from new_backtest.order_book import OrderBook as FloatBook
 from new_backtest.profiles import apply_profile, load_profile
 from new_backtest.session_replay import SessionReplay
 
+RECORDED = None
+NO_NOTES = "--no-keepalive-notes" in sys.argv       # recorded mode: do NOT apply the book connection's non-book frames (pongs, acks) as venue-message notes (what a replay without pong frames does)
+if NO_NOTES:
+    sys.argv.remove("--no-keepalive-notes")
+if "--recorded" in sys.argv:
+    i = sys.argv.index("--recorded")
+    RECORDED = Path(sys.argv[i + 1])
+    del sys.argv[i:i + 2]
 day, minutes, out_path = sys.argv[1], float(sys.argv[2]), Path(sys.argv[3])
 SLICES = "/Users/vaibhav/Documents/Newproject/out/queue_v2/slices_mar2024"
 H = (1.0, 5.0, 30.0)
@@ -40,8 +50,45 @@ rep = SessionReplay(bt_cfg, profile)
 cfg = rep.app_config
 cfg.strategies["maker_simulation"] = {"enabled": True, "quote_size": "1.0", "max_inventory": "2.0", "engine": "auto", "quote_interval_ms": 1000, "depth": 50}
 t0 = time.time()
+def load_recorded(session_dir):
+    """The recorded live session as one event list in the recorder's arrival order (trace.jsonl): books from canonical.jsonl, prints from trades.jsonl; ticker, control and derivative frames are not market events."""
+    can, trades, order = {}, {}, []
+    for part in sorted(Path(session_dir).glob("part-*")):
+        for line in (part / "canonical.jsonl").open():
+            row = json.loads(line)
+            can[row["event_id"]] = row
+        for line in (part / "trades.jsonl").open():
+            row = json.loads(line)
+            trades[row["event_id"]] = row
+        order += [json.loads(line) for line in (part / "trace.jsonl").open()]
+    out = []
+    for row in order:
+        if row["disposition"] == "CANONICAL":
+            out.append(MarketEvent.from_dict(can[row["canonical_event_id"]]))
+        elif row["disposition"] == "TRADE":
+            out.append(TradeEvent.from_dict(trades[row["canonical_event_id"]]))
+    return out
+
+
+def load_keepalive_notes(session_dir):
+    """(receive_ts_ns, venue) of every frame on a BOOK connection that is not a book update: Bybit pongs and acknowledgements, any non-book Binance depth-channel frame. Read from the recorder's wire file."""
+    notes = []
+    for part in sorted(Path(session_dir).glob("part-*")):
+        for line in (part / "wire.jsonl").open():
+            w = json.loads(line)
+            ch, fd = w["channel"], w["frame_data"]
+            if w["venue"] == "BYBIT" and ch.startswith("orderbook") and '"topic":"orderbook' not in fd:
+                notes.append((w["receive_ts_ns"], "BYBIT"))
+            elif w["venue"] == "BINANCE" and "depth" in ch and '"e":"depthUpdate"' not in fd and '"lastUpdateId"' not in fd:
+                notes.append((w["receive_ts_ns"], "BINANCE"))
+    return sorted(notes)
+
+
+NOTES = load_keepalive_notes(RECORDED) if (RECORDED and not NO_NOTES) else []
+
+
 events, first = [], None
-for ev in rep.feed.convert(rep._timed_stream()):
+for ev in (load_recorded(RECORDED) if RECORDED else rep.feed.convert(rep._timed_stream())):
     first = first or ev.receive_ts_ns
     if ev.receive_ts_ns - first > minutes * 60 * 1e9:
         break
@@ -106,7 +153,7 @@ def request(action, o, ts):
         order_type=OrderType.LIMIT, time_in_force=TimeInForce.GTC, post_only=True, created_ts_ns=ts)
 
 
-def run_new(session, adapters, executor, deliver_event, deliver_trade, label):
+def run_new(session, adapters, executor, deliver_event, deliver_trade, label, note_cb=None):
     fills, acks, reasons, qa_place, fill_at = [], {}, {}, {}, {}
     tr = Trace()
     causes, cur = {}, [0]
@@ -121,8 +168,12 @@ def run_new(session, adapters, executor, deliver_event, deliver_trade, label):
     session.router._deliver_resting_fills = lambda venue, produced, now_ns, exchange_ts_ns=None: fills.extend(
         {"order_id": rq.order_id, "ts_ns": now_ns, "qty": float(cb.last_fill_quantity), "price": float(cb.average_price)} for rq, cb in produced) or len(produced)
     i, t = 0, time.time()
+    ni = 0
     for n, ev in enumerate(events):
         cur[0] = n
+        while note_cb is not None and ni < len(NOTES) and NOTES[ni][0] <= ev.receive_ts_ns:
+            note_cb(NOTES[ni][1], NOTES[ni][0])                 # a frame on the book connection that is not a book update
+            ni += 1
         while i < len(inj) and inj[i][0] <= ev.receive_ts_ns:
             ts, _, kind, o = inj[i]
             i += 1
@@ -152,7 +203,8 @@ def run_new(session, adapters, executor, deliver_event, deliver_trade, label):
 adapters, views, states, executor = build_queue_simulation(cfg)
 sess = TradingSession(cfg, execution_mode=ExecutionMode.INTERNAL_SIMULATION, adapters=adapters, strategies=[])
 feeder = SimulatedVenueFeeder(sess, {v: v for v in cfg.venues}, views, states, adapters, ets_of=lambda ns: None)
-R = run_new(sess, adapters, executor, lambda ev: feeder.on_book(ev), lambda ev: feeder.on_trade(ev), "REPLAY")
+R = run_new(sess, adapters, executor, lambda ev: feeder.on_book(ev), lambda ev: feeder.on_trade(ev), "REPLAY", note_cb=lambda v, t: sess.note_venue_message(v, t))
+replay_stale = {v: b.stats.stale_transitions for (v, _), b in sess.books.items()}
 
 # ---------------- PAPER wiring (LivePaperSession built offline) ----------------
 clock = {"now": 0}
@@ -177,7 +229,7 @@ with tempfile.TemporaryDirectory() as tmp:
         paper._on_trade(ev)
 
     # paper.session.books are the service's books (LivePaperSession passes them in)
-    P = run_new(paper.session, paper.session.router.adapters, paper.queue_executor, paper_book, paper_trade, "PAPER")
+    P = run_new(paper.session, paper.session.router.adapters, paper.queue_executor, paper_book, paper_trade, "PAPER", note_cb=lambda v, t: paper.session.note_venue_message(v, t))
     paper._timestamps.close()
 
 # ---------------- criterion 1: PAPER == REPLAY ----------------
@@ -397,7 +449,7 @@ def markouts(rows_of, ts_key, qty_key, price_key, oids, venue="binance"):
 
 
 mk = None
-if early_binance:
+if early_binance and not RECORDED:
     mk = {"orders": len(early_binance),
           "new_rule_early_fills": markouts(new_by, "ts_ns", "qty", "price", early_binance),
           "old_engine_later_fills_of_the_same_orders": markouts(old_by, "match_ts_ns", "quantity", "price", early_binance),
@@ -452,6 +504,8 @@ def cause_of(oid, group):
 
 
 def money(rows_of, ts_key, qty_key, oids):
+    if RECORDED:
+        return "not computed in --recorded mode (the mids come from the March slice files)"
     return markouts(rows_of, ts_key, qty_key, "price", oids, venue="bybit") if oids else None
 
 
@@ -475,6 +529,8 @@ summary = {"label": "EXPLORATORY: D7c, probe orders of the old paper simulator o
                                                                                                                                   "new_path_orders_left_open_with_remaining_below_1e-9_by_venue": dict(Counter(x["venue"] for x in new_left_open)), "new_path_orders_left_open_with_remaining_below_1e-9_list": new_left_open[:50]}, "replay_qty": sum(f["qty"] for f in R["fills"]),
            "acceptance_differences": {str(k): v for k, v in reasons_rej.items()}, "volume_limit_check_of_the_new_rule": vol_limit,
            "queue_ahead_at_placement_by_venue_replay_path": qshare, "only_new_patterns": {" | ".join(p): c for p, c in only_new_pat.most_common()}, "only_old_patterns": {" | ".join(p): c for p, c in only_old_pat.most_common()}, "quantity_difference_patterns": {" | ".join(p): c for p, c in qty_pat.most_common()},
-           "patterns": {k: {" | ".join(p): c for p, c in v.most_common()} for k, v in cls.items()}, "markouts_early_binance": mk, "unreferenced": unref}
+           "patterns": {k: {" | ".join(p): c for p, c in v.most_common()} for k, v in cls.items()}, "markouts_early_binance": mk, "unreferenced": unref,
+           "keepalive_notes_applied": len(NOTES), "keepalive_notes_mode": "off (--no-keepalive-notes)" if (RECORDED and NO_NOTES) else ("on" if RECORDED else "not applicable (March slice)"),
+           "stale_transitions_in_replay_path_by_venue": replay_stale}
 out_path.write_text(json.dumps(summary, indent=1, default=str))
 print(json.dumps(summary, indent=1, default=str))

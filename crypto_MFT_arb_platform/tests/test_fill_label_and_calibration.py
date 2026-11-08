@@ -1229,3 +1229,46 @@ class TestFillModelV2GateIntegration(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class CalibrationReportTests(unittest.TestCase):
+    """Gap E: the metrics that score a fill model on real orders."""
+
+    def test_a_perfect_forecast_has_zero_brier_and_a_calibrated_reliability_table(self):
+        from new_backtest.fill_model_v1 import calibration_report
+        y = [0, 1] * 50
+        r = calibration_report(y, [float(v) for v in y], n_boot=200)
+        self.assertEqual(r["brier"], 0.0)
+        self.assertEqual(r["n"], 100)
+        self.assertAlmostEqual(sum(b["n"] for b in r["reliability"]), 100)
+
+    def test_brier_matches_the_definition_and_the_base_rate_baseline_is_beaten_by_a_good_model(self):
+        from new_backtest.fill_model_v1 import calibration_report
+        import random
+        rng = random.Random(3)
+        p = [rng.random() for _ in range(2000)]
+        y = [1 if rng.random() < q else 0 for q in p]           # outcomes drawn from the forecast itself: calibrated by construction
+        base = [sum(y) / len(y)] * len(y)
+        r = calibration_report(y, p, baseline_p=base, n_boot=300)
+        self.assertAlmostEqual(r["brier"], sum((a - b) ** 2 for a, b in zip(p, y)) / len(y), places=9)
+        self.assertLess(r["brier_model_minus_baseline"], 0.0)
+        self.assertLess(r["brier_model_minus_baseline_ci95"][1], 0.0)          # the whole interval below zero: better than the base rate
+        for b in r["reliability"]:
+            self.assertGreaterEqual(b["observed_wilson95"][1], b["observed_rate"] - 1e-9)
+            self.assertLessEqual(b["observed_wilson95"][0], b["observed_rate"] + 1e-9)
+
+    def test_weights_change_the_observed_rate_and_the_report_is_reproducible(self):
+        from new_backtest.fill_model_v1 import calibration_report
+        y, p = [1, 0, 0, 0], [0.5, 0.5, 0.5, 0.5]
+        a = calibration_report(y, p, n_boot=100)
+        b = calibration_report(y, p, weights=[3.0, 1.0, 1.0, 1.0], n_boot=100)
+        self.assertAlmostEqual(a["observed_rate"], 0.25)
+        self.assertAlmostEqual(b["observed_rate"], 0.5)
+        self.assertEqual(calibration_report(y, p, n_boot=100), a)
+
+    def test_mismatched_lengths_are_refused(self):
+        from new_backtest.fill_model_v1 import calibration_report
+        with self.assertRaises(ValueError):
+            calibration_report([1, 0], [0.5])
+        with self.assertRaises(ValueError):
+            calibration_report([1, 0], [0.5, 0.5], baseline_p=[0.5])

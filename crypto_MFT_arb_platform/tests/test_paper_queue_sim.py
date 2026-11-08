@@ -148,3 +148,136 @@ class PaperWiringEqualsReplayWiring(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class LivePaperCommandLineTests(unittest.TestCase):
+    """Phase D, D7d prerequisite: the live-paper command can select the queue simulator and the Bybit book heartbeat; both are off by default."""
+
+    def test_flags_exist_and_default_off(self):
+        import argparse
+        from crypto_stat_arb import cli
+        import io, contextlib
+        captured = {}
+        orig = cli._run_live_paper
+
+        async def fake(args):
+            captured["args"] = args
+            return {}
+        cli._run_live_paper = fake
+        orig_print = cli._print_live_result
+        cli._print_live_result = lambda result: None
+        try:
+            import sys
+            for argv, expect_q, expect_hb in ((["live-paper", "--config", "c.json"], False, 0.0),
+                                              (["live-paper", "--config", "c.json", "--queue-sim", "--book-heartbeat-seconds", "0.25"], True, 0.25)):
+                old_argv = sys.argv
+                sys.argv = ["crypto-stat-arb", *argv]
+                try:
+                    cli.main()
+                finally:
+                    sys.argv = old_argv
+                self.assertEqual((captured["args"].queue_sim, captured["args"].book_heartbeat_seconds), (expect_q, expect_hb))
+                self.assertEqual(cli._live_settings(captured["args"]).book_heartbeat_seconds, expect_hb)
+        finally:
+            cli._run_live_paper = orig
+            cli._print_live_result = orig_print
+
+    def test_queue_sim_and_maker_dry_run_together_are_refused(self):
+        import argparse, asyncio
+        from crypto_stat_arb import cli
+        args = argparse.Namespace(queue_sim=True, maker_dry_run=True, execution_mode="internal_paper")
+        with self.assertRaises(SystemExit):
+            asyncio.run(cli._run_live_paper(args))
+
+
+class LivePaperRunsTheProfileStrategy(unittest.TestCase):
+    """Phase D, D7d (owner 9 Nov): `live-paper` builds the profile's own strategy (ArbSessionStrategy over the v1_5 signal) with the profile's simulator and session rules, not the default spread strategy."""
+
+    PROFILE = "perp_perp_maker_taker_v1_5"
+
+    def build(self, tmp: Path):
+        from new_backtest.profiles import apply_profile, load_profile
+        from new_backtest.session_replay import SessionReplay, live_paper_setup
+        profile = load_profile(self.PROFILE)
+        rep = SessionReplay(apply_profile(profile, pair="SOLUSDT", start_date="2024-03-11", end_date="2024-03-11", data_root="", output_dir=""), profile)
+        cfg_file = tmp / "cfg.json"
+        cfg_file.write_text(json.dumps(rep.raw_config))
+        setup = live_paper_setup(self.PROFILE)
+        paper = LivePaperSession(cfg_file, tmp / "out", "profile-strategy", LiveFeedSettings(udp_enabled=False, binance_market="linear", bybit_market="linear", durable=False),
+                                 queue_simulation=setup["queue_simulation"], session_kwargs=setup["session_kwargs"], strategy_builder=setup["strategy_builder"], tick_seconds=3600)
+        return paper, setup
+
+    def close(self, paper):
+        paper.service.recorder.close({})
+        paper.service.ohlc_writer.close()
+        paper.service.ltp_writer.close()
+
+    def test_the_session_runs_arb_session_strategy_not_the_default_spread_strategy(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            paper, setup = self.build(Path(tmp))
+            try:
+                names = [type(s).__name__ for s in paper.session.strategies]
+                self.assertEqual(names, ["ArbSessionStrategy"])
+                self.assertIs(paper.session.strategy, paper.session.strategies[0])
+                self.assertNotIn("CrossVenueSpreadStrategy", names)
+                self.assertIsNone(paper.session.strategies[0].evaluate(paper.session.books, 1))           # empty books: no signal, no error
+            finally:
+                self.close(paper)
+
+    def test_the_profiles_simulator_and_session_rules_are_applied(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            paper, setup = self.build(Path(tmp))
+            try:
+                mc = paper.queue_executor.config
+                self.assertEqual((mc.cancel_model, mc.fill_evidence), ("proportional", "trade_confirm"))      # the profile's maker block, not the executor's defaults
+                self.assertEqual(setup["queue_simulation"]["cancel_model"], "proportional")
+                self.assertEqual(tuple(paper.session.maker_venues), ("BYBIT",))
+                self.assertGreater(paper.session.oms.order_lifetime_ns, 0)                                  # the profile's mandatory maker order lifetime
+            finally:
+                self.close(paper)
+
+    def test_the_session_artifacts_can_be_written_with_the_profiles_latency_model(self):
+        """The D7d live check crashed at the end of the run in write_session_artifacts (the timing latency model had no seed): finalize must write its files."""
+        from crypto_stat_arb.models import MarketEvent
+        with tempfile.TemporaryDirectory() as tmp:
+            paper, setup = self.build(Path(tmp))
+            try:
+                self.assertEqual(paper.session.latency_model.seed, setup["session_kwargs"]["latency_model"].seed)
+                self.assertIsInstance(paper.session.latency_model.seed, int)
+                clock = 1_700_000_000_000_000_000
+                snap = lambda venue, seq, bid, ask: MarketEvent.from_dict({
+                    "event_type": "BOOK_SNAPSHOT", "venue": venue, "instrument_id": paper.cfg.instrument_id, "exchange_ts_ns": clock, "source_ts_ns": clock, "receive_ts_ns": clock + 1_000_000,
+                    "sequence": seq, "bids": [{"price": str(bid), "quantity": "5"}], "asks": [{"price": str(ask), "quantity": "5"}]})
+                for ev in (snap("BYBIT", 1, "100.000", "100.010"), snap("BINANCE", 1, "100.000", "100.010")):
+                    paper.events.append(ev)
+                result = paper.finalize({"venues": {}})
+                self.assertNotEqual(result.get("status"), "NO_MARKET_DATA")
+                self.assertTrue((paper.output_dir / "latency_report.json").exists())
+            finally:
+                self.close(paper)
+
+    def test_a_strategy_builder_without_the_queue_simulator_is_refused(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            from new_backtest.profiles import apply_profile, load_profile
+            from new_backtest.session_replay import SessionReplay, live_paper_setup
+            profile = load_profile(self.PROFILE)
+            rep = SessionReplay(apply_profile(profile, pair="SOLUSDT", start_date="2024-03-11", end_date="2024-03-11", data_root="", output_dir=""), profile)
+            cfg_file = Path(tmp) / "cfg.json"
+            cfg_file.write_text(json.dumps(rep.raw_config))
+            with self.assertRaises(ValueError):
+                LivePaperSession(cfg_file, Path(tmp) / "out", "no-queue-sim", LiveFeedSettings(udp_enabled=False, binance_market="linear", bybit_market="linear", durable=False),
+                                 strategy_builder=live_paper_setup(self.PROFILE)["strategy_builder"])
+
+    def test_the_command_line_needs_queue_sim_and_a_profile_for_a_strategy_setup(self):
+        import argparse
+        from crypto_stat_arb import cli
+        base = dict(queue_sim=False, maker_dry_run=False, execution_mode="internal_paper", strategy_setup="new_backtest.session_replay:live_paper_setup", strategy_profile=self.PROFILE,
+                    venue=None, binance_market="linear", bybit_market="linear", binance_ws_base=None, binance_rest_base=None, bybit_ws_url=None, bybit_depth=50, http_timeout_seconds=10.0,
+                    initial_sync_timeout_seconds=15.0, reconnect_min_seconds=1.0, reconnect_max_seconds=30.0, rotate_seconds=3600.0, rotate_bytes=1000, no_fsync=True, max_runtime_seconds=1.0,
+                    max_events=None, no_trades=False, trade_stale_seconds=30.0, no_udp=True, udp_group="239.255.77.77", udp_port=19001, udp_interface="0.0.0.0", udp_ttl=1, udp_depth=20,
+                    udp_max_datagram_bytes=60000, monitor_interval_seconds=1.0, rest_reconcile_seconds=None, book_heartbeat_seconds=0.0, config=Path("c.json"), output_dir=Path("o"),
+                    session_id="x", status_poll_seconds=0.0, flatten_lead_seconds=20.0, status_only=True)
+        with self.assertRaises(SystemExit):                                              # no --queue-sim
+            asyncio.run(cli._run_live_paper(argparse.Namespace(**base)))
+        with self.assertRaises(SystemExit):                                              # no profile
+            asyncio.run(cli._run_live_paper(argparse.Namespace(**{**base, "queue_sim": True, "strategy_profile": None})))

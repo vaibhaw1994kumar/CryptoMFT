@@ -59,3 +59,14 @@ crypto_MFT_arb_platform/*
 # macOS metadata
 .DS_Store
 **/.DS_Store
+
+# D7d (owner 9 Nov): the recordings and logs of live runs stay local (large, public feeds); account order data and anything derived per order stays local too
+out/integration/paper_live/run1/
+out/integration/paper_live/check1/
+out/integration/paper_live/shakedown/
+out/integration/paper_live/shakedown2/
+out/integration/paper_live/*.log
+out/integration/paper_live/*.out
+out/integration/fill_model_real/__pycache__/
+out/integration/fill_model_real/retrain.log
+out/integration/fill_model_real/out/superseded_first_run/

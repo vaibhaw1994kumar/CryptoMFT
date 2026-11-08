@@ -1,0 +1,181 @@
+{
+ "strategy": {
+  "strategy_id": "perp_perp_maker_taker_v1_5",
+  "instrument_id": "SOL-USDT-PERP",
+  "venues": [
+   "BYBIT",
+   "BINANCE"
+  ],
+  "quantity": "1.0",
+  "entry_bps": "0",
+  "min_net_edge_bps": "1.0",
+  "max_book_age_ms": 500
+ },
+ "execution_mode": "INTERNAL_SIMULATION",
+ "latency": {
+  "enabled": true,
+  "seed": 7,
+  "preset": "singapore",
+  "profiles": {}
+ },
+ "backtest": {
+  "drain_horizon_ms": 10000
+ },
+ "time": {
+  "correct_host_offset": true
+ },
+ "fees": [
+  {
+   "instrument_id": "SOL-USDT-PERP",
+   "effective_from": "1970-01-01T00:00:00Z",
+   "venue": "BYBIT",
+   "maker_fee_bps": "1.0",
+   "taker_fee_bps": "3.2",
+   "fee_source": "PUBLIC_SCHEDULE_UNVERIFIED",
+   "conservative_unverified": true,
+   "tier": "bybit_perp_vip5: linear VIP 5 (owner-confirmed tier), public schedule as given by the owner 7 Nov 2026, account SOLUSDT rates not read"
+  },
+  {
+   "instrument_id": "SOL-USDT-PERP",
+   "effective_from": "1970-01-01T00:00:00Z",
+   "venue": "BINANCE",
+   "maker_fee_bps": "0.0",
+   "taker_fee_bps": "1.7",
+   "fee_source": "PUBLIC_SCHEDULE_UNVERIFIED",
+   "conservative_unverified": true,
+   "tier": "binance_perp_vip9: USD-M VIP 9 (owner-confirmed tier), public schedule as given by the owner 7 Nov 2026, account SOLUSDT rates not read; with BNB the taker is 1.53 (recorded, not built: a BNB fee needs a BNB price)"
+  }
+ ],
+ "risk": {
+  "initial_capital_by_venue": {
+   "BYBIT": "1000.0",
+   "BINANCE": "1000.0"
+  },
+  "max_order_notional": "1000000000",
+  "max_gross_notional": "1000000000",
+  "max_residual_base": "1.0",
+  "max_position_base": "1.25",
+  "inventory": {
+   "model": "unconstrained"
+  },
+  "margin": {
+   "evaluate_interval_ms": 1000,
+   "flatten_after_liquidation": true,
+   "venues": {
+    "BYBIT": {
+     "mode": "CROSS",
+     "liquidation": {
+      "enabled": false
+     },
+     "tiers": {
+      "SOL-USDT-PERP": {
+       "source": "ASSUMED",
+       "tiers": [
+        {
+         "max_notional": "50000.0",
+         "maintenance_rate": "0.01",
+         "initial_rate": "0.02"
+        },
+        {
+         "max_notional": "500000.0",
+         "maintenance_rate": "0.025",
+         "initial_rate": "0.05"
+        }
+       ]
+      }
+     }
+    },
+    "BINANCE": {
+     "mode": "CROSS",
+     "liquidation": {
+      "enabled": false
+     },
+     "tiers": {
+      "SOL-USDT-PERP": {
+       "source": "ASSUMED",
+       "tiers": [
+        {
+         "max_notional": "50000.0",
+         "maintenance_rate": "0.01",
+         "initial_rate": "0.02"
+        },
+        {
+         "max_notional": "500000.0",
+         "maintenance_rate": "0.025",
+         "initial_rate": "0.05"
+        }
+       ]
+      }
+     }
+    }
+   }
+  },
+  "margin_accounts": {
+   "BYBIT": {
+    "margin_enabled": true
+   },
+   "BINANCE": {
+    "margin_enabled": true
+   }
+  }
+ },
+ "oms": {
+  "residual": {
+   "max_residual_base": "1.0",
+   "max_residual_age_ms": 5000,
+   "hedge_venue_priority": [
+    "BINANCE",
+    "BYBIT"
+   ],
+   "unwind_price_slippage_bps": "15.0",
+   "max_unwind_attempts": 3,
+   "hold_new_risk_on_breach": true,
+   "kill_after_ms": 30000
+  }
+ },
+ "instruments": [
+  {
+   "instrument_id": "SOL-USDT-PERP",
+   "venue": "BYBIT",
+   "symbol": "SOLUSDT",
+   "base": "SOL",
+   "quote": "USDT",
+   "tick_size": "0.001",
+   "quantity_step": "0.1",
+   "min_quantity": "0.1",
+   "min_notional": "1",
+   "taker_fee_bps": "3.2",
+   "product_type": "PERP",
+   "leverage": "10",
+   "contract_type": "LINEAR",
+   "settlement_asset": "USDT",
+   "funding_interval_hours": 8,
+   "funding_anchor": "1970-01-01T00:00:00Z"
+  },
+  {
+   "instrument_id": "SOL-USDT-PERP",
+   "venue": "BINANCE",
+   "symbol": "SOLUSDT",
+   "base": "SOL",
+   "quote": "USDT",
+   "tick_size": "0.001",
+   "quantity_step": "0.01",
+   "min_quantity": "0.01",
+   "min_notional": "1",
+   "taker_fee_bps": "1.7",
+   "product_type": "PERP",
+   "leverage": "10",
+   "contract_type": "LINEAR",
+   "settlement_asset": "USDT",
+   "funding_interval_hours": 8,
+   "funding_anchor": "1970-01-01T00:00:00Z"
+  }
+ ],
+ "funding": {
+  "rates": [],
+  "settle_lag_ms": 5000,
+  "mark_fallback": "exchange_mark",
+  "max_mark_age_ms": 60000,
+  "max_abs_rate": "0.03"
+ }
+}
