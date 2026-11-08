@@ -314,7 +314,7 @@ def load_config(path: Path) -> tuple[AppConfig, dict]:
                 residual_config.get("unwind_urgency", "NORMAL")
             ),
             unwind_price_slippage_bps=d(
-                residual_config.get("unwind_price_slippage_bps", "10")
+                residual_config.get("unwind_price_slippage_bps", "15")
             ),
             allow_risk_reducing_under_stop=bool(
                 residual_config.get("allow_risk_reducing_under_stop", True)
@@ -330,6 +330,8 @@ def load_config(path: Path) -> tuple[AppConfig, dict]:
                 int(residual_config["kill_after_ms"]) * 1_000_000
                 if residual_config.get("kill_after_ms") is not None else None
             ),
+            decision_status=dict(residual_config.get("decision_status", {})),
+            decision_notes=dict(residual_config.get("decision_notes", {})),
         ),
         account_risk_snapshots={
             str(venue): AccountRiskSnapshot(

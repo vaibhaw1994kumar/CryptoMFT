@@ -57,7 +57,7 @@ class ResidualPolicy:
     max_residual_age_ns: int
     hedge_venue_priority: tuple[str, ...] = ()
     unwind_urgency: UnwindUrgency = UnwindUrgency.NORMAL
-    unwind_price_slippage_bps: Decimal = Decimal("10")
+    unwind_price_slippage_bps: Decimal = Decimal("15")      # owner 8 Nov 2026: 15 bps, DECISION_PENDING_CALIBRATION (was 10 in the core)
     allow_risk_reducing_under_stop: bool = True
     max_unwind_attempts: int = 3          # 2026-11-02 owner decision: 3, as the v1 profile (was 2); exhaustion -> UNWIND_EXHAUSTED_ALARM
     max_one_sided_notional: Decimal = Decimal("Infinity")
@@ -65,6 +65,9 @@ class ResidualPolicy:
     # breach is still open after ``kill_after_ns`` the kill switch trips.
     hold_new_risk_on_breach: bool = True
     kill_after_ns: int | None = None
+    # labels read from the config (oms.residual.decision_status / decision_notes); the config file is a release artifact, so they are part of the release identity
+    decision_status: dict = field(default_factory=dict, compare=False)
+    decision_notes: dict = field(default_factory=dict, compare=False)
 
     def __post_init__(self) -> None:
         if self.max_residual_base < 0:

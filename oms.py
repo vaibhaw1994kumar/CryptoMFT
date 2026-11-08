@@ -2525,6 +2525,8 @@ class OMS:
             fee=order.fee,
             reason=update.reason,
         )
+        if order.filled_quantity > 0 and plan.parent_id in self._hedge_specs:
+            self._price_fills(order, update.observed_ts_ns)      # FILL_TRIGGERED: a maker fill arrives as a stream update, not as a dispatch callback: it is priced here (once per delta)
         self.ledger.apply_fill(order, update.observed_ts_ns)
         self._update_exposure_control(update.observed_ts_ns)
         self._persist(plan, update.observed_ts_ns, "ORDER_STATE_UPDATE_APPLIED", **payload)
@@ -2717,6 +2719,7 @@ class OMS:
                 raise ValueError("FILL_TRIGGERED needs maker_venue to be one of the opportunity's venues")
             maker_child = next(c for c in children if c.venue == maker_venue)
             hedge_proto = next(c for c in children if c is not maker_child)
+            maker_child.post_only, maker_child.time_in_force = True, "GTC"       # a resting post-only order: priced as maker, and a quiet GTC order is resting, not unknown
             plan = ParentPlan(parent_id, opportunity, [maker_child])
         else:
             plan = ParentPlan(parent_id, opportunity, children)
@@ -2733,6 +2736,13 @@ class OMS:
             return self._close_without_exposure(
                 plan, now, PlanState.REJECTED, "residual_breach_hold"
             )
+        unknown_chains = sorted(c.chain_id for group in self.hedge_chains.values() for c in group.values() if c.state in (HedgeState.UNKNOWN, HedgeState.ESCALATED))
+        if unknown_chains:
+            # unknown block (the backtester's count_unknown_exposure): while a hedge is UNKNOWN (or escalated and waiting on one), the exposure it may or may not have closed is of
+            # unknown size, so no new package is admitted until the venue has answered
+            self.realism_counters["new_risk_held_hedge_unknown"] = self.realism_counters.get("new_risk_held_hedge_unknown", 0) + 1
+            self.ledger.record("NEW_RISK_HELD_HEDGE_UNKNOWN", now, parent_id=parent_id, opportunity_id=opportunity.opportunity_id, chain_ids=unknown_chains)
+            return self._close_without_exposure(plan, now, PlanState.REJECTED, "hedge_unknown_block")
         if self.unwind_exhausted_alarms:
             self.realism_counters["new_risk_held_unwind_exhausted"] = self.realism_counters.get("new_risk_held_unwind_exhausted", 0) + 1
             self.ledger.record(
@@ -3120,17 +3130,20 @@ class OMS:
         """The settings the owner left as DECISION_PENDING_CALIBRATION, one value each (the core's), with the backtester's value beside it. No production value is invented."""
         rp, hp, rl = self.residual_policy, self.hedge_policy, self.release_policy
         ref, label = self._BACKTESTER_REFERENCE, "DECISION_PENDING_CALIBRATION"
+        cfg = rp.decision_status                       # the labels as the config carries them (a release artifact, so part of the release identity); empty when built in code
         return {
-            "unwind_price_slippage_bps": {"core": str(rp.unwind_price_slippage_bps), "backtester_v1_2": ref["unwind_price_slippage_bps"], "label": label},
-            "max_unwind_attempts": {"core": rp.max_unwind_attempts, "backtester_v1_2": ref["max_unwind_attempts"], "label": label,
-                                    "note": "the core's code default has been 3 since 2 Nov; the core repo's config copies said 2 until 8 Nov"},
-            "max_residual_age_ns": {"core": rp.max_residual_age_ns, "backtester_v1_2": ref["residual_rule"], "label": label, "action": "hold new risk, then unwind"},
-            "kill_after_ns": {"core": rp.kill_after_ns, "label": label, "action": "kill switch if the breach is still open"},
+            "unwind_price_slippage_bps": {"core": str(rp.unwind_price_slippage_bps), "backtester_v1_2": ref["unwind_price_slippage_bps"], "label": label,
+                                          "config_label": cfg.get("unwind_price_slippage_bps"), "note": "owner 8 Nov 2026: 15 bps in the core and the backtester (the core was 10)"},
+            "max_unwind_attempts": {"core": rp.max_unwind_attempts, "backtester_v1_2": ref["max_unwind_attempts"], "label": label, "config_label": cfg.get("max_unwind_attempts"),
+                                    "note": "owner 8 Nov 2026: 3. The core's code default has been 3 since 2 Nov; the core config copies said 2 until 8 Nov, so this changes live behaviour (one more unwind attempt before the alarm)"},
+            "max_residual_age_ns": {"core": rp.max_residual_age_ns, "backtester_v1_2": ref["residual_rule"], "label": label, "config_label": cfg.get("max_residual_age_ms"),
+                                    "action": "stage 1 of the core's two stages: hold new risk (owner 8 Nov 2026)"},
+            "kill_after_ns": {"core": rp.kill_after_ns, "label": label, "config_label": cfg.get("kill_after_ms"), "action": "stage 2: kill switch if the breach is still open (owner 8 Nov 2026)"},
             "retry_limit": {"core": hp.retry_limit, "backtester_v1_2": ref["retry_limit"], "label": label, "note": "0 = retry off until a caller sets it"},
             "retry_backoff_ns": {"core": hp.retry_backoff_ns, "backtester_v1_2": ref["retry_backoff_s"], "label": label},
             "max_book_age_ns": {"core": hp.max_book_age_ns, "label": label, "note": "None = the book's own state decides"},
             "max_queue_age_ns": {"core": rl.max_queue_age_ns, "label": label, "note": "None = no age limit"},
-            "unknown_query_budget": {"core": self.order_timeout_policy.max_queries, "label": label, "action": "alarm AND kill switch (H16)"},
+            "unknown_query_budget": {"core": self.order_timeout_policy.max_queries, "label": label, "action": "H16, accepted by the owner 8 Nov 2026: chain FAILED (alarm) AND kill switch"},
         }
 
     def hedge_report(self) -> dict[str, object]:
