@@ -32,6 +32,7 @@ MS_NS = 1_000_000
 STAGES = (
     "market_data", "strategy", "risk", "entry", "submit_ack", "fill", "cancel",
 )
+_STAGE_ALIAS = {"submit_reject": "submit_ack", "cancel_report": "submit_ack"}
 EVENT_PAIRS = {
     "market_data": ("exchange_ts", "receive_ts"),
     "strategy": ("receive_ts", "decision_ts"),
@@ -234,6 +235,7 @@ class LatencyModel:
         return getattr(self.profile(venue), stage).mean_ns
 
     def draw(self, venue: str, stage: str) -> int:
+        stage = _STAGE_ALIAS.get(stage, stage)          # the router names a reject and a cancel report separately (a timeline-based model draws them from their own timelines); here they are submit_ack
         if stage not in STAGES:
             raise ValueError(f"unknown latency stage {stage!r}")
         value = getattr(self.profile(venue), stage).sample(self._rng)

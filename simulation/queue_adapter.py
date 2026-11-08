@@ -25,7 +25,7 @@ from ..models import TradeEvent
 from ..orderbook import OrderBook as CoreBook
 from .fill_engine import Fill, MakerExecutor
 from .models import Side as SimSide
-from .order_book import OrderBook as SimBook, float_mirror
+from .order_book import OrderBook as SimBook, core_book_from_float, float_mirror
 from .postonly import would_cross
 from .venue_state import VenueState
 
@@ -38,7 +38,7 @@ _EPS = 1e-12
 class QueueAwareVenueAdapter(DeterministicVenueAdapter):
     def __init__(
         self, venue: str, executor: MakerExecutor, *, tick_size: float, maker_fee_bps: float, pair: str = "",
-        state: VenueState | None = None,
+        state: VenueState | None = None, truth=None, feed_venue: str = "",
     ) -> None:
         if executor.config.fill_evidence not in EVIDENCE_REQUIRED_MODES:
             raise ValueError(
@@ -50,6 +50,8 @@ class QueueAwareVenueAdapter(DeterministicVenueAdapter):
         self.tick_size = float(tick_size)
         self.maker_fee_bps = float(maker_fee_bps)
         self.pair = pair
+        self.truth = truth                                             # timing.TruthBooks (the shared rule) or None: taker arrivals execute against the venue-truth book, PostOnly is judged on it when complete
+        self.feed_venue = feed_venue or venue.lower()
         self._owns_state = state is None
         self.state = state or VenueState(venue)
         self._maker_id: dict[str, int] = {}                            # core order id -> executor order id
@@ -96,7 +98,7 @@ class QueueAwareVenueAdapter(DeterministicVenueAdapter):
             and request.order_type == OrderType.LIMIT
         )
         if not (mine or replace_mine or resting):
-            return super().handle(request, book)                       # IOC / FOK / market: a taker fill, the deterministic walk
+            return super().handle(request, self._taker_book(request, book))      # IOC / FOK / market: a taker fill, the deterministic walk
         if resting and not request.post_only:
             callbacks: tuple[ExecutionCallback, ...] = (self._callback(
                 request, ExecutionEventType.REJECTED,
@@ -111,11 +113,25 @@ class QueueAwareVenueAdapter(DeterministicVenueAdapter):
         self._remember(callbacks)
         return callbacks
 
+    def _taker_book(self, request: CanonicalOrderRequest, book: CoreBook | None) -> CoreBook | None:
+        """A taker arrival executes against the venue-truth book at its arrival's exchange time (hedge_arrival_book 'truth'); the view when the truth book is not ready."""
+        if self.truth is None or self._arrival_ns is None or book is None or request.action != OrderAction.SUBMIT:
+            return book
+        now = self._secs(self._arrival_ns)
+        view = self._mirror(book, now)
+        chosen = self.truth.at_arrival(self.feed_venue, now, view)
+        return book if chosen is view else core_book_from_float(self.venue, book.instrument_id, chosen, self._arrival_ns)
+
     def _place(self, request: CanonicalOrderRequest, book: CoreBook | None) -> tuple[ExecutionCallback, ...]:
         if book is None or not book.is_tradable:
             return (self._callback(request, ExecutionEventType.REJECTED, reason="no valid book at arrival"),)
         side = "buy" if request.side == CoreSide.BUY else "sell"
-        if would_cross(side, float(request.price), float(book.best_bid), float(book.best_ask)):
+        best_bid, best_ask = float(book.best_bid), float(book.best_ask)
+        if self.truth is not None and self._arrival_ns is not None and self.truth.complete_at(self.feed_venue, self._secs(self._arrival_ns)):
+            tb = self.truth.books[self.feed_venue]                                     # PostOnly is judged at ARRIVAL on the book the matching engine held (postonly_reject_model 'on'), when that book is complete
+            best_bid, best_ask = tb.best_bid, tb.best_ask
+            self.truth.stats["postonly_checks_truth_at_arrival"] += 1
+        if would_cross(side, float(request.price), best_bid, best_ask):
             return (self._callback(request, ExecutionEventType.REJECTED, reason="postonly_would_take_liquidity"),)
         now = self._at(request)
         mirror = self._mirror(book, now)
@@ -156,7 +172,8 @@ class QueueAwareVenueAdapter(DeterministicVenueAdapter):
             return ()
         now = self._secs(trade.receive_ts_ns)
         sign = 1 if trade.aggressor_side == CoreSide.BUY.value else -1
-        self.state.on_trade(now, float(trade.price), float(trade.quantity), sign)
+        if self._owns_state:                                           # an externally supplied state is fed by its owner, once per print
+            self.state.on_trade(now, float(trade.price), float(trade.quantity), sign)
         fills = self.executor.on_trade(
             self.venue, float(trade.price), float(trade.quantity), sign, now, self.maker_fee_bps,
             event_ts=self._secs(trade.exchange_ts_ns),

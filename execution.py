@@ -1231,6 +1231,7 @@ class StrategyDirectedRouter:
     def _schedule(
         self, route_id: str, request: CanonicalOrderRequest,
         callbacks: tuple[ExecutionCallback, ...], venue_ts_ns: int,
+        fixed_latency_ns: int | None = None,
     ) -> None:
         for callback in callbacks:
             latency_ns = 0
@@ -1241,9 +1242,11 @@ class StrategyDirectedRouter:
                     or callback.event_type in {
                         ExecutionEventType.PARTIAL, ExecutionEventType.FILLED,
                     }
+                    else "submit_reject" if callback.event_type == ExecutionEventType.REJECTED
+                    else "cancel_report" if callback.event_type == ExecutionEventType.CANCELLED
                     else "submit_ack"
                 )
-                latency_ns = self.latency_model.draw(callback.venue, stage)
+                latency_ns = 0 if fixed_latency_ns is not None else self.latency_model.draw(callback.venue, stage)
             deliver_ts = max(
                 venue_ts_ns + latency_ns,
                 self._last_delivery_ts.get(callback.order_id, 0),
@@ -1428,11 +1431,12 @@ class StrategyDirectedRouter:
         hook = getattr(self.adapters.get(venue), "on_trade", None)
         if hook is None:
             return 0
-        return self._deliver_resting_fills(venue, hook(trade), now_ns)
+        return self._deliver_resting_fills(venue, hook(trade), now_ns, exchange_ts_ns=trade.exchange_ts_ns)
 
     def _deliver_resting_fills(
         self, venue: str,
         produced: tuple[tuple[CanonicalOrderRequest, ExecutionCallback], ...], now_ns: int,
+        exchange_ts_ns: int | None = None,
     ) -> int:
         for request, callback in produced:
             # The venue matched now, not when the order was placed: stamp the
@@ -1444,10 +1448,11 @@ class StrategyDirectedRouter:
                 "ts_ns": now_ns,
                 "callback": callback.to_dict(),
             })
-            self._schedule(
-                stable_id("resting-fill", callback.callback_id), request,
-                (callback,), now_ns,
-            )
+            delivery = getattr(self.latency_model, "resting_fill_delivery_ns", None)
+            if delivery is not None and exchange_ts_ns is not None:       # a timeline model: the fill is known at max(print received, exchange time + the fill-report timeline)
+                self._schedule(stable_id("resting-fill", callback.callback_id), request, (callback,), delivery(venue, now_ns, exchange_ts_ns), fixed_latency_ns=0)
+            else:
+                self._schedule(stable_id("resting-fill", callback.callback_id), request, (callback,), now_ns)
         return len(produced)
 
     def query_order(

@@ -671,3 +671,19 @@ def float_mirror(venue: str, pair: str, bids, asks, ts: float) -> OrderBook:
     book = OrderBook(venue, pair)
     book.apply_snapshot([[float(p), float(q)] for p, q in bids.items()], [[float(p), float(q)] for p, q in asks.items()], ts)
     return book
+
+
+def core_book_from_float(venue: str, instrument_id: str, sim_book: OrderBook, ts_ns: int):
+    """The inverse conversion, used for the venue-truth book at an order's arrival: a throwaway core (Decimal) book holding the float book's levels, so the adapter's deterministic walk can run on it
+    (Decimal(repr(x)) is lossless for a float read from text). It is a copy: nothing the walk consumes reaches the truth book."""
+    from decimal import Decimal
+
+    from ..models import EventType, Level, MarketEvent, stable_id
+    from ..orderbook import OrderBook as CoreBook
+
+    book = CoreBook(venue, instrument_id)
+    bids = tuple(Level(Decimal(repr(p)), Decimal(repr(q))) for p, q in sim_book.levels("bid", 100_000))
+    asks = tuple(Level(Decimal(repr(p)), Decimal(repr(q))) for p, q in sim_book.levels("ask", 100_000))
+    book.apply(MarketEvent(event_id=stable_id("truth-book", venue, ts_ns), event_type=EventType.BOOK_SNAPSHOT, venue=venue, instrument_id=instrument_id, exchange_ts_ns=ts_ns, receive_ts_ns=ts_ns,
+                           sequence=1, source_ts_ns=ts_ns, sequence_start=1, raw_ref="truth-book", adapter_version="truth-book-v1", bids=bids, asks=asks, quality_flags=("TRUTH_BOOK_COPY",)))
+    return book

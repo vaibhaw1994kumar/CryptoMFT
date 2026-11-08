@@ -183,6 +183,136 @@ class Timelines:
                              "source": self._s[(v, n)].spec.source} for (v, n) in sorted(self._s)}
 
 
+class TimelinesLatencyModel:
+    """The core router's latency model backed by the SAME `Timelines` the backtester draws from (the profile's timing block: latency preset, the 35 ms floors, jitter, one RNG stream per
+    venue and timeline), so both runtimes give an order the same entry, cancel and report delays. The router's stage names map as the backtester uses its timelines:
+      entry -> entry (send to arrival, every leg)          cancel -> cancel (cancel request to effect)
+      submit_reject -> ack_report (a PostOnly reject notice)    cancel_report -> cancel_report
+      resting fills: known at max(print received, exchange time + fill_report) (`resting_fill_delivery_ns`, `_on_fill`'s rule)
+      submit_ack of an accepted order, fill of an IOC at arrival, strategy, risk, market_data: 0. The backtester has no such delay (an accepted order is not reported, an IOC fill is
+      known at arrival, the decision is the send): recorded as owner question Q-T1 in report C48; a non-zero value would be a change to BOTH runtimes."""
+    source = "timelines:profile"
+    _MAP = {"entry": "entry", "cancel": "cancel", "submit_reject": "ack_report", "cancel_report": "cancel_report"}
+
+    def __init__(self, timelines: "Timelines") -> None:
+        self.timelines = timelines
+        self.zero_stages: dict[str, int] = {}
+
+    def draw(self, venue: str, stage: str) -> int:
+        name = self._MAP.get(stage)
+        if name is None:
+            self.zero_stages[stage] = self.zero_stages.get(stage, 0) + 1
+            return 0
+        return self.timelines.sample_ns(venue.lower(), name)         # timelines are keyed by the feed's lower-case venue name
+
+    def resting_fill_delivery_ns(self, venue: str, received_ns: int, exchange_ns: int) -> int:
+        return max(received_ns, exchange_ns + self.timelines.sample_ns(venue.lower(), "fill_report"))
+
+    def observe(self, venue: str, stage: str, latency_ns: int) -> None:
+        return None
+
+    def expected_ns(self, venue: str, stage: str) -> int:
+        name = self._MAP.get(stage)
+        return 0 if name is None else int(self.timelines.sampler(venue.lower(), name).spec.mean_ms * 1e6)
+
+    def to_dict(self) -> dict:
+        return {"source": self.source, "stage_map": dict(self._MAP), "zero_stages": dict(self.zero_stages)}
+
+    def report(self) -> dict:
+        return {**self.to_dict(), "timelines": self.timelines.report()}
+
+
+class TruthBooks:
+    """Venue-truth books at an order's ARRIVAL (WP3, moved here from the backtester so the session path runs the same rule). Per venue: the book as the exchange held it at an exchange time x,
+    built from events the feed has delivered or will deliver inside a look-ahead window (receive order equals exchange order within a venue; counted when not). A taker arrival executes against it;
+    the strategy only ever reads the receive-time view. `apply(ev, book)` is the data source's own reader of one raw event (research files here, so it lives with the data loader, not in the
+    core); everything else is the rule: hold events ahead, catch the truth book up to x, test completeness, fall back to the view when the truth book is not ready, count it all in `stats`."""
+
+    def __init__(self, books: dict, apply, *, message_atomic: bool, aligner_of, stats) -> None:
+        from collections import deque
+        self.books, self._apply, self.message_atomic, self._aligner_of, self.stats = books, apply, message_atomic, aligner_of, stats
+        self.ahead: dict = {v: deque() for v in books}
+        self.ahead_mode = False
+
+    def with_lookahead(self, feed, window_s: float):
+        """Yield the feed in receive order while holding a window of later events per venue (`ahead`), so an arrival at exchange time x can see venue events that the exchange had already
+        processed but the collector had not yet delivered."""
+        from collections import deque
+        self.ahead_mode = True
+        buf: deque = deque()
+        for ev in iter(feed):
+            buf.append(ev)
+            self.ahead[ev.venue].append(ev)
+            while buf and buf[-1].receive_ts - buf[0].receive_ts >= window_s:
+                yield buf.popleft()
+        while buf:
+            yield buf.popleft()
+
+    def ingest(self, ev) -> None:
+        self.ahead_mode = True
+        self.ahead[ev.venue].append(ev)
+
+    def catch_up(self, venue: str, x_exchange: float | None, ref_host_ts: float | None = None) -> None:
+        """Apply to the venue-truth book every held event of `venue` stamped at or before exchange time x. ref_host_ts: the host time of whatever is being evaluated (an arrival's release time);
+        events received after it are counted as applied before receipt: the look-ahead the truth layer exists for."""
+        q, tb = self.ahead[venue], self.books[venue]
+        while q:
+            ev = q[0]
+            ets = getattr(ev, "exchange_ts", None)
+            if x_exchange is not None and ets is not None and ets > x_exchange:
+                break
+            q.popleft()
+            if ets is not None and ets < tb.last_update_ts:
+                self.stats["truth_events_out_of_exchange_order"] += 1
+            self._apply(ev, tb)
+            if ref_host_ts is not None and ev.receive_ts > ref_host_ts:
+                self.stats["truth_events_applied_before_receipt"] += 1
+        if self.message_atomic:
+            tb.end_message()                                # every held event of a message shares its exchange time, so a message is never split here
+
+    def sync_event(self, ev) -> None:
+        """Called for every event the strategy view applies: the truth book must be at least as far along."""
+        if self.ahead_mode:
+            self.catch_up(ev.venue, getattr(ev, "exchange_ts", None), ev.receive_ts)
+            q = self.ahead[ev.venue]
+            if q and q[0] is ev:                           # exchange_ts missing or out of order: apply it now anyway
+                q.popleft()
+                self._apply(ev, self.books[ev.venue])
+                if self.message_atomic:
+                    self.books[ev.venue].end_message()
+        else:
+            self._apply(ev, self.books[ev.venue])
+            if self.message_atomic:
+                self.books[ev.venue].end_message()
+
+    def exchange_time(self, release_ts: float) -> float:
+        aligner = self._aligner_of()
+        return aligner.to_exchange(release_ts) if aligner.ready else release_ts
+
+    def complete_at(self, venue: str, release_ts: float) -> bool:
+        """True when the truth book of the venue is known to be complete at the arrival's exchange time: the catch-up has run and an event stamped after that time is already held (so nothing
+        stamped before it is still to come)."""
+        x = self.exchange_time(release_ts)
+        self.catch_up(venue, x, release_ts)
+        q, tb = self.ahead[venue], self.books[venue]
+        return tb.ready and bool(q) and (getattr(q[0], "exchange_ts", None) or 0.0) > x
+
+    def at_arrival(self, venue: str, release_ts: float, view):
+        """The book a taker arrival executes against: the venue-truth book at the arrival's exchange time, else the strategy view (counted)."""
+        self.catch_up(venue, self.exchange_time(release_ts), release_ts)
+        tb = self.books[venue]
+        if not tb.ready:
+            self.stats["truth_book_not_ready_at_arrival"] += 1
+            return view
+        self.stats["truth_arrivals"] += 1
+        if view.ready and view.mid > 0:
+            d = abs(tb.mid - view.mid) / view.mid * 1e4
+            self.stats["truth_vs_view_mid_bps_sum"] += d
+            if d > self.stats.get("truth_vs_view_mid_bps_max", 0.0):
+                self.stats["truth_vs_view_mid_bps_max"] = d
+        return tb
+
+
 class FixedOffsetAligner:
     """Host-clock aligner with a MEASURED offset. Same surface as latency_model.HostClockAligner. observe() only classifies a
     recorded local_ts as a plausible receive time (within plausible_ns of exchange_ts + offset) and never changes the offset;
