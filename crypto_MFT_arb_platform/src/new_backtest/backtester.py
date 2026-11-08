@@ -1278,10 +1278,20 @@ class CrossVenueArbBacktester:
         """4h.5: rebuild cash / base / fees from the layer's fill journal alone and compare with the ledger. Raises
         ExecutionReconciliationError unless equity_bridge == "warn" (the same switch as the equity bridge)."""
         funding = self.settler.report()["by_venue"] if self.settler else {}
+        inv_base, inv_cash, fees_paid = dict(self.inventory.base), dict(self.inventory.cash), self.fees_paid
+        if self.config.ledger_source == "core" and self._shadow is not None:
+            # D6 (owner 8 Nov, exit condition): the reconciliation reads the CORE LEDGER, not the float inventory, cash or fee accumulator. The journal rebuilt from the layer's fills is judged against it.
+            from decimal import Decimal
+            sh = self._shadow
+            inv_base = {v: float(sh.ledger.positions.get((sh._venue(v), sh.instrument), 0)) for v in self.config.venues}
+            inv_cash = {v: float(sh.ledger.cash_deltas.get(sh._venue(v), 0)) for v in self.config.venues}
+            rows = getattr(self, "_core_recon_rows", None) or {}
+            fees_paid = float(sum((-Decimal(r["fees_at_fill_time"]) - Decimal(r["rebates_at_fill_time"]) for r in rows.values()), Decimal(0)))
+            cash_pnl = sum(inv_cash.values())
         doc = reconcile(fills=self.xl.fills, intents=self.xl.intents,
                         fee_bps={v: (self.venue_specs[v].fees.maker_bps, self.venue_specs[v].fees.taker_bps) for v in self.config.venues},
                         liquidation_fee_bps={v: c.liquidation_fee_bps for v, c in self.margin_model.cfg.venues.items()} if self.margin_model is not None else None,
-                        inventory_base=dict(self.inventory.base), inventory_cash=dict(self.inventory.cash), fees_paid=self.fees_paid,
+                        inventory_base=inv_base, inventory_cash=inv_cash, fees_paid=fees_paid,
                         funding_by_venue=dict(funding), trade_log=self.trade_log, cash_pnl=cash_pnl,
                         truncated=len(self.trade_log) >= self.config.max_trade_log or bool(self.xl.counts.get("fills_truncated")),
                         mode=self.xl.cfg.one_hedge_child)
@@ -2973,10 +2983,20 @@ class CrossVenueArbBacktester:
                                traded_notional=D(repr(float(self.traded_notional))))
         val_c = Valuation("USDT", {(sh._venue(v), sh.instrument): dm[v] for v in cfg.venues})
         funding_on = sh.funding is not None
+        # D6 (owner 8 Nov): the two float-path figures the reconciliation is judged against, as exact Decimals of the same floats the ledger was fed (Decimal(repr(x))): the trade ledger's trading P&L per venue
+        # at the closing marks (cash of every fill before fees, plus the position at the mark) and the fees it charged. A mismatch is a finding, not a tolerance to widen.
+        trade_pnl, legacy_fees = {}, {}
+        for v in cfg.venues:
+            rows = [r for r in self.trade_log if r["venue"] == v]
+            signed = [(D(repr(float(r["qty"]))) if r["side"] == "buy" else -D(repr(float(r["qty"]))), D(repr(float(r["price"])))) for r in rows]
+            trade_pnl[sh._venue(v)] = sum((-q * px for q, px in signed), D(0)) + sum((q for q, _ in signed), D(0)) * dm[v]
+            legacy_fees[sh._venue(v)] = sum((D(repr(float(r["fee"]))) for r in rows), D(0))
         recon = reconcile(sh.ledger.economics, opening=Valuation("USDT", {}), closing=val_c, product_types={sh._venue(v): "PERP" for v in cfg.venues},
+                          trade_pnl_by_venue=None if truncated else trade_pnl, legacy_fees_by_venue=None if truncated else legacy_fees,
                           funding_modelled_venues=[sh._venue(v) for v in sh.funding_venues] if funding_on else (),
                           funding_flags_by_venue=sh.funding.blocking_flags_by_venue() if funding_on else None, estimated_by_venue=sh.funding.estimated_by_venue() if funding_on else None,
-                          mark_missing=sh.ledger.mark_missing, identity_tolerance=D("1e-15"))      # float-fed ledger: 17-digit quantities, Decimal products round at ~1e-25
+                          mark_missing=sh.ledger.mark_missing, identity_tolerance=D("1e-15"), legacy_fee_tolerance=D("1e-12"))      # float-fed ledger: 17-digit quantities, Decimal products round at ~1e-25
+        self._core_recon_rows = recon["venues"]
         gate = None
         dq = _data_quality(feed, cfg)
         if cfg.output_dir:

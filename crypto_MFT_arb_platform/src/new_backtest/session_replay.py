@@ -259,6 +259,9 @@ class SessionReplay:
             "label": "EXPLORATORY: session runtime, not a result to quote", "runtime": "session", "profile": self.profile.get("name"), "pair": self.config.pair,
             "days": [self.config.start_date, self.config.end_date], "size_base": float(self.config.arb.max_position_base), "fee_presets": self.profile.get("fee_presets"),
             "events": dict(self.events), "signals": signals, "orders": orders, "fills": fills, "positions": positions, "cash_by_venue": cash, "equity_at_book_mids": str(equity),
+            "ledger_event_counts": dict(Counter(e["event_type"] for e in s.ledger.events)),
+            "gate_events": [{k: (str(v) if isinstance(v, Decimal) else v) for k, v in e.items() if k in ("event_type", "ts_ns", "reason", "chain_id", "parent_id")}
+                            for e in s.ledger.events if e["event_type"] in ("HEDGE_DISPATCH_HELD", "TIME_INTEGRITY_BLOCK", "ORDER_LIFETIME_EXPIRED", "ORDER_REJECT_CLASSIFIED", "HEDGE_CAP_BREACH_AT_DISPATCH", "HEDGE_ALARM")][:500],
             "grid_snaps": dict(self.shim.grid_snaps), "fills_by_source": {n: dict(a.fills_by_source) for n, a in self.adapters.items()},
             "manifest": {
                 "invalid_book_policy": s.book_policy_report(self.last_ns), "feed": self.feed.manifest(), "ticks": self.ticks, "quantity_step": f"{QUANTITY_STEP} ASSUMED",
