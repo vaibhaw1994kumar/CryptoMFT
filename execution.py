@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Any, Callable, Protocol
 
 from .instruments import InstrumentMaster
-from .models import Side, stable_id
+from .models import Side, TradeEvent, stable_id
 from .orderbook import OrderBook
 
 
@@ -1421,7 +1421,19 @@ class StrategyDirectedRouter:
         hook = getattr(self.adapters.get(venue), "on_book_update", None)
         if hook is None:
             return 0
-        produced = hook(book)
+        return self._deliver_resting_fills(venue, hook(book), now_ns)
+
+    def on_trade(self, venue: str, trade: TradeEvent, now_ns: int) -> int:
+        """Phase D (D2): let the venue simulator see a public trade print. An adapter without the hook (the deterministic one, live and testnet adapters) ignores it."""
+        hook = getattr(self.adapters.get(venue), "on_trade", None)
+        if hook is None:
+            return 0
+        return self._deliver_resting_fills(venue, hook(trade), now_ns)
+
+    def _deliver_resting_fills(
+        self, venue: str,
+        produced: tuple[tuple[CanonicalOrderRequest, ExecutionCallback], ...], now_ns: int,
+    ) -> int:
         for request, callback in produced:
             # The venue matched now, not when the order was placed: stamp the
             # report and the queryable order status with the match time.

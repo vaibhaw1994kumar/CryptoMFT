@@ -28,7 +28,7 @@ from .margin import LiquidationEngine, MarginConfig
 from .transfers import RebalanceRule, TransferEngine, TransferRoute
 from .risk import InventoryModel
 from .ledger import Ledger
-from .models import EventType, MarketEvent, Opportunity, PlanState
+from .models import EventType, MarketEvent, Opportunity, PlanState, TradeEvent
 from .oms import OMS, instrument_assets
 from .orderbook import OrderBook
 from .plan_store import ParentPlanStore
@@ -437,6 +437,18 @@ class TradingSession:
             self._dispatch(strategy, opportunity, now, decided, event)
             last = opportunity
         return last
+
+    def on_trade(self, trade: TradeEvent, *, now_ns: int | None = None) -> int:
+        """Phase D (D2): a public trade print reaches the venue simulator (queue fills come from trades, never from a book update). It does not feed the book gate, the time monitor or the strategy; a venue adapter without an ``on_trade`` hook ignores it. Applies even when the last book event was blocked on its timestamps: the venue matches whatever our clock says."""
+        now = trade.receive_ts_ns if now_ns is None else now_ns
+        if self.clock_ns is not None and now_ns is None:
+            now = int(self.clock_ns())
+        self.oms.advance_time(now, self.books)
+        produced = self.oms.on_trade(trade.venue, trade, now)
+        if produced:
+            self.last_event_ts_ns = max(self.last_event_ts_ns, now)
+            self._notify_closed_plans()
+        return produced
 
     def _dispatch(
         self, strategy: Any, opportunity: Opportunity, now: int,

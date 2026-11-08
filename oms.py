@@ -18,6 +18,7 @@ from .models import (
     ParentPlan,
     PlanState,
     Side,
+    TradeEvent,
     stable_id,
 )
 from .orderbook import BookState, OrderBook
@@ -2253,6 +2254,14 @@ class OMS:
         if produced:
             self.process_throttled_routes(now_ns)
         self._hedge_progress_all(now_ns)            # a held hedge dispatch (bad book) is retried as soon as the book may be valid again
+        return produced
+
+    def on_trade(self, venue: str, trade: TradeEvent, now_ns: int) -> int:
+        """Phase D (D2): route a public trade print to the venue simulator, like ``on_book_update``. No consumer yet: only an adapter with an ``on_trade`` hook reacts."""
+        produced = self.router.on_trade(venue, trade, now_ns)
+        if produced:
+            self.process_throttled_routes(now_ns)
+            self._hedge_progress_all(now_ns)
         return produced
 
     def drain(self, until_ns: int) -> dict[str, object]:
