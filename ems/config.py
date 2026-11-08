@@ -9,6 +9,7 @@ PAIRINGS = ("maker_taker", "maker_maker", "taker_taker")
 ONE_HEDGE_CHILD = ("off", "count", "enforce")
 RISK_RESERVATION = ("off", "count", "enforce")
 PLACEMENTS = ("touch", "improve", "deep")
+PRICE_RULES = ("conditional_edge", "naive_edge")   # execution.primary.price_rule: conditional_edge (every perp profile) is the edge the signal was gated on; naive_edge is legacy_v0's, kept for that reference only
 # execution.hedge.cap: touch_slack = today's rule, re-taken from the touch on every attempt; conditional_edge_breakeven = the capped_ioc_dp
 # policy's cap; breakeven_plus_buffer (phase 1-lite) = ONE fixed limit for the whole hedge chain: the price at which the trade nets zero after
 # maker + taker fees, moved cap_buffer_bps against us; every retry re-sends that same limit (no chasing).
@@ -20,9 +21,9 @@ _RENAMED = {"PASSIVE_TOUCH": "PASSIVE with placement: touch", "PASSIVE_IMPROVE":
 _SECTION_KEYS = {
     "primary": {"tactic", "placement", "deep_ticks", "max_age_s", "reprice", "price_rule"},
     "hedge": {"tactic", "cap", "cap_buffer_bps", "deadline_s", "attempts", "urgency_phi", "flicker_model", "slack_bps_floor",
-              "policy", "price_model", "flicker_set", "v0_bps", "q", "max_attempts_cap", "min_p_at_cap", "policy_venues"},
-    "maker_maker": {"escalate_after_s"},
-    "unwind": {"tactic", "child", "window_s", "fallback", "band_bps"},
+              "policy", "price_model", "flicker_set", "v0_bps", "max_attempts_cap", "min_p_at_cap", "policy_venues"},
+    "maker_maker": set(),        # hedge.q, maker_maker.escalate_after_s, unwind.window_s and unwind.fallback were declared here and read by nothing; no profile sets them: removed (Phase C, 8 Nov)
+    "unwind": {"tactic", "child", "band_bps"},
 }
 
 
@@ -59,6 +60,9 @@ class ExecutionConfig:
         pl = self.primary.get("placement", "deep")
         if pl not in PLACEMENTS:
             raise ExecutionConfigError(f"execution.primary.placement must be one of {PLACEMENTS}, not {pl!r}")
+        pr = self.primary.get("price_rule", "conditional_edge")
+        if pr not in PRICE_RULES:
+            raise ExecutionConfigError(f"execution.primary.price_rule must be one of {PRICE_RULES}, not {pr!r}")
         dt = self.primary.get("deep_ticks")
         if dt is not None and (pl != "deep" or not isinstance(dt, int) or isinstance(dt, bool) or dt < 1):
             raise ExecutionConfigError("execution.primary.deep_ticks is a positive integer and only valid with placement: deep")

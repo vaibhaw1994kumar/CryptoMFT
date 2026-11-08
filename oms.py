@@ -4,6 +4,7 @@ from decimal import Decimal, ROUND_CEILING, ROUND_FLOOR
 import json
 from pathlib import Path
 from collections.abc import Callable
+from typing import Any
 
 from .economics import EconomicEventType
 from .funding import is_perpetual
@@ -19,7 +20,9 @@ from .models import (
     Side,
     stable_id,
 )
-from .orderbook import OrderBook
+from .orderbook import BookState, OrderBook
+from .hedge_lifecycle import HedgeLifecycle, HedgePolicy, HedgeState
+from .venue_semantics_perp import BINANCE as _MKT_BINANCE, BYBIT as _MKT_BYBIT, classify_reject
 from .risk import (
     PreTradeDecision, ReconciliationReport, RiskEngine, VenueRiskSnapshot,
 )
@@ -32,6 +35,8 @@ from .execution import (
     DEFERRED_ACTIONS,
     DispatchPolicy,
     OrderTimeoutPolicy,
+    PendingRoute,
+    ReleasePolicy,
     VenueOrderStatus,
     ExecutionCallback,
     ExecutionEventType,
@@ -246,6 +251,8 @@ class OMS:
         order_owner_guard: Callable[[], None] | None = None,
         new_risk_guard: Callable[[], None] | None = None,
         order_timeout_policy: OrderTimeoutPolicy | None = None,
+        hedge_policy: HedgePolicy | None = None,
+        release_policy: ReleasePolicy | None = None,
     ):
         self.instruments = instruments
         self.risk = risk
@@ -266,6 +273,8 @@ class OMS:
         self.asset_prices: dict[tuple[str, str], Decimal] = {}
         self.matcher = matcher or DeterministicMatcher()
         self.router = router or StrategyDirectedRouter(instruments)
+        self.release_policy = release_policy or ReleasePolicy()
+        self.router.release_revalidator = self._revalidate_queued       # EMS01: every queued request is re-checked when it is released
         self.plan_store = plan_store
         self.dispatch_policy = dispatch_policy
         self.execution_clock_ns = execution_clock_ns
@@ -287,6 +296,19 @@ class OMS:
         self._residual_next_check: dict[str, int] = {}
         self._reconciliation_retry: set[str] = set()
         self._deferred_close: dict[str, tuple[str, tuple[str, ...]]] = {}
+        self.hedge_policy = hedge_policy or HedgePolicy()
+        self.expired_at_release: list[dict[str, Any]] = []
+        self._hedge_specs: dict[str, dict[str, Any]] = {}                  # FILL_TRIGGERED: the declared hedge leg of a plan (no ChildOrder until a maker fill)
+        self.hedge_chains: dict[str, dict[str, HedgeLifecycle]] = {}       # parent_id -> chain_id -> chain
+        self._chain_of_child: dict[str, HedgeLifecycle] = {}
+        self._chain_children: dict[str, list[str]] = {}
+        self._hedge_retry_due: dict[str, int] = {}                          # chain_id -> due ts ns
+        self._hedge_held: dict[str, str] = {}                               # chain_id -> why the dispatch is held (bad book, price cap): re-checked on every timer
+        self._hedge_dispatching = 0
+        self._hedge_finalizing = 0
+        self.hedge_records: list[dict[str, Any]] = []
+        self.reject_records: list[dict[str, object]] = []      # Phase C: one record per rejected child, classified by the venue code table
+        self._rejects_classified: set[str] = set()
         self.realism_counters: dict[str, int] = {
             "unknown_state_orders": 0,
             "venue_queries": 0,
@@ -314,6 +336,7 @@ class OMS:
         self.recovered_plans = sum(
             plan.state != PlanState.CLOSED for plan in self.plans.values()
         )
+        self._recover_hedge_state()
         # REJECT_AFTER_FILL_ALARM is once per order across restarts: the recovered reports show which were raised.
         self._reject_after_fill_alarmed.update(
             order.order_id for plan in self.plans.values() for order in plan.children
@@ -1456,6 +1479,7 @@ class OMS:
                 # unhandled exception abort the whole plan/session.
                 order.state = OrderState.REJECTED
                 order.reject_reason = str(exc)
+                self._classify_reject(plan, order, attempt_ts)
                 self._residual_event(
                     plan, "UNWIND_ORDER_REJECTED_INVALID", attempt_ts,
                     order_id=order_id, venue=venue, reason=str(exc),
@@ -1575,8 +1599,23 @@ class OMS:
         self, plan: ParentPlan, ts_ns: int,
         books: dict[tuple[str, str], OrderBook] | None = None,
     ) -> ParentPlan:
+        if plan.parent_id not in self._hedge_specs:
+            return self._finalize_plan_body(plan, ts_ns, books)
+        # FILL_TRIGGERED: updates the unwind produces re-enter the hedge reaction; it must not finalize the plan from inside its own finalization
+        self._hedge_finalizing += 1
+        try:
+            return self._finalize_plan_body(plan, ts_ns, books)
+        finally:
+            self._hedge_finalizing -= 1
+
+    def _finalize_plan_body(
+        self, plan: ParentPlan, ts_ns: int,
+        books: dict[tuple[str, str], OrderBook] | None = None,
+    ) -> ParentPlan:
         if plan.state == PlanState.CLOSED:
             return plan
+        if plan.parent_id in self._hedge_specs and not self._fill_triggered_settled(plan):
+            return plan                      # FILL_TRIGGERED: the maker still rests or a hedge chain is open; the plan closes when they settle
         if self.router.has_pending_parent(plan.parent_id):
             return plan
         unknown = self._unknown_state_children(plan, ts_ns)
@@ -1598,6 +1637,8 @@ class OMS:
         all_filled = all(
             order.state == OrderState.FILLED for order in primary
         )
+        if plan.parent_id in self._hedge_specs and plan.residual_base != 0:
+            all_filled = False               # FILL_TRIGGERED: a filled maker whose hedge did not cover it is a residual, not a filled plan
         if all_filled:
             if plan.state != PlanState.HEDGE_UNWIND:
                 self._transition(plan, PlanState.FILLED, ts_ns)
@@ -1728,6 +1769,32 @@ class OMS:
             affected.append(self._finalize_plan(plan, now_ns, self._books))
         return tuple(affected)
 
+    def _revalidate_queued(self, pending: PendingRoute, now_ns: int) -> str | None:
+        """EMS01: a request queued for a rate limit is released against the market as it is NOW, not the book captured when it was queued. Returns why the request is no
+        longer worth sending (it is then expired and rejected as `expired_at_release`, never sent), or None. Covers every queued route, not only hedges.
+        A risk-reducing request is exempt (it closes exposure); its book is checked where it is built (hedge dispatch)."""
+        if pending.risk_reducing:
+            return None
+        req = pending.request
+        why: str | None = None
+        if self.risk.kill_switch:
+            why = "kill_switch_active"
+        else:
+            book = self._books.get((req.venue, req.instrument_id)) or pending.book
+            limit = self.release_policy.max_queue_age_ns
+            if book.state != BookState.VALID:
+                why = f"book_{book.state.value.lower()}"
+            elif limit is not None and now_ns - pending.enqueued_ts_ns > limit:
+                why = "queue_age"
+            elif (self.release_policy.check_price and req.time_in_force == TimeInForce.IOC and req.price is not None and book.bids and book.asks):
+                touch = book.best_ask if req.side == Side.BUY else book.best_bid
+                if (req.side == Side.BUY and touch > req.price) or (req.side == Side.SELL and touch < req.price):
+                    why = "price_moved_past_limit"
+        if why is not None:
+            self.realism_counters["expired_at_release"] = self.realism_counters.get("expired_at_release", 0) + 1
+            self.expired_at_release.append({"order_id": req.order_id, "venue": req.venue, "reason": why, "queued_ns": now_ns - pending.enqueued_ts_ns, "ts_ns": now_ns})
+        return why
+
     def process_throttled_routes(self, now_ns: int) -> tuple[RoutingResult, ...]:
         """Release due EMS work, converge delivered reports, close completed parents."""
         if self.order_owner_guard is not None:
@@ -1786,7 +1853,8 @@ class OMS:
                 fill_ts = observed_ts
             else:
                 self._record_order_action(
-                    plan, order, request, "SUBMIT", "RELEASED", now_ns,
+                    plan, order, request, "SUBMIT",
+                    "EXPIRED" if routing.throttle_action == ThrottleAction.EXPIRED else "RELEASED", now_ns,
                 )
                 fill_ts = now_ns
                 for callback_index, callback in enumerate(routing.callbacks):
@@ -2115,6 +2183,7 @@ class OMS:
                     if status is not None else None
                 ),
             )
+            self._hedge_on_query(plan, order, status is not None, query_ts)
             if status is not None:
                 self._apply_venue_status(plan, order, status, query_ts)
                 if order.state in TERMINAL_ORDER_STATES or (
@@ -2151,6 +2220,7 @@ class OMS:
         router_due = self.router.next_due_ts()
         if router_due is not None:
             candidates.append(router_due)
+        candidates.extend(self._hedge_timer_candidates())
         return min(candidates) if candidates else None
 
     def advance_time(
@@ -2167,10 +2237,12 @@ class OMS:
                 break
             self.process_throttled_routes(due)
             self.check_order_deadlines(due)
+            self._hedge_progress_all(due)
             steps += 1
             if steps >= max_steps:
                 raise RuntimeError("EMS timers did not converge")
         self.enforce_residual_limits(now_ns, only_due=True)
+        self._hedge_progress_all(now_ns)
         return steps
 
     def on_book_update(self, venue: str, instrument_id: str, now_ns: int) -> int:
@@ -2180,6 +2252,7 @@ class OMS:
         produced = self.router.on_book_update(venue, book, now_ns)
         if produced:
             self.process_throttled_routes(now_ns)
+        self._hedge_progress_all(now_ns)            # a held hedge dispatch (bad book) is retried as soon as the book may be valid again
         return produced
 
     def drain(self, until_ns: int) -> dict[str, object]:
@@ -2269,7 +2342,20 @@ class OMS:
         )
 
     def _derive_execution_state(self, plan: ParentPlan, ts_ns: int) -> None:
-        states = {order.state for order in plan.children}
+        spec = self._hedge_specs.get(plan.parent_id)
+        if spec is not None:
+            # FILL_TRIGGERED: the plan is judged by the maker and the LAST child of each hedge chain (an earlier rejected attempt that was retried does not count),
+            # and it is FILLED only when the hedges together cover the whole maker size
+            relevant = [o for o in plan.children if o.order_id == spec["maker_order_id"]]
+            for ids in self._chain_children.values():
+                if ids and any(o.order_id == ids[-1] for o in plan.children):
+                    relevant.append(next(o for o in plan.children if o.order_id == ids[-1]))
+            states = {order.state for order in relevant}
+            hedged = sum((o.filled_quantity for o in plan.children if o.order_role == "HEDGE"), Decimal("0"))
+            if all(state == OrderState.FILLED for state in states) and hedged < spec["max_qty"]:
+                states = states | {OrderState.PARTIAL}
+        else:
+            states = {order.state for order in plan.children}
         if all(state == OrderState.FILLED for state in states):
             target = PlanState.FILLED
         elif OrderState.REJECTED in states or OrderState.CANCELLED in states:
@@ -2396,6 +2482,8 @@ class OMS:
         if update.liquidity:
             self._order_liquidity[order.order_id] = update.liquidity
         order.reject_reason = str(winner.get("reason") or "") or None
+        if order.state == OrderState.REJECTED:
+            self._classify_reject(plan, order, update.observed_ts_ns)
 
         terminal_claims = sorted({
             str(item["resolved_order_state"]) for item in order.state_updates
@@ -2453,7 +2541,29 @@ class OMS:
             )
         self._after_order_state_change(plan, order, previous_state, update)
         self._derive_execution_state(plan, update.observed_ts_ns)
+        if plan.parent_id in self._hedge_specs:
+            self._fill_triggered_react(plan, order, update.observed_ts_ns)
         return plan
+
+    @staticmethod
+    def _market_for(venue: str) -> str | None:
+        v = venue.lower()
+        return _MKT_BYBIT if "bybit" in v else _MKT_BINANCE if "binance" in v else None
+
+    def _classify_reject(self, plan: ParentPlan, order: ChildOrder, ts_ns: int) -> None:
+        """Every reject goes through the one venue code table (venue_semantics_perp.classify_reject), once per order: the label and whether the same
+        request may be sent again. An unclassified reason is not retryable (fail closed) and is counted. Nothing retries on this yet: the record is the input to retry-before-unwind."""
+        if order.order_id in self._rejects_classified:
+            return
+        self._rejects_classified.add(order.order_id)
+        verdict = classify_reject(self._market_for(order.venue), order.reject_reason or "")
+        key = "reject_classified" if verdict.classified else "reject_unclassified"
+        self.realism_counters[key] = self.realism_counters.get(key, 0) + 1
+        record = {"parent_id": plan.parent_id, "order_id": order.order_id, "venue": order.venue, "role": order.order_role, "ts_ns": ts_ns,
+                  "reason": order.reject_reason or "", "label": verdict.label, "retry_permitted": verdict.retry_permitted,
+                  "basis": verdict.basis, "classified": verdict.classified}
+        self.reject_records.append(record)
+        self.ledger.record("ORDER_REJECT_CLASSIFIED", ts_ns, **{k: v for k, v in record.items() if k != "ts_ns"})
 
     def _after_order_state_change(
         self, plan: ParentPlan, order: ChildOrder, previous: OrderState, update: CanonicalOrderUpdate,
@@ -2568,6 +2678,7 @@ class OMS:
         opportunity: Opportunity,
         books: dict[tuple[str, str], OrderBook],
         dispatch_ts_ns: int | None = None,
+        maker_venue: str | None = None,
     ) -> ParentPlan:
         self._books.update(books)
         parent_id = stable_id("parent", opportunity.opportunity_id)
@@ -2599,7 +2710,16 @@ class OMS:
                 limit_price=opportunity.sell_price,
             ),
         ]
-        plan = ParentPlan(parent_id, opportunity, children)
+        fill_triggered = self.dispatch_policy == DispatchPolicy.FILL_TRIGGERED
+        hedge_proto = None
+        if fill_triggered:
+            if maker_venue not in (opportunity.buy_venue, opportunity.sell_venue):
+                raise ValueError("FILL_TRIGGERED needs maker_venue to be one of the opportunity's venues")
+            maker_child = next(c for c in children if c.venue == maker_venue)
+            hedge_proto = next(c for c in children if c is not maker_child)
+            plan = ParentPlan(parent_id, opportunity, [maker_child])
+        else:
+            plan = ParentPlan(parent_id, opportunity, children)
         self.plans[parent_id] = plan
         now = opportunity.observed_ts_ns
         self._transition(plan, PlanState.CREATED, now, event_type="PLAN_CREATED")
@@ -2736,171 +2856,11 @@ class OMS:
             policy=self.dispatch_policy.value,
             child_count=len(children),
         )
-        for leg_index, order in enumerate(children):
-            dispatch_started_ts = self._next_execution_ts(dispatch_base)
-            self.ledger.record(
-                "CHILD_DISPATCH_STARTED",
-                dispatch_started_ts,
-                parent_id=parent_id,
-                order_id=order.order_id,
-                venue=order.venue,
-                leg_index=leg_index,
-                policy=self.dispatch_policy.value,
-            )
-            self._persist(
-                plan,
-                dispatch_started_ts,
-                "CHILD_DISPATCH_STARTED",
-                order_id=order.order_id,
-                venue=order.venue,
-                leg_index=leg_index,
-            )
-            self._recompute_plan_economics(plan, dispatch_started_ts)
-            risk_reducing = self._order_reduces_residual(plan, order)
-            instruction = RoutingInstruction(
-                strategy_id=opportunity.strategy_id,
-                eligible_venues=(order.venue,),
-                route_priority=(order.venue,),
-                order_id=order.order_id,
-                parent_opportunity_id=order.opportunity_id,
-                parent_order_id=order.parent_id,
-                instrument_id=order.instrument_id,
-                side=order.side,
-                price=order.limit_price,
-                quantity=order.quantity,
-                order_type=OrderType.LIMIT,
-                time_in_force=TimeInForce.IOC,
-                maker_taker_intent=MakerTakerIntent.TAKER,
-                post_only=False,
-                reduce_only=False,
-                created_ts_ns=dispatch_started_ts,
-                idempotency_key=stable_id("submit", order.order_id),
-                risk_reducing=risk_reducing,
-            )
-            try:
-                routing = self.route_strategy_order(instruction, books)
-            except Exception as exc:
-                # The adapter raised after the order may already have been handed to the venue, so the order is
-                # neither accepted nor rejected as far as we know. Keep the reservation, never resend, and put the
-                # order under the normal report-deadline recovery (venue query -> time out -> kill switch).
-                self._note_ambiguous_dispatch(plan, order, instruction.idempotency_key, "SUBMIT", exc, dispatch_started_ts)
-                raise
-            if risk_reducing:
-                self._record_legging_control_override(
-                    plan, order, routing, dispatch_started_ts,
-                    global_stop_override=self.risk.kill_switch,
-                )
-            if routing.request is not None:
-                self._record_order_action(
-                    plan, order, routing.request, "SUBMIT",
-                    (
-                        routing.throttle_action.value
-                        if routing.throttle_action in {
-                            ThrottleAction.QUEUE, ThrottleAction.DELAY
-                        } else "DISPATCHED"
-                    ),
-                    dispatch_started_ts,
-                )
-            if routing.throttle_action == ThrottleAction.IN_FLIGHT:
+        if fill_triggered:
+            self._hedge_register(plan, hedge_proto, plan.children[0], opportunity, package_dispatch_ts)
+        for leg_index, order in enumerate(list(plan.children)):
+            if self._dispatch_leg(plan, order, leg_index, opportunity, books, dispatch_base, now, maker_leg=fill_triggered):
                 package_throttled = True
-                self.ledger.record(
-                    "CHILD_DISPATCH_IN_FLIGHT", dispatch_started_ts,
-                    parent_id=parent_id, order_id=order.order_id,
-                    venue=order.venue, leg_index=leg_index,
-                    arrival_ts_ns=routing.release_ts_ns,
-                )
-            if routing.throttle_action in {
-                ThrottleAction.QUEUE, ThrottleAction.DELAY
-            }:
-                package_throttled = True
-                throttle_payload = {
-                    "parent_id": parent_id, "order_id": order.order_id,
-                    "venue": order.venue, "leg_index": leg_index,
-                    "action": routing.throttle_action.value,
-                    "release_ts_ns": routing.release_ts_ns,
-                    "rate_limit": self.router.rate_limit_snapshot(),
-                }
-                self.ledger.record(
-                    "CHILD_DISPATCH_THROTTLED", dispatch_started_ts,
-                    **throttle_payload,
-                )
-                self._persist(
-                    plan, dispatch_started_ts, "CHILD_DISPATCH_THROTTLED",
-                    **throttle_payload,
-                )
-            callback_timestamps = []
-            for callback_index, callback in enumerate(routing.callbacks):
-                callback_ts = self._next_execution_ts(now)
-                callback_timestamps.append(callback_ts)
-                callback_payload = {
-                    "parent_id": parent_id,
-                    "order_id": order.order_id,
-                    "venue": order.venue,
-                    "leg_index": leg_index,
-                    "callback_index": callback_index,
-                    "callback_id": callback.callback_id,
-                    "callback_type": callback.event_type.value,
-                    "adapter_event_ts_ns": callback.event_ts_ns,
-                    "local_callback_ts_ns": callback_ts,
-                }
-                self.ledger.record(
-                    "CHILD_CALLBACK_OBSERVED", callback_ts, **callback_payload
-                )
-                self._persist(
-                    plan, callback_ts, "CHILD_CALLBACK_OBSERVED", **callback_payload
-                )
-                self.ingest_execution_callback(callback, callback_ts)
-            dispatch_completed_ts = self._next_execution_ts(now)
-            if routing.selected_venue is None:
-                rejection_reason = ";".join(
-                    reason for check in routing.checks for reason in check.reasons
-                ) or "no eligible route"
-                self.ingest_order_update(CanonicalOrderUpdate(
-                    update_id=stable_id("route-rejection", order.order_id),
-                    source=OrderUpdateSource.INTERNAL,
-                    parent_order_id=parent_id, order_id=order.order_id,
-                    venue=order.venue, instrument_id=order.instrument_id,
-                    state=ExecutionEventType.REJECTED,
-                    event_ts_ns=dispatch_completed_ts,
-                    observed_ts_ns=dispatch_completed_ts,
-                    reason=rejection_reason,
-                ))
-            measurement = ChildDispatchMeasurement(
-                parent_order_id=parent_id,
-                order_id=order.order_id,
-                venue=order.venue,
-                leg_index=leg_index,
-                dispatch_started_ts_ns=dispatch_started_ts,
-                dispatch_completed_ts_ns=dispatch_completed_ts,
-                dispatch_duration_ns=dispatch_completed_ts - dispatch_started_ts,
-                callback_count=len(callback_timestamps),
-                first_callback_observed_ts_ns=(
-                    callback_timestamps[0] if callback_timestamps else None
-                ),
-                last_callback_observed_ts_ns=(
-                    callback_timestamps[-1] if callback_timestamps else None
-                ),
-            )
-            self.dispatch_measurements.append(measurement)
-            self.ledger.record(
-                "CHILD_DISPATCH_COMPLETED",
-                dispatch_completed_ts,
-                **measurement.to_dict(),
-            )
-            self._persist(
-                plan,
-                dispatch_completed_ts,
-                "CHILD_DISPATCH_COMPLETED",
-                measurement=measurement.to_dict(),
-                order_state=order.state.value,
-                filled_quantity=order.filled_quantity,
-            )
-            if order.filled_quantity:
-                self._price_fills(order, dispatch_completed_ts)
-                fill_ts = callback_timestamps[-1] if callback_timestamps else dispatch_completed_ts
-                self.ledger.apply_fill(order, fill_ts)
-                self._update_exposure_control(fill_ts)
-            self._assess_legging_risk(plan, dispatch_completed_ts, books)
 
         package_completed_ts = self._next_execution_ts(now)
         self.ledger.record(
@@ -2930,7 +2890,533 @@ class OMS:
             )
             return plan
 
+        if fill_triggered:
+            self._fill_triggered_settle(plan, self._hedge_specs[parent_id], package_completed_ts)
+            return plan
         return self._finalize_plan(plan, package_completed_ts, books)
+
+    def _dispatch_leg(
+        self, plan: ParentPlan, order: ChildOrder, leg_index: int, opportunity: Opportunity,
+        books: dict[tuple[str, str], OrderBook], dispatch_base: int, now: int, *, maker_leg: bool = False,
+    ) -> bool:
+        """Persist, route and book the callbacks of one child (the body of the package loop in execute, shared with the FILL_TRIGGERED hedge child).
+        Returns True when the venue throttled, delayed or left the order in flight. A maker leg is a post-only GTC limit; every other leg is a taker IOC limit."""
+        parent_id = plan.parent_id
+        package_throttled = False
+        dispatch_started_ts = self._next_execution_ts(dispatch_base)
+        self.ledger.record(
+            "CHILD_DISPATCH_STARTED",
+            dispatch_started_ts,
+            parent_id=parent_id,
+            order_id=order.order_id,
+            venue=order.venue,
+            leg_index=leg_index,
+            policy=self.dispatch_policy.value,
+        )
+        self._persist(
+            plan,
+            dispatch_started_ts,
+            "CHILD_DISPATCH_STARTED",
+            order_id=order.order_id,
+            venue=order.venue,
+            leg_index=leg_index,
+        )
+        self._recompute_plan_economics(plan, dispatch_started_ts)
+        risk_reducing = self._order_reduces_residual(plan, order)
+        instruction = RoutingInstruction(
+            strategy_id=opportunity.strategy_id,
+            eligible_venues=(order.venue,),
+            route_priority=(order.venue,),
+            order_id=order.order_id,
+            parent_opportunity_id=order.opportunity_id,
+            parent_order_id=order.parent_id,
+            instrument_id=order.instrument_id,
+            side=order.side,
+            price=order.limit_price,
+            quantity=order.quantity,
+            order_type=OrderType.LIMIT,
+            time_in_force=TimeInForce.GTC if maker_leg else TimeInForce.IOC,
+            maker_taker_intent=MakerTakerIntent.MAKER if maker_leg else MakerTakerIntent.TAKER,
+            post_only=maker_leg,
+            reduce_only=False,
+            created_ts_ns=dispatch_started_ts,
+            idempotency_key=stable_id("submit", order.order_id),
+            risk_reducing=risk_reducing,
+        )
+        try:
+            routing = self.route_strategy_order(instruction, books)
+        except Exception as exc:
+            # The adapter raised after the order may already have been handed to the venue, so the order is
+            # neither accepted nor rejected as far as we know. Keep the reservation, never resend, and put the
+            # order under the normal report-deadline recovery (venue query -> time out -> kill switch).
+            self._note_ambiguous_dispatch(plan, order, instruction.idempotency_key, "SUBMIT", exc, dispatch_started_ts)
+            raise
+        if risk_reducing:
+            self._record_legging_control_override(
+                plan, order, routing, dispatch_started_ts,
+                global_stop_override=self.risk.kill_switch,
+            )
+        if routing.request is not None:
+            self._record_order_action(
+                plan, order, routing.request, "SUBMIT",
+                (
+                    routing.throttle_action.value
+                    if routing.throttle_action in {
+                        ThrottleAction.QUEUE, ThrottleAction.DELAY
+                    } else "DISPATCHED"
+                ),
+                dispatch_started_ts,
+            )
+        if routing.throttle_action == ThrottleAction.IN_FLIGHT:
+            package_throttled = True
+            self.ledger.record(
+                "CHILD_DISPATCH_IN_FLIGHT", dispatch_started_ts,
+                parent_id=parent_id, order_id=order.order_id,
+                venue=order.venue, leg_index=leg_index,
+                arrival_ts_ns=routing.release_ts_ns,
+            )
+        if routing.throttle_action in {
+            ThrottleAction.QUEUE, ThrottleAction.DELAY
+        }:
+            package_throttled = True
+            throttle_payload = {
+                "parent_id": parent_id, "order_id": order.order_id,
+                "venue": order.venue, "leg_index": leg_index,
+                "action": routing.throttle_action.value,
+                "release_ts_ns": routing.release_ts_ns,
+                "rate_limit": self.router.rate_limit_snapshot(),
+            }
+            self.ledger.record(
+                "CHILD_DISPATCH_THROTTLED", dispatch_started_ts,
+                **throttle_payload,
+            )
+            self._persist(
+                plan, dispatch_started_ts, "CHILD_DISPATCH_THROTTLED",
+                **throttle_payload,
+            )
+        callback_timestamps = []
+        for callback_index, callback in enumerate(routing.callbacks):
+            callback_ts = self._next_execution_ts(now)
+            callback_timestamps.append(callback_ts)
+            callback_payload = {
+                "parent_id": parent_id,
+                "order_id": order.order_id,
+                "venue": order.venue,
+                "leg_index": leg_index,
+                "callback_index": callback_index,
+                "callback_id": callback.callback_id,
+                "callback_type": callback.event_type.value,
+                "adapter_event_ts_ns": callback.event_ts_ns,
+                "local_callback_ts_ns": callback_ts,
+            }
+            self.ledger.record(
+                "CHILD_CALLBACK_OBSERVED", callback_ts, **callback_payload
+            )
+            self._persist(
+                plan, callback_ts, "CHILD_CALLBACK_OBSERVED", **callback_payload
+            )
+            self.ingest_execution_callback(callback, callback_ts)
+        dispatch_completed_ts = self._next_execution_ts(now)
+        if routing.selected_venue is None:
+            rejection_reason = ";".join(
+                reason for check in routing.checks for reason in check.reasons
+            ) or "no eligible route"
+            self.ingest_order_update(CanonicalOrderUpdate(
+                update_id=stable_id("route-rejection", order.order_id),
+                source=OrderUpdateSource.INTERNAL,
+                parent_order_id=parent_id, order_id=order.order_id,
+                venue=order.venue, instrument_id=order.instrument_id,
+                state=ExecutionEventType.REJECTED,
+                event_ts_ns=dispatch_completed_ts,
+                observed_ts_ns=dispatch_completed_ts,
+                reason=rejection_reason,
+            ))
+        measurement = ChildDispatchMeasurement(
+            parent_order_id=parent_id,
+            order_id=order.order_id,
+            venue=order.venue,
+            leg_index=leg_index,
+            dispatch_started_ts_ns=dispatch_started_ts,
+            dispatch_completed_ts_ns=dispatch_completed_ts,
+            dispatch_duration_ns=dispatch_completed_ts - dispatch_started_ts,
+            callback_count=len(callback_timestamps),
+            first_callback_observed_ts_ns=(
+                callback_timestamps[0] if callback_timestamps else None
+            ),
+            last_callback_observed_ts_ns=(
+                callback_timestamps[-1] if callback_timestamps else None
+            ),
+        )
+        self.dispatch_measurements.append(measurement)
+        self.ledger.record(
+            "CHILD_DISPATCH_COMPLETED",
+            dispatch_completed_ts,
+            **measurement.to_dict(),
+        )
+        self._persist(
+            plan,
+            dispatch_completed_ts,
+            "CHILD_DISPATCH_COMPLETED",
+            measurement=measurement.to_dict(),
+            order_state=order.state.value,
+            filled_quantity=order.filled_quantity,
+        )
+        if order.filled_quantity:
+            self._price_fills(order, dispatch_completed_ts)
+            fill_ts = callback_timestamps[-1] if callback_timestamps else dispatch_completed_ts
+            self.ledger.apply_fill(order, fill_ts)
+            self._update_exposure_control(fill_ts)
+        self._assess_legging_risk(plan, dispatch_completed_ts, books)
+        return package_throttled
+
+    # ------------------------------------------------------------------------------------------------------------------
+    # FILL_TRIGGERED (Phase C, matrix 4B): the hedge of a maker fill. The rules live here; a simulated or live venue only produces the events.
+    #  * the package (maker + hedge, worst case) is reserved atomically at execute(); the hedge child does not exist until a maker fill
+    #  * every maker fill delta opens its OWN hedge chain (one hedge intent per fill, as the backtester does; one live child per chain); the reservation bounds the
+    #    sum at the maker size. A second partial fill while a hedge is in flight is NOT queued or netted: it is hedged by its own chain.
+    #  * the hedge child id is the idempotent client order id (stable_id of parent, chain and attempt); it is recorded before the send (OMS03)
+    #  * a hedge dispatched on a book that is not VALID, or missing or stale, is HELD (the chain waits in HEDGE_PENDING, re-checked on every timer and book update)
+    #    until the book is valid or the residual age limit escalates the chain; it is never sent blind and never dropped
+    #  * a reject goes through the venue code table: a retryable one is retried within the budget, anything else goes to the unwind path
+    #  * no answer: the venue is queried (check_order_deadlines) and nothing is resent until the query says the order is not there
+    # ------------------------------------------------------------------------------------------------------------------
+    _CHAIN_OPEN = (HedgeState.MAKER_FILLED, HedgeState.HEDGE_PENDING, HedgeState.SUBMITTED, HedgeState.PARTIALLY_FILLED, HedgeState.REJECTED,
+                   HedgeState.RETRYING, HedgeState.UNKNOWN)
+
+    def _recover_hedge_state(self) -> None:
+        """After a restart: rebuild the declared hedge leg and every hedge chain of the recovered plans from the plan store (the OMS persisted both before each send)."""
+        if self.plan_store is None:
+            return
+        for parent_id in self.plans:
+            spec = None
+            chains: dict[str, dict[str, Any]] = {}
+            for ev in self.plan_store.events(parent_id):
+                if ev["event_type"] == "HEDGE_SPEC":
+                    spec = ev["payload"]
+                elif ev["event_type"] == "HEDGE_CHAIN":
+                    pl = ev["payload"]
+                    chains[pl["chain"]["chain_id"]] = pl
+                    if spec is not None:
+                        spec["requested_qty"], spec["chain_seq"] = pl["requested_qty"], pl["chain_seq"]
+            if spec is None:
+                continue
+            self._hedge_specs[parent_id] = dict(spec, side=Side(spec["side"]), limit_price=Decimal(str(spec["limit_price"])), max_qty=Decimal(str(spec["max_qty"])),
+                                                requested_qty=Decimal(str(spec["requested_qty"])), chain_seq=int(spec["chain_seq"]))
+            for chain_id, pl in chains.items():
+                chain = HedgeLifecycle.restore(pl["chain"])
+                self.hedge_chains.setdefault(parent_id, {})[chain_id] = chain
+                self._chain_children[chain_id] = list(pl["children"])
+                for oid in pl["children"]:
+                    self._chain_of_child[oid] = chain
+                if chain.state is HedgeState.RETRYING:
+                    self._hedge_retry_due[chain_id] = 0                 # due now: the next timer sends it (the retry was decided before the stop)
+
+    # Reference values of the frozen backtester profile (perp_perp_maker_taker_v1_2) for the settings the core now has ONE value for. Not read by any rule: they are printed beside
+    # the core's value so a run record shows both. The backtester keeps its own hedging until Phase D.
+    _BACKTESTER_REFERENCE = {"unwind_price_slippage_bps": "15", "max_unwind_attempts": 3, "max_residual_age_s": 5.0, "residual_rule": "breaker net_exposure_s 5.0 (trips at once)",
+                             "retry_limit": 2, "retry_backoff_s": 0.25}
+
+    def decision_pending_settings(self) -> dict[str, dict[str, object]]:
+        """The settings the owner left as DECISION_PENDING_CALIBRATION, one value each (the core's), with the backtester's value beside it. No production value is invented."""
+        rp, hp, rl = self.residual_policy, self.hedge_policy, self.release_policy
+        ref, label = self._BACKTESTER_REFERENCE, "DECISION_PENDING_CALIBRATION"
+        return {
+            "unwind_price_slippage_bps": {"core": str(rp.unwind_price_slippage_bps), "backtester_v1_2": ref["unwind_price_slippage_bps"], "label": label},
+            "max_unwind_attempts": {"core": rp.max_unwind_attempts, "backtester_v1_2": ref["max_unwind_attempts"], "label": label,
+                                    "note": "the core's code default has been 3 since 2 Nov; the core repo's config copies said 2 until 8 Nov"},
+            "max_residual_age_ns": {"core": rp.max_residual_age_ns, "backtester_v1_2": ref["residual_rule"], "label": label, "action": "hold new risk, then unwind"},
+            "kill_after_ns": {"core": rp.kill_after_ns, "label": label, "action": "kill switch if the breach is still open"},
+            "retry_limit": {"core": hp.retry_limit, "backtester_v1_2": ref["retry_limit"], "label": label, "note": "0 = retry off until a caller sets it"},
+            "retry_backoff_ns": {"core": hp.retry_backoff_ns, "backtester_v1_2": ref["retry_backoff_s"], "label": label},
+            "max_book_age_ns": {"core": hp.max_book_age_ns, "label": label, "note": "None = the book's own state decides"},
+            "max_queue_age_ns": {"core": rl.max_queue_age_ns, "label": label, "note": "None = no age limit"},
+            "unknown_query_budget": {"core": self.order_timeout_policy.max_queries, "label": label, "action": "alarm AND kill switch (H16)"},
+        }
+
+    def hedge_report(self) -> dict[str, object]:
+        """Per event and per chain, what the specification asks for: retry intervals, reject reasons and labels, timeouts, partial fills, the recovery outcome and the residual-exposure
+        duration. p_fail and loss_fail_bps are SCENARIO values (not calibrated): failure costs are reported per scenario by the caller, never as a measured rate."""
+        chains = [dict(c.as_record(), parent_id=pid) for pid, group in self.hedge_chains.items() for c in group.values()]
+        return {"settings": self.decision_pending_settings(), "chains": chains, "rejects": list(self.reject_records), "expired_at_release": list(self.expired_at_release),
+                "counters": {k: v for k, v in self.realism_counters.items() if k.startswith(("hedge_", "reject_", "expired_"))},
+                "p_fail_and_loss_fail_bps": "SCENARIO (not calibrated): no execution logs exist"}
+
+    def _hedge_register(self, plan: ParentPlan, proto: ChildOrder, maker: ChildOrder, opportunity: Opportunity, ts_ns: int) -> None:
+        self._hedge_specs[plan.parent_id] = {
+            "venue": proto.venue, "side": proto.side, "instrument_id": proto.instrument_id, "limit_price": proto.limit_price,
+            "max_qty": opportunity.quantity, "requested_qty": Decimal("0"), "maker_order_id": maker.order_id, "chain_seq": 0,
+            "opportunity_id": opportunity.opportunity_id,
+        }
+        self._persist(plan, ts_ns, "HEDGE_SPEC", **self._hedge_specs[plan.parent_id])
+
+    def _fill_triggered_settled(self, plan: ParentPlan) -> bool:
+        spec = self._hedge_specs[plan.parent_id]
+        chains = list(self.hedge_chains.get(plan.parent_id, {}).values())
+        if any(c.state in (HedgeState.UNWINDING, HedgeState.ESCALATED, HedgeState.FAILED) for c in chains):
+            return True
+        maker = next((o for o in plan.children if o.order_id == spec["maker_order_id"]), None)
+        maker_done = maker is not None and maker.state in TERMINAL_ORDER_STATES and maker.state != OrderState.TIMED_OUT
+        return maker_done and not any(c.state in self._CHAIN_OPEN for c in chains)
+
+    def _hedge_move(self, plan: ParentPlan, chain: HedgeLifecycle, to: HedgeState, ts_ns: int, reason: str, **kw: Any) -> None:
+        frm = chain.state
+        chain.move(to, ts_ns / 1e9, reason, **kw)
+        self.ledger.record("HEDGE_STATE", ts_ns, parent_id=plan.parent_id, chain_id=chain.chain_id, from_state=frm.value, to_state=to.value, reason=reason,
+                           hedged_qty=chain.hedged_qty, residual_qty=chain.residual_qty, retries=chain.retries)
+        self._persist(plan, ts_ns, "HEDGE_CHAIN", chain=chain.snapshot(), children=list(self._chain_children.get(chain.chain_id, [])),
+                      requested_qty=self._hedge_specs[plan.parent_id]["requested_qty"], chain_seq=self._hedge_specs[plan.parent_id]["chain_seq"])
+        if chain.state in (HedgeState.RECONCILED, HedgeState.FAILED):
+            self.hedge_records.append(dict(chain.as_record(), parent_id=plan.parent_id))
+
+    def _fill_triggered_react(self, plan: ParentPlan, order: ChildOrder, ts_ns: int) -> None:
+        spec = self._hedge_specs[plan.parent_id]
+        if order.order_id == spec["maker_order_id"]:
+            self._hedge_for_maker_fill(plan, spec, order, ts_ns)
+        else:
+            chain = self._chain_of_child.get(order.order_id)
+            if chain is not None:
+                self._hedge_child_changed(plan, spec, chain, order, ts_ns)
+        self._fill_triggered_settle(plan, spec, ts_ns)
+
+    def _hedge_for_maker_fill(self, plan: ParentPlan, spec: dict[str, Any], maker: ChildOrder, ts_ns: int) -> None:
+        delta = min(maker.filled_quantity, spec["max_qty"]) - spec["requested_qty"]
+        if delta <= 0:
+            return
+        spec["requested_qty"] += delta
+        seq = spec["chain_seq"]
+        spec["chain_seq"] = seq + 1
+        chain = HedgeLifecycle(
+            chain_id=stable_id("hedge-chain", plan.parent_id, seq), exposure_qty=float(delta), retry_limit=self.hedge_policy.retry_limit,
+            unwind_attempt_limit=max(1, self.residual_policy.max_unwind_attempts), max_residual_age_s=self.residual_policy.max_residual_age_ns / 1e9,
+            query_attempt_limit=self.order_timeout_policy.max_queries, opened_ts=ts_ns / 1e9)
+        self.hedge_chains.setdefault(plan.parent_id, {})[chain.chain_id] = chain
+        self._chain_children[chain.chain_id] = []
+        self.ledger.record("HEDGE_CHAIN_OPENED", ts_ns, parent_id=plan.parent_id, chain_id=chain.chain_id, exposure_qty=str(delta), maker_order_id=maker.order_id,
+                           maker_filled=str(maker.filled_quantity))
+        self._hedge_move(plan, chain, HedgeState.HEDGE_PENDING, ts_ns, "maker fill")
+        self._hedge_try_dispatch(plan, spec, chain, ts_ns)
+
+    def _hedge_dispatch_refusal(self, spec: dict[str, Any], ts_ns: int) -> str | None:
+        """EMS01 at dispatch: the hedge book must be usable now. Returns why not, or None. (The price is not a refusal: see _hedge_try_dispatch.)"""
+        book = self._books.get((spec["venue"], spec["instrument_id"]))
+        if book is None:
+            return "hedge_book_missing"
+        if book.state != BookState.VALID:
+            return f"hedge_book_{book.state.value.lower()}"
+        if not book.bids or not book.asks:
+            return "hedge_book_one_sided"
+        limit = self.hedge_policy.max_book_age_ns
+        if limit is not None and book.last_receive_ts_ns is not None and ts_ns - book.last_receive_ts_ns > limit:
+            return "hedge_book_stale"
+        return None
+
+    def _hedge_try_dispatch(self, plan: ParentPlan, spec: dict[str, Any], chain: HedgeLifecycle, ts_ns: int) -> bool:
+        reason = self._hedge_dispatch_refusal(spec, ts_ns)
+        if reason is not None:
+            if self._hedge_held.get(chain.chain_id) != reason:
+                self._hedge_held[chain.chain_id] = reason
+                self.realism_counters["hedge_dispatch_held"] = self.realism_counters.get("hedge_dispatch_held", 0) + 1
+                self.ledger.record("HEDGE_DISPATCH_HELD", ts_ns, parent_id=plan.parent_id, chain_id=chain.chain_id, reason=reason)
+            return False
+        self._hedge_held.pop(chain.chain_id, None)
+        book = self._books[(spec["venue"], spec["instrument_id"])]
+        touch = book.best_ask if spec["side"] == Side.BUY else book.best_bid
+        if (spec["side"] == Side.BUY and touch > spec["limit_price"]) or (spec["side"] == Side.SELL and touch < spec["limit_price"]):
+            # the hedge reduces exposure just taken, so it is still sent, at its cap (it may find nothing: ioc_unfilled -> retry or unwind); the breach is on record
+            self.realism_counters["hedge_cap_breach_at_dispatch"] = self.realism_counters.get("hedge_cap_breach_at_dispatch", 0) + 1
+            self.ledger.record("HEDGE_CAP_BREACH_AT_DISPATCH", ts_ns, parent_id=plan.parent_id, chain_id=chain.chain_id, touch=str(touch), cap=str(spec["limit_price"]),
+                               reason="price_cap_exceeded")
+        done = sum((o.filled_quantity for o in plan.children if o.order_id in self._chain_children[chain.chain_id]), Decimal("0"))
+        qty = Decimal(str(chain.exposure_qty)) - done
+        attempt = len(self._chain_children[chain.chain_id])
+        child = ChildOrder(
+            order_id=stable_id("child", plan.parent_id, "HEDGE", chain.chain_id, attempt), parent_id=plan.parent_id, opportunity_id=spec["opportunity_id"],
+            venue=spec["venue"], instrument_id=spec["instrument_id"], side=spec["side"], quantity=qty, limit_price=spec["limit_price"], order_role="HEDGE")
+        try:
+            self.instruments.validate_order(child, ts_ns)
+        except ValueError as exc:
+            self.ledger.record("HEDGE_CHILD_INVALID", ts_ns, parent_id=plan.parent_id, chain_id=chain.chain_id, reason=str(exc), quantity=str(qty))
+            self._hedge_refused(plan, spec, chain, ts_ns, str(exc), "instrument_check")
+            return False
+        self._chain_children[chain.chain_id].append(child.order_id)
+        self._chain_of_child[child.order_id] = chain
+        plan.children.append(child)
+        was = chain.state
+        self._hedge_move(plan, chain, HedgeState.SUBMITTED, ts_ns, f"send {child.order_id}" + (" (retry)" if was is HedgeState.RETRYING else ""))
+        self.ledger.record("HEDGE_SUBMIT", ts_ns, parent_id=plan.parent_id, chain_id=chain.chain_id, client_order_id=child.order_id, quantity=str(qty), attempt=attempt)
+        self._hedge_dispatching += 1
+        try:
+            self._dispatch_leg(plan, child, len(plan.children) - 1, plan.opportunity, self._books, ts_ns, ts_ns)
+        finally:
+            self._hedge_dispatching -= 1
+        if child.state not in TERMINAL_ORDER_STATES:
+            self._watch_order(child, ts_ns)               # the report deadline: no answer in time means the venue is queried, never that the hedge is resent
+        return True
+
+    def _hedge_refused(self, plan: ParentPlan, spec: dict[str, Any], chain: HedgeLifecycle, ts_ns: int, reason: str, code: str) -> None:
+        """The hedge could not be built or sent (a lot, minimum or instrument rule): classified, never retried blind, goes to the unwind path."""
+        verdict = classify_reject(self._market_for(spec["venue"]), code)
+        chain.note_reject(ts_ns / 1e9, verdict.label, verdict.retry_permitted)
+        if chain.state is HedgeState.HEDGE_PENDING:
+            self._hedge_move(plan, chain, HedgeState.REJECTED, ts_ns, reason)
+            self._hedge_after_reject(plan, spec, chain, ts_ns)
+        elif chain.state is HedgeState.RETRYING:
+            self._hedge_move(plan, chain, HedgeState.UNWINDING, ts_ns, f"retry could not be built: {reason}")
+
+    def _hedge_child_changed(self, plan: ParentPlan, spec: dict[str, Any], chain: HedgeLifecycle, order: ChildOrder, ts_ns: int) -> None:
+        mine = [o for o in plan.children if o.order_id in self._chain_children[chain.chain_id]]
+        hedged = sum((o.filled_quantity for o in mine), Decimal("0"))
+        exposure = Decimal(str(chain.exposure_qty))
+        st = order.state
+        if chain.state in (HedgeState.HEDGED, HedgeState.RECONCILED, HedgeState.UNWINDING, HedgeState.FAILED, HedgeState.ESCALATED):
+            if order.filled_quantity > 0 and float(hedged) > chain.hedged_qty + 1e-12:
+                self.ledger.record("HEDGE_LATE_FILL", ts_ns, parent_id=plan.parent_id, chain_id=chain.chain_id, order_id=order.order_id, chain_state=chain.state.value,
+                                   hedged=str(hedged))
+            return
+        if chain.state is HedgeState.UNKNOWN:
+            if st is OrderState.FILLED or (st is OrderState.CANCELLED and order.filled_quantity >= order.quantity):
+                chain.note_query("found_executed" if hedged >= exposure else "found_partial")
+            elif st in (OrderState.ACKNOWLEDGED, OrderState.SENT):
+                chain.note_query("found_live")
+            elif st is OrderState.PARTIAL:
+                chain.note_query("found_partial")
+            elif st is OrderState.REJECTED:
+                chain.note_query("not_found")
+            elif st is OrderState.CANCELLED:
+                chain.note_query("found_partial" if order.filled_quantity > 0 else "not_found")
+        if st is OrderState.TIMED_OUT:
+            if chain.state in (HedgeState.SUBMITTED, HedgeState.RETRYING):
+                self._hedge_move(plan, chain, HedgeState.UNKNOWN, ts_ns, "order timed out")
+            if chain.state is HedgeState.UNKNOWN and chain.query_failures >= chain.query_attempt_limit:
+                self._hedge_unknown_escalation(plan, chain, ts_ns)
+            return
+        if hedged >= exposure - Decimal("1e-12"):
+            self._hedge_move(plan, chain, HedgeState.HEDGED, ts_ns, "fully hedged", filled_qty=float(hedged))
+            return
+        if st is OrderState.PARTIAL and hedged > Decimal(str(chain.hedged_qty)):
+            if chain.state is HedgeState.UNKNOWN:
+                self._hedge_move(plan, chain, HedgeState.PARTIALLY_FILLED, ts_ns, "query found a partial fill", filled_qty=float(hedged))
+            elif chain.state in (HedgeState.SUBMITTED, HedgeState.PARTIALLY_FILLED):
+                self._hedge_move(plan, chain, HedgeState.PARTIALLY_FILLED, ts_ns, "partial hedge fill", filled_qty=float(hedged))
+            return
+        if st in (OrderState.ACKNOWLEDGED, OrderState.SENT) and chain.state is HedgeState.UNKNOWN and chain._query_result == "found_live":
+            self._hedge_move(plan, chain, HedgeState.SUBMITTED, ts_ns, "the venue has the order live")
+            return
+        terminal_unfilled = st is OrderState.CANCELLED or st is OrderState.FILLED or st is OrderState.REJECTED
+        if not terminal_unfilled:
+            return
+        if st is OrderState.REJECTED:
+            if chain.state is HedgeState.UNKNOWN:                                  # the venue says it does not know the order: a replacement is allowed
+                self._hedge_after_query_not_found(plan, spec, chain, ts_ns)
+                return
+            record = next((r for r in reversed(self.reject_records) if r["order_id"] == order.order_id), None)
+            chain.note_reject(ts_ns / 1e9, str(record["label"]) if record else "unclassified", bool(record and record["retry_permitted"]))
+            if chain.state in (HedgeState.SUBMITTED, HedgeState.HEDGE_PENDING):
+                self._hedge_move(plan, chain, HedgeState.REJECTED, ts_ns, f"rejected: {order.reject_reason}")
+            self._hedge_after_reject(plan, spec, chain, ts_ns)
+            return
+        # CANCELLED (an IOC remainder the venue dropped) or FILLED short of the exposure: part may be hedged, the rest needs another child
+        if hedged > Decimal(str(chain.hedged_qty)) and chain.state in (HedgeState.SUBMITTED, HedgeState.UNKNOWN, HedgeState.PARTIALLY_FILLED):
+            self._hedge_move(plan, chain, HedgeState.PARTIALLY_FILLED, ts_ns, "IOC remainder not filled", filled_qty=float(hedged))
+            self._hedge_after_reject(plan, spec, chain, ts_ns)
+            return
+        if chain.state is HedgeState.UNKNOWN:
+            self._hedge_after_query_not_found(plan, spec, chain, ts_ns)
+            return
+        order.reject_reason = "ioc_expired_unfilled"                               # an IOC the venue dropped unfilled: an engine refusal, not a venue code
+        self._classify_reject(plan, order, ts_ns)
+        record = next((r for r in reversed(self.reject_records) if r["order_id"] == order.order_id), None)
+        chain.note_reject(ts_ns / 1e9, str(record["label"]) if record else "ioc_unfilled", bool(record and record["retry_permitted"]))
+        if chain.state is HedgeState.SUBMITTED:
+            self._hedge_move(plan, chain, HedgeState.REJECTED, ts_ns, "IOC found nothing inside its cap")
+        self._hedge_after_reject(plan, spec, chain, ts_ns)
+
+    def _hedge_after_query_not_found(self, plan: ParentPlan, spec: dict[str, Any], chain: HedgeLifecycle, ts_ns: int) -> None:
+        if chain.retries < chain.retry_limit:
+            self._hedge_move(plan, chain, HedgeState.RETRYING, ts_ns, "the venue does not know the order: replacement allowed")
+            self._hedge_retry_due[chain.chain_id] = ts_ns + self.hedge_policy.retry_backoff_ns
+        else:
+            self._hedge_move(plan, chain, HedgeState.UNWINDING, ts_ns, "not at the venue and no retry budget")
+
+    def _hedge_after_reject(self, plan: ParentPlan, spec: dict[str, Any], chain: HedgeLifecycle, ts_ns: int) -> None:
+        """The reject table decides: a retryable reject (or an IOC remainder) with budget left is retried after the backoff; anything else is unwound."""
+        permitted = chain.state is HedgeState.PARTIALLY_FILLED or bool(chain._last_reject_retry_permitted)
+        if permitted and chain.retries < chain.retry_limit:
+            self._hedge_move(plan, chain, HedgeState.RETRYING, ts_ns, "retry permitted")
+            self._hedge_retry_due[chain.chain_id] = ts_ns + self.hedge_policy.retry_backoff_ns
+            return
+        why = "reject not retryable" if not permitted else f"retry budget {chain.retry_limit} used"
+        if chain.state in (HedgeState.REJECTED, HedgeState.PARTIALLY_FILLED):
+            self._hedge_move(plan, chain, HedgeState.UNWINDING, ts_ns, why)
+
+    def _hedge_unknown_escalation(self, plan: ParentPlan, chain: HedgeLifecycle, ts_ns: int) -> None:
+        """H16, settled: when status queries keep failing the chain goes to FAILED (the persistent alarm, no new risk until an operator reset) AND the core's kill switch
+        trips (the OMS does this on 'unconfirmed order state'). Both, not one: the exposure is of unknown size, so it can be neither hedged nor unwound blind, and
+        resting maker orders must stop adding to it. The backtester raises only the alarm; that stays until Phase D."""
+        self._hedge_move(plan, chain, HedgeState.FAILED, ts_ns, "status queries exhausted")
+        self.ledger.record("HEDGE_ALARM", ts_ns, parent_id=plan.parent_id, chain_id=chain.chain_id, reason="unknown_unresolved", kill_switch=self.risk.kill_switch)
+        self.unwind_exhausted_alarms.setdefault(plan.parent_id, {"reason": "hedge_unknown_unresolved", "ts_ns": ts_ns, "chain_id": chain.chain_id})
+        if not self.risk.kill_switch:
+            self.risk.activate_kill_switch(now_ns=ts_ns, reason="hedge status unresolved", source="OMS_HEDGE_UNKNOWN", ledger=self.ledger)
+            self.cancel_open_orders("hedge status unresolved", ts_ns)
+
+    def _hedge_on_query(self, plan: ParentPlan, order: ChildOrder, answered: bool, ts_ns: int) -> None:
+        chain = self._chain_of_child.get(order.order_id)
+        if chain is None:
+            return
+        if chain.state in (HedgeState.SUBMITTED, HedgeState.RETRYING):
+            self._hedge_move(plan, chain, HedgeState.UNKNOWN, ts_ns, "report deadline passed: the venue is queried")
+        if not answered and chain.state is HedgeState.UNKNOWN:
+            chain.note_query("failed")
+
+    def _hedge_timer_candidates(self) -> list[int]:
+        out = list(self._hedge_retry_due.values())
+        for parent_id, chains in self.hedge_chains.items():
+            for c in chains.values():
+                if c.max_residual_age_s is not None and c.state in self._CHAIN_OPEN and c.exposure_closed_ts is None:
+                    out.append(int((c.opened_ts + c.max_residual_age_s) * 1e9) + 1)
+        return out
+
+    def _hedge_progress_all(self, now_ns: int) -> None:
+        if self._hedge_dispatching or self._hedge_finalizing:
+            return
+        for parent_id in list(self.hedge_chains):
+            plan = self.plans.get(parent_id)
+            if plan is not None and plan.state != PlanState.CLOSED:
+                self._fill_triggered_settle(plan, self._hedge_specs[parent_id], now_ns)
+
+    def _fill_triggered_settle(self, plan: ParentPlan, spec: dict[str, Any], ts_ns: int) -> None:
+        if self._hedge_dispatching or self._hedge_finalizing:
+            return
+        for chain in list(self.hedge_chains.get(plan.parent_id, {}).values()):
+            if chain.state is HedgeState.HEDGE_PENDING and chain.chain_id in self._hedge_held:
+                self._hedge_try_dispatch(plan, spec, chain, ts_ns)
+            elif chain.state is HedgeState.RETRYING and self._hedge_retry_due.get(chain.chain_id, 1 << 62) <= ts_ns:
+                self._hedge_retry_due.pop(chain.chain_id, None)
+                self._hedge_try_dispatch(plan, spec, chain, ts_ns)
+            elif chain.state is HedgeState.RETRYING and chain.chain_id in self._hedge_held:
+                self._hedge_try_dispatch(plan, spec, chain, ts_ns)
+            if chain.state in self._CHAIN_OPEN and chain.residual_age_breached(ts_ns / 1e9):
+                self.realism_counters["hedge_residual_age_breaches"] = self.realism_counters.get("hedge_residual_age_breaches", 0) + 1
+                self._hedge_retry_due.pop(chain.chain_id, None)
+                self._hedge_held.pop(chain.chain_id, None)
+                self._hedge_move(plan, chain, HedgeState.ESCALATED, ts_ns, "residual age limit")
+        for chain in list(self.hedge_chains.get(plan.parent_id, {}).values()):
+            if chain.state is HedgeState.ESCALATED and not self._unknown_state_children(plan, ts_ns):
+                self._hedge_move(plan, chain, HedgeState.UNWINDING, ts_ns, "escalated: deterministic unwind")
+        if plan.state != PlanState.CLOSED and self._fill_triggered_settled(plan):
+            self._finalize_plan(plan, ts_ns, self._books)
+            self._hedge_after_finalize(plan, ts_ns)
+
+    def _hedge_after_finalize(self, plan: ParentPlan, ts_ns: int) -> None:
+        for chain in self.hedge_chains.get(plan.parent_id, {}).values():
+            if chain.state is HedgeState.UNWINDING:
+                if plan.parent_id in self.unwind_exhausted_alarms:
+                    self._hedge_move(plan, chain, HedgeState.FAILED, ts_ns, "unwind attempts exhausted")
+                elif plan.state == PlanState.CLOSED and plan.residual_base == 0:
+                    self._hedge_move(plan, chain, HedgeState.RECONCILED, ts_ns, "unwound and reconciled", unwound_qty=chain.exposure_qty - chain.hedged_qty)
+            elif chain.state is HedgeState.HEDGED and plan.state == PlanState.CLOSED and plan.residual_base == 0:
+                self._hedge_move(plan, chain, HedgeState.RECONCILED, ts_ns, "positions and orders reconciled")
 
     def reconcile_plan(
         self,

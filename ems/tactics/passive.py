@@ -179,6 +179,7 @@ class Passive(Tactic):
     def __init__(self, cfg) -> None:
         super().__init__(cfg)
         self.placement = cfg.primary.get("placement", "deep")
+        self.price_rule = cfg.primary.get("price_rule", "conditional_edge")        # validated by ExecutionConfig; the edge price handed to price() is the conditional-edge price
         self.deep_ticks = cfg.primary.get("deep_ticks")
         if self.placement not in PLACEMENTS:
             raise IntentError(f"unknown placement {self.placement!r}; known: {PLACEMENTS}")

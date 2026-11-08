@@ -40,6 +40,7 @@ class MakerTakerIntent(StrEnum):
 
 class DispatchPolicy(StrEnum):
     DETERMINISTIC_SEQUENTIAL = "DETERMINISTIC_SEQUENTIAL"
+    FILL_TRIGGERED = "FILL_TRIGGERED"          # maker first; each maker fill opens a hedge chain (oms.py, Phase C)
 
 
 class UnwindUrgency(StrEnum):
@@ -80,6 +81,15 @@ class ResidualPolicy:
             raise ValueError("hedge venue priority must contain unique venues")
 
 
+@dataclass(frozen=True)
+class ReleasePolicy:
+    """EMS01: what is re-checked when a queued request is released. A risk-reducing request is exempt from the price and age checks (it closes exposure).
+    max_queue_age_ns is DECISION_PENDING_CALIBRATION: None means no age limit (no value is invented)."""
+    max_queue_age_ns: int | None = None
+    check_price: bool = True
+    calibration_label: str = "DECISION_PENDING_CALIBRATION"
+
+
 class RateLimitPolicy(StrEnum):
     REJECT = "REJECT"
     QUEUE = "QUEUE"
@@ -94,6 +104,7 @@ class ThrottleAction(StrEnum):
     RELEASED = "RELEASED"
     IN_FLIGHT = "IN_FLIGHT"
     DELIVERED = "DELIVERED"
+    EXPIRED = "EXPIRED"          # EMS01: a queued request found, at release, to be no longer worth sending; it was not sent
 
 
 # Routing outcomes where the OMS has no venue answer yet and must wait.
@@ -401,6 +412,7 @@ class PendingRoute:
     enqueued_ts_ns: int
     release_ts_ns: int
     queue_ordinal: int
+    risk_reducing: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -826,6 +838,8 @@ class StrategyDirectedRouter:
         self.trace: list[dict[str, Any]] = []
         # EMS02: per-scope venue limits (rate_limits.ScopedRateLimiter); None = per-venue budget only.
         self.scoped_limits: Any | None = None
+        # EMS01: called for every queued SUBMIT at release time; returns why it is no longer worth sending (it is then expired, not sent), or None. The OMS installs it.
+        self.release_revalidator: Callable[[PendingRoute, int], str | None] | None = None
 
     def route_controlled(
         self,
@@ -1108,6 +1122,7 @@ class StrategyDirectedRouter:
                 enqueued_ts_ns=instruction.created_ts_ns,
                 release_ts_ns=release_ts_ns,
                 queue_ordinal=self._queue_ordinal,
+                risk_reducing=instruction.risk_reducing,
             )
             self._pending.append(pending)
             self._pending_by_idempotency[request.idempotency_key] = pending
@@ -1324,6 +1339,22 @@ class StrategyDirectedRouter:
                                                       venue=pending.request.venue,
                                                       order_id=pending.request.order_id))
                 continue
+            if self.release_revalidator is not None and pending.request.action == OrderAction.SUBMIT:
+                expired_why = self.release_revalidator(pending, now_ns)
+                if expired_why is not None:
+                    self._pending_by_idempotency.pop(pending.request.idempotency_key, None)
+                    self.trace.append({"record_type": "THROTTLE_EXPIRED", "ts_ns": now_ns, "route_id": pending.route_id, "request_id": pending.request.request_id,
+                                       "venue": pending.request.venue, "reason": expired_why, "enqueued_ts_ns": pending.enqueued_ts_ns,
+                                       "queued_ns": now_ns - pending.enqueued_ts_ns})
+                    req = pending.request
+                    released.append(RoutingResult(
+                        route_id=pending.route_id, selected_venue=req.venue, override_applied=pending.override_applied, checks=pending.checks, request=req,
+                        callbacks=(ExecutionCallback(
+                            schema_version="1.0.0", callback_id=f"expired-{req.request_id}", request_id=req.request_id, order_id=req.order_id,
+                            parent_opportunity_id=req.parent_opportunity_id, parent_order_id=req.parent_order_id, venue=req.venue, instrument_id=req.instrument_id,
+                            event_type=ExecutionEventType.REJECTED, event_ts_ns=now_ns, reason=f"expired_at_release: {expired_why}"),),
+                        throttle_action=ThrottleAction.EXPIRED, release_ts_ns=pending.release_ts_ns))
+                    continue
             status.rate_limit_used += 1
             self._scoped_charge(pending.request, now_ns)
             self._pending_by_idempotency.pop(pending.request.idempotency_key, None)
