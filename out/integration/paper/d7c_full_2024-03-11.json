@@ -1,0 +1,1298 @@
+{
+ "label": "EXPLORATORY: D7c, probe orders of the old paper simulator on a recorded March slice; not a strategy result",
+ "day": "2024-03-11",
+ "minutes": 120.0,
+ "events": 1554402,
+ "engine_old": "cpp_mm_matching_engine",
+ "orders": 13996,
+ "criterion_1_paper_equals_replay": {
+  "orders": 13996,
+  "replay_fill_rows": 7819,
+  "paper_fill_rows": 7819,
+  "orders_that_differ": {
+   "acceptance": 0,
+   "reason": 0,
+   "fills": 0,
+   "queue_ahead_at_placement": 0
+  },
+  "examples": []
+ },
+ "old_filled_orders": 6886,
+ "replay_filled_orders": 7017,
+ "filled_by_both": 6879,
+ "only_new_by_venue": {
+  "BINANCE": 91,
+  "BYBIT": 47
+ },
+ "only_old_by_venue": {
+  "BINANCE": 6,
+  "BYBIT": 1
+ },
+ "quantity_differs_on": 5,
+ "old_qty": 6874.799999999999,
+ "dust_fills": {
+  "old_engine_fills_below_1e-9": {
+   "BYBIT": 83
+  },
+  "old_engine_orders_whose_only_fills_are_dust": 8,
+  "new_path_fills_below_1e-9": 0,
+  "new_path_fills_below_1e-9_by_venue": {},
+  "new_path_fills_below_1e-9_list": [],
+  "new_path_orders_left_open_with_remaining_below_1e-9_by_venue": {
+   "BYBIT": 14
+  },
+  "new_path_orders_left_open_with_remaining_below_1e-9_list": [
+   {
+    "venue": "BYBIT",
+    "order": "bybit-buy-3364",
+    "size": 1.0,
+    "filled": 0.9999999999999999,
+    "remaining": 1.1102230246251565e-16
+   },
+   {
+    "venue": "BYBIT",
+    "order": "bybit-sell-3490",
+    "size": 1.0,
+    "filled": 0.9999999999999999,
+    "remaining": 1.1102230246251565e-16
+   },
+   {
+    "venue": "BYBIT",
+    "order": "bybit-sell-4172",
+    "size": 1.0,
+    "filled": 0.9999999999999999,
+    "remaining": 1.1102230246251565e-16
+   },
+   {
+    "venue": "BYBIT",
+    "order": "bybit-buy-4301",
+    "size": 1.0,
+    "filled": 0.9999999999999999,
+    "remaining": 1.1102230246251565e-16
+   },
+   {
+    "venue": "BYBIT",
+    "order": "bybit-buy-5740",
+    "size": 1.0,
+    "filled": 0.9999999999999999,
+    "remaining": 1.1102230246251565e-16
+   },
+   {
+    "venue": "BYBIT",
+    "order": "bybit-sell-6338",
+    "size": 1.0,
+    "filled": 0.9999999999999999,
+    "remaining": 1.1102230246251565e-16
+   },
+   {
+    "venue": "BYBIT",
+    "order": "bybit-buy-6544",
+    "size": 1.0,
+    "filled": 0.9999999999999999,
+    "remaining": 1.1102230246251565e-16
+   },
+   {
+    "venue": "BYBIT",
+    "order": "bybit-buy-6562",
+    "size": 1.0,
+    "filled": 0.9999999999999999,
+    "remaining": 1.1102230246251565e-16
+   },
+   {
+    "venue": "BYBIT",
+    "order": "bybit-buy-6750",
+    "size": 1.0,
+    "filled": 0.9999999999999999,
+    "remaining": 1.1102230246251565e-16
+   },
+   {
+    "venue": "BYBIT",
+    "order": "bybit-sell-8619",
+    "size": 1.0,
+    "filled": 0.9999999999999999,
+    "remaining": 1.1102230246251565e-16
+   },
+   {
+    "venue": "BYBIT",
+    "order": "bybit-buy-9447",
+    "size": 1.0,
+    "filled": 0.9999999999999999,
+    "remaining": 1.1102230246251565e-16
+   },
+   {
+    "venue": "BYBIT",
+    "order": "bybit-sell-10083",
+    "size": 1.0,
+    "filled": 0.9999999999999999,
+    "remaining": 1.1102230246251565e-16
+   },
+   {
+    "venue": "BYBIT",
+    "order": "bybit-sell-11114",
+    "size": 1.0,
+    "filled": 0.9999999999999999,
+    "remaining": 1.1102230246251565e-16
+   },
+   {
+    "venue": "BYBIT",
+    "order": "bybit-sell-13785",
+    "size": 1.0,
+    "filled": 0.9999999999999999,
+    "remaining": 1.1102230246251565e-16
+   }
+  ]
+ },
+ "replay_qty": 6996.994046550746,
+ "acceptance_differences": {
+  "('BINANCE', 'ACKNOWLEDGED', 'REJECTED', 'no valid book at arrival')": 11
+ },
+ "volume_limit_check_of_the_new_rule": {
+  "checked": 7017,
+  "violations": 0,
+  "detail": []
+ },
+ "queue_ahead_at_placement_by_venue_replay_path": {
+  "BINANCE": {
+   "acknowledged_orders": 7818,
+   "queue_ahead_gt_0": 6202,
+   "queue_ahead_ge_order_size": 6202,
+   "queue_ahead_ge_10x_order_size": 5217,
+   "median_queue_ahead": 24.0,
+   "share_behind_a_real_queue_gt_0": 0.7933,
+   "share_behind_at_least_one_order_size": 0.7933
+  },
+  "BYBIT": {
+   "acknowledged_orders": 4324,
+   "queue_ahead_gt_0": 4073,
+   "queue_ahead_ge_order_size": 3865,
+   "queue_ahead_ge_10x_order_size": 2602,
+   "median_queue_ahead": 15.8,
+   "share_behind_a_real_queue_gt_0": 0.942,
+   "share_behind_at_least_one_order_size": 0.8938
+  }
+ },
+ "only_new_patterns": {
+  "BINANCE | old engine: order live, never filled | new fills at TRADE AT price | level NOT shown in last book | queues part at never before the fill": 45,
+  "BYBIT | old engine: order live, never filled | new fills at TRADE AT price | level NOT shown in last book | queues part at BOOK": 27,
+  "BINANCE | old engine: order live, never filled | new fills at TRADE AT price | level shown in last book | queues part at TRADE": 27,
+  "BYBIT | old engine: order live, never filled | new fills at TRADE AT price | level shown in last book | queues part at BOOK": 16,
+  "BINANCE | old engine: order live, never filled | new fills at TRADE AT price | level NOT shown in last book | queues part at TRADE": 10,
+  "BINANCE | old engine: order live, never filled | new fills at TRADE AT price | level shown in last book | queues part at never before the fill": 9,
+  "BYBIT | old engine: order live, never filled | new fills at TRADE AT price | level NOT shown in last book | queues part at TRADE": 2,
+  "BYBIT | old engine: order live, never filled | new fills at TRADE AT price | level NOT shown in last book | queues part at never before the fill": 1,
+  "BYBIT | old engine: order live, never filled | new fills at TRADE AT price | level shown in last book | queues part at never before the fill": 1
+ },
+ "only_old_patterns": {
+  "BINANCE | new path: order not acknowledged (stale book at arrival) | old fills at TRADE AT/other | new queue ahead at that event unknown (order no longer live)": 5,
+  "BINANCE | new path: order not acknowledged (stale book at arrival) | old fills at TRADE through price | new queue ahead at that event unknown (order no longer live)": 1,
+  "BYBIT | new path: order live, never filled | old fills at TRADE AT/other | new queue ahead at that event > 0": 1
+ },
+ "quantity_difference_patterns": {
+  "BYBIT | new fills more | 2 new rows / 1 old rows": 4,
+  "BYBIT | new fills more | 1 new rows / 1 old rows": 1
+ },
+ "patterns": {
+  "early_binance": {
+   "new fills at TRADE AT price | level NOT shown in last book | queues equal until the fill | old fills at TRADE through price": 424,
+   "new fills at TRADE AT price | level NOT shown in last book | queues equal until the fill | old fills at TRADE at/other": 288,
+   "new fills at TRADE AT price | level shown in last book | queues part at TRADE | old fills at TRADE at/other": 118,
+   "new fills at TRADE AT price | level shown in last book | queues part at TRADE | old fills at TRADE through price": 85,
+   "new fills at TRADE AT price | level NOT shown in last book | queues part at TRADE | old fills at TRADE through price": 73,
+   "new fills at TRADE AT price | level NOT shown in last book | queues part at TRADE | old fills at TRADE at/other": 43,
+   "new fills at TRADE AT price | level shown in last book | queues equal until the fill | old fills at TRADE through price": 42,
+   "new fills at TRADE AT price | level shown in last book | queues equal until the fill | old fills at TRADE at/other": 35
+  },
+  "later_bybit": {
+   "new fills at TRADE (not at price) | level NOT shown in last book | queues equal until the fill | old fills at TRADE through price": 62,
+   "new fills at TRADE (not at price) | level shown in last book | queues equal until the fill | old fills at TRADE through price": 45,
+   "new fills at TRADE (not at price) | level NOT shown in last book | queues part at BOOK | old fills at TRADE through price": 20,
+   "new fills at TRADE (not at price) | level shown in last book | queues part at BOOK | old fills at TRADE through price": 14,
+   "new fills at TRADE (not at price) | level NOT shown in last book | queues part at TRADE | old fills at TRADE through price": 8,
+   "new fills at TRADE AT price | level NOT shown in last book | queues equal until the fill | old fills at TRADE through price": 5,
+   "new fills at TRADE AT price | level shown in last book | queues equal until the fill | old fills at TRADE through price": 5,
+   "new fills at TRADE (not at price) | level NOT shown in last book | queues part at BOOK | old fills at TRADE at/other": 4,
+   "new fills at TRADE (not at price) | level shown in last book | queues part at BOOK | old fills at TRADE at/other": 4,
+   "new fills at TRADE AT price | level shown in last book | queues part at BOOK | old fills at TRADE at/other": 3,
+   "new fills at TRADE (not at price) | level shown in last book | queues part at TRADE | old fills at TRADE through price": 2,
+   "new fills at TRADE AT price | level NOT shown in last book | queues part at BOOK | old fills at TRADE at/other": 1,
+   "new fills at TRADE AT price | level shown in last book | queues part at BOOK | old fills at TRADE through price": 1,
+   "new fills at TRADE AT price | level NOT shown in last book | queues part at BOOK | old fills at TRADE through price": 1
+  },
+  "early_bybit": {
+   "new fills at TRADE AT price | level NOT shown in last book | queues part at BOOK | old fills at TRADE at/other": 26,
+   "new fills at TRADE AT price | level NOT shown in last book | queues part at BOOK | old fills at TRADE through price": 23,
+   "new fills at TRADE AT price | level shown in last book | queues part at BOOK | old fills at TRADE through price": 22,
+   "new fills at TRADE AT price | level shown in last book | queues part at BOOK | old fills at TRADE at/other": 18,
+   "new fills at TRADE AT price | level shown in last book | queues equal until the fill | old fills at TRADE through price": 6,
+   "new fills at TRADE AT price | level NOT shown in last book | queues part at TRADE | old fills at TRADE through price": 2,
+   "new fills at TRADE AT price | level NOT shown in last book | queues equal until the fill | old fills at TRADE through price": 2,
+   "new fills at TRADE AT price | level shown in last book | queues part at TRADE | old fills at TRADE at/other": 2,
+   "new fills at TRADE AT price | level NOT shown in last book | queues equal until the fill | old fills at TRADE at/other": 1,
+   "new fills at TRADE AT price | level shown in last book | queues part at TRADE | old fills at TRADE through price": 1
+  },
+  "later_binance": {
+   "new fills at TRADE (not at price) | level NOT shown in last book | queues equal until the fill | old fills at TRADE through price": 6,
+   "new fills at TRADE (not at price) | level NOT shown in last book | queues part at TRADE | old fills at TRADE through price": 5,
+   "new fills at TRADE (not at price) | level shown in last book | queues equal until the fill | old fills at TRADE through price": 3,
+   "new fills at TRADE AT price | level NOT shown in last book | queues equal until the fill | old fills at TRADE through price": 1,
+   "new fills at TRADE (not at price) | level shown in last book | queues part at TRADE | old fills at TRADE through price": 1,
+   "new fills at TRADE AT price | level shown in last book | queues equal until the fill | old fills at TRADE through price": 1
+  }
+ },
+ "markouts_early_binance": {
+  "orders": 1108,
+  "new_rule_early_fills": {
+   "1s": {
+    "orders": 1108,
+    "mean_bps_qty_weighted": -1.0802964049086121,
+    "usdt_total": -16.877000000000578
+   },
+   "5s": {
+    "orders": 1108,
+    "mean_bps_qty_weighted": -1.1165303952875993,
+    "usdt_total": -17.45400000000052
+   },
+   "30s": {
+    "orders": 1105,
+    "mean_bps_qty_weighted": 0.07738008972999527,
+    "usdt_total": 0.9985000000001492
+   }
+  },
+  "old_engine_later_fills_of_the_same_orders": {
+   "1s": {
+    "orders": 1108,
+    "mean_bps_qty_weighted": -1.051454935278846,
+    "usdt_total": -16.429499999999734
+   },
+   "5s": {
+    "orders": 1108,
+    "mean_bps_qty_weighted": -1.0965765593290218,
+    "usdt_total": -17.14550000000105
+   },
+   "30s": {
+    "orders": 1105,
+    "mean_bps_qty_weighted": 0.061452548714254526,
+    "usdt_total": 0.7495000000004945
+   }
+  },
+  "approximation": "the venue's own mid by exchange time, a replay of its book events; the run's own receive-time markouts are not available per fill"
+ },
+ "unreferenced": {
+  "causes_by_group": {
+   "A": {
+    "CANCEL_MODEL (queues first part at a BOOK event)": 12
+   },
+   "B": {
+    "CANCEL_MODEL (queues first part at a BOOK event)": 1
+   },
+   "C": {
+    "CANCEL_MODEL (queues first part at a BOOK event)": 5
+   }
+  },
+  "UNEXPLAINED_VS_RETIRED_ENGINE": {
+   "A": {
+    "orders": 0,
+    "venue": "BYBIT",
+    "new_fills_markouts": null,
+    "old_fills_markouts": null
+   },
+   "B": {
+    "orders": 0,
+    "venue": "BYBIT",
+    "new_fills_markouts": null,
+    "old_fills_markouts": null
+   },
+   "C": {
+    "orders": 0,
+    "venue": "BYBIT",
+    "new_fills_markouts": null,
+    "old_fills_markouts": null
+   }
+  },
+  "A_later_bybit_old_not_through": {
+   "orders": 12,
+   "new_fills_markouts": {
+    "1s": {
+     "orders": 12,
+     "mean_bps_qty_weighted": -0.7152229531782589,
+     "usdt_total": -0.10405153472881126
+    },
+    "5s": {
+     "orders": 12,
+     "mean_bps_qty_weighted": -2.5542740944052285,
+     "usdt_total": -0.3728824477922082
+    },
+    "30s": {
+     "orders": 12,
+     "mean_bps_qty_weighted": -7.720127621882868,
+     "usdt_total": -1.112283195721853
+    }
+   },
+   "old_fills_markouts": {
+    "1s": {
+     "orders": 12,
+     "mean_bps_qty_weighted": -0.5551930656128674,
+     "usdt_total": -0.08700000000000027
+    },
+    "5s": {
+     "orders": 12,
+     "mean_bps_qty_weighted": -1.064207776388707,
+     "usdt_total": -0.16729999999998274
+    },
+    "30s": {
+     "orders": 12,
+     "mean_bps_qty_weighted": -5.675625181766601,
+     "usdt_total": -0.8779999999999513
+    }
+   }
+  },
+  "B_only_old_bybit": {
+   "orders": 1,
+   "old_fills_markouts_the_fills_the_new_path_does_not_have": {
+    "1s": {
+     "orders": 1,
+     "mean_bps_qty_weighted": -2.4992755722984943,
+     "usdt_total": -0.0034500000000008413
+    },
+    "5s": {
+     "orders": 1,
+     "mean_bps_qty_weighted": 0.6882063170118189,
+     "usdt_total": 0.0009500000000031148
+    },
+    "30s": {
+     "orders": 1,
+     "mean_bps_qty_weighted": -7.135612865834029,
+     "usdt_total": -0.009849999999997295
+    }
+   }
+  },
+  "C_quantity_differs_bybit": {
+   "orders": 5,
+   "new_fills_markouts": {
+    "1s": {
+     "orders": 5,
+     "mean_bps_qty_weighted": 1.0095947960130112,
+     "usdt_total": 0.016261325066915012
+    },
+    "5s": {
+     "orders": 5,
+     "mean_bps_qty_weighted": 1.1973257708706446,
+     "usdt_total": 0.019441621401207036
+    },
+    "30s": {
+     "orders": 5,
+     "mean_bps_qty_weighted": 2.083537957814843,
+     "usdt_total": 0.03332823304993861
+    }
+   },
+   "old_fills_markouts": {
+    "1s": {
+     "orders": 5,
+     "mean_bps_qty_weighted": 1.706429299803403,
+     "usdt_total": 0.04074999999997715
+    },
+    "5s": {
+     "orders": 5,
+     "mean_bps_qty_weighted": 2.7949106821249017,
+     "usdt_total": 0.06705000000002032
+    },
+    "30s": {
+     "orders": 5,
+     "mean_bps_qty_weighted": -3.9871603581122854,
+     "usdt_total": -0.09734999999999161
+    }
+   },
+   "extra_quantity_new_minus_old": 1.3500275992040003
+  },
+  "sample": [
+   {
+    "group": "A",
+    "venue": "BYBIT",
+    "side": "BUY",
+    "price": 143.175,
+    "size": 1.0,
+    "old_fills": [
+     [
+      6338.83,
+      1.0,
+      143.175
+     ]
+    ],
+    "new_fills": [
+     [
+      6343.615,
+      0.996182612681,
+      143.175
+     ],
+     [
+      6343.615,
+      0.003817387319,
+      143.175
+     ]
+    ],
+    "around_the_old_fill": [
+     {
+      "n": 183361,
+      "kind": "BOOK",
+      "ms_after_order_arrival": 6299.337,
+      "queue_ahead_old": 0.1,
+      "queue_ahead_new": 0.003817387319097704
+     },
+     {
+      "n": 183378,
+      "kind": "TRADE",
+      "ms_after_order_arrival": 6338.227,
+      "queue_ahead_old": 0.0,
+      "queue_ahead_new": 0.003817387319097704,
+      "price": 143.175,
+      "qty": 0.1,
+      "aggressor": "SELL"
+     },
+     {
+      "n": 183379,
+      "kind": "TRADE",
+      "ms_after_order_arrival": 6338.83,
+      "queue_ahead_old": null,
+      "queue_ahead_new": 0.003817387319097704,
+      "price": 143.175,
+      "qty": 1.3,
+      "aggressor": "SELL"
+     },
+     {
+      "n": 183380,
+      "kind": "TRADE",
+      "ms_after_order_arrival": 6338.858,
+      "queue_ahead_old": null,
+      "queue_ahead_new": 0.003817387319097704,
+      "price": 143.175,
+      "qty": 0.7,
+      "aggressor": "SELL"
+     }
+    ],
+    "around_the_new_fill": [
+     {
+      "n": 183384,
+      "kind": "TRADE",
+      "ms_after_order_arrival": 6343.614,
+      "queue_ahead_old": null,
+      "queue_ahead_new": 0.003817387319097704,
+      "price": 143.175,
+      "qty": 14.9,
+      "aggressor": "SELL"
+     },
+     {
+      "n": 183385,
+      "kind": "TRADE",
+      "ms_after_order_arrival": 6343.614,
+      "queue_ahead_old": null,
+      "queue_ahead_new": 0.003817387319097704,
+      "price": 143.175,
+      "qty": 7.2,
+      "aggressor": "SELL"
+     },
+     {
+      "n": 183386,
+      "kind": "TRADE",
+      "ms_after_order_arrival": 6343.614,
+      "queue_ahead_old": null,
+      "queue_ahead_new": 0.003817387319097704,
+      "price": 143.175,
+      "qty": 25.4,
+      "aggressor": "SELL"
+     },
+     {
+      "n": 183387,
+      "kind": "TRADE",
+      "ms_after_order_arrival": 6343.615,
+      "queue_ahead_old": null,
+      "queue_ahead_new": 0.0,
+      "price": 143.174,
+      "qty": 1.0,
+      "aggressor": "SELL"
+     },
+     {
+      "n": 183388,
+      "kind": "TRADE",
+      "ms_after_order_arrival": 6343.615,
+      "queue_ahead_old": null,
+      "queue_ahead_new": null,
+      "price": 143.173,
+      "qty": 2.0,
+      "aggressor": "SELL"
+     }
+    ]
+   },
+   {
+    "group": "A",
+    "venue": "BYBIT",
+    "side": "BUY",
+    "price": 140.679,
+    "size": 1.0,
+    "old_fills": [
+     [
+      341.569,
+      0.4999999999999982,
+      140.679
+     ],
+     [
+      349.576,
+      0.5000000000000018,
+      140.679
+     ]
+    ],
+    "new_fills": [
+     [
+      349.576,
+      1.0,
+      140.679
+     ]
+    ],
+    "around_the_old_fill": [
+     {
+      "n": 799511,
+      "kind": "TRADE",
+      "ms_after_order_arrival": 340.93,
+      "queue_ahead_old": 17.6,
+      "queue_ahead_new": 19.638910505836577,
+      "price": 140.679,
+      "qty": 7.1,
+      "aggressor": "SELL"
+     },
+     {
+      "n": 799512,
+      "kind": "TRADE",
+      "ms_after_order_arrival": 341.372,
+      "queue_ahead_old": 12.600000000000001,
+      "queue_ahead_new": 14.638910505836577,
+      "price": 140.679,
+      "qty": 5.0,
+      "aggressor": "SELL"
+     },
+     {
+      "n": 799513,
+      "kind": "TRADE",
+      "ms_after_order_arrival": 341.569,
+      "queue_ahead_old": 9.200000000000001,
+      "queue_ahead_new": 11.238910505836577,
+      "price": 140.679,
+      "qty": 3.4,
+      "aggressor": "SELL"
+     },
+     {
+      "n": 799514,
+      "kind": "TRADE",
+      "ms_after_order_arrival": 341.569,
+      "queue_ahead_old": 0.0,
+      "queue_ahead_new": 1.5389105058365775,
+      "price": 140.679,
+      "qty": 9.7,
+      "aggressor": "SELL"
+     },
+     {
+      "n": 799526,
+      "kind": "TRADE",
+      "ms_after_order_arrival": 349.576,
+      "queue_ahead_old": null,
+      "queue_ahead_new": null,
+      "price": 140.679,
+      "qty": 5.0,
+      "aggressor": "SELL"
+     }
+    ],
+    "around_the_new_fill": [
+     {
+      "n": 799512,
+      "kind": "TRADE",
+      "ms_after_order_arrival": 341.372,
+      "queue_ahead_old": 12.600000000000001,
+      "queue_ahead_new": 14.638910505836577,
+      "price": 140.679,
+      "qty": 5.0,
+      "aggressor": "SELL"
+     },
+     {
+      "n": 799513,
+      "kind": "TRADE",
+      "ms_after_order_arrival": 341.569,
+      "queue_ahead_old": 9.200000000000001,
+      "queue_ahead_new": 11.238910505836577,
+      "price": 140.679,
+      "qty": 3.4,
+      "aggressor": "SELL"
+     },
+     {
+      "n": 799514,
+      "kind": "TRADE",
+      "ms_after_order_arrival": 341.569,
+      "queue_ahead_old": 0.0,
+      "queue_ahead_new": 1.5389105058365775,
+      "price": 140.679,
+      "qty": 9.7,
+      "aggressor": "SELL"
+     },
+     {
+      "n": 799526,
+      "kind": "TRADE",
+      "ms_after_order_arrival": 349.576,
+      "queue_ahead_old": null,
+      "queue_ahead_new": null,
+      "price": 140.679,
+      "qty": 5.0,
+      "aggressor": "SELL"
+     },
+     {
+      "n": 799541,
+      "kind": "TRADE",
+      "ms_after_order_arrival": 359.584,
+      "queue_ahead_old": null,
+      "queue_ahead_new": null,
+      "price": 140.679,
+      "qty": 5.0,
+      "aggressor": "SELL"
+     }
+    ]
+   },
+   {
+    "group": "A",
+    "venue": "BYBIT",
+    "side": "BUY",
+    "price": 140.768,
+    "size": 1.0,
+    "old_fills": [
+     [
+      228.876,
+      1.0,
+      140.768
+     ]
+    ],
+    "new_fills": [
+     [
+      657.767,
+      0.1,
+      140.768
+     ],
+     [
+      657.767,
+      0.9,
+      140.768
+     ]
+    ],
+    "around_the_old_fill": [
+     {
+      "n": 965448,
+      "kind": "BOOK",
+      "ms_after_order_arrival": 96.147,
+      "queue_ahead_old": 6.7,
+      "queue_ahead_new": 6.7
+     },
+     {
+      "n": 965457,
+      "kind": "BOOK",
+      "ms_after_order_arrival": 197.086,
+      "queue_ahead_old": 6.7,
+      "queue_ahead_new": 2.993617021276596
+     },
+     {
+      "n": 965464,
+      "kind": "TRADE",
+      "ms_after_order_arrival": 228.876,
+      "queue_ahead_old": 5.0,
+      "queue_ahead_new": 2.993617021276596,
+      "price": 140.768,
+      "qty": 1.7,
+      "aggressor": "SELL"
+     },
+     {
+      "n": 965465,
+      "kind": "TRADE",
+      "ms_after_order_arrival": 228.876,
+      "queue_ahead_old": null,
+      "queue_ahead_new": 2.993617021276596,
+      "price": 140.768,
+      "qty": 6.7,
+      "aggressor": "SELL"
+     },
+     {
+      "n": 965476,
+      "kind": "BOOK",
+      "ms_after_order_arrival": 297.729,
+      "queue_ahead_old": null,
+      "queue_ahead_new": 0.0
+     }
+    ],
+    "around_the_new_fill": [
+     {
+      "n": 965524,
+      "kind": "BOOK",
+      "ms_after_order_arrival": 506.172,
+      "queue_ahead_old": null,
+      "queue_ahead_new": 0.0
+     },
+     {
+      "n": 965529,
+      "kind": "BOOK",
+      "ms_after_order_arrival": 596.652,
+      "queue_ahead_old": null,
+      "queue_ahead_new": 0.0
+     },
+     {
+      "n": 965530,
+      "kind": "TRADE",
+      "ms_after_order_arrival": 627.344,
+      "queue_ahead_old": null,
+      "queue_ahead_new": 0.0,
+      "price": 140.758,
+      "qty": 0.5,
+      "aggressor": "BUY"
+     },
+     {
+      "n": 965537,
+      "kind": "TRADE",
+      "ms_after_order_arrival": 657.767,
+      "queue_ahead_old": null,
+      "queue_ahead_new": 0.0,
+      "price": 140.754,
+      "qty": 0.1,
+      "aggressor": "SELL"
+     },
+     {
+      "n": 965538,
+      "kind": "TRADE",
+      "ms_after_order_arrival": 657.767,
+      "queue_ahead_old": null,
+      "queue_ahead_new": null,
+      "price": 140.754,
+      "qty": 12.0,
+      "aggressor": "SELL"
+     }
+    ]
+   },
+   {
+    "group": "A",
+    "venue": "BYBIT",
+    "side": "BUY",
+    "price": 140.879,
+    "size": 1.0,
+    "old_fills": [
+     [
+      1028.553,
+      1.0,
+      140.879
+     ]
+    ],
+    "new_fills": [
+     [
+      38401.488,
+      1.0,
+      140.879
+     ]
+    ],
+    "around_the_old_fill": [
+     {
+      "n": 1063867,
+      "kind": "TRADE",
+      "ms_after_order_arrival": 1024.123,
+      "queue_ahead_old": 17.299999999999997,
+      "queue_ahead_new": 13.036705577172501,
+      "price": 140.88,
+      "qty": 0.2,
+      "aggressor": "SELL"
+     },
+     {
+      "n": 1063868,
+      "kind": "TRADE",
+      "ms_after_order_arrival": 1024.123,
+      "queue_ahead_old": 4.899999999999997,
+      "queue_ahead_new": 13.036705577172501,
+      "price": 140.879,
+      "qty": 12.4,
+      "aggressor": "SELL"
+     },
+     {
+      "n": 1063869,
+      "kind": "TRADE",
+      "ms_after_order_arrival": 1024.123,
+      "queue_ahead_old": 4.699999999999997,
+      "queue_ahead_new": 13.036705577172501,
+      "price": 140.879,
+      "qty": 0.2,
+      "aggressor": "SELL"
+     },
+     {
+      "n": 1063870,
+      "kind": "TRADE",
+      "ms_after_order_arrival": 1028.553,
+      "queue_ahead_old": null,
+      "queue_ahead_new": 10.736705577172494,
+      "price": 140.879,
+      "qty": 8.7,
+      "aggressor": "SELL"
+     },
+     {
+      "n": 1063871,
+      "kind": "TRADE",
+      "ms_after_order_arrival": 1032.097,
+      "queue_ahead_old": null,
+      "queue_ahead_new": 10.736705577172494,
+      "price": 140.888,
+      "qty": 0.1,
+      "aggressor": "BUY"
+     }
+    ],
+    "around_the_new_fill": [
+     {
+      "n": 1068342,
+      "kind": "TRADE",
+      "ms_after_order_arrival": 38379.152,
+      "queue_ahead_old": null,
+      "queue_ahead_new": 0.0,
+      "price": 140.888,
+      "qty": 16.1,
+      "aggressor": "SELL"
+     },
+     {
+      "n": 1068348,
+      "kind": "TRADE",
+      "ms_after_order_arrival": 38380.021,
+      "queue_ahead_old": null,
+      "queue_ahead_new": 0.0,
+      "price": 140.888,
+      "qty": 3.0,
+      "aggressor": "SELL"
+     },
+     {
+      "n": 1068351,
+      "kind": "BOOK",
+      "ms_after_order_arrival": 38397.049,
+      "queue_ahead_old": null,
+      "queue_ahead_new": 0.0
+     },
+     {
+      "n": 1068353,
+      "kind": "TRADE",
+      "ms_after_order_arrival": 38401.488,
+      "queue_ahead_old": null,
+      "queue_ahead_new": null,
+      "price": 140.878,
+      "qty": 3.6,
+      "aggressor": "SELL"
+     },
+     {
+      "n": 1068354,
+      "kind": "TRADE",
+      "ms_after_order_arrival": 38406.386,
+      "queue_ahead_old": null,
+      "queue_ahead_new": null,
+      "price": 140.878,
+      "qty": 12.3,
+      "aggressor": "SELL"
+     }
+    ]
+   },
+   {
+    "group": "B",
+    "venue": "BYBIT",
+    "side": "BUY",
+    "price": 138.04,
+    "size": 1.0,
+    "old_fills": [
+     [
+      1634.205,
+      0.1,
+      138.04
+     ]
+    ],
+    "new_fills": [],
+    "around_the_old_fill": [
+     {
+      "n": 1373153,
+      "kind": "BOOK",
+      "ms_after_order_arrival": 1598.858,
+      "queue_ahead_old": 21.8,
+      "queue_ahead_new": 6.677857060771634
+     },
+     {
+      "n": 1373160,
+      "kind": "TRADE",
+      "ms_after_order_arrival": 1634.205,
+      "queue_ahead_old": 18.2,
+      "queue_ahead_new": 6.677857060771634,
+      "price": 138.04,
+      "qty": 3.6,
+      "aggressor": "SELL"
+     },
+     {
+      "n": 1373161,
+      "kind": "TRADE",
+      "ms_after_order_arrival": 1634.205,
+      "queue_ahead_old": 0.0,
+      "queue_ahead_new": 6.0778570607716365,
+      "price": 138.04,
+      "qty": 18.2,
+      "aggressor": "SELL"
+     },
+     {
+      "n": 1373162,
+      "kind": "TRADE",
+      "ms_after_order_arrival": 1634.205,
+      "queue_ahead_old": 0.0,
+      "queue_ahead_new": 5.977857060771637,
+      "price": 138.04,
+      "qty": 0.1,
+      "aggressor": "SELL"
+     },
+     {
+      "n": 1373165,
+      "kind": "BOOK",
+      "ms_after_order_arrival": 1696.667,
+      "queue_ahead_old": 0.0,
+      "queue_ahead_new": 0.0
+     }
+    ]
+   },
+   {
+    "group": "C",
+    "venue": "BYBIT",
+    "side": "BUY",
+    "price": 138.641,
+    "size": 1.0,
+    "old_fills": [
+     [
+      758.677,
+      0.6,
+      138.641
+     ]
+    ],
+    "new_fills": [
+     [
+      758.676,
+      0.31079862602,
+      138.641
+     ],
+     [
+      758.677,
+      0.6,
+      138.641
+     ]
+    ],
+    "around_the_old_fill": [
+     {
+      "n": 1261331,
+      "kind": "TRADE",
+      "ms_after_order_arrival": 758.676,
+      "queue_ahead_old": 3.1,
+      "queue_ahead_new": 2.789201373980249,
+      "price": 138.679,
+      "qty": 1.4,
+      "aggressor": "BUY"
+     },
+     {
+      "n": 1261332,
+      "kind": "TRADE",
+      "ms_after_order_arrival": 758.676,
+      "queue_ahead_old": 3.1,
+      "queue_ahead_new": 2.789201373980249,
+      "price": 138.679,
+      "qty": 22.5,
+      "aggressor": "BUY"
+     },
+     {
+      "n": 1261333,
+      "kind": "TRADE",
+      "ms_after_order_arrival": 758.676,
+      "queue_ahead_old": 0.0,
+      "queue_ahead_new": 0.0,
+      "price": 138.641,
+      "qty": 3.1,
+      "aggressor": "SELL"
+     },
+     {
+      "n": 1261334,
+      "kind": "TRADE",
+      "ms_after_order_arrival": 758.677,
+      "queue_ahead_old": 0.0,
+      "queue_ahead_new": 0.0,
+      "price": 138.641,
+      "qty": 0.6,
+      "aggressor": "SELL"
+     },
+     {
+      "n": 1261335,
+      "kind": "BOOK",
+      "ms_after_order_arrival": 795.771,
+      "queue_ahead_old": 0.0,
+      "queue_ahead_new": 0.0
+     }
+    ],
+    "around_the_new_fill": [
+     {
+      "n": 1261330,
+      "kind": "TRADE",
+      "ms_after_order_arrival": 758.676,
+      "queue_ahead_old": 3.1,
+      "queue_ahead_new": 2.789201373980249,
+      "price": 138.678,
+      "qty": 69.7,
+      "aggressor": "BUY"
+     },
+     {
+      "n": 1261331,
+      "kind": "TRADE",
+      "ms_after_order_arrival": 758.676,
+      "queue_ahead_old": 3.1,
+      "queue_ahead_new": 2.789201373980249,
+      "price": 138.679,
+      "qty": 1.4,
+      "aggressor": "BUY"
+     },
+     {
+      "n": 1261332,
+      "kind": "TRADE",
+      "ms_after_order_arrival": 758.676,
+      "queue_ahead_old": 3.1,
+      "queue_ahead_new": 2.789201373980249,
+      "price": 138.679,
+      "qty": 22.5,
+      "aggressor": "BUY"
+     },
+     {
+      "n": 1261333,
+      "kind": "TRADE",
+      "ms_after_order_arrival": 758.676,
+      "queue_ahead_old": 0.0,
+      "queue_ahead_new": 0.0,
+      "price": 138.641,
+      "qty": 3.1,
+      "aggressor": "SELL"
+     },
+     {
+      "n": 1261334,
+      "kind": "TRADE",
+      "ms_after_order_arrival": 758.677,
+      "queue_ahead_old": 0.0,
+      "queue_ahead_new": 0.0,
+      "price": 138.641,
+      "qty": 0.6,
+      "aggressor": "SELL"
+     }
+    ]
+   },
+   {
+    "group": "C",
+    "venue": "BYBIT",
+    "side": "BUY",
+    "price": 144.093,
+    "size": 1.0,
+    "old_fills": [
+     [
+      2700.177,
+      0.2,
+      144.093
+     ]
+    ],
+    "new_fills": [
+     [
+      2699.433,
+      0.174662601503,
+      144.093
+     ],
+     [
+      2700.177,
+      0.2,
+      144.093
+     ]
+    ],
+    "around_the_old_fill": [
+     {
+      "n": 110277,
+      "kind": "BOOK",
+      "ms_after_order_arrival": 2593.665,
+      "queue_ahead_old": 0.5999999999999999,
+      "queue_ahead_new": 0.4253373984971495
+     },
+     {
+      "n": 110291,
+      "kind": "BOOK",
+      "ms_after_order_arrival": 2694.419,
+      "queue_ahead_old": 0.5999999999999999,
+      "queue_ahead_new": 0.4253373984971495
+     },
+     {
+      "n": 110292,
+      "kind": "TRADE",
+      "ms_after_order_arrival": 2699.433,
+      "queue_ahead_old": 0.0,
+      "queue_ahead_new": 0.0,
+      "price": 144.093,
+      "qty": 0.6,
+      "aggressor": "SELL"
+     },
+     {
+      "n": 110293,
+      "kind": "TRADE",
+      "ms_after_order_arrival": 2700.177,
+      "queue_ahead_old": 0.0,
+      "queue_ahead_new": 0.0,
+      "price": 144.093,
+      "qty": 0.2,
+      "aggressor": "SELL"
+     },
+     {
+      "n": 110301,
+      "kind": "TRADE",
+      "ms_after_order_arrival": 2727.346,
+      "queue_ahead_old": 0.0,
+      "queue_ahead_new": 0.0,
+      "price": 144.094,
+      "qty": 2.5,
+      "aggressor": "BUY"
+     }
+    ],
+    "around_the_new_fill": [
+     {
+      "n": 110273,
+      "kind": "BOOK",
+      "ms_after_order_arrival": 2495.051,
+      "queue_ahead_old": 0.5999999999999999,
+      "queue_ahead_new": 0.4253373984971495
+     },
+     {
+      "n": 110277,
+      "kind": "BOOK",
+      "ms_after_order_arrival": 2593.665,
+      "queue_ahead_old": 0.5999999999999999,
+      "queue_ahead_new": 0.4253373984971495
+     },
+     {
+      "n": 110291,
+      "kind": "BOOK",
+      "ms_after_order_arrival": 2694.419,
+      "queue_ahead_old": 0.5999999999999999,
+      "queue_ahead_new": 0.4253373984971495
+     },
+     {
+      "n": 110292,
+      "kind": "TRADE",
+      "ms_after_order_arrival": 2699.433,
+      "queue_ahead_old": 0.0,
+      "queue_ahead_new": 0.0,
+      "price": 144.093,
+      "qty": 0.6,
+      "aggressor": "SELL"
+     },
+     {
+      "n": 110293,
+      "kind": "TRADE",
+      "ms_after_order_arrival": 2700.177,
+      "queue_ahead_old": 0.0,
+      "queue_ahead_new": 0.0,
+      "price": 144.093,
+      "qty": 0.2,
+      "aggressor": "SELL"
+     }
+    ]
+   },
+   {
+    "group": "C",
+    "venue": "BYBIT",
+    "side": "BUY",
+    "price": 144.323,
+    "size": 1.0,
+    "old_fills": [
+     [
+      2639.879,
+      0.09999999999999998,
+      144.323
+     ]
+    ],
+    "new_fills": [
+     [
+      2639.879,
+      0.122566371681,
+      144.323
+     ]
+    ],
+    "around_the_old_fill": [
+     {
+      "n": 16045,
+      "kind": "BOOK",
+      "ms_after_order_arrival": 2293.529,
+      "queue_ahead_old": 0.2,
+      "queue_ahead_new": 0.17743362831858406
+     },
+     {
+      "n": 16052,
+      "kind": "BOOK",
+      "ms_after_order_arrival": 2494.824,
+      "queue_ahead_old": 0.2,
+      "queue_ahead_new": 0.17743362831858406
+     },
+     {
+      "n": 16053,
+      "kind": "BOOK",
+      "ms_after_order_arrival": 2594.541,
+      "queue_ahead_old": 0.2,
+      "queue_ahead_new": 0.17743362831858406
+     },
+     {
+      "n": 16055,
+      "kind": "TRADE",
+      "ms_after_order_arrival": 2639.879,
+      "queue_ahead_old": 0.0,
+      "queue_ahead_new": 0.0,
+      "price": 144.323,
+      "qty": 0.3,
+      "aggressor": "SELL"
+     },
+     {
+      "n": 16056,
+      "kind": "BOOK",
+      "ms_after_order_arrival": 2695.168,
+      "queue_ahead_old": 0.0,
+      "queue_ahead_new": 0.0
+     }
+    ],
+    "around_the_new_fill": [
+     {
+      "n": 16045,
+      "kind": "BOOK",
+      "ms_after_order_arrival": 2293.529,
+      "queue_ahead_old": 0.2,
+      "queue_ahead_new": 0.17743362831858406
+     },
+     {
+      "n": 16052,
+      "kind": "BOOK",
+      "ms_after_order_arrival": 2494.824,
+      "queue_ahead_old": 0.2,
+      "queue_ahead_new": 0.17743362831858406
+     },
+     {
+      "n": 16053,
+      "kind": "BOOK",
+      "ms_after_order_arrival": 2594.541,
+      "queue_ahead_old": 0.2,
+      "queue_ahead_new": 0.17743362831858406
+     },
+     {
+      "n": 16055,
+      "kind": "TRADE",
+      "ms_after_order_arrival": 2639.879,
+      "queue_ahead_old": 0.0,
+      "queue_ahead_new": 0.0,
+      "price": 144.323,
+      "qty": 0.3,
+      "aggressor": "SELL"
+     },
+     {
+      "n": 16056,
+      "kind": "BOOK",
+      "ms_after_order_arrival": 2695.168,
+      "queue_ahead_old": 0.0,
+      "queue_ahead_new": 0.0
+     }
+    ]
+   }
+  ]
+ }
+}

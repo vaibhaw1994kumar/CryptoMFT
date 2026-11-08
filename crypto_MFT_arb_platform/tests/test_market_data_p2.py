@@ -114,6 +114,68 @@ class MonotonicFreshnessTests(unittest.TestCase):
             live.close()
 
 
+class BookStreamLivenessTests(unittest.TestCase):
+    """Phase D, D7 (owner 8 Nov, Q-P2): a book is trusted only while its own stream is known to be alive. A quiet book on a live stream stays valid; a dead book stream is caught even while trades keep arriving."""
+
+    @staticmethod
+    def valid_after(live):
+        book = live.service.books["BYBIT"]
+        live.service.book_gate.allow((book,), live.wall.ns, live.service._book_ages())
+        return book.state == BookState.VALID
+
+    def test_a_quiet_book_on_a_live_stream_stays_valid(self):
+        with tempfile.TemporaryDirectory() as directory:
+            live = Service(directory)
+            live.frame(bybit("snapshot", 10, live.wall_ms()))
+            for _ in range(5):                                     # 5 x 600 ms with no book update (limit 1 s), but a pong frame on the book connection each time
+                live.mono.ns += 600 * MS
+                live.wall.ns += 600 * MS
+                live.frame(json.dumps({"success": True, "ret_msg": "pong", "op": "ping"}))
+                self.assertTrue(self.valid_after(live))
+            self.assertEqual(live.service.stats["BYBIT"].book_stream_frames, 6)
+            live.close()
+
+    def test_a_silent_book_stream_is_stale_even_while_trades_keep_arriving(self):
+        with tempfile.TemporaryDirectory() as directory:
+            live = Service(directory)
+            live.frame(bybit("snapshot", 10, live.wall_ms()))
+            for i in range(5):                                     # the trade stream is busy; the book stream says nothing (the test config's age limit is 1 s)
+                live.mono.ns += 400 * MS
+                live.wall.ns += 400 * MS
+                live.service._process_trade_frame(
+                    "BYBIT", URL, json.dumps({"topic": "publicTrade.BTCUSDT", "type": "snapshot", "data": [
+                        {"s": "BTCUSDT", "i": f"t{i}", "T": live.wall_ms(), "p": "100", "v": "1", "S": "Buy"}]}),
+                    channel="publicTrade.BTCUSDT")
+            self.assertEqual(live.service.stats["BYBIT"].book_stream_frames, 1)
+            self.assertFalse(self.valid_after(live))
+            self.assertEqual(live.service.books["BYBIT"].invalid_reason, "market_data_stale")
+            live.close()
+
+    def test_a_frame_on_the_book_stream_that_is_not_a_book_update_still_proves_it_alive(self):
+        with tempfile.TemporaryDirectory() as directory:
+            live = Service(directory)
+            live.frame(bybit("snapshot", 10, live.wall_ms()))
+            live.mono.ns += 800 * MS
+            live.wall.ns += 800 * MS
+            live.frame("not json")                                 # garbage still came through the book connection
+            live.mono.ns += 800 * MS
+            live.wall.ns += 800 * MS
+            self.assertTrue(self.valid_after(live))
+            live.close()
+
+    def test_connection_start_forgets_the_old_liveness(self):
+        with tempfile.TemporaryDirectory() as directory:
+            live = Service(directory)
+            live.frame(bybit("snapshot", 10, live.wall_ms()))
+            live.service._begin_connection("BYBIT")
+            self.assertIsNone(live.service._book_alive_mono_ns("BYBIT"))
+            live.close()
+
+    def test_heartbeat_setting_is_validated(self):
+        with self.assertRaises(ValueError):
+            LiveFeedSettings(venues=("BYBIT",), durable=False, book_heartbeat_seconds=-1.0).validate()
+
+
 def event(venue, exchange_ms, receive_ms, sequence=1):
     return MarketEvent.from_dict({
         "event_type": "BOOK_DELTA", "venue": venue, "instrument_id": "BTC-USDT-SPOT",

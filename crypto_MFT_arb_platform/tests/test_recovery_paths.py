@@ -224,3 +224,21 @@ class BufferOverflowTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class BookHeartbeatTests(unittest.IsolatedAsyncioTestCase):
+    async def test_bybit_book_connection_sends_an_application_ping_when_configured(self):
+        """Phase D, D7 (Q-P2): the pong is a book-stream frame, so a quiet book on a live stream keeps producing liveness evidence."""
+        socket = FakeWebSocket([bybit("snapshot", 10, [["100", "1"]], [["101", "1"]])])
+        with tempfile.TemporaryDirectory() as directory:
+            service, _ = make_service(directory, ("BYBIT",), {"BYBIT": [socket]}, book_heartbeat_seconds=0.01, max_runtime_seconds=0.3)
+            await asyncio.wait_for(service.run(), timeout=10)
+        pings = [m for m in socket.sent if json.loads(m).get("op") == "ping"]
+        self.assertGreaterEqual(len(pings), 2)
+
+    async def test_no_ping_is_sent_by_default(self):
+        socket = FakeWebSocket([bybit("snapshot", 10, [["100", "1"]], [["101", "1"]])])
+        with tempfile.TemporaryDirectory() as directory:
+            service, _ = make_service(directory, ("BYBIT",), {"BYBIT": [socket]}, max_runtime_seconds=0.2)
+            await asyncio.wait_for(service.run(), timeout=10)
+        self.assertEqual([m for m in socket.sent if json.loads(m).get("op") == "ping"], [])
