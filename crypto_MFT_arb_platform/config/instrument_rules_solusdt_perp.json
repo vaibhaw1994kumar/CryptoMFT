@@ -1,0 +1,31 @@
+{
+ "label": "PUBLISHED_CURRENT_RULES_NOT_HISTORICAL",
+ "fetched": "2026-11-08",
+ "fetched_by": "Claude Code, public endpoints, no API key",
+ "note": "Current exchange rules. The March 2024 and January 2022 data used earlier price grids (the data shows tick 0.001 in March 2024 and 0.005 on Bybit in January 2022); the lot steps of those dates are not published here, so the current steps are applied to them and labelled so.",
+ "venues": {
+  "binance": {
+   "source": "https://fapi.binance.com/fapi/v1/exchangeInfo",
+   "symbol": "SOLUSDT",
+   "contract_type": "PERPETUAL",
+   "status": "TRADING",
+   "tick_size": "0.0100",
+   "quantity_step": "0.01",
+   "min_quantity": "0.01",
+   "max_quantity": "1000000",
+   "market_quantity_step": "0.01",
+   "min_notional": "5"
+  },
+  "bybit": {
+   "source": "https://api.bybit.com/v5/market/instruments-info?category=linear&symbol=SOLUSDT",
+   "symbol": "SOLUSDT",
+   "contract_type": "LinearPerpetual",
+   "status": "Trading",
+   "tick_size": "0.010",
+   "quantity_step": "0.1",
+   "min_quantity": "0.1",
+   "max_quantity": "96000.0",
+   "min_notional": "5"
+  }
+ }
+}

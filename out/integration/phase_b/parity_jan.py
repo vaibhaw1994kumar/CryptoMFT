@@ -45,7 +45,7 @@ with warnings.catch_warnings():
         summary = {"label": "EXPLORATORY, funding not modelled", "day": day, "runtime": "backtester", "size_base": cfg.arb.max_position_base, "signals": r.signals_generated, "orders_sent": r.orders_sent, "fills": r.orders_filled,
                    "cash_pnl": r.cash_pnl, "ending_equity_common_timestamp": r.ending_equity, "fees_paid": r.fees_paid, "final_inventory": r.final_inventory,
                    "hedge_counters": {k: v for k, v in hr.items() if isinstance(v, (int, float))}, "hedge_move_bps": [cfg.arb.expected_hedge_move_bps_bid, cfg.arb.expected_hedge_move_bps_ask],
-                   "timing_stats": dict(bt.timing_stats), "wall_s": time.time() - t0}
+                   "timing_stats": dict(bt.timing_stats), "breaker_trips": [{"ts": t["ts"], "cause": t["cause"]} for t in ((hr.get("circuit_breaker") or {}).get("trips") or [])], "wall_s": time.time() - t0}
     else:
         from new_backtest.session_replay import SessionReplay, order_times_new, write_result
         rep = SessionReplay(cfg, doc)

@@ -40,14 +40,24 @@ from .backtester import _preflight_override
 from .fill_engine import MakerExecutor
 from .fill_model import EmpiricalFillModel
 from .latency_model import LatencyBook
-from .timing import FixedOffsetAligner, Timelines, TimelinesLatencyModel, TruthBooks
+from .timing import FixedOffsetAligner, Timelines, TimelinesLatencyModel, TruthBooks, dead_feed_blocks
 from collections import Counter
 from .event_loader import BOOK, DELTA, delta_fields, snapshot_levels
 from .order_book import OrderBook
 
 # The dated price grid per dataset (the Phase B data checks' ticks) and the quantity step. The step is ASSUMED: no instrument master is stored for these datasets (lot NOT_MEASURED).
 DATED_TICKS = {"2022": {"bybit": 0.005, "binance": 0.001}, "2024": {"bybit": 0.001, "binance": 0.001}}
-QUANTITY_STEP = {"bybit": 0.1, "binance": 0.01}
+_RULES_FILE = Path(__file__).resolve().parents[2] / "config" / "instrument_rules_solusdt_perp.json"
+
+
+def published_rules() -> dict:
+    """The venues' PUBLISHED CURRENT SOLUSDT perpetual rules (lot step, minimum quantity, tick), fetched from their public exchange-info endpoints on 8 Nov 2026 with the source and date in the file
+    (REF03/REF04). Current, not historical: the data's own grid is the dated tick above; the lot steps of the data dates are not published, so the current steps are applied and labelled so."""
+    return json.loads(_RULES_FILE.read_text())
+
+
+def quantity_steps() -> dict[str, float]:
+    return {v: float(row["quantity_step"]) for v, row in published_rules()["venues"].items()}
 _NS = 1_000_000_000
 
 
@@ -73,13 +83,20 @@ class SessionReplay:
                 self.venue_specs[v] = replace(self.venue_specs[v], trust_local_ts=bool(trust))
         self.ticks = ticks or dated_ticks(config.start_date)
         size = float(config.arb.max_position_base)
-        raw, self.config_notes = raw_config_from_profile(profile, pair=config.pair, venues=venues, ticks=self.ticks, quantity_steps={v: QUANTITY_STEP[v] for v in venues}, size_base=size,
+        raw, self.config_notes = raw_config_from_profile(profile, pair=config.pair, venues=venues, ticks=self.ticks, quantity_steps={v: quantity_steps()[v] for v in venues}, size_base=size,
                                                          seed=config.seed)
         self.app_config, self.raw_config = config_from_raw(raw)
         self.instrument_id = self.app_config.instrument_id
-        self.feed = CanonicalFeed(self.instrument_id, venue_names=self.names, delta_semantics={v: s.delta_semantics for v, s in self.venue_specs.items()})
+        self.feed = CanonicalFeed(self.instrument_id, venue_names=self.names, delta_semantics={v: s.delta_semantics for v, s in self.venue_specs.items()},
+                                  max_silence_s=None if config.timing is None else config.timing.dead_feed_s)
         self.states = {v: VenueState(v, config.venue_state) for v in venues}
         self.timing_stats: Counter = Counter()
+        self._feed_state: dict[str, str] = {}
+        self._last_book_ns: dict[str, int] = {}
+        self._bo_since: int | None = None
+        self._bo_intervals: list[tuple[int, int]] = []
+        self.venue_span: dict[str, list[int]] = {}
+        self.book_only_ns_by_day: dict[str, int] = {}
         self.truth = None
         if config.timing is not None and config.timing.truth_books:       # WP3 truth books, the shared rule (timing.TruthBooks): taker arrivals and PostOnly checks use the venue-truth book at the arrival's exchange time
             truth_books = {v: OrderBook(v, config.pair, self.venue_specs[v].delta_semantics, tape_repair=config.book_tape_repair, own_overlay=config.own_impact == "overlay",
@@ -111,7 +128,8 @@ class SessionReplay:
         self.session = TradingSession(
             self.app_config, execution_mode=ExecutionMode.INTERNAL_SIMULATION, adapters=self.adapters, strategies=[],
             dispatch_policy=DispatchPolicy.FILL_TRIGGERED, maker_venues=tuple(self.names[v] for v in config.arb.maker_venues),
-            resync_delay_ns=int(self.resync_delay_s * _NS), resync_source=self.feed.resync_snapshot, latency_model=self.latency_model, hedge_policy=hedge_policy,
+            resync_delay_ns=int(self.resync_delay_s * _NS), resync_source=self.feed.resync_snapshot,
+            resync_silence_ns=None if config.timing is None else int(config.timing.dead_feed_s * _NS), latency_model=self.latency_model, hedge_policy=hedge_policy,
         )
         if config.arb.maker_max_age_s > 0:
             self.session.oms.order_lifetime_ns = int(config.arb.maker_max_age_s * _NS)     # the profile's MANDATORY maker order lifetime (a rule, the same on both runtimes)
@@ -180,6 +198,57 @@ class SessionReplay:
     def _feed_venue(self, core_name: str) -> str:
         return next(v for v, n in self.names.items() if n == core_name)
 
+    def _dead_feed_gate(self, now_s: float) -> bool:
+        """The profile's MANDATORY timing.dead_feed_s gate on the view books' absolute age, the same rule as the backtester's `_dead_feed_blocks` (`timing.dead_feed_blocks`)."""
+        cfg = self.config.timing
+        if cfg is None:
+            return False
+        max_age = cfg.max_book_age_s if cfg.max_book_age_s is not None else self.config.arb.max_book_age_s
+        return dead_feed_blocks({v: self.views[v].age_s(now_s) for v in self.venues}, max_age, cfg.dead_feed_s, self._feed_state, self.timing_stats)
+
+    def _book_only_suspension(self, venue: str, now_ns: int) -> None:
+        """Owner 8 Nov (Q-G1): suspended seconds reported BOTH ways. The session's gate measures age from the venue's last message of any kind; this counts the same blocks with age from the last BOOK
+        change only (the older reading), so the part of the suspension that is only a quiet best-bid/ask feed shows."""
+        self._last_book_ns[venue] = now_ns
+        limit = self.session.cfg.max_book_age_ns
+        blocked = any(
+            (now_ns - self._last_book_ns.get(v, -10 ** 18)) > limit or self.session.books[(v, self.instrument_id)].state.value in ("SYNCING", "GAP_DETECTED", "CHECKSUM_FAILED", "INVALID_DATA", "PRICE_ANOMALY")
+            for v in (self.names[x] for x in self.venues))
+        if blocked and self._bo_since is None:
+            self._bo_since = now_ns
+        elif not blocked and self._bo_since is not None:
+            self._bo_intervals.append((self._bo_since, now_ns))
+            self._bo_since = None
+
+    def _common_window_ns(self) -> tuple[int, int] | None:
+        """The span in which BOTH venues have data (owner 8 Nov): from the later first message to the earlier last message. The Binance tape ends at about 17 h on 2022-01-05 and 2022-01-13."""
+        if len(self.venue_span) < len(self.venues):
+            return None
+        return max(v[0] for v in self.venue_span.values()), min(v[1] for v in self.venue_span.values())
+
+    def _seconds_by_day(self, intervals, clip: tuple[int, int] | None) -> dict[str, float]:
+        out: dict[str, int] = {}
+        for a, b in intervals:
+            if clip is not None:
+                a, b = max(a, clip[0]), min(b, clip[1])
+            for day, ns in self.session.book_gate._segments(a, b):
+                out[day] = out.get(day, 0) + ns
+        return {d: ns / 1e9 for d, ns in sorted(out.items())}
+
+    def _book_only_seconds(self, clip) -> dict[str, float]:
+        """Book-change-age reading, per UTC day, including a suspension still open at the last event, clipped to the common window."""
+        intervals = list(self._bo_intervals) + ([(self._bo_since, self.last_ns)] if self._bo_since is not None else [])
+        return self._seconds_by_day(intervals, clip)
+
+    def _coverage(self) -> dict:
+        w = self._common_window_ns()
+        spans = {v: {"first_ns": a, "last_ns": b} for v, (a, b) in self.venue_span.items()}
+        if w is None:
+            return {"venues": spans, "common_window_ns": None}
+        excluded_after = [{"venue_with_data_until": v, "excluded_from_ns": w[1], "excluded_to_ns": span["last_ns"], "excluded_seconds": (span["last_ns"] - w[1]) / 1e9} for v, span in spans.items() if span["last_ns"] > w[1]]
+        return {"venues": spans, "common_window_ns": list(w), "common_window_hours": (w[1] - w[0]) / 3.6e12, "excluded_span": excluded_after,
+                "label": "DATA_LIMITATION: the span after one venue's data ends is excluded from the comparison and from the suspended seconds; it is not a suspension"}
+
     def _ets(self, exchange_ts_ns: int) -> float | None:
         """When the event executed at the exchange, on the host clock (the backtester's `_event_host_ts`); None until the aligner has a sample."""
         aligner = self.latency.aligner
@@ -194,6 +263,8 @@ class SessionReplay:
         now = event.receive_ts_ns
         now_s = now / _NS
         self.events["book"] += 1
+        span = self.venue_span.setdefault(self._feed_venue(event.venue), [now, now])
+        span[1] = max(span[1], now)
         self.session.resync_if_due(now)
         self.session.oms.advance_time(now, self.session.books)         # in-flight orders land and timers fire BEFORE this event is applied (the backtester's _advance_to): an order sent at t - latency never sees an event received at t
         self.session.books[(event.venue, event.instrument_id)].apply(event)
@@ -217,6 +288,7 @@ class SessionReplay:
         produced += adapter.feed_cross(view, now_s, ets)
         self._deliver(adapter, produced, now, event.exchange_ts_ns)
         self.session.on_event(event, apply_book=False)
+        self._book_only_suspension(event.venue, now)
 
     def _trade(self, trade: TradeEvent) -> None:
         now = trade.receive_ts_ns
@@ -225,7 +297,10 @@ class SessionReplay:
         if price <= 0 or volume <= 0:
             return
         self.events["trade"] += 1
+        span = self.venue_span.setdefault(self._feed_venue(trade.venue), [now, now])
+        span[1] = max(span[1], now)
         self.session.oms.advance_time(now, self.session.books)
+        self.session.note_venue_message(trade.venue, now)                  # Q-G1: a print is a message of the venue: its books' age is measured from it
         sign = 1 if trade.aggressor_side == "BUY" else -1
         fv = self._feed_venue(trade.venue)
         view, state, adapter, ets = self.views[fv], self.states[fv], self.adapters[trade.venue], self._ets(trade.exchange_ts_ns)
@@ -239,9 +314,12 @@ class SessionReplay:
     def result(self) -> dict[str, Any]:
         s = self.session
         orders, fills = [], []
+        lifetime_ids = {e["order_id"] for e in s.ledger.events if e["event_type"] == "ORDER_LIFETIME_EXPIRED"}
         for plan in s.oms.plans.values():
             for child in plan.children:
-                orders.append({"order_id": child.order_id, "venue": child.venue, "side": child.side.value, "quantity": str(child.quantity), "limit_price": None if child.limit_price is None else str(child.limit_price),
+                terminal = [u for u in child.state_updates if str(u.get("resolved_order_state")) in ("CANCELLED", "FILLED", "REJECTED", "EXPIRED", "TIMED_OUT")]
+                orders.append({"cancel_reason": child.reject_reason, "terminal_ts_ns": int(terminal[-1]["event_ts_ns"]) if terminal else None,
+                               "lifetime_expired": child.order_id in lifetime_ids, "order_id": child.order_id, "venue": child.venue, "side": child.side.value, "quantity": str(child.quantity), "limit_price": None if child.limit_price is None else str(child.limit_price),
                                "post_only": bool(child.post_only), "state": child.state.value, "filled_quantity": str(child.filled_quantity), "average_price": str(child.average_price), "fee": str(child.fee)})
         for e in s.ledger.events:
             if e.get("event_type") == "FILL":
@@ -264,7 +342,17 @@ class SessionReplay:
                             for e in s.ledger.events if e["event_type"] in ("HEDGE_DISPATCH_HELD", "TIME_INTEGRITY_BLOCK", "ORDER_LIFETIME_EXPIRED", "ORDER_REJECT_CLASSIFIED", "HEDGE_CAP_BREACH_AT_DISPATCH", "HEDGE_ALARM")][:500],
             "grid_snaps": dict(self.shim.grid_snaps), "fills_by_source": {n: dict(a.fills_by_source) for n, a in self.adapters.items()},
             "manifest": {
-                "invalid_book_policy": s.book_policy_report(self.last_ns), "feed": self.feed.manifest(), "ticks": self.ticks, "quantity_step": f"{QUANTITY_STEP} ASSUMED",
+                "invalid_book_policy": s.book_policy_report(self.last_ns),
+                "coverage": self._coverage(),
+                "suspended_seconds_two_ways": {"any_message_age (the rule), common hours only": self._seconds_by_day([(a, b) for a, b, c in s.book_gate.open_intervals(self.last_ns)], self._common_window_ns()),
+                                               "book_change_age_only (older reading), common hours only": self._book_only_seconds(self._common_window_ns()),
+                                               "any_message_age, whole run (incl. the span after a venue's data ends: a data limitation, not a suspension)": s.book_policy_report(self.last_ns)["suspended_seconds_total_by_day"]},
+                "price_sanity_core_stats": {f"{v}": {k: getattr(b.stats, k) for k in ("price_jumps", "confirmed_price_moves", "wide_spreads", "crossed_or_locked", "stale_transitions", "invalid_levels", "resyncs", "snapshots", "deltas_applied")}
+                                            for (v, _), b in s.books.items()},
+                "time_integrity_blocks": sum(1 for e in s.ledger.events if e["event_type"] == "TIME_INTEGRITY_BLOCK"),
+                "sequence_gap_counter_of_the_core_book": "NOT REPORTED: synthetic sequence, gaps NOT_MEASURED",
+                "entry_gates": {"book_age_rule": "core, 500 ms, age from the last message of any kind (owner 8 Nov Q-G1)", "dead_feed_5s": "not a blocking gate; the resubscribe trigger only (Q-G2)", "price_sanity_500bps": "core, kept (Q-G3)",
+                                "time_integrity": "core, host-offset correction on (Q-G4)", "circuit_breaker": "NOT IN THE CORE: Phase E (Q-G5); old-path trips are in the parity report"}, "feed": self.feed.manifest(), "ticks": self.ticks, "quantity_step": {"values": quantity_steps(), "label": published_rules()["label"], "fetched": published_rules()["fetched"], "sources": {v: r["source"] for v, r in published_rules()["venues"].items()}},
                 "config_notes": self.config_notes, "timing": {"latency_model": None if self.latency_model is None else self.latency_model.report(), "truth_books": dict(self.timing_stats)}, "release_identity": self.config.release_identity,
                 "differences_from_backtester_loop": ["no timing timelines or venue-truth books", "core latency model", "no maker-lifetime timer, hedge faults, breaker, requote, margin step of the backtester",
                                                      "message-end cross invalidates the core book", "sequence SYNTHETIC, gaps NOT_MEASURED"],
@@ -320,10 +408,11 @@ def new_fills(run_dir: Path) -> list[dict]:
     return out
 
 
-def compare_parity(old_dir: Path, new_dir: Path, ticks: dict[str, float], windows_ns: list[list] | None = None) -> dict:
+def compare_parity(old_dir: Path, new_dir: Path, ticks: dict[str, float], windows_ns: list[list] | None = None, until: float | None = None) -> dict:
     """Per (venue, side) leg: quantity, vwap price in ticks, first and last fill time, row counts; the signal count; every difference above a tolerance, each with whether it lies inside a
     suspension window of the session run. Classification is done by a person from this output and recorded in the run manifest (a machine cannot tell BUG_CORE from BY_DESIGN)."""
-    o, n = _by_leg(old_fills(old_dir)), _by_leg(new_fills(new_dir))
+    keep = (lambda rows: rows) if until is None else (lambda rows: [r for r in rows if r['ts'] <= until])        # owner 8 Nov: only the hours where both venues have data
+    o, n = _by_leg(keep(old_fills(old_dir))), _by_leg(keep(new_fills(new_dir)))
     windows = [(w[0] / _NS, w[1] / _NS) for w in (windows_ns or [])]
     inside = lambda t: any(a <= t <= b for a, b in windows)
     diffs = []

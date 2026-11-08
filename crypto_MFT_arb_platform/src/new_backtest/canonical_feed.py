@@ -116,8 +116,9 @@ def _uncross(bids: dict[Decimal, Decimal], asks: dict[Decimal, Decimal], incomin
 
 
 class CanonicalFeed:
-    def __init__(self, instrument_id: str, *, venue_names: dict[str, str] | None = None, delta_semantics: dict[str, str] | None = None) -> None:
+    def __init__(self, instrument_id: str, *, venue_names: dict[str, str] | None = None, delta_semantics: dict[str, str] | None = None, max_silence_s: float | None = None) -> None:
         self.instrument_id = instrument_id
+        self.max_silence_ns = None if max_silence_s is None else int(max_silence_s * 1_000_000_000)      # a venue silent this long has nothing newer to resync from (a dropped feed): no snapshot
         self.venue_names = venue_names or {}
         self.delta_semantics = delta_semantics or {}
         self._levels: dict[str, tuple[dict[Decimal, Decimal], dict[Decimal, Decimal]]] = {}
@@ -125,6 +126,7 @@ class CanonicalFeed:
         self._ordinal = 0
         self.counts = {"snapshots": 0, "delta_messages": 0, "delta_records": 0, "trades": 0, "levels_changed": 0, "crossed_messages": 0, "crossed_snapshots": 0, "resync_snapshots": 0}
         self._inverse = {core: feed for feed, core in self.venue_names.items()}
+        self._last_trade_ns: dict[str, int] = {}
         self._emitted_ns: dict[str, int] = {}            # per venue: the latest receive time of a book event this feed has handed out
 
     def _venue(self, feed_venue: str) -> str:
@@ -210,6 +212,8 @@ class CanonicalFeed:
         levels, sequence = self._levels.get(feed_venue), self._sequence.get(venue)
         if levels is None or sequence is None or instrument_id != self.instrument_id or not (levels[0] and levels[1]):
             return None
+        if self.max_silence_ns is not None and now_ns - max(self._emitted_ns.get(venue, 0), self._last_trade_ns.get(venue, 0)) > self.max_silence_ns:
+            return None                                          # the data holds nothing newer than its last message: the resync cannot invent the exchange's present state
         if now_ns + _SAME_STAMP_NS < self._emitted_ns.get(venue, 0):
             raise ValueError(f"resync snapshot asked for {now_ns} but this feed has already handed out {venue} events up to {self._emitted_ns[venue]}: that would be later information; "
                              "replay the feed lazily (one event into the session before the next is converted), never convert it all first")
@@ -254,6 +258,7 @@ class CanonicalFeed:
         buy = side.lower().startswith("b") if isinstance(side, str) else self._text_number(side) > 0
         self._ordinal += 1
         self.counts["trades"] += 1
+        self._last_trade_ns[venue] = max(self._last_trade_ns.get(venue, 0), _ns_exact(ev.receive_ts))
         native_id = next((str(p[f]) for f in _TRADE_ID_FIELDS if p.get(f) not in (None, "")), "")
         exchange_ns = _ns_exact(p.get("exchange_ts", ev.exchange_ts))
         return TradeEvent(

@@ -56,7 +56,7 @@ from .execution import ExecutionConfig, ExecutionLayer, Role
 from .execution.ioc_runtime import IocRuntime
 from .hedge_faults import DisconnectGen, ExposureTracker, HedgeFaultConfig, Outage
 from .margin_model import MarginModel, MarginModelConfig
-from .timing import FixedOffsetAligner, Timelines, TimingConfig, TruthBooks, feed_state
+from .timing import FixedOffsetAligner, Timelines, TimingConfig, TruthBooks, dead_feed_blocks, feed_state
 from .valuation import MidHistory, common_timestamp_valuation
 from .latency_model import InFlightOrder, LatencyBook, MarkoutTracker, PendingOrderQueue
 from .models import Side
@@ -2012,21 +2012,10 @@ class CrossVenueArbBacktester:
         return self._truth.at_arrival(order.venue, order.release_ts, self.books[order.venue])
 
     def _dead_feed_blocks(self, now: float) -> bool:
-        """WP3 dead-feed gate on ABSOLUTE age per venue: a dead venue, or every venue stale at once, blocks entry."""
+        """WP3 dead-feed gate on ABSOLUTE age per venue: a dead venue, or every venue stale at once, blocks entry (`timing.dead_feed_blocks`, the shared rule)."""
         cfg = self.timing_cfg
         max_age = cfg.max_book_age_s if cfg.max_book_age_s is not None else self.config.arb.max_book_age_s
-        states = {v: feed_state(self.books[v].age_s(now), max_age, cfg.dead_feed_s) for v in self.config.venues}
-        for v, st in states.items():
-            if st != self._feed_state.get(v):
-                self.timing_stats[f"feed_{st}_transitions_{v}"] += 1
-                self._feed_state[v] = st
-        if any(st == "dead" for st in states.values()):
-            self.timing_stats["signals_blocked_by_dead_feed"] += 1
-            return True
-        if all(st != "valid" for st in states.values()):
-            self.timing_stats["entry_blocked_both_stale"] += 1
-            return True
-        return False
+        return dead_feed_blocks({v: self.books[v].age_s(now) for v in self.config.venues}, max_age, cfg.dead_feed_s, self._feed_state, self.timing_stats)
 
     def _timing_report(self) -> dict:
         if self.timelines is None:

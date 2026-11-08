@@ -286,6 +286,15 @@ class ReplayInvalidBookPolicy(unittest.TestCase):
         last = [e for e in events if e.venue == "BYBIT"][-1]
         self.assertIsNotNone(feed.resync_snapshot("BYBIT", self.INSTRUMENT, last.receive_ts_ns))      # asked about the time it has reached: fine
 
+    def test_a_silent_venue_has_nothing_newer_to_resync_from(self):
+        """Q-G2: 5 s of silence is the resubscribe trigger, but the data cannot invent the exchange's present state: no snapshot from a venue that stopped sending."""
+        feed = CanonicalFeed(self.INSTRUMENT, venue_names=self.VENUES, max_silence_s=5.0)
+        stream = [e for e in self._stream() if not (e.venue == "binance" and e.exchange_ts > 3.0)]                  # Binance stops at 3.0 s; Bybit goes on
+        for event in feed.convert(stream):
+            last = event
+        self.assertIsNone(feed.resync_snapshot("BINANCE", self.INSTRUMENT, last.receive_ts_ns))
+        self.assertIsNotNone(feed.resync_snapshot("BYBIT", self.INSTRUMENT, last.receive_ts_ns))
+
     def test_without_the_policy_the_book_stays_invalid_for_the_rest_of_the_slice(self):
         feed, session, states, last = self._run(None)
         self.assertEqual({st for v, t, st in states if v == "BYBIT" and t >= 2.0}, {"CHECKSUM_FAILED"})

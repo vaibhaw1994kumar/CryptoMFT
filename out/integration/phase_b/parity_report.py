@@ -31,15 +31,24 @@ for day in days:
     print(f"suspended s   {pol['suspended_seconds_total_by_day']}   resyncs {pol['resyncs_by_source']}   windows {len(pol['suspension_intervals_ns'])}")
     print("truth/timing  ", {k: v for k, v in man["manifest"]["timing"]["truth_books"].items() if k.startswith(("truth_arrivals", "postonly", "truth_book_not"))})
     print("fills by src  ", man["fills_by_source"])
+    mm = man["manifest"]
+    print("suspended two ways", mm["suspended_seconds_two_ways"])
+    print("price sanity   ", mm["price_sanity_core_stats"], "| time-integrity blocks", mm["time_integrity_blocks"], "| resync unavailable", pol.get("resync_unavailable_count"))
+    print("old-path breaker trips", so.get("breaker_trips"), "| lot rules", mm["quantity_step"]["label"], mm["quantity_step"]["values"], "| zero stages", mm["timing"]["latency_model"]["zero_stages_label"][:14])
     ev = [json.loads(l) for l in (o / "order_events.jsonl").read_text().splitlines() if l.strip()] if (o / "order_events.jsonl").exists() else []
-    old_rows, new_rows = order_times_old(ev), json.loads((n / "order_times.json").read_text())
+    cov = mm["coverage"]
+    until = cov["common_window_ns"][1] / 1e9 if cov.get("common_window_ns") else None
+    if until is not None and cov.get("excluded_span"):
+        print(f"coverage      common hours {cov['common_window_hours']:.2f} h; excluded span {[round(x['excluded_seconds']) for x in cov['excluded_span']]} s after one venue's data ends: DATA LIMITATION, not a suspension; every figure below is restricted to the common hours")
+    old_rows = [r for r in order_times_old(ev) if until is None or r["send"] <= until]
+    new_rows = [r for r in json.loads((n / "order_times.json").read_text()) if until is None or r["send"] <= until]
     print(f"per-order times: old {len(old_rows)} orders, new {len(new_rows)} orders")
     for r in compare_order_times(old_rows, new_rows)[:12]:
         if "what" in r:
             print("   order", r["order"], r["what"])
         else:
             print("   order", r["order"], r["venue"], r["side"], {k: (None if v["diff_s"] is None else round(v["diff_s"], 6)) for k, v in r.items() if isinstance(v, dict)})
-    rep = compare_parity(o, n, TICKS[day[:4]], pol["suspension_intervals_ns"])
+    rep = compare_parity(o, n, TICKS[day[:4]], pol["suspension_intervals_ns"], until)
     print("differences above tolerance:", len(rep["differences"]))
     for d in rep["differences"][:10]:
         print("  ", d)

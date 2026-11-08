@@ -143,5 +143,27 @@ class GateSuspendedTimeTests(unittest.TestCase):
         self.assertEqual(self.gate.suspended_seconds_by_day(T0 + 10 * NS), {"2024-03-01": {"BINANCE:SYNCING+BYBIT:SYNCING": 2.0, "BYBIT:SYNCING": 1.0}})
 
 
+class AnyMessageAgeTests(unittest.TestCase):
+    """Owner 8 Nov (Q-G1): the 500 ms rule is unchanged, but a book's age runs from the venue's last message of ANY kind: a quiet best-bid/ask feed with prints is alive, not stale."""
+
+    def _gate_and_books(self):
+        gate = BookIntegrityGate(max_book_age_ns=500_000_000, cancel_callback=lambda reason, now: 0)
+        a, b = OrderBook("BINANCE", "BTC-USDT-SPOT"), OrderBook("BYBIT", "BTC-USDT-SPOT")
+        a.apply(event("BINANCE", 10, "BOOK_SNAPSHOT", T0)); b.apply(event("BYBIT", 20, "BOOK_SNAPSHOT", T0))
+        return gate, a, b
+
+    def test_a_silent_book_is_stale_after_500_ms(self):
+        gate, a, b = self._gate_and_books()
+        self.assertFalse(gate.allow((a, b), T0 + 600_000_000))
+
+    def test_a_print_on_the_venue_keeps_its_book_fresh(self):
+        gate, a, b = self._gate_and_books()
+        a.note_venue_message(T0 + 400_000_000)
+        b.note_venue_message(T0 + 450_000_000)
+        self.assertTrue(gate.allow((a, b), T0 + 600_000_000))
+        a.note_venue_message(T0 + 100)                                   # never moves the time backwards
+        self.assertEqual(a.last_receive_ts_ns, T0 + 400_000_000)
+
+
 if __name__ == "__main__":
     unittest.main()
