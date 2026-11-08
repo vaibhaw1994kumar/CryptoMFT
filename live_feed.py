@@ -117,6 +117,8 @@ class WireFrame:
 @dataclass(slots=True)
 class VenueLiveStats:
     book_syncs: int = 0                  # times the book became VALID
+    book_stream_frames: int = 0          # frames received on the book connection of this venue (any kind); the liveness evidence, never fed by the trade connection
+    book_stream_silences: int = 0        # book connection silent past the book age limit (stale_disconnects counts the resulting reconnects)
     reconciles_ok: int = 0               # REST cross-checks: exact match
     reconcile_deep_diffs: int = 0        # touch agrees, deeper levels differ
     reconcile_mismatches: int = 0        # best bid/ask disagree: resync forced
@@ -166,6 +168,10 @@ class LiveFeedSettings:
     bybit_depth: int = 50
     http_timeout_seconds: float = 10.0
     initial_sync_timeout_seconds: float = 15.0
+    # Book-stream liveness (Phase D, D7, owner 8 Nov, Q-P2): a book is trusted only while its own stream is known to be alive, whatever the trade stream does. Every frame on the book
+    # connection (data, control, acknowledgement, pong) is the evidence; a quiet book on a live stream stays valid. When above 0 the Bybit book connection sends an application ping
+    # at this interval, so a quiet book still produces frames inside the age limit (Binance has no application ping: its liveness is its data frames and the transport's own pings).
+    book_heartbeat_seconds: float = 0.0
     reconnect_min_seconds: float = 1.0
     reconnect_max_seconds: float = 30.0
     rotate_seconds: float = 3600.0
@@ -230,6 +236,8 @@ class LiveFeedSettings:
             raise ValueError("http_timeout_seconds must be positive")
         if self.initial_sync_timeout_seconds <= 0:
             raise ValueError("initial_sync_timeout_seconds must be positive")
+        if self.book_heartbeat_seconds < 0:
+            raise ValueError("book_heartbeat_seconds must not be negative")
         if self.reconnect_min_seconds <= 0:
             raise ValueError("reconnect_min_seconds must be positive")
         if self.reconnect_max_seconds < self.reconnect_min_seconds:
@@ -786,6 +794,8 @@ class LiveOrderBookService:
         # Freshness runs on a monotonic clock; clock_ns (wall) stamps records.
         self.monotonic_ns = monotonic_ns
         self._last_book_mono_ns: dict[str, int | None] = {}
+        # Last frame of any kind on each venue's BOOK connection (monotonic). Together with the last applied update it is the book stream's liveness; trade frames never touch it.
+        self._last_book_frame_mono_ns: dict[str, int | None] = {}
         # Venue-to-host delay (backlog) and host-clock offset, for alerts and the summary.
         # Decisions are blocked by the trading session's own monitor (same policy).
         self.time_monitor = TimeIntegrityMonitor(self.config.time_policy, tuple(self.settings.venues))
@@ -1579,14 +1589,30 @@ class LiveOrderBookService:
                 host=self._host(url),
             )
             await websocket.send(json.dumps({"op": "subscribe", "args": [topic]}))
-            while not self.stop_event.is_set():
-                frame = await self._recv_fresh(venue, websocket)
-                state = self._process_websocket_frame(venue, url, frame, channel=topic)
-                if state in (
-                        BookState.GAP_DETECTED, BookState.CHECKSUM_FAILED,
-                        BookState.INVALID_DATA,
-                    ):
-                    raise ResyncRequired(self.books[venue].invalid_reason)
+            heartbeat = (
+                asyncio.create_task(self._book_heartbeat(websocket))
+                if self.settings.book_heartbeat_seconds > 0 else None
+            )
+            try:
+                while not self.stop_event.is_set():
+                    frame = await self._recv_fresh(venue, websocket)
+                    state = self._process_websocket_frame(venue, url, frame, channel=topic)
+                    if state in (
+                            BookState.GAP_DETECTED, BookState.CHECKSUM_FAILED,
+                            BookState.INVALID_DATA,
+                        ):
+                        raise ResyncRequired(self.books[venue].invalid_reason)
+            finally:
+                if heartbeat is not None:
+                    heartbeat.cancel()
+                    with suppress(asyncio.CancelledError):
+                        await heartbeat
+
+    async def _book_heartbeat(self, websocket: WebSocketLike) -> None:
+        """Application ping on the Bybit book connection: its pong is a book-stream frame, so a quiet book on a live stream keeps producing liveness evidence."""
+        while not self.stop_event.is_set():
+            await asyncio.sleep(self.settings.book_heartbeat_seconds)
+            await websocket.send(json.dumps({"op": "ping"}))
 
     def _observe_timing(self, event: MarketEvent) -> None:
         assessment = self.time_monitor.observe(event, now_ns=event.receive_ts_ns)
@@ -1786,14 +1812,19 @@ class LiveOrderBookService:
                      "threshold_bps": str(monitor.threshold_bps)},
         )
 
+    def _book_alive_mono_ns(self, venue: str) -> int | None:
+        """When the venue's book stream was last known alive: its last applied update or its last frame of any kind, whichever is later (None before the first)."""
+        marks = [m for m in (self._last_book_mono_ns.get(venue), self._last_book_frame_mono_ns.get(venue)) if m is not None]
+        return max(marks) if marks else None
+
     def _book_ages(self) -> dict[str, int | None]:
         now = self.monotonic_ns()
-        return {venue: (None if last is None else now - last)
-                for venue, last in self._last_book_mono_ns.items()}
+        return {venue: (None if (last := self._book_alive_mono_ns(venue)) is None else now - last)
+                for venue in self.settings.venues}
 
     def _remaining_fresh_seconds(self, venue: str) -> float:
         book = self.books[venue]
-        last = self._last_book_mono_ns.get(venue)
+        last = self._book_alive_mono_ns(venue)
         if book.state != BookState.VALID or last is None:
             return self.settings.initial_sync_timeout_seconds
         remaining_ns = self.config.max_book_age_ns - (self.monotonic_ns() - last)
@@ -1816,12 +1847,14 @@ class LiveOrderBookService:
         age = self._book_ages().get(venue)
         if age is not None:
             book.mark_stale_age(age, self.config.max_book_age_ns)
+        self.stats[venue].book_stream_silences += 1
         self.stats[venue].stale_disconnects += 1
         self.book_gate.allow(tuple(self.books.values()), self.clock_ns(), self._book_ages())
         self._publish_book(book, None)
 
     def _begin_connection(self, venue: str) -> None:
         self._last_book_mono_ns[venue] = None
+        self._last_book_frame_mono_ns[venue] = None
         self._pending_rest.pop(venue, None)
         self._history.pop(venue, None)
         self._book_cross_seq[venue] = None
@@ -1831,6 +1864,7 @@ class LiveOrderBookService:
 
     def _invalidate_connection(self, venue: str) -> None:
         self._last_book_mono_ns[venue] = None
+        self._last_book_frame_mono_ns[venue] = None
         self._pending_rest.pop(venue, None)
         self._history.pop(venue, None)
         self._book_cross_seq[venue] = None
@@ -2005,6 +2039,8 @@ class LiveOrderBookService:
         channel: str | None = None,
     ) -> BookState | None:
         receive_ts_ns = self.clock_ns()
+        self._last_book_frame_mono_ns[venue] = self.monotonic_ns()           # any frame on the book connection proves the stream alive, before it is parsed or judged
+        self.stats[venue].book_stream_frames += 1
         adapter_version = (
             "binance-depth-v1" if venue == "BINANCE" else "bybit-depth-v1"
         )
