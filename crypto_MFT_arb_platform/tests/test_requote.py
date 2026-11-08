@@ -217,7 +217,7 @@ class NoUnusedSettings(unittest.TestCase):
         import re
         from pathlib import Path
         src = Path(__file__).resolve().parents[1] / "src"
-        files = [f for f in list(src.glob("new_backtest/**/*.py")) + list(src.glob("crypto_stat_arb/ems/**/*.py")) if "nested" not in str(f)]
+        files = [f for f in list(src.glob("new_backtest/**/*.py")) + list(src.glob("crypto_stat_arb/ems/**/*.py")) + list(src.glob("crypto_stat_arb/strategies/**/*.py")) if "nested" not in str(f)]
         return {f: "\n".join(l.split("#", 1)[0] for l in f.read_text().splitlines()) for f in files}
 
     def test_every_arb_and_reprice_field_is_read(self):
