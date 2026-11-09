@@ -175,6 +175,7 @@ class TradingSession:
         resync_silence_ns: int | None = None,
         resync_delay_ns: int | None = None,
         resync_source: Callable[[str, str, int], MarketEvent | None] | None = None,
+        gate_on_every_event: bool = False,
     ) -> None:
         execution_mode = ExecutionMode(execution_mode)
         assert_execution_mode(
@@ -187,6 +188,9 @@ class TradingSession:
         if (resync_delay_ns is None) != (resync_source is None):
             raise ValueError("a resync delay and a resync source go together")
         self.resync_delay_ns = resync_delay_ns
+        # Owner 9 Nov (D7d): the live service evaluates the book gate on EVERY book event, before the session sees it. With this on, a replay does the same: `on_event` applies the book and evaluates the gate first, so the gate is not skipped when the event is
+        # time-integrity-blocked and its feed-control, kill-switch and margin events are stamped as live stamps them. Off = every existing caller, byte for byte.
+        self.gate_on_every_event = gate_on_every_event
         self.resync_silence_ns = resync_silence_ns           # a venue silent this long (any message) is treated as a dropped feed: resubscribe after the same delay (Q-G2: the 5 s is a resubscribe trigger, not a blocking gate)
         self.resync_unavailable = 0
         self.resync_source = resync_source
@@ -363,6 +367,12 @@ class TradingSession:
     ) -> Opportunity | None:
         wall_start = self.wall_ns()
         now = self._now(event, now_ns)
+        if self.gate_on_every_event and gate_allowed is None and event.event_type in (EventType.BOOK_SNAPSHOT, EventType.BOOK_DELTA):
+            # As the live service does: apply the book, evaluate the gate, then hand the event to the session (the gate is not skipped by the early returns below).
+            if apply_book:
+                self.books[(event.venue, event.instrument_id)].apply(event)
+                apply_book = False
+            gate_allowed = self.book_gate.allow(tuple(self.books[(venue, self.cfg.instrument_id)] for venue in self.cfg.venues), now)
         if self.resync_delay_ns is not None:
             self._resync_due_books(now)
         self.events_processed += 1
