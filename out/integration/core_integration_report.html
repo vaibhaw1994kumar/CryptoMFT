@@ -496,6 +496,24 @@ The full curves for every bucket are in <code>probe_adverse/analysis.json</code>
 </ul>
 </ul>
 
+<h3>C63. S2, the hedge cap sweep with v1_6 (9 Nov 2026; EXPLORATORY; SELECT days only; NOT ENOUGH TRADES TO CHOOSE)</h3>
+<ul>
+<li><b>What was run.</b> Profile <code>perp_perp_maker_taker_v1_6</code>, frozen snapshot <code>out/queue_v2/snap_s2</code> (fingerprint efcbe11443970ca9; the code after the gate rule), 2-hour March slices (00:00-02:00 UTC), size 1, Singapore latency, fees from the profile (Bybit VIP 5, Binance VIP 9, PUBLIC_SCHEDULE_UNVERIFIED), no funding file. Cap rule in the session runtime = <code>touch_slack</code>: each hedge attempt is capped at the hedge venue's current touch moved against us by max(<code>arb.max_walk_bps</code> = 2, <code>execution.hedge.slack_bps_floor</code>) bps. Cells: floor 2, 3, <b>5 (today's profile, unchanged)</b>, 8, 12; one setting changed per cell, through <code>QV2_HEDGE</code> (recorded in each summary). Wrappers <code>out/integration/s2/run_s2_cells.py</code> and <code>aggregate_s2.py</code>, result <code>s2/s2_aggregate.json</code>. 20 replays, 0 failed.</li>
+<li><b>Two limits on the scope, both from rules already in force.</b> (1) <b>SELECT days only (03-08 to 03-11), not all 11.</b> v1_6 pins an adverse table and a hedge-move file fitted on 03-01..03-07, and the loaders (and the runner) refuse a run day that is not strictly after every fit day: a first launch on 03-01 stopped with "training days must be strictly before the run day". Running the TRAIN days with v1_6 would need an in-sample exception, labelled, from the owner. (2) <b>The break-even-plus-buffer cap is not in the sweep:</b> it exists only in the backtester's own loop (<code>backtester.py</code>), not in the session runtime that v1_5 and later use, so a sweep on v1_6 can vary the touch slack only. HOLDOUT is not used.</li>
+</ul>
+<table><tr><th>cap floor (bps)</th><th>days</th><th>trades (signals)</th><th>maker fills + hedge fills</th><th>hedge submits</th><th>cap breaches at dispatch</th><th>days with an open leg</th><th>equity at book mids (USDT)</th><th>flag</th></tr>
+<tr><td>2</td><td>4</td><td>5</td><td>10</td><td>12</td><td>9</td><td>0</td><td>&minus;0.108</td><td>TOO_FEW_TO_COMPARE</td></tr>
+<tr><td>3</td><td>4</td><td>5</td><td>10</td><td>11</td><td>8</td><td>0</td><td>&minus;0.087</td><td>TOO_FEW_TO_COMPARE</td></tr>
+<tr><td><b>5 (today)</b></td><td>4</td><td>5</td><td>10</td><td>8</td><td>5</td><td>0</td><td>&minus;0.116</td><td>TOO_FEW_TO_COMPARE</td></tr>
+<tr><td>8</td><td>4</td><td>5</td><td>10</td><td>5</td><td>2</td><td>0</td><td>&minus;0.065</td><td>TOO_FEW_TO_COMPARE</td></tr>
+<tr><td>12</td><td>4</td><td>5</td><td>10</td><td>5</td><td>2</td><td>0</td><td>&minus;0.065</td><td>TOO_FEW_TO_COMPARE</td></tr></table>
+<ul>
+<li><b>Trades per cell: 5 in four days</b> (03-08: 0, 03-09: 3, 03-10: 1, 03-11: 1), the same five in every cell: the cap changes only what happens AFTER a maker fill, so the entries do not move. The flag threshold written into the aggregate script is 30 pooled trades; every cell is flagged TOO_FEW_TO_COMPARE, so <b>no cap is chosen and none is recommended</b>.</li>
+<li><b>What the cells do show (mechanism, not a ranking).</b> Only the 03-11 trade is sensitive to the cap: with a floor of 8 or 12 bps its hedge fills on the first attempt (3 hedge submits, 3 filled), with 5 it needs 6 submits (3 cancelled by the cap), with 2 or 3 it needs 9 (6 cancelled); the final positions are flat in every cell, so no cap leaves an open leg here. A narrower cap means more cancelled attempts and later or worse hedges; the equity differences (&minus;0.043 to &minus;0.094 on that one trade, &minus;0.065 to &minus;0.116 over the four days) come from one trade and are a few cents; they are not an effect size. A cap exists to bound the loss when the hedge venue moves fast before the hedge fills; the slices contain no such move that the cells separate, so they say nothing about that.</li>
+<li><b>What would make S2 decidable.</b> About 30 or more trades per cell: the full days (the slices are 2 of 24 hours) and more days. Full-day replays take about 12 times as long (about 75 minutes each); five cells over the four SELECT days is about 25 hours serial, about 12 hours with two at a time. The owner decides whether to spend that, and whether to allow the labelled in-sample TRAIN days.</li>
+<li><b>Not done.</b> The identity check of the reference profiles on 03-11 with the new snapshot <code>snap_s2</code> (the gate rule does not touch the backtester runtime that they use, and the test suite equals the Phase 0 list, but the replay identity was not rerun for this snapshot).</li>
+</ul>
+
 <h2>Phase D, D7: paper on the one runtime (9 Nov 2026)</h2>
 <h3>C51. D7 a to c built; the comparison is REPORTED and does NOT pass yet</h3>
 <ul>

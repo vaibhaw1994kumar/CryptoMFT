@@ -226,7 +226,7 @@ PHASE F: Clean up
 
 STRATEGY STEPS S1-S3 (owner 7 Nov; ORDER CHANGED 9 Nov: right after the Phase D gate and D7d with v1_5, before Phase E work and before Phase F, on the shared code)
 1. **S1, adverse-selection table in core `strategies/edge.py`.** It replaces the single expected hedge move and the uncalibrated block_on_toxic thresholds and ships as a NEW profile version. **Fitted on market-data labels only (owner 9 Nov):** for each trade at a level, the mid move at 1, 5 and 30 s. Fitted on TRAIN, chosen on SELECT, never HOLDOUT. **It is not fitted on simulated strategy fills of v1_3 or v1_2** (this replaces the 7 Nov wording, which fitted on the fills of the repricing strategy); v1_3 simulated fills may be used only to CHECK it. Results are EXPLORATORY until the simulator validation step.
-2. **S2, the Phase 1-lite hedge cap sweep,** run with the S1 curve (after S1).
+2. **S2, the Phase 1-lite hedge cap sweep,** run with the S1 curve (after S1). **Run 9 Nov (report C63): SELECT days 03-08..03-11 only (the TRAIN days are refused by the v1_6 fit-day rule), 2-hour slices, touch-slack floor 2/3/5/8/12 bps (the break-even-plus-buffer cap is not in the session runtime); 5 trades per cell, every cell TOO_FEW_TO_COMPARE, no cap chosen. Decidable only with full days or more days; the owner decides.**
 3. **S3, Albers features.**
 The adaptive hedge limit stays deferred.
 

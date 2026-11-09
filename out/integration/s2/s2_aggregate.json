@@ -1,0 +1,417 @@
+{
+ "label": "EXPLORATORY: S2 hedge cap sweep, v1_6, 2-hour March slices, SELECT days, size 1, Singapore latency, fees from the profile (Bybit VIP 5 + Binance VIP 9, PUBLIC_SCHEDULE_UNVERIFIED), no funding",
+ "min_trades_to_compare": 30,
+ "cells": {
+  "slack12": {
+   "days": 4,
+   "signals": 5,
+   "fills": 10,
+   "equity_at_book_mids": -0.064772596,
+   "hedge_submits": 5,
+   "cap_breach_at_dispatch": 2,
+   "days_with_open_leg": 0,
+   "flag": "TOO_FEW_TO_COMPARE"
+  },
+  "slack2": {
+   "days": 4,
+   "signals": 5,
+   "fills": 10,
+   "equity_at_book_mids": -0.10756531999999999,
+   "hedge_submits": 12,
+   "cap_breach_at_dispatch": 9,
+   "days_with_open_leg": 0,
+   "flag": "TOO_FEW_TO_COMPARE"
+  },
+  "slack3": {
+   "days": 4,
+   "signals": 5,
+   "fills": 10,
+   "equity_at_book_mids": -0.08656889,
+   "hedge_submits": 11,
+   "cap_breach_at_dispatch": 8,
+   "days_with_open_leg": 0,
+   "flag": "TOO_FEW_TO_COMPARE"
+  },
+  "slack5": {
+   "days": 4,
+   "signals": 5,
+   "fills": 10,
+   "equity_at_book_mids": -0.11556396,
+   "hedge_submits": 8,
+   "cap_breach_at_dispatch": 5,
+   "days_with_open_leg": 0,
+   "flag": "TOO_FEW_TO_COMPARE"
+  },
+  "slack8": {
+   "days": 4,
+   "signals": 5,
+   "fills": 10,
+   "equity_at_book_mids": -0.064772596,
+   "hedge_submits": 5,
+   "cap_breach_at_dispatch": 2,
+   "days_with_open_leg": 0,
+   "flag": "TOO_FEW_TO_COMPARE"
+  }
+ },
+ "rows": [
+  {
+   "cell": "slack12",
+   "day": "2024-03-08",
+   "signals": 0,
+   "orders": 0,
+   "fills": 0,
+   "equity_at_book_mids": 0.0,
+   "net_position_base": 0,
+   "hedge_orders_by_state": {},
+   "hedge_chains_opened": 0,
+   "cap_breach_at_dispatch": 0,
+   "hedge_submits": 0,
+   "positions": {}
+  },
+  {
+   "cell": "slack12",
+   "day": "2024-03-09",
+   "signals": 3,
+   "orders": 4,
+   "fills": 2,
+   "equity_at_book_mids": -0.01210396,
+   "net_position_base": 0.0,
+   "hedge_orders_by_state": {
+    "BINANCE:FILLED": 1
+   },
+   "hedge_chains_opened": 1,
+   "cap_breach_at_dispatch": 1,
+   "hedge_submits": 1,
+   "positions": {
+    "BYBIT:SOL-USDT-PERP": 1.0,
+    "BINANCE:SOL-USDT-PERP": -1.0
+   }
+  },
+  {
+   "cell": "slack12",
+   "day": "2024-03-10",
+   "signals": 1,
+   "orders": 2,
+   "fills": 2,
+   "equity_at_book_mids": -0.0093163,
+   "net_position_base": 0.0,
+   "hedge_orders_by_state": {
+    "BINANCE:FILLED": 1
+   },
+   "hedge_chains_opened": 1,
+   "cap_breach_at_dispatch": 1,
+   "hedge_submits": 1,
+   "positions": {
+    "BYBIT:SOL-USDT-PERP": 1.0,
+    "BINANCE:SOL-USDT-PERP": -1.0
+   }
+  },
+  {
+   "cell": "slack12",
+   "day": "2024-03-11",
+   "signals": 1,
+   "orders": 4,
+   "fills": 6,
+   "equity_at_book_mids": -0.043352336,
+   "net_position_base": 0.0,
+   "hedge_orders_by_state": {
+    "BINANCE:FILLED": 3
+   },
+   "hedge_chains_opened": 3,
+   "cap_breach_at_dispatch": 0,
+   "hedge_submits": 3,
+   "positions": {
+    "BYBIT:SOL-USDT-PERP": 1.0,
+    "BINANCE:SOL-USDT-PERP": -1.0
+   }
+  },
+  {
+   "cell": "slack2",
+   "day": "2024-03-08",
+   "signals": 0,
+   "orders": 0,
+   "fills": 0,
+   "equity_at_book_mids": 0.0,
+   "net_position_base": 0,
+   "hedge_orders_by_state": {},
+   "hedge_chains_opened": 0,
+   "cap_breach_at_dispatch": 0,
+   "hedge_submits": 0,
+   "positions": {}
+  },
+  {
+   "cell": "slack2",
+   "day": "2024-03-09",
+   "signals": 3,
+   "orders": 5,
+   "fills": 2,
+   "equity_at_book_mids": -0.03310039,
+   "net_position_base": 0.0,
+   "hedge_orders_by_state": {
+    "BINANCE:CANCELLED": 1,
+    "BINANCE:FILLED": 1
+   },
+   "hedge_chains_opened": 1,
+   "cap_breach_at_dispatch": 2,
+   "hedge_submits": 2,
+   "positions": {
+    "BYBIT:SOL-USDT-PERP": 1.0,
+    "BINANCE:SOL-USDT-PERP": -1.0
+   }
+  },
+  {
+   "cell": "slack2",
+   "day": "2024-03-10",
+   "signals": 1,
+   "orders": 2,
+   "fills": 2,
+   "equity_at_book_mids": -0.0093163,
+   "net_position_base": 0.0,
+   "hedge_orders_by_state": {
+    "BINANCE:FILLED": 1
+   },
+   "hedge_chains_opened": 1,
+   "cap_breach_at_dispatch": 1,
+   "hedge_submits": 1,
+   "positions": {
+    "BYBIT:SOL-USDT-PERP": 1.0,
+    "BINANCE:SOL-USDT-PERP": -1.0
+   }
+  },
+  {
+   "cell": "slack2",
+   "day": "2024-03-11",
+   "signals": 1,
+   "orders": 10,
+   "fills": 6,
+   "equity_at_book_mids": -0.06514863,
+   "net_position_base": 0.0,
+   "hedge_orders_by_state": {
+    "BINANCE:CANCELLED": 6,
+    "BINANCE:FILLED": 3
+   },
+   "hedge_chains_opened": 3,
+   "cap_breach_at_dispatch": 6,
+   "hedge_submits": 9,
+   "positions": {
+    "BYBIT:SOL-USDT-PERP": 1.0,
+    "BINANCE:SOL-USDT-PERP": -1.0
+   }
+  },
+  {
+   "cell": "slack3",
+   "day": "2024-03-08",
+   "signals": 0,
+   "orders": 0,
+   "fills": 0,
+   "equity_at_book_mids": 0.0,
+   "net_position_base": 0,
+   "hedge_orders_by_state": {},
+   "hedge_chains_opened": 0,
+   "cap_breach_at_dispatch": 0,
+   "hedge_submits": 0,
+   "positions": {}
+  },
+  {
+   "cell": "slack3",
+   "day": "2024-03-09",
+   "signals": 3,
+   "orders": 4,
+   "fills": 2,
+   "equity_at_book_mids": -0.01210396,
+   "net_position_base": 0.0,
+   "hedge_orders_by_state": {
+    "BINANCE:FILLED": 1
+   },
+   "hedge_chains_opened": 1,
+   "cap_breach_at_dispatch": 1,
+   "hedge_submits": 1,
+   "positions": {
+    "BYBIT:SOL-USDT-PERP": 1.0,
+    "BINANCE:SOL-USDT-PERP": -1.0
+   }
+  },
+  {
+   "cell": "slack3",
+   "day": "2024-03-10",
+   "signals": 1,
+   "orders": 2,
+   "fills": 2,
+   "equity_at_book_mids": -0.0093163,
+   "net_position_base": 0.0,
+   "hedge_orders_by_state": {
+    "BINANCE:FILLED": 1
+   },
+   "hedge_chains_opened": 1,
+   "cap_breach_at_dispatch": 1,
+   "hedge_submits": 1,
+   "positions": {
+    "BYBIT:SOL-USDT-PERP": 1.0,
+    "BINANCE:SOL-USDT-PERP": -1.0
+   }
+  },
+  {
+   "cell": "slack3",
+   "day": "2024-03-11",
+   "signals": 1,
+   "orders": 10,
+   "fills": 6,
+   "equity_at_book_mids": -0.06514863,
+   "net_position_base": 0.0,
+   "hedge_orders_by_state": {
+    "BINANCE:CANCELLED": 6,
+    "BINANCE:FILLED": 3
+   },
+   "hedge_chains_opened": 3,
+   "cap_breach_at_dispatch": 6,
+   "hedge_submits": 9,
+   "positions": {
+    "BYBIT:SOL-USDT-PERP": 1.0,
+    "BINANCE:SOL-USDT-PERP": -1.0
+   }
+  },
+  {
+   "cell": "slack5",
+   "day": "2024-03-08",
+   "signals": 0,
+   "orders": 0,
+   "fills": 0,
+   "equity_at_book_mids": 0.0,
+   "net_position_base": 0,
+   "hedge_orders_by_state": {},
+   "hedge_chains_opened": 0,
+   "cap_breach_at_dispatch": 0,
+   "hedge_submits": 0,
+   "positions": {}
+  },
+  {
+   "cell": "slack5",
+   "day": "2024-03-09",
+   "signals": 3,
+   "orders": 4,
+   "fills": 2,
+   "equity_at_book_mids": -0.01210396,
+   "net_position_base": 0.0,
+   "hedge_orders_by_state": {
+    "BINANCE:FILLED": 1
+   },
+   "hedge_chains_opened": 1,
+   "cap_breach_at_dispatch": 1,
+   "hedge_submits": 1,
+   "positions": {
+    "BYBIT:SOL-USDT-PERP": 1.0,
+    "BINANCE:SOL-USDT-PERP": -1.0
+   }
+  },
+  {
+   "cell": "slack5",
+   "day": "2024-03-10",
+   "signals": 1,
+   "orders": 2,
+   "fills": 2,
+   "equity_at_book_mids": -0.0093163,
+   "net_position_base": 0.0,
+   "hedge_orders_by_state": {
+    "BINANCE:FILLED": 1
+   },
+   "hedge_chains_opened": 1,
+   "cap_breach_at_dispatch": 1,
+   "hedge_submits": 1,
+   "positions": {
+    "BYBIT:SOL-USDT-PERP": 1.0,
+    "BINANCE:SOL-USDT-PERP": -1.0
+   }
+  },
+  {
+   "cell": "slack5",
+   "day": "2024-03-11",
+   "signals": 1,
+   "orders": 7,
+   "fills": 6,
+   "equity_at_book_mids": -0.0941437,
+   "net_position_base": 0.0,
+   "hedge_orders_by_state": {
+    "BINANCE:CANCELLED": 3,
+    "BINANCE:FILLED": 3
+   },
+   "hedge_chains_opened": 3,
+   "cap_breach_at_dispatch": 3,
+   "hedge_submits": 6,
+   "positions": {
+    "BYBIT:SOL-USDT-PERP": 1.0,
+    "BINANCE:SOL-USDT-PERP": -1.0
+   }
+  },
+  {
+   "cell": "slack8",
+   "day": "2024-03-08",
+   "signals": 0,
+   "orders": 0,
+   "fills": 0,
+   "equity_at_book_mids": 0.0,
+   "net_position_base": 0,
+   "hedge_orders_by_state": {},
+   "hedge_chains_opened": 0,
+   "cap_breach_at_dispatch": 0,
+   "hedge_submits": 0,
+   "positions": {}
+  },
+  {
+   "cell": "slack8",
+   "day": "2024-03-09",
+   "signals": 3,
+   "orders": 4,
+   "fills": 2,
+   "equity_at_book_mids": -0.01210396,
+   "net_position_base": 0.0,
+   "hedge_orders_by_state": {
+    "BINANCE:FILLED": 1
+   },
+   "hedge_chains_opened": 1,
+   "cap_breach_at_dispatch": 1,
+   "hedge_submits": 1,
+   "positions": {
+    "BYBIT:SOL-USDT-PERP": 1.0,
+    "BINANCE:SOL-USDT-PERP": -1.0
+   }
+  },
+  {
+   "cell": "slack8",
+   "day": "2024-03-10",
+   "signals": 1,
+   "orders": 2,
+   "fills": 2,
+   "equity_at_book_mids": -0.0093163,
+   "net_position_base": 0.0,
+   "hedge_orders_by_state": {
+    "BINANCE:FILLED": 1
+   },
+   "hedge_chains_opened": 1,
+   "cap_breach_at_dispatch": 1,
+   "hedge_submits": 1,
+   "positions": {
+    "BYBIT:SOL-USDT-PERP": 1.0,
+    "BINANCE:SOL-USDT-PERP": -1.0
+   }
+  },
+  {
+   "cell": "slack8",
+   "day": "2024-03-11",
+   "signals": 1,
+   "orders": 4,
+   "fills": 6,
+   "equity_at_book_mids": -0.043352336,
+   "net_position_base": 0.0,
+   "hedge_orders_by_state": {
+    "BINANCE:FILLED": 3
+   },
+   "hedge_chains_opened": 3,
+   "cap_breach_at_dispatch": 0,
+   "hedge_submits": 3,
+   "positions": {
+    "BYBIT:SOL-USDT-PERP": 1.0,
+    "BINANCE:SOL-USDT-PERP": -1.0
+   }
+  }
+ ]
+}
