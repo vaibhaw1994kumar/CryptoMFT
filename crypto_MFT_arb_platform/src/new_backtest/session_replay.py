@@ -130,6 +130,7 @@ class SessionReplay:
             dispatch_policy=DispatchPolicy.FILL_TRIGGERED, maker_venues=tuple(self.names[v] for v in config.arb.maker_venues),
             resync_delay_ns=int(self.resync_delay_s * _NS), resync_source=self.feed.resync_snapshot,
             resync_silence_ns=None if config.timing is None else int(config.timing.dead_feed_s * _NS), latency_model=self.latency_model, hedge_policy=hedge_policy,
+            gate_on_every_event=True,          # owner 9 Nov (D7d): the session runtime is v1_5 and later; the gate is evaluated on every event, as the live service does
         )
         if config.arb.maker_max_age_s > 0:
             self.session.oms.order_lifetime_ns = int(config.arb.maker_max_age_s * _NS)     # the profile's MANDATORY maker order lifetime (a rule, the same on both runtimes)
@@ -575,7 +576,7 @@ def live_paper_setup(profile_name: str) -> dict:
                                touch_slack_bps=max(float(cfg.arb.max_walk_bps), float(hedge_cfg.get("slack_bps_floor", 5.0))) if hedge_cfg.get("cap") == "touch_slack" else None)
     timelines = Timelines(cfg.timing) if cfg.timing is not None else None
     session_kwargs = {"dispatch_policy": DispatchPolicy.FILL_TRIGGERED, "maker_venues": tuple(names[v] for v in cfg.arb.maker_venues), "hedge_policy": hedge_policy,
-                      "latency_model": TimelinesLatencyModel(timelines) if timelines is not None else None}
+                      "latency_model": TimelinesLatencyModel(timelines) if timelines is not None else None, "gate_on_every_event": True}
 
     def build(paper) -> list:
         session = paper.session

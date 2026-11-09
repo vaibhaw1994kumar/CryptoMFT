@@ -72,6 +72,25 @@ class BlockedEventBookTests(unittest.TestCase):
 
 
 
+class GateOnEveryEventTests(unittest.TestCase):
+    """Owner 9 Nov (D7d): the live service evaluates the book gate on every event; a replay with `gate_on_every_event` does too, so a blocked event stamps the gate's feed-control events."""
+
+    def run_case(self, on):
+        cfg, _ = load_config(CONFIG)
+        session = TradingSession(cfg, gate_on_every_event=on)
+        for venue in ("BINANCE", "BYBIT"):
+            session.on_event(event(venue, 1, T0, T0 + MS, [("60000", "1")], [("60000.1", "1")], snapshot=True))
+        late = T0 + cfg.max_book_age_ns + 10 * MS           # BYBIT's book is now older than the maximum age; this BINANCE event is blocked (receive before exchange time)
+        session.on_event(event("BINANCE", 2, late + 10 * MS, late + 5 * MS, [("60000", "3")], []))
+        return [row for row in session.ledger.events if row["event_type"] == "FEED_CONTROL_STATE_TRANSITION" and row["ts_ns"] == late + 5 * MS]
+
+    def test_off_by_default_the_blocked_event_does_not_run_the_gate(self):
+        self.assertEqual(self.run_case(False), [])
+
+    def test_on_the_blocked_event_runs_the_gate(self):
+        self.assertTrue(self.run_case(True))
+
+
 def write_run(run, mode, *, net_pnl, equity, latency_p50=1_000_000):
     run.mkdir(parents=True)
     (run / "summary.json").write_text(json.dumps({

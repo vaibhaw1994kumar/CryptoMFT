@@ -4,7 +4,9 @@
 The recorded books, trades and the book connection's pong frames (as venue-message notes) are the SAME for both; the clock is each event's receive time. Compared: the ledger's events (type, time, venue, side, price, quantity),
 the final positions and cash, the OMS plans and their orders. Also reported: the strategy's own counters (evaluations, signals, the best net edge it saw, the reject reasons) against its entry threshold, which is the
 answer to "why no orders" when there are none.
-Usage: offline_strategy_check.py SESSION_DIR MINUTES OUT_JSON [PROFILE]"""
+Usage: offline_strategy_check.py SESSION_DIR MINUTES OUT_JSON [PROFILE] [gate_first]
+`gate_first` (owner 9 Nov, D7d trace): the REPLAY side applies each book and evaluates the book gate on EVERY event before the session sees it, as the live service does; without it the replay evaluates the gate inside `session.on_event`,
+which returns early on a time-integrity-blocked event."""
 import json
 import sys
 import tempfile
@@ -23,6 +25,7 @@ from new_backtest.session_replay import live_paper_setup, load_keepalive_notes, 
 
 session_dir, minutes, out_path = Path(sys.argv[1]), float(sys.argv[2]), Path(sys.argv[3])
 profile = sys.argv[4] if len(sys.argv) > 4 else "perp_perp_maker_taker_v1_5"
+GATE_FIRST = len(sys.argv) > 5 and sys.argv[5] == "gate_first"
 CONFIG = Path("/Users/vaibhav/Documents/Newproject/out/integration/paper_live/config_v1_5.json")
 
 events_all = load_recorded_events(session_dir)
@@ -70,7 +73,12 @@ headroom = {"bid": [], "ask": []}
 def on_book_with_headroom(ev):
     """After every book event: how far the strategy's own required quote price (`_quote_limit`, the one place it is computed: fees, minimum edge, buffer, expected hedge move, slippage, funding, failure cost) is from a quote
     AT THE MAKER TOUCH: headroom in bps, positive = a quote at the touch would already clear the entry rule. The maker venue is the profile's (Bybit), the hedge venue the other."""
-    feeder.on_book(ev)
+    if GATE_FIRST:
+        sess.books[(ev.venue, ev.instrument_id)].apply(ev)
+        sess.book_gate.allow(tuple(sess.books[(v, sess.cfg.instrument_id)] for v in sess.cfg.venues), ev.receive_ts_ns)
+        feeder.on_book(ev, apply_core=False, gate_allowed=not sess.book_gate.suspended)
+    else:
+        feeder.on_book(ev)
     inner = sess.strategies[0].strategy
     mv, hv = "BYBIT", "BINANCE"
     mb, hb = views[mv], views[hv]
@@ -128,8 +136,10 @@ same = {"ledger_events": replay["ledger_events"] == pap["ledger_events"], "posit
 differ = [i for i, (a, b) in enumerate(zip(replay["ledger_events"], pap["ledger_events"])) if a != b][:10]
 ledger_diff = {"event_type_counts_replay": dict(Counter(r[0] for r in replay["ledger_events"])), "event_type_counts_paper": dict(Counter(r[0] for r in pap["ledger_events"])),
                "only_in_replay_by_type": dict(Counter(r[0] for r in (Counter(map(tuple, replay["ledger_events"])) - Counter(map(tuple, pap["ledger_events"]))).elements())),
-               "only_in_paper_by_type": dict(Counter(r[0] for r in (Counter(map(tuple, pap["ledger_events"])) - Counter(map(tuple, replay["ledger_events"]))).elements()))}
-summary = {"label": "EXPLORATORY: D7d offline step, recorded Mac shakedown stream; not a strategy result", "session": session_dir.name, "minutes": minutes, "profile": profile, "events": len(events), "keepalive_notes": len(notes),
+               "only_in_paper_by_type": dict(Counter(r[0] for r in (Counter(map(tuple, pap["ledger_events"])) - Counter(map(tuple, replay["ledger_events"]))).elements())),
+               "only_in_replay_rows": sorted((Counter(map(tuple, replay["ledger_events"])) - Counter(map(tuple, pap["ledger_events"]))).elements(), key=lambda r: str(r[1]))[:60],
+               "only_in_paper_rows": sorted((Counter(map(tuple, pap["ledger_events"])) - Counter(map(tuple, replay["ledger_events"]))).elements(), key=lambda r: str(r[1]))[:60]}
+summary = {"label": "EXPLORATORY: D7d offline step, recorded Mac shakedown stream; not a strategy result", "session": session_dir.name, "minutes": minutes, "profile": profile, "replay_gate_first": GATE_FIRST, "events": len(events), "keepalive_notes": len(notes),
            "identical": same, "ledger_difference": ledger_diff, "ledger_events_replay_paper": [replay["ledger_event_count"], pap["ledger_event_count"]], "first_differing_ledger_rows": differ,
            "edge_diagnostics": edge_diagnostics, "replay": {k: v for k, v in replay.items() if k != "ledger_events"}, "paper": {k: v for k, v in pap.items() if k != "ledger_events"}}
 out_path.write_text(json.dumps(summary, indent=1, default=str))
