@@ -782,11 +782,11 @@ class SessionRuntimeSwitch(unittest.TestCase):
     KW = WorkingProfilesUseOnlyTheCore.KW
     REFERENCE = WorkingProfilesUseOnlyTheCore.REFERENCE
 
-    def test_off_by_default_and_on_only_in_v1_5(self):
+    def test_off_by_default_and_on_only_in_v1_5_and_later(self):
         from new_backtest.profiles import PROFILES_DIR, apply_profile, load_profile
         for n in sorted(p.stem for p in PROFILES_DIR.glob("*.yaml")):
             cfg = apply_profile(load_profile(n), **self.KW)
-            self.assertEqual(cfg.runtime, "session" if n == "perp_perp_maker_taker_v1_5" else "backtester", n)
+            self.assertEqual(cfg.runtime, "session" if n in ("perp_perp_maker_taker_v1_5", "perp_perp_maker_taker_v1_6") else "backtester", n)      # v1_6 (S1) is v1_5 plus the table
             self.assertEqual(cfg.release_identity["runtime"], cfg.runtime)
 
     def test_v1_5_is_v1_4_plus_the_runtime_and_nothing_else(self):

@@ -98,6 +98,117 @@ def day_stats(data_root, pair: str, day: str, maker_venue: str = "bybit", hedge_
             "truncation": truncation_report()}
 
 
+def day_labels(data_root, pair: str, day: str, maker_venue: str = "bybit", hedge_venue: str = "binance", horizons: tuple = (1.0, 5.0, 30.0), max_book_age_s: float = 2.0,
+               tick: float = 0.001, vol_window_s: float = 30.0, flow_window_s: float = 1.0) -> dict:
+    """S1 (owner 9 Nov): one LABEL ROW per public print event on the maker venue that would hit our passive quote, from MARKET DATA only (no strategy fill, simulated or not).
+    Event, side, hedge-venue mid and the adverse sign are exactly `day_stats`'s. Each row carries the features known at the print and the hedge-mid move after each horizon (negative = adverse):
+      depth_ticks   how far the DEEPEST price of the sweep is behind the maker touch just before it (0 = the touch itself): a quote that deep or shallower is filled by this print
+      spread_bps    maker-venue touch spread in bps of its mid, at the print
+      vol_bps       standard deviation of the hedge mid's 1 s changes over the last `vol_window_s`, in bps (None until 5 changes are known)
+      flow          signed maker-venue volume of the last `flow_window_s` BEFORE the print, positive when it ran in this print's direction (the aggressor's), in base units
+      move_<h>s     hedge-mid move after h seconds (None when the hedge book was stale or missing at t or t + h, or the day ended first)
+    Only TRAIN days may be fitted from these rows (the caller's rule)."""
+    reset_truncation()
+    hedge_book = OrderBook(hedge_venue, pair, tape_repair=False)
+    maker_book = OrderBook(maker_venue, pair, tape_repair=False)
+    hedge_ev = iter_venue_events(data_root, hedge_venue, pair, day, day, include_snapshots=True, include_deltas=True, include_trades=False)
+    maker_ev = iter_venue_events(data_root, maker_venue, pair, day, day, include_snapshots=True, include_deltas=True, include_trades=True, trade_dedupe="multiset")
+    merged = heapq.merge(((e.exchange_ts, 0, i, e) for i, e in enumerate(hedge_ev)), ((e.exchange_ts, 1, i, e) for i, e in enumerate(maker_ev)), key=lambda x: x[:3])
+    rows: list[dict] = []
+    pending = {h: deque() for h in horizons}          # per horizon: (row index, t, side, mid0)
+    cnt = {"prints": 0, "events": 0, "no_book": 0, "stale": 0, "unresolved_at_end": 0}
+    mids: deque = deque()                              # (second, hedge mid): one per second, for the volatility
+    flows: deque = deque()                             # (ts, signed volume) of recent maker prints
+    last_sec = None
+    group: dict | None = None                          # the sweep being assembled: same exchange time and aggressor side
+
+    def resolve_until(limit_ts: float) -> None:
+        for h, q in pending.items():
+            while q and q[0][1] + h < limit_ts:
+                idx, t, side, mid0 = q.popleft()
+                if not hedge_book.ready or hedge_book.mid <= 0 or (t + h) - hedge_book.last_update_ts > max_book_age_s:
+                    continue
+                bps = (hedge_book.mid - mid0) / mid0 * 1e4
+                rows[idx][f"move_{h:g}s"] = -bps if side == "ask" else bps
+
+    def close_group() -> None:
+        nonlocal group
+        if group is None:
+            return
+        g, group = group, None
+        cnt["events"] += 1
+        if not (hedge_book.ready and hedge_book.mid > 0 and maker_book.ready and maker_book.mid > 0):
+            cnt["no_book"] += 1
+            return
+        if g["ts"] - hedge_book.last_update_ts > max_book_age_s or g["ts"] - maker_book.last_update_ts > max_book_age_s:
+            cnt["stale"] += 1
+            return
+        side = "bid" if g["sign"] < 0 else "ask"
+        touch = maker_book.best_bid if side == "bid" else maker_book.best_ask
+        deepest = g["min_px"] if side == "bid" else g["max_px"]
+        depth = max(0, int(round(((touch - deepest) if side == "bid" else (deepest - touch)) / tick)))
+        ch = [b - a for (_, a), (_, b) in zip(mids, list(mids)[1:])]
+        vol = None
+        if len(ch) >= 5:
+            m = sum(ch) / len(ch)
+            vol = math.sqrt(sum((x - m) ** 2 for x in ch) / (len(ch) - 1)) / hedge_book.mid * 1e4
+        flow = sum(v for t, v in flows if g["ts"] - flow_window_s <= t < g["ts"]) * (1 if g["sign"] > 0 else -1)
+        row = {"ts": g["ts"], "side": side, "depth_ticks": depth, "spread_bps": (maker_book.best_ask - maker_book.best_bid) / maker_book.mid * 1e4, "vol_bps": vol, "flow": flow,
+               **{f"move_{h:g}s": None for h in horizons}}
+        rows.append(row)
+        for h in horizons:
+            pending[h].append((len(rows) - 1, g["ts"], side, hedge_book.mid))
+
+    for ts, kind, _, ev in merged:
+        if kind == 0:
+            close_group()
+            resolve_until(ts)
+            if ev.kind == BOOK:
+                bids, asks = snapshot_levels(ev.payload)
+                if bids and asks:
+                    hedge_book.apply_snapshot(bids, asks, ts)
+            elif ev.kind == DELTA:
+                side, price, volume, event_type = delta_fields(ev.payload)
+                if price > 0:
+                    hedge_book.apply_delta(side, price, volume, event_type, ts)
+            sec = int(ts)
+            if hedge_book.ready and hedge_book.mid > 0 and sec != last_sec:
+                last_sec = sec
+                mids.append((sec, hedge_book.mid))
+                while mids and mids[0][0] < sec - vol_window_s:
+                    mids.popleft()
+            continue
+        if ev.kind == BOOK:
+            close_group()
+            bids, asks = snapshot_levels(ev.payload)
+            if bids and asks:
+                maker_book.apply_snapshot(bids, asks, ts)
+            continue
+        if ev.kind == DELTA:
+            close_group()
+            side, price, volume, event_type = delta_fields(ev.payload)
+            if price > 0:
+                maker_book.apply_delta(side, price, volume, event_type, ts)
+            continue
+        if ev.kind != TRADE:
+            continue
+        price, vol, sign = trade_fields(ev.payload)
+        if price <= 0 or vol <= 0:
+            continue
+        cnt["prints"] += 1
+        if group is not None and (group["ts"], group["sign"]) != (ts, sign):
+            close_group()
+        if group is None:
+            group = {"ts": ts, "sign": sign, "min_px": price, "max_px": price}
+        group["min_px"], group["max_px"] = min(group["min_px"], price), max(group["max_px"], price)
+        flows.append((ts, vol * (1 if sign > 0 else -1)))
+        while flows and flows[0][0] < ts - 5 * flow_window_s:
+            flows.popleft()
+    close_group()
+    cnt["unresolved_at_end"] = sum(len(q) for q in pending.values())
+    return {"day": day, "counts": cnt, "rows": rows, "truncation": truncation_report(), "horizons": list(horizons), "tick": tick, "max_book_age_s": max_book_age_s}
+
+
 def combine(per_day: list[dict], horizon_s: float, maker_venue: str, hedge_venue: str, pair: str, data_root: str) -> dict:
     out = {"label": "expected hedge move from MARKET DATA only (v1.1 step 9a); EXPLORATORY", "method": "per public print on the maker venue that hits our side (one event per exchange time and aggressor side): hedge-venue mid at t and t+horizon, bps; bid = change, ask = -change",
            "pair": pair, "maker_venue": maker_venue, "hedge_venue": hedge_venue, "horizon_s": horizon_s, "data_root": str(data_root),
@@ -135,7 +246,12 @@ def _main() -> None:
     ap.add_argument("--maker-venue", default="bybit"); ap.add_argument("--hedge-venue", default="binance")
     ap.add_argument("--horizon-s", type=float, default=1.0); ap.add_argument("--max-book-age-s", type=float, default=2.0)
     ap.add_argument("--jobs", type=int, default=1); ap.add_argument("--day-file", default=None, help="internal: compute one day and write its raw stats here")
+    ap.add_argument("--labels-out", default=None, help="S1: write the per-print LABEL ROWS of the first day in --days to this JSON file and stop")
+    ap.add_argument("--label-horizons", default="1,5,30", help="S1: the horizons in seconds of the label rows (e.g. 0.05,0.15,1,5,30)")
     a = ap.parse_args()
+    if a.labels_out:
+        Path(a.labels_out).write_text(json.dumps(day_labels(a.data_root, a.pair, a.days.split(",")[0], a.maker_venue, a.hedge_venue, horizons=tuple(float(x) for x in a.label_horizons.split(",")), max_book_age_s=a.max_book_age_s)))
+        return
     days = [d for d in a.days.split(",") if d]
     if a.day_file:
         Path(a.day_file).write_text(json.dumps(day_stats(a.data_root, a.pair, days[0], a.maker_venue, a.hedge_venue, a.horizon_s, a.max_book_age_s)))

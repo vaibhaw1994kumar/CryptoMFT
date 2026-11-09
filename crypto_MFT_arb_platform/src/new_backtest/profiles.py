@@ -123,6 +123,7 @@ SWITCHES: tuple[Switch, ...] = (
     Switch("arb.p_fail", "CALIBRATED", note="SCENARIO, not calibrated (PLACEHOLDER 0.07; no execution logs exist)"),
     Switch("arb.loss_fail_bps", "CALIBRATED", note="SCENARIO, not calibrated (7.8 from a simulated hedge-failure study, not execution logs)"),
     Switch("arb.expected_hedge_move_bps_bid", "CALIBRATED", note="training-day executed hedge move"),
+    Switch("adverse_table", "CALIBRATED", note="absent in every profile up to v1_5 (the single pinned hedge move is used); v1_6 (S1) pins a table fitted on market-data labels of TRAIN days only: expected hedge move by depth reached, volatility and flow, in place of that number in the quote price, the entry rule and the repricing rule"),
     Switch("latency_preset", "CALIBRATED", note="ASSUMED until ollog measurements replace it"),
     Switch("margin", "MANDATORY", (None,), "margin model configured in a perp profile"),
     Switch("postonly_reject_model", "MANDATORY", ("off", None), "perp profile: PostOnly would-cross orders are rejected at exchange arrival time (lifecycle task 5); perp profiles only"),
@@ -229,7 +230,7 @@ def apply_profile(doc: dict, dataset: str | None = None, **overrides):
         raise ProfileError(f"profile {doc.get('name')}: " + "; ".join(bad))
     body = {k: v for k, v in doc.items() if not k.startswith("_") and k not in ("name", "description", "classification", "decision_status",
                                                                                "product_fee_consistency", "timing", "breaker", "margin",
-                                                                               "fee_presets", "calibration", "execution", "hedge_move_calibration", "dataset_settings")}
+                                                                               "fee_presets", "calibration", "execution", "hedge_move_calibration", "adverse_table", "dataset_settings")}
     ds_applied = None
     ds_cfg = ((doc.get("dataset_settings") or {}).get(dataset) if dataset else None)
     if ds_cfg:
@@ -286,6 +287,11 @@ def apply_profile(doc: dict, dataset: str | None = None, **overrides):
     hm = doc.get("hedge_move_calibration")
     if hm:
         cfg.arb.expected_hedge_move_bps_bid, cfg.arb.expected_hedge_move_bps_ask, hm_info = load_hedge_move_calibration(doc, hm, cfg.start_date)
+    at = doc.get("adverse_table")
+    if at:
+        cfg.arb.adverse_table, at_info = load_adverse_table(doc, at, cfg.start_date)
+        cfg.arb.adverse_horizon_s = float(at.get("horizon_s", 1.0))
+        cfg.arb.adverse_requote_horizon_s = float(at["requote_horizon_s"]) if at.get("requote_horizon_s") is not None else None
     require_core_accounting(cfg, doc.get("name"))
     require_runtime(cfg, doc.get("name"))
     cfg.release_identity = release_identity(cfg, doc)
@@ -294,7 +300,33 @@ def apply_profile(doc: dict, dataset: str | None = None, **overrides):
     cfg.release_identity["latency_sensitivity"] = sensitivity
     if hm:
         cfg.release_identity["hedge_move_calibration"] = hm_info
+    if at:
+        cfg.release_identity["adverse_table"] = {**at_info, "horizon_s": cfg.arb.adverse_horizon_s, "requote_horizon_s": cfg.arb.adverse_requote_horizon_s}
     return cfg
+
+
+def load_adverse_table(doc: dict, at: dict, run_start: str):
+    """S1: the AdverseTable a profile pins: a data file whose sha256 the profile records, fitted on TRAIN days that all end before the run starts, from market-data labels only.
+    Refuses a missing file, bytes that no longer match the recorded hash, a file with no days or with a day on or after the run's start date, one not marked as fitted on market-data labels, and a horizon it does not hold."""
+    from crypto_stat_arb.strategies.edge import AdverseTable
+    p = Path(at["file"])
+    path = p if p.is_absolute() else PLATFORM_DIR / p
+    if not path.exists():
+        raise ProfileError(f"profile {doc.get('name')}: adverse_table file {path} does not exist")
+    got = hashlib.sha256(path.read_bytes()).hexdigest()
+    if got != at.get("sha256"):
+        raise ProfileError(f"profile {doc.get('name')}: adverse_table {path.name} has sha256 {got}, the profile pins {at.get('sha256')} (file edited after it was pinned)")
+    table = AdverseTable.load(path)
+    days = (table.fitted_on or {}).get("days") or []
+    if not days or any(str(x) >= str(run_start) for x in days):
+        raise ProfileError(f"profile {doc.get('name')}: adverse_table {path.name} must be fitted on TRAIN days strictly before the run start {run_start}; it lists {days}")
+    if (table.fitted_on or {}).get("source") != "MARKET_DATA_LABELS":
+        raise ProfileError(f"profile {doc.get('name')}: adverse_table {path.name} is not marked as fitted on market-data labels (fitted_on.source); a table fitted on strategy fills is refused")
+    for key in ("horizon_s", "requote_horizon_s"):
+        h = at.get(key, 1.0 if key == "horizon_s" else None)
+        if h is not None and f"{float(h):g}" not in {f"{x:g}" for x in table.horizons_s}:
+            raise ProfileError(f"profile {doc.get('name')}: adverse_table {key} {h} is not in the table's horizons {table.horizons_s}")
+    return table, {"file": str(path), "sha256": got, "days": days, "dims": list(table.dims), "shrink_k": table.shrink_k, "events": table.fitted_on.get("events"), "version": table.version}
 
 
 def load_hedge_move_calibration(doc: dict, hm: dict, run_start: str) -> tuple[float, float, dict]:

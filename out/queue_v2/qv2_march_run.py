@@ -128,6 +128,8 @@ for _k, _v in _json.loads(os.environ.get("QV2_CFG", "{}")).items():
     setattr(cfg, _k, _v)
 if os.environ.get("QV2_REPRICE"):                                   # S0 smoke / sensitivity run ONLY: the reprice numbers come from the caller and are labelled in the result (source ILLUSTRATIVE_NOT_FITTED unless the caller says otherwise)
     cfg.execution.primary["reprice"] = _json.loads(os.environ["QV2_REPRICE"])
+if os.environ.get("QV2_HEDGE"):                                     # S2 hedge cap sweep ONLY (owner 9 Nov): execution.hedge settings (slack_bps_floor) from the caller; the cell name carries it and the summary's qv2 block records it
+    cfg.execution.hedge.update(_json.loads(os.environ["QV2_HEDGE"]))
 if os.environ.get("QV2_VENUE_TICKS") and not _pinned:
     cfg.arb.venue_ticks = {k: float(v) for k, v in json.loads(os.environ["QV2_VENUE_TICKS"]).items()}      # declared per dataset (v1.1 step 9b); the engine checks the first snapshot against it
 for _k, _v in json.loads(os.environ.get("QV2_ARB", "{}")).items():
@@ -196,7 +198,7 @@ summary = {
     "switch_table": switch_table(doc), "maker_config": {k: v for k, v in dataclasses.asdict(cfg.maker).items() if not (k == "depletion_ledger" and not v)},   # a switch that is off is not listed: every earlier result keeps its bytes
     "warnings": sorted({str(w.message)[:300] for w in caught}),
     "data_integrity": getattr(r, "data_integrity", None), "queue_parameter_status": getattr(r, "queue_parameter_status", None),
-    "qv2": {"maker": _json.loads(os.environ.get("QV2_MAKER", "{}")), "cfg": _json.loads(os.environ.get("QV2_CFG", "{}")),
+    "qv2": {"maker": _json.loads(os.environ.get("QV2_MAKER", "{}")), "cfg": _json.loads(os.environ.get("QV2_CFG", "{}")), "hedge": _json.loads(os.environ.get("QV2_HEDGE", "{}")),
             "markout_summary": r.markout_summary, "markout_by_venue_role": getattr(r, "markout_by_venue_role", None), "maker_observations": r.maker_observations,
             "data_manifest": r.data_manifest, "maker_stats": r.maker_stats, "maker_diagnostics": r.maker_diagnostics,
             "queue_updates": dict(getattr(_bt.maker, "queue_updates", {})),
