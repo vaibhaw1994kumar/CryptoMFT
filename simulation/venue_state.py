@@ -113,6 +113,11 @@ class VenueState:
     def signed_volume(self) -> float:
         return sum(v * s for _, v, s in self._trades)
 
+    def signed_volume_within(self, now: float, window_s: float) -> float:
+        """Signed volume (+ = buy aggressor) of the prints in [now - window_s, now]; the held window is `flow_window_s`, so a longer ask sees only what is held."""
+        cut = now - window_s
+        return sum(v * s for t, v, s in self._trades if cut <= t <= now)
+
     @property
     def total_volume(self) -> float:
         return sum(v for _, v, _ in self._trades)

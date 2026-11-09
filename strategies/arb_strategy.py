@@ -160,6 +160,11 @@ class ArbConfig:
     # own legging_report (hedge_move_bps by side); default 0 = no information yet.
     expected_hedge_move_bps_bid: float = 0.0     # passive bid -> sell hedge
     expected_hedge_move_bps_ask: float = 0.0     # passive ask -> buy hedge
+    # S1 (owner 9 Nov): an `edge.AdverseTable` (fitted on market-data labels only) replaces the two numbers above. None = off: the numbers above are used, as in every profile before v1_6. When set it needs a declared
+    # tick for the maker venue (the table's depth buckets are in ticks). The object comes from the profile's pinned file (new_backtest.profiles); it is not a profile key and is not part of any dump.
+    adverse_table: Any = None
+    adverse_horizon_s: float = 1.0               # the table's horizon read as the hedge move in the quote price and the entry rule: the one closest to the hedge arrival delay (v1_6: 0.05 s)
+    adverse_requote_horizon_s: float | None = None   # the horizon the repricing rule (S0 `requote_target`) reads; None = the same as adverse_horizon_s (v1_6: 1 s, the markout horizon)
     expected_hedge_slippage_bps: float = 0.0     # hedge VWAP beyond the touch for the clip size
     funding_holding_bps: float = 0.0             # expected funding / holding cost of the hedged pair until it is closed
     # PLACEHOLDER — NOT MEASURED. p_fail = 0.07 is the hedge-failure study's break-even figure, an assumed value. A replay with no
@@ -329,6 +334,16 @@ class CrossVenueArbStrategy:
         if not (0.0 <= self.config.p_fail <= 1.0) or self.config.loss_fail_bps < 0.0:
             raise ValueError("ArbConfig.p_fail must be in [0, 1] and loss_fail_bps >= 0")
         self.venue_names = tuple(sorted(venues))
+        if self.config.adverse_table is not None:
+            missing = [v for v in self.venue_names_cfg(venues) if not (self.config.venue_ticks.get(v, 0.0) > 0.0)]
+            if missing:
+                raise ValueError(f"ArbConfig.adverse_table needs a declared venue_ticks[venue] > 0 (its depth buckets are in ticks); missing {missing}")
+            for name, h in (("adverse_horizon_s", self.config.adverse_horizon_s), ("adverse_requote_horizon_s", self.config.adverse_requote_horizon_s)):
+                if h is not None and f"{h:g}" not in {f"{x:g}" for x in self.config.adverse_table.horizons_s}:
+                    raise ValueError(f"ArbConfig.{name} {h} is not a horizon of the table {self.config.adverse_table.horizons_s}")
+        self._adverse_features = edge_mod.AdverseFeatures() if self.config.adverse_table is not None else None
+        self._adverse_states: dict | None = None
+        self._adverse_now = 0.0
         self._ids = itertools.count(1)
         self._last_signal_ts = 0.0
         self.fill_model_v1 = fill_model_v1
@@ -351,24 +366,54 @@ class CrossVenueArbStrategy:
     def venue_names_cfg(venues) -> list[str]:
         return sorted(venues)
 
-    def _quote_limit(self, side: str, hedge_px: float, fee_bps: float) -> float:
+    def _observe_adverse_features(self, books: dict, states: dict, now: float) -> None:
+        """S1: keep the quote-time features current (one hedge-mid sample per whole second per venue; the maker venue's print state for the flow). Called first in `evaluate`; a no-op without a table."""
+        if self._adverse_features is None:
+            return
+        self._adverse_states, self._adverse_now = states, now
+        for v, b in books.items():
+            if b.ready:
+                self._adverse_features.on_mid(v, now, b.mid)
+
+    def _hedge_move_bps(self, side: str, maker_venue: str, taker_venue: str, books: dict, quote_px: float | None = None, horizon_s: float | None = None) -> float:
+        """The expected hedge-venue move, in bps, for a passive `side` quote on `maker_venue` (the one place it is chosen: the quote price, the entry rule and the repricing rule all read it).
+        No table: the profile's number for that side, unchanged. With a table: the move for a quote `quote_px` behind the maker touch (None = at the touch, all sweeps), at the volatility, flow and spread now.
+        The quote price itself is built from the all-depth value (quote_px None), then the entry rule reads the value for the depth that price lands on: one pass, no iteration."""
+        cfg = self.config
+        table = cfg.adverse_table
+        if table is None:
+            return cfg.expected_hedge_move_bps_bid if side == "bid" else cfg.expected_hedge_move_bps_ask
+        maker_book, taker_book = books[maker_venue], books[taker_venue]
+        depth = 0
+        if quote_px is not None:
+            tick = cfg.venue_ticks[maker_venue]
+            behind = (maker_book.best_bid - quote_px) if side == "bid" else (quote_px - maker_book.best_ask)
+            depth = max(0, int(round(behind / tick)))
+        st = (self._adverse_states or {}).get(maker_venue)
+        flow = edge_mod.AdverseFeatures.side_flow(st.signed_volume_within(self._adverse_now, 1.0), side) if st is not None else 0.0
+        return table.expected_move_reaching_bps(side, quote_depth_ticks=depth, vol_bps=self._adverse_features.vol_bps(taker_venue, taker_book.mid), flow=flow,
+                                                spread_bps=maker_book.spread_bps if maker_book.ready else None, horizon_s=cfg.adverse_horizon_s if horizon_s is None else horizon_s)
+
+    def _quote_limit(self, side: str, hedge_px: float, fee_bps: float, move_bps: float | None = None) -> float:
         """The most a passive bid may rest at / the least a passive ask may rest at, from the hedge-venue price `hedge_px` (the one place this is computed:
         first placement and repricing both call it).
         legacy_v0: the naive edge. Other profiles: the quote is built from the EXPECTED hedge price (touch moved by the conditional hedge-move estimate) less
         fees, edge, buffer, expected slippage, funding/holding and p_fail x loss_fail. The required edge is measured against the price we PAY (the hedge)."""
         cfg = self.config
         required_bps = fee_bps + cfg.min_net_edge_bps + cfg.safety_buffer_bps
+        if move_bps is None:
+            move_bps = cfg.expected_hedge_move_bps_bid if side == "bid" else cfg.expected_hedge_move_bps_ask
         if side == "bid":
             px = hedge_px * (1.0 - required_bps / 10_000.0)
             if cfg.profile != "legacy_v0":
                 extra_bps = cfg.expected_hedge_slippage_bps + cfg.funding_holding_bps + cfg.p_fail * cfg.loss_fail_bps
-                expected_hedge = hedge_px * (1.0 + cfg.expected_hedge_move_bps_bid / 10_000.0)
+                expected_hedge = hedge_px * (1.0 + move_bps / 10_000.0)
                 px = expected_hedge * (1.0 - (required_bps + extra_bps) / 10_000.0)
             return px
         px = hedge_px / (1.0 - required_bps / 10_000.0)
         if cfg.profile != "legacy_v0":
             extra_bps = cfg.expected_hedge_slippage_bps + cfg.funding_holding_bps + cfg.p_fail * cfg.loss_fail_bps
-            expected_hedge = hedge_px * (1.0 - cfg.expected_hedge_move_bps_ask / 10_000.0)
+            expected_hedge = hedge_px * (1.0 - move_bps / 10_000.0)
             px = expected_hedge / (1.0 - (required_bps + extra_bps) / 10_000.0)
         return px
 
@@ -389,7 +434,8 @@ class CrossVenueArbStrategy:
         if taker_book.touch_age_s("bid" if bid else "ask", now) > cfg.max_touch_age_s:
             return None, "stale_hedge_touch"
         fee_bps = maker_fees.maker_bps + taker_fees.taker_bps
-        px = self._quote_limit("bid" if bid else "ask", hedge_px, fee_bps)
+        rq_h = cfg.adverse_requote_horizon_s                                 # the repricing rule reads its own horizon (None: the entry rule's)
+        px = self._quote_limit("bid" if bid else "ask", hedge_px, fee_bps, self._hedge_move_bps("bid" if bid else "ask", maker_venue, taker_venue, books, None, rq_h))
         if cfg.round_quotes_to_tick:
             px = self._quote_to_tick(maker_venue, px, "bid" if bid else "ask")
             tick = cfg.venue_ticks[maker_venue]
@@ -402,7 +448,7 @@ class CrossVenueArbStrategy:
             return None, "no_edge"
         er = edge_mod.maker_taker_expected_edge_bps(
             px, "bid" if bid else "ask", taker_book, qty, maker_fees.maker_bps, taker_fees.taker_bps,
-            expected_hedge_move_bps=cfg.expected_hedge_move_bps_bid if bid else cfg.expected_hedge_move_bps_ask,
+            expected_hedge_move_bps=self._hedge_move_bps("bid" if bid else "ask", maker_venue, taker_venue, books, px, rq_h),
             expected_hedge_slippage_bps=cfg.expected_hedge_slippage_bps, funding_holding_bps=cfg.funding_holding_bps, p_fail=cfg.p_fail, loss_fail_bps=cfg.loss_fail_bps)
         if er.net_bps - cfg.safety_buffer_bps < cfg.min_net_edge_bps:
             return None, "no_edge"
@@ -511,6 +557,7 @@ class CrossVenueArbStrategy:
     ) -> ArbSignal | None:
         cfg = self.config
         self.evaluations += 1
+        self._observe_adverse_features(books, states, now)
 
         if cfg.min_resignal_gap_s > 0 and now - self._last_signal_ts < cfg.min_resignal_gap_s:
             self.rejects["throttled"] += 1
@@ -682,7 +729,7 @@ class CrossVenueArbStrategy:
             return None
 
         fee_bps = maker_fees.maker_bps + taker_fees.taker_bps
-        max_bid = self._quote_limit("bid", hedge_px, fee_bps)
+        max_bid = self._quote_limit("bid", hedge_px, fee_bps, self._hedge_move_bps("bid", maker_venue, taker_venue, books))
 
         # Must be a real improvement on the maker venue's book, and never cross it.
         touch_bid, touch_ask = maker_book.best_bid, maker_book.best_ask
@@ -711,7 +758,7 @@ class CrossVenueArbStrategy:
             # perp_perp_maker_taker_v1: the gate uses the conditional expected edge; the naive one is logged beside it.
             er = edge_mod.maker_taker_expected_edge_bps(
                 max_bid, "bid", taker_book, self._max_clip(max_bid), maker_fees.maker_bps, taker_fees.taker_bps,
-                expected_hedge_move_bps=cfg.expected_hedge_move_bps_bid, expected_hedge_slippage_bps=cfg.expected_hedge_slippage_bps,
+                expected_hedge_move_bps=self._hedge_move_bps("bid", maker_venue, taker_venue, books, max_bid), expected_hedge_slippage_bps=cfg.expected_hedge_slippage_bps,
                 funding_holding_bps=cfg.funding_holding_bps, p_fail=cfg.p_fail, loss_fail_bps=cfg.loss_fail_bps)
             naive_bps, cond_bps, edge_ref = er.naive_bps, er.net_bps - cfg.safety_buffer_bps, er.ref_name
             net_bps = cond_bps
@@ -820,7 +867,7 @@ class CrossVenueArbStrategy:
             return None
 
         fee_bps = maker_fees.maker_bps + taker_fees.taker_bps
-        min_ask = self._quote_limit("ask", hedge_px, fee_bps)
+        min_ask = self._quote_limit("ask", hedge_px, fee_bps, self._hedge_move_bps("ask", maker_venue, taker_venue, books))
 
         touch_bid, touch_ask = maker_book.best_bid, maker_book.best_ask
         joins_touch = False
@@ -847,7 +894,7 @@ class CrossVenueArbStrategy:
         if cfg.profile != "legacy_v0":
             er = edge_mod.maker_taker_expected_edge_bps(
                 min_ask, "ask", taker_book, self._max_clip(min_ask), maker_fees.maker_bps, taker_fees.taker_bps,
-                expected_hedge_move_bps=cfg.expected_hedge_move_bps_ask, expected_hedge_slippage_bps=cfg.expected_hedge_slippage_bps,
+                expected_hedge_move_bps=self._hedge_move_bps("ask", maker_venue, taker_venue, books, min_ask), expected_hedge_slippage_bps=cfg.expected_hedge_slippage_bps,
                 funding_holding_bps=cfg.funding_holding_bps, p_fail=cfg.p_fail, loss_fail_bps=cfg.loss_fail_bps)
             naive_bps, cond_bps, edge_ref = er.naive_bps, er.net_bps - cfg.safety_buffer_bps, er.ref_name
             net_bps = cond_bps
