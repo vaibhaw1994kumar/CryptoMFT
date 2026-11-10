@@ -499,6 +499,10 @@ class MarkoutTracker:
             pm = _PendingMarkout(ts + h, h, venue, side, price, qty, role)
             heapq.heappush(self._pending, (pm.target_ts, next(self._counter), pm))
 
+    def due(self, now: float) -> bool:
+        """True when at least one pending markout has reached its horizon at `now`."""
+        return bool(self._pending) and self._pending[0][0] <= now
+
     def resolve(self, now: float, mids: dict[str, float], finalize: bool = False) -> None:
         while self._pending and (finalize or self._pending[0][0] <= now):
             _, _, pm = heapq.heappop(self._pending)

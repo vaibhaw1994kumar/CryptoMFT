@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import bisect
 import json
+import math
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -290,3 +291,132 @@ class AdverseFeatures:
         """`signed_volume`: maker-venue volume, + for buy-aggressor prints. A bid is hit by sell prints, so its flow is the negative of it; an ask's is the volume itself."""
         return -signed_volume if side == "bid" else signed_volume
 
+
+
+# ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+# S3 (owner 10 Nov): the do-not-quote filter. ONE feature code path (`QuoteFeatures`) for the market-data study and the strategy, and the model it feeds (`DoNotQuoteFilter`).
+# ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+QUOTE_FEATURE_NAMES = ("own_share_touch_maker", "own_share_top5_maker", "hedge_side_share_touch", "fill_dir_vol_1s", "opp_dir_vol_1s", "queue_ahead", "spread_bps", "vol_bps", "vol_known", "since_touch_change_s",
+                       "naive_edge_bps", "improves_touch")
+
+
+@dataclass(frozen=True)
+class QuoteState:
+    """What the filter reads, at ONE moment, from the maker venue (Bybit, full book) and the hedge venue (Binance, best bid/ask in March 2024): the raw quantities, no side applied yet.
+    `buy_vol_1s` / `sell_vol_1s`: the maker venue's printed volume by aggressor side in the last second; `since_touch_change_s`: seconds since the maker touch (best bid or best ask) last moved."""
+    maker_bid: float
+    maker_ask: float
+    maker_bid_size: float
+    maker_ask_size: float
+    maker_bid_top5: float
+    maker_ask_top5: float
+    hedge_bid: float
+    hedge_ask: float
+    hedge_bid_size: float
+    hedge_ask_size: float
+    vol_bps: float | None
+    since_touch_change_s: float
+    buy_vol_1s: float
+    sell_vol_1s: float
+
+
+class QuoteFeatures:
+    """The quote-time features of the do-not-quote filter, defined once. `observe` reads a `QuoteState` from the books (float `OrderBook`s of the simulation layer) and the recent prints; `vector` turns a state, a side, the quote
+    price and the fees into the model's inputs. A passive BID is hit by sell prints and hedged by a SELL on the hedge venue's bid; a passive ASK the other way round: every feature is stated for OUR side, so one model form serves both.
+    The hedge-mid volatility is `AdverseFeatures`' (one sample per second); the touch-change clock is kept here (`on_touch`)."""
+
+    def __init__(self, adverse_features: "AdverseFeatures | None" = None) -> None:
+        self.adverse = adverse_features if adverse_features is not None else AdverseFeatures()
+        self._touch: tuple | None = None
+        self._touch_ts: float | None = None
+
+    def on_touch(self, ts: float, bid: float, ask: float) -> None:
+        """Call on every maker-venue book update."""
+        if (bid, ask) != self._touch:
+            self._touch, self._touch_ts = (bid, ask), ts
+
+    def observe(self, now: float, maker_book, hedge_book, maker_state) -> QuoteState:
+        self.adverse.on_mid("hedge", now, hedge_book.mid)
+        buy = sell = 0.0
+        for t, v, s in maker_state._trades:                         # the venue state's held print window (>= 1 s)
+            if now - 1.0 <= t <= now:
+                if s > 0:
+                    buy += v
+                else:
+                    sell += v
+        return QuoteState(maker_book.best_bid, maker_book.best_ask, maker_book.best_bid_size, maker_book.best_ask_size,
+                          sum(s for _, s in maker_book.levels("bid", 5)), sum(s for _, s in maker_book.levels("ask", 5)),
+                          hedge_book.best_bid, hedge_book.best_ask, hedge_book.best_bid_size, hedge_book.best_ask_size,
+                          self.adverse.vol_bps("hedge", hedge_book.mid), (now - self._touch_ts) if self._touch_ts is not None else 0.0, buy, sell)
+
+    @staticmethod
+    def vector(side: str, st: QuoteState, quote_px: float, maker_fee_bps: float, taker_fee_bps: float) -> list[float]:
+        """Features for a quote on `side` at `quote_px`, in `QUOTE_FEATURE_NAMES` order. naive_edge_bps = the edge after fees at the hedge touch NOW, with no expected move in it (the S1 table is not counted twice)."""
+        bid = side == "bid"
+        own, opp = (st.maker_bid_size, st.maker_ask_size) if bid else (st.maker_ask_size, st.maker_bid_size)
+        own5, opp5 = (st.maker_bid_top5, st.maker_ask_top5) if bid else (st.maker_ask_top5, st.maker_bid_top5)
+        share = lambda a, b: 0.5 if a + b <= 0 else a / (a + b)
+        hedge_hit, hedge_other = (st.hedge_bid_size, st.hedge_ask_size) if bid else (st.hedge_ask_size, st.hedge_bid_size)
+        fill_dir, opp_dir = (st.sell_vol_1s, st.buy_vol_1s) if bid else (st.buy_vol_1s, st.sell_vol_1s)
+        touch = st.maker_bid if bid else st.maker_ask
+        improves = quote_px > touch if bid else quote_px < touch
+        mid = (st.maker_bid + st.maker_ask) / 2
+        hedge_px = st.hedge_bid if bid else st.hedge_ask
+        naive = ((hedge_px - quote_px) if bid else (quote_px - hedge_px)) / quote_px * 1e4 - maker_fee_bps - taker_fee_bps
+        log1p = lambda x: math.log1p(max(x, 0.0))
+        return [share(own, opp), share(own5, opp5), share(hedge_hit, hedge_other), log1p(fill_dir), log1p(opp_dir), 0.0 if improves else log1p(own),
+                (st.maker_ask - st.maker_bid) / mid * 1e4 if mid > 0 else 0.0, 0.0 if st.vol_bps is None else st.vol_bps, 0.0 if st.vol_bps is None else 1.0, log1p(st.since_touch_change_s), naive, 1.0 if improves else 0.0]
+
+
+@dataclass
+class DoNotQuoteFilter:
+    """Predicted hedge-venue mid move after a fill of OUR quote (bps, negative = adverse; the sign of `expected_hedge_move_bps`), from `QuoteFeatures`, one ridge model per side fitted on market-data labels at `horizon_s`.
+    The rule: SKIP the quote when naive_edge_bps + predicted_move_bps < threshold_bps, where naive_edge_bps is the edge after fees at the hedge touch with NO expected move in it (the S1 table's move is not counted twice).
+    Pure: no state, no I/O besides save/load. Fitted on TRAIN days only, threshold chosen on SELECT, HOLDOUT scored once (the caller's rule, recorded in `fitted_on`)."""
+    names: tuple
+    horizon_s: float
+    threshold_bps: float
+    sides: dict                      # side -> {"intercept": float, "weights": [..], "means": [..], "scales": [..]}
+    fitted_on: dict | None = None
+    version: str = "do_not_quote_v1"
+
+    def predict_move_bps(self, side: str, x) -> float:
+        m = self.sides[side]
+        return m["intercept"] + sum(w * (v - mu) / sd for w, v, mu, sd in zip(m["weights"], x, m["means"], m["scales"]))
+
+    def skip(self, side: str, x) -> bool:
+        """x: the `QuoteFeatures.vector` of the quote; naive_edge_bps is one of its entries (by name)."""
+        return x[self.names.index("naive_edge_bps")] + self.predict_move_bps(side, x) < self.threshold_bps
+
+    def to_dict(self) -> dict:
+        return {"version": self.version, "names": list(self.names), "horizon_s": self.horizon_s, "threshold_bps": self.threshold_bps, "sides": self.sides, "fitted_on": self.fitted_on}
+
+    @classmethod
+    def from_dict(cls, d: dict) -> "DoNotQuoteFilter":
+        return cls(tuple(d["names"]), float(d["horizon_s"]), float(d["threshold_bps"]), d["sides"], d.get("fitted_on"), d.get("version", "do_not_quote_v1"))
+
+    def save(self, path) -> None:
+        Path(path).write_text(json.dumps(self.to_dict(), indent=1, sort_keys=True))
+
+    @classmethod
+    def load(cls, path) -> "DoNotQuoteFilter":
+        return cls.from_dict(json.loads(Path(path).read_text()))
+
+    def with_threshold(self, threshold_bps: float) -> "DoNotQuoteFilter":
+        return DoNotQuoteFilter(self.names, self.horizon_s, float(threshold_bps), self.sides, self.fitted_on, self.version)
+
+
+def fit_do_not_quote_filter(rows_by_side: dict, *, horizon_s: float = 0.05, ridge: float = 10.0, threshold_bps: float = 0.0, names: tuple = QUOTE_FEATURE_NAMES, fitted_on: dict | None = None) -> DoNotQuoteFilter:
+    """`rows_by_side`: {"bid": (X, y), "ask": (X, y)} with X a list of `QuoteFeatures.vector` rows and y the realised hedge-mid move at `horizon_s` in bps (negative = adverse). Ridge regression on standardised
+    features, the intercept unpenalised; deterministic (closed form). numpy is imported here only: the model itself is plain Python."""
+    import numpy as np
+
+    sides = {}
+    for side, (X, y) in rows_by_side.items():
+        A, t = np.asarray(X, dtype=float), np.asarray(y, dtype=float)
+        mu, sd = A.mean(axis=0), A.std(axis=0)
+        sd = np.where(sd > 1e-12, sd, 1.0)
+        Z = (A - mu) / sd
+        w = np.linalg.solve(Z.T @ Z + ridge * np.eye(Z.shape[1]), Z.T @ (t - t.mean()))
+        sides[side] = {"intercept": float(t.mean()), "weights": [float(v) for v in w], "means": [float(v) for v in mu], "scales": [float(v) for v in sd], "n": int(len(t))}
+    return DoNotQuoteFilter(tuple(names), float(horizon_s), float(threshold_bps), sides, fitted_on)

@@ -163,6 +163,7 @@ class ArbConfig:
     # S1 (owner 9 Nov): an `edge.AdverseTable` (fitted on market-data labels only) replaces the two numbers above. None = off: the numbers above are used, as in every profile before v1_6. When set it needs a declared
     # tick for the maker venue (the table's depth buckets are in ticks). The object comes from the profile's pinned file (new_backtest.profiles); it is not a profile key and is not part of any dump.
     adverse_table: Any = None
+    do_not_quote: Any = None            # S3 (owner 10 Nov): a `DoNotQuoteFilter` (market-data-fitted, pinned by the profile); None = off, same arithmetic as before. Applied at placement, on features read now (the study scored 8 ms before the sweep)
     adverse_horizon_s: float = 1.0               # the table's horizon read as the hedge move in the quote price and the entry rule: the one closest to the hedge arrival delay (v1_6: 0.05 s)
     adverse_requote_horizon_s: float | None = None   # the horizon the repricing rule (S0 `requote_target`) reads; None = the same as adverse_horizon_s (v1_6: 1 s, the markout horizon)
     expected_hedge_slippage_bps: float = 0.0     # hedge VWAP beyond the touch for the clip size
@@ -342,6 +343,7 @@ class CrossVenueArbStrategy:
                 if h is not None and f"{h:g}" not in {f"{x:g}" for x in self.config.adverse_table.horizons_s}:
                     raise ValueError(f"ArbConfig.{name} {h} is not a horizon of the table {self.config.adverse_table.horizons_s}")
         self._adverse_features = edge_mod.AdverseFeatures() if self.config.adverse_table is not None else None
+        self._quote_features = edge_mod.QuoteFeatures() if self.config.do_not_quote is not None else None
         self._adverse_states: dict | None = None
         self._adverse_now = 0.0
         self._ids = itertools.count(1)
@@ -374,6 +376,27 @@ class CrossVenueArbStrategy:
         for v, b in books.items():
             if b.ready:
                 self._adverse_features.on_mid(v, now, b.mid)
+
+    def _observe_quote_features(self, books: dict, now: float) -> None:
+        """S3: keep the touch-change clock and the hedge-mid samples of the do-not-quote filter current. A no-op without a filter."""
+        if self._quote_features is None:
+            return
+        for v, b in books.items():
+            if b.ready:
+                if v in self.config.maker_venues or not self.config.maker_venues:
+                    self._quote_features.on_touch(now, b.best_bid, b.best_ask)
+
+    def _dnq_skip(self, side: str, quote_px: float, maker_venue: str, books: dict, states: dict, maker_bps: float, taker_bps: float, now: float) -> bool:
+        """S3: True when the do-not-quote filter says to skip this quote: naive edge after fees + the model's predicted hedge move < the filter's threshold. Counts a `dnq` reject (the key exists only once used)."""
+        flt = self.config.do_not_quote
+        if flt is None:
+            return False
+        taker_venue = next(v for v in books if v != maker_venue)
+        st = self._quote_features.observe(now, books[maker_venue], books[taker_venue], states[maker_venue])
+        if flt.skip(side, edge_mod.QuoteFeatures.vector(side, st, quote_px, maker_bps, taker_bps)):
+            self.rejects["dnq"] = self.rejects.get("dnq", 0) + 1
+            return True
+        return False
 
     def _hedge_move_bps(self, side: str, maker_venue: str, taker_venue: str, books: dict, quote_px: float | None = None, horizon_s: float | None = None) -> float:
         """The expected hedge-venue move, in bps, for a passive `side` quote on `maker_venue` (the one place it is chosen: the quote price, the entry rule and the repricing rule all read it).
@@ -557,7 +580,9 @@ class CrossVenueArbStrategy:
     ) -> ArbSignal | None:
         cfg = self.config
         self.evaluations += 1
+        self.last_eval_ts = now                       # the time of the evaluation in progress (read by a reject trace: `session_replay.TracedRejects`; no decision reads it)
         self._observe_adverse_features(books, states, now)
+        self._observe_quote_features(books, now)
 
         if cfg.min_resignal_gap_s > 0 and now - self._last_signal_ts < cfg.min_resignal_gap_s:
             self.rejects["throttled"] += 1
@@ -788,6 +813,8 @@ class CrossVenueArbStrategy:
         if qty * max_bid < cfg.min_clip_notional:
             self.rejects["clip_too_small"] += 1
             return None
+        if self._dnq_skip("bid", max_bid, maker_venue, books, states, maker_fees.maker_bps, taker_fees.taker_bps, now):
+            return None
 
         # Fill-probability gate (Phase 1) + adverse-selection gate (Stage 4) ──
         # queue_ahead=0: order not yet placed; biases toward over-estimating
@@ -923,6 +950,8 @@ class CrossVenueArbStrategy:
         qty = min(hedge_depth, inv_cap, self._max_clip(min_ask))
         if qty * min_ask < cfg.min_clip_notional:
             self.rejects["clip_too_small"] += 1
+            return None
+        if self._dnq_skip("ask", min_ask, maker_venue, books, states, maker_fees.maker_bps, taker_fees.taker_bps, now):
             return None
 
         if (cfg.min_fill_prob > 0.0

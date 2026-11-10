@@ -176,6 +176,7 @@ class TradingSession:
         resync_delay_ns: int | None = None,
         resync_source: Callable[[str, str, int], MarketEvent | None] | None = None,
         gate_on_every_event: bool = False,
+        markout_horizons_s: tuple[float, ...] | None = None,
     ) -> None:
         execution_mode = ExecutionMode(execution_mode)
         assert_execution_mode(
@@ -191,6 +192,11 @@ class TradingSession:
         # Owner 9 Nov (D7d): the live service evaluates the book gate on EVERY book event, before the session sees it. With this on, a replay does the same: `on_event` applies the book and evaluates the gate first, so the gate is not skipped when the event is
         # time-integrity-blocked and its feed-control, kill-switch and margin events are stamped as live stamps them. Off = every existing caller, byte for byte.
         self.gate_on_every_event = gate_on_every_event
+        # Forward price markouts per fill (owner 9 Nov, ported from the backtester's `markout_by_venue_role`): the core's own `MarkoutTracker`, fed by the ledger's trade fills and resolved on market-data time. Off (None) for every caller
+        # that does not pass horizons: the session replay passes the profile's `markout_horizons_s`. It reads the books and the ledger; it changes no decision.
+        self.markouts = None
+        self._markout_horizons_s = markout_horizons_s
+        self._markout_touch: dict[str, tuple] = {}
         self.resync_silence_ns = resync_silence_ns           # a venue silent this long (any message) is treated as a dropped feed: resubscribe after the same delay (Q-G2: the 5 s is a resubscribe trigger, not a blocking gate)
         self.resync_unavailable = 0
         self.resync_source = resync_source
@@ -317,6 +323,11 @@ class TradingSession:
         if self.margin_venues:
             self.ledger.trade_fill_listeners.append(self._margin_fill)
             self.liquidation.restore(self.ledger)
+        if self._markout_horizons_s:
+            from .simulation.latency_model import MarkoutTracker
+
+            self.markouts = MarkoutTracker(tuple(self._markout_horizons_s))
+            self.ledger.trade_fill_listeners.append(self._markout_fill)
         settings = cfg.strategies or {}
         if strategies is None:
             strategies = []
@@ -405,6 +416,12 @@ class TradingSession:
             self.books[(event.venue, event.instrument_id)].apply(event)
         self._schedule_resync(now)                      # also when the caller applied the book itself (apply_book=False)
         self.oms.on_book_update(event.venue, event.instrument_id, now)
+        if self.markouts is not None:                    # the backtester's trigger: resolve when THIS venue's touch changed (not on every update), so both read the same mid at the same moments
+            mb = self.books[(event.venue, event.instrument_id)]
+            touch = (mb.best_bid, mb.best_ask) if mb.bids and mb.asks else None
+            if touch is not None and touch != self._markout_touch.get(event.venue):
+                self._markout_touch[event.venue] = touch
+                self.resolve_markouts(now)
         book_key = (event.venue, event.instrument_id)
         if book_key not in self.opening_marks:
             book = self.books.get(book_key)
@@ -721,6 +738,21 @@ class TradingSession:
         from .execution import DeterministicVenueAdapter
 
         return self.router.adapters.setdefault(venue, DeterministicVenueAdapter(venue))
+
+    def _markout_fill(self, event) -> None:
+        """One trade fill into the markout tracker: venue, side and role (maker or taker, as the ledger booked it), price and quantity of THIS fill (not the cumulative), time in seconds."""
+        details = dict(event.details)
+        quote = self.cfg.instruments.get(event.venue, event.instrument_id).quote
+        qty = abs(next((p.quantity for p in event.postings if p.account == "main" and p.asset != quote), Decimal("0")))          # the position leg: the base asset on spot, the contract on a perpetual
+        self.markouts.record_fill(event.ts_ns / 1e9, event.venue.lower(), str(details.get("side", "")).lower(), float(event.valuation_price), float(qty), str(details.get("liquidity", "")).lower() or "maker")
+
+    def _markout_mids(self) -> dict[str, float]:
+        return {venue.lower(): float((book.best_bid + book.best_ask) / 2) for (venue, _), book in self.books.items() if book.bids and book.asks}
+
+    def resolve_markouts(self, now_ns: int, finalize: bool = False) -> None:
+        """Resolve the markouts whose horizon has passed against the books' mids now (all of them against the last mids when `finalize`)."""
+        if self.markouts is not None and (finalize or self.markouts.due(now_ns / 1e9)):
+            self.markouts.resolve(now_ns / 1e9, self._markout_mids(), finalize=finalize)
 
     def _margin_fill(self, event) -> None:
         if event.venue in self.margin_venues:
