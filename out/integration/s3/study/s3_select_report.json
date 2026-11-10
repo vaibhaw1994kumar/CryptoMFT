@@ -1,0 +1,461 @@
+{
+ "label": "EXPLORATORY: S3 do-not-quote filter, March 2024 market data; ASSUMED 8 ms lag, ASSUMED 45 ms hedge delay, 15 bps unwind band; HOLDOUT not read",
+ "rules": "(1) FIT on TRAIN only (DEVIATION recorded 10 Nov, 'cut it short': 2024-03-01..04 and 03-06, full days; 03-05 unfinished, 03-07 dropped): one ridge model per side (penalty 10, standardised features) of the 50 ms move on the features at the 8 ms lag, on the `touch`-rule events (the superset). The threshold is NOT fitted.\n  (2) RULE: skip the quote when naive_edge_bps + predicted_move_bps < tau. tau is chosen on SELECT (DEVIATION: 2024-03-08..03-11 as 2-hour slices, 00:00-02:00 UTC; 03-12 dropped) from {-1.0, -0.5, 0, 0.5, 1.0, 1.5, 2.0, 2.5, 3.0} as the one with the largest total net bps avoided under the `clear` rule,\n      where avoided = minus the sum of the realised net of the skipped events (positive = the skipped quotes lost money).\n  (3) ACCEPT the filter only if, at the chosen tau on SELECT, the gain is positive under BOTH queue rules AND the 90% day-block bootstrap interval (4 SELECT day blocks, 10,000 resamples, seed 1) of the gain per event under `clear` excludes zero.\n      With five day blocks the interval is COARSE and is reported as such. Otherwise v1_7 ships with the filter OFF and the finding is reported as it is.\n  (4) COMPARE against keep-all and against v1_6's own `block_on_toxic` gate reproduced on the same stream (the core VenueState, the profile's thresholds), on the same events and the same score; the filter has to beat the gate, not only keep-all.\n  (5) HOLDOUT 2024-03-13..03-15 is extracted and scored ONCE, only after the model and tau are frozen (file and sha256 written), with its own lock file; prediction metrics (MSE, trimmed MSE, median absolute error, per day) and the same net score. Used once before for S1 (prediction only).",
+ "counts": {
+  "TRAIN": {
+   "clear": 3605,
+   "touch": 7024
+  },
+  "SELECT": {
+   "clear": 217,
+   "touch": 385
+  }
+ },
+ "prediction_50ms": {
+  "TRAIN": {
+   "n": 7024,
+   "mse_side_mean": 2.0766690029686896,
+   "mse_model": 1.9471316842392432,
+   "gain": 0.062377450881323515
+  },
+  "SELECT": {
+   "n": 385,
+   "mse_side_mean": 6.6078568851949075,
+   "mse_model": 6.713030818480341,
+   "gain": -0.015916496848029427
+  }
+ },
+ "tau_grid_select": {
+  "-1": {
+   "clear": {
+    "events": 217,
+    "skipped": 4,
+    "share_skipped": 0.018433179723502304,
+    "net_per_event_keep_all": 2.1351322580645165,
+    "net_per_event_kept": 2.065342723004695,
+    "net_per_event_skipped": 5.851425,
+    "total_net_avoided_bps": -23.4057,
+    "gain_per_event_bps": -0.10786036866359447
+   },
+   "touch": {
+    "events": 385,
+    "skipped": 5,
+    "share_skipped": 0.012987012987012988,
+    "net_per_event_keep_all": 2.0171644155844155,
+    "net_per_event_kept": 1.9995952631578946,
+    "net_per_event_skipped": 3.35242,
+    "total_net_avoided_bps": -16.7621,
+    "gain_per_event_bps": -0.04353792207792208
+   }
+  },
+  "-0.5": {
+   "clear": {
+    "events": 217,
+    "skipped": 6,
+    "share_skipped": 0.027649769585253458,
+    "net_per_event_keep_all": 2.1351322580645165,
+    "net_per_event_kept": 2.0355729857819904,
+    "net_per_event_skipped": 5.636299999999999,
+    "total_net_avoided_bps": -33.8178,
+    "gain_per_event_bps": -0.15584239631336405
+   },
+   "touch": {
+    "events": 385,
+    "skipped": 7,
+    "share_skipped": 0.01818181818181818,
+    "net_per_event_keep_all": 2.0171644155844155,
+    "net_per_event_kept": 1.982629894179894,
+    "net_per_event_skipped": 3.882028571428571,
+    "total_net_avoided_bps": -27.1742,
+    "gain_per_event_bps": -0.07058233766233767
+   }
+  },
+  "0": {
+   "clear": {
+    "events": 217,
+    "skipped": 7,
+    "share_skipped": 0.03225806451612903,
+    "net_per_event_keep_all": 2.1351322580645165,
+    "net_per_event_kept": 2.049874761904762,
+    "net_per_event_skipped": 4.692857142857143,
+    "total_net_avoided_bps": -32.85,
+    "gain_per_event_bps": -0.15138248847926267
+   },
+   "touch": {
+    "events": 385,
+    "skipped": 9,
+    "share_skipped": 0.023376623376623377,
+    "net_per_event_keep_all": 2.0171644155844155,
+    "net_per_event_kept": 1.990571808510638,
+    "net_per_event_skipped": 3.1281444444444446,
+    "total_net_avoided_bps": -28.1533,
+    "gain_per_event_bps": -0.07312545454545455
+   }
+  },
+  "0.5": {
+   "clear": {
+    "events": 217,
+    "skipped": 10,
+    "share_skipped": 0.04608294930875576,
+    "net_per_event_keep_all": 2.1351322580645165,
+    "net_per_event_kept": 2.0546531400966184,
+    "net_per_event_skipped": 3.80105,
+    "total_net_avoided_bps": -38.0105,
+    "gain_per_event_bps": -0.1751635944700461
+   },
+   "touch": {
+    "events": 385,
+    "skipped": 14,
+    "share_skipped": 0.03636363636363636,
+    "net_per_event_keep_all": 2.0171644155844155,
+    "net_per_event_kept": 1.991275741239892,
+    "net_per_event_skipped": 2.7032142857142856,
+    "total_net_avoided_bps": -37.845,
+    "gain_per_event_bps": -0.0982987012987013
+   }
+  },
+  "1": {
+   "clear": {
+    "events": 217,
+    "skipped": 21,
+    "share_skipped": 0.0967741935483871,
+    "net_per_event_keep_all": 2.1351322580645165,
+    "net_per_event_kept": 2.091270408163265,
+    "net_per_event_skipped": 2.544509523809524,
+    "total_net_avoided_bps": -53.4347,
+    "gain_per_event_bps": -0.24624285714285715
+   },
+   "touch": {
+    "events": 385,
+    "skipped": 27,
+    "share_skipped": 0.07012987012987013,
+    "net_per_event_keep_all": 2.0171644155844155,
+    "net_per_event_kept": 2.0057879888268157,
+    "net_per_event_skipped": 2.168007407407407,
+    "total_net_avoided_bps": -58.536199999999994,
+    "gain_per_event_bps": -0.1520420779220779
+   }
+  },
+  "1.5": {
+   "clear": {
+    "events": 217,
+    "skipped": 41,
+    "share_skipped": 0.1889400921658986,
+    "net_per_event_keep_all": 2.1351322580645165,
+    "net_per_event_kept": 2.116748295454545,
+    "net_per_event_skipped": 2.2140487804878046,
+    "total_net_avoided_bps": -90.776,
+    "gain_per_event_bps": -0.41832258064516126
+   },
+   "touch": {
+    "events": 385,
+    "skipped": 56,
+    "share_skipped": 0.14545454545454545,
+    "net_per_event_keep_all": 2.0171644155844155,
+    "net_per_event_kept": 2.086359574468085,
+    "net_per_event_skipped": 1.6106428571428573,
+    "total_net_avoided_bps": -90.19600000000001,
+    "gain_per_event_bps": -0.23427532467532472
+   }
+  },
+  "2": {
+   "clear": {
+    "events": 217,
+    "skipped": 109,
+    "share_skipped": 0.5023041474654378,
+    "net_per_event_keep_all": 2.1351322580645165,
+    "net_per_event_kept": 2.0489712962962963,
+    "net_per_event_skipped": 2.220502752293578,
+    "total_net_avoided_bps": -242.0348,
+    "gain_per_event_bps": -1.1153677419354837
+   },
+   "touch": {
+    "events": 385,
+    "skipped": 189,
+    "share_skipped": 0.4909090909090909,
+    "net_per_event_keep_all": 2.0171644155844155,
+    "net_per_event_kept": 2.093577551020408,
+    "net_per_event_skipped": 1.9379211640211638,
+    "total_net_avoided_bps": -366.26709999999997,
+    "gain_per_event_bps": -0.9513431168831168
+   }
+  },
+  "2.5": {
+   "clear": {
+    "events": 217,
+    "skipped": 190,
+    "share_skipped": 0.8755760368663594,
+    "net_per_event_keep_all": 2.1351322580645165,
+    "net_per_event_kept": 2.305488888888889,
+    "net_per_event_skipped": 2.1109236842105266,
+    "total_net_avoided_bps": -401.07550000000003,
+    "gain_per_event_bps": -1.8482741935483873
+   },
+   "touch": {
+    "events": 385,
+    "skipped": 349,
+    "share_skipped": 0.9064935064935065,
+    "net_per_event_keep_all": 2.0171644155844155,
+    "net_per_event_kept": 2.2925805555555554,
+    "net_per_event_skipped": 1.988754727793696,
+    "total_net_avoided_bps": -694.0754,
+    "gain_per_event_bps": -1.8027932467532466
+   }
+  },
+  "3": {
+   "clear": {
+    "events": 217,
+    "skipped": 200,
+    "share_skipped": 0.9216589861751152,
+    "net_per_event_keep_all": 2.1351322580645165,
+    "net_per_event_kept": 2.721588235294117,
+    "net_per_event_skipped": 2.0852835,
+    "total_net_avoided_bps": -417.0567,
+    "gain_per_event_bps": -1.9219202764976957
+   },
+   "touch": {
+    "events": 385,
+    "skipped": 367,
+    "share_skipped": 0.9532467532467532,
+    "net_per_event_keep_all": 2.0171644155844155,
+    "net_per_event_kept": 2.7439666666666667,
+    "net_per_event_skipped": 1.9815174386920982,
+    "total_net_avoided_bps": -727.2169,
+    "gain_per_event_bps": -1.888875064935065
+   }
+  }
+ },
+ "chosen_tau": -1.0,
+ "select_at_chosen_tau": {
+  "clear": {
+   "summary": {
+    "events": 217,
+    "skipped": 4,
+    "share_skipped": 0.018433179723502304,
+    "net_per_event_keep_all": 2.1351322580645165,
+    "net_per_event_kept": 2.065342723004695,
+    "net_per_event_skipped": 5.851425,
+    "total_net_avoided_bps": -23.4057,
+    "gain_per_event_bps": -0.10786036866359447
+   },
+   "per_day": [
+    {
+     "day": "2024-03-08",
+     "events": 13,
+     "skipped": 0,
+     "net_all": 23.834699999999998,
+     "net_skipped": 0,
+     "net_kept": 23.834699999999998
+    },
+    {
+     "day": "2024-03-09",
+     "events": 4,
+     "skipped": 0,
+     "net_all": -0.7372999999999996,
+     "net_skipped": 0,
+     "net_kept": -0.7372999999999996
+    },
+    {
+     "day": "2024-03-10",
+     "events": 43,
+     "skipped": 0,
+     "net_all": 71.8545,
+     "net_skipped": 0,
+     "net_kept": 71.8545
+    },
+    {
+     "day": "2024-03-11",
+     "events": 157,
+     "skipped": 4,
+     "net_all": 368.3718,
+     "net_skipped": 23.4057,
+     "net_kept": 344.9661
+    }
+   ],
+   "bootstrap_gain_per_event_90pct": {
+    "p5": -0.145076652892562,
+    "p95": 0.0,
+    "blocks": 4,
+    "note": "COARSE: day blocks, few of them"
+   }
+  },
+  "touch": {
+   "summary": {
+    "events": 385,
+    "skipped": 5,
+    "share_skipped": 0.012987012987012988,
+    "net_per_event_keep_all": 2.0171644155844155,
+    "net_per_event_kept": 1.9995952631578946,
+    "net_per_event_skipped": 3.35242,
+    "total_net_avoided_bps": -16.7621,
+    "gain_per_event_bps": -0.04353792207792208
+   },
+   "per_day": [
+    {
+     "day": "2024-03-08",
+     "events": 39,
+     "skipped": 0,
+     "net_all": 78.503,
+     "net_skipped": 0,
+     "net_kept": 78.503
+    },
+    {
+     "day": "2024-03-09",
+     "events": 8,
+     "skipped": 0,
+     "net_all": 8.3445,
+     "net_skipped": 0,
+     "net_kept": 8.3445
+    },
+    {
+     "day": "2024-03-10",
+     "events": 142,
+     "skipped": 0,
+     "net_all": 272.3782,
+     "net_skipped": 0,
+     "net_kept": 272.3782
+    },
+    {
+     "day": "2024-03-11",
+     "events": 196,
+     "skipped": 5,
+     "net_all": 417.3826,
+     "net_skipped": 16.7621,
+     "net_kept": 400.6205
+    }
+   ],
+   "bootstrap_gain_per_event_90pct": {
+    "p5": -0.08020143540669857,
+    "p95": 0.0,
+    "blocks": 4,
+    "note": "COARSE: day blocks, few of them"
+   }
+  }
+ },
+ "toxic_gate_v1_6_on_the_same_events": {
+  "clear": {
+   "summary": {
+    "events": 217,
+    "skipped": 18,
+    "share_skipped": 0.08294930875576037,
+    "net_per_event_keep_all": 2.1351322580645165,
+    "net_per_event_kept": 2.1407628140703516,
+    "net_per_event_skipped": 2.0728833333333334,
+    "total_net_avoided_bps": -37.3119,
+    "gain_per_event_bps": -0.1719442396313364
+   },
+   "per_day": [
+    {
+     "day": "2024-03-08",
+     "events": 13,
+     "skipped": 1,
+     "net_all": 23.834699999999998,
+     "net_skipped": 1.3181,
+     "net_kept": 22.5166
+    },
+    {
+     "day": "2024-03-09",
+     "events": 4,
+     "skipped": 0,
+     "net_all": -0.7372999999999996,
+     "net_skipped": 0,
+     "net_kept": -0.7372999999999996
+    },
+    {
+     "day": "2024-03-10",
+     "events": 43,
+     "skipped": 4,
+     "net_all": 71.8545,
+     "net_skipped": 6.0146999999999995,
+     "net_kept": 65.8398
+    },
+    {
+     "day": "2024-03-11",
+     "events": 157,
+     "skipped": 13,
+     "net_all": 368.3718,
+     "net_skipped": 29.9791,
+     "net_kept": 338.3927
+    }
+   ]
+  },
+  "touch": {
+   "summary": {
+    "events": 385,
+    "skipped": 25,
+    "share_skipped": 0.06493506493506493,
+    "net_per_event_keep_all": 2.0171644155844155,
+    "net_per_event_kept": 2.0089730555555554,
+    "net_per_event_skipped": 2.13512,
+    "total_net_avoided_bps": -53.378,
+    "gain_per_event_bps": -0.13864415584415585
+   },
+   "per_day": [
+    {
+     "day": "2024-03-08",
+     "events": 39,
+     "skipped": 1,
+     "net_all": 78.503,
+     "net_skipped": 2.2887,
+     "net_kept": 76.2143
+    },
+    {
+     "day": "2024-03-09",
+     "events": 8,
+     "skipped": 0,
+     "net_all": 8.3445,
+     "net_skipped": 0,
+     "net_kept": 8.3445
+    },
+    {
+     "day": "2024-03-10",
+     "events": 142,
+     "skipped": 10,
+     "net_all": 272.3782,
+     "net_skipped": 19.1805,
+     "net_kept": 253.1977
+    },
+    {
+     "day": "2024-03-11",
+     "events": 196,
+     "skipped": 14,
+     "net_all": 417.3826,
+     "net_skipped": 31.9088,
+     "net_kept": 385.4738
+    }
+   ]
+  }
+ },
+ "keep_all": {
+  "clear": {
+   "events": 217,
+   "skipped": 0,
+   "share_skipped": 0.0,
+   "net_per_event_keep_all": 2.1351322580645165,
+   "net_per_event_kept": 2.1351322580645165,
+   "net_per_event_skipped": null,
+   "total_net_avoided_bps": -0.0,
+   "gain_per_event_bps": -0.0
+  },
+  "touch": {
+   "events": 385,
+   "skipped": 0,
+   "share_skipped": 0.0,
+   "net_per_event_keep_all": 2.0171644155844155,
+   "net_per_event_kept": 2.0171644155844155,
+   "net_per_event_skipped": null,
+   "total_net_avoided_bps": -0.0,
+   "gain_per_event_bps": -0.0
+  }
+ },
+ "accept": {
+  "gain_positive_under_both_queue_rules": false,
+  "bootstrap_excludes_zero": false,
+  "beats_toxic_gate": true,
+  "ACCEPTED": false
+ },
+ "model_file": {
+  "path": "out/integration/s3/study/dnq_v1.json",
+  "sha256": "73bf915b24acb73973b02fc976c8797a8be8ba567ba0c6836a43e26550c4fefc"
+ }
+}

@@ -19,6 +19,7 @@ EXPLORATORY: it is the unconditional drift after a print, not the drift after OU
 from __future__ import annotations
 
 import argparse
+import bisect
 import heapq
 import json
 import math
@@ -109,7 +110,7 @@ def day_labels(data_root, pair: str, day: str, maker_venue: str = "bybit", hedge
       move_<h>s     hedge-mid move after h seconds (None when the hedge book was stale or missing at t or t + h, or the day ended first)
     Only TRAIN days may be fitted from these rows (the caller's rule).
     S2 hedge event study (owner 9 Nov): `hook(row, hedge_book, maker_book, sweep)` is called for every event as it is created, with both books exactly as they stood BEFORE the sweep (the maker touch is the pre-sweep touch) and the sweep's total printed volume in sweep['volume'];
-    `tick_hook(ts)` is called before each stream item is applied (and with infinity at the end), so a caller can resolve its own timed actions against the books as they stood strictly before `ts`."""
+    `tick_hook(ts, kind, ev, hedge_book, maker_book)` is called before each stream item is applied (kind 0 = hedge venue, 1 = maker venue; with infinity at the end), so a caller can resolve its own timed actions against the books as they stood strictly before `ts` and can post-process the previous item."""
     reset_truncation()
     hedge_book = OrderBook(hedge_venue, pair, tape_repair=False)
     maker_book = OrderBook(maker_venue, pair, tape_repair=False)
@@ -165,7 +166,7 @@ def day_labels(data_root, pair: str, day: str, maker_venue: str = "bybit", hedge
 
     for ts, kind, _, ev in merged:
         if tick_hook is not None:
-            tick_hook(ts)
+            tick_hook(ts, kind, ev, hedge_book, maker_book)
         if kind == 0:
             close_group()
             resolve_until(ts)
@@ -213,7 +214,7 @@ def day_labels(data_root, pair: str, day: str, maker_venue: str = "bybit", hedge
             flows.popleft()
     close_group()
     if tick_hook is not None:
-        tick_hook(float("inf"))
+        tick_hook(float("inf"), None, None, hedge_book, maker_book)
     cnt["unresolved_at_end"] = sum(len(q) for q in pending.values())
     return {"day": day, "counts": cnt, "rows": rows, "truncation": truncation_report(), "horizons": list(horizons), "tick": tick, "max_book_age_s": max_book_age_s}
 
@@ -248,7 +249,8 @@ class HedgeStudy:
     banded at `unwind_band_bps` from its dispatch touch (the old backtester's unwind, `unwind_band_bps` of the profile), filled at the maker touch at its arrival when inside the band, else priced at the band edge.
     Cost (bps of the quote price, after fees, positive = a loss): -[(hedge price - q)/q (a bid fill) or (q - hedge price)/q (an ask fill)] + maker fee + the venue taker fee of whichever order closed the exposure."""
 
-    def __init__(self, setup: dict, *, d_send_s: float = 0.045, d_report_s: float = 0.045, d_unwind_s: float = 0.035, size: float = 1.0, max_book_age_s: float = 2.0, min_gap_s: float = 1.0) -> None:
+    def __init__(self, setup: dict, *, d_send_s: float = 0.045, d_report_s: float = 0.045, d_unwind_s: float = 0.035, size: float = 1.0, max_book_age_s: float = 2.0, min_gap_s: float = 1.0,
+                 variants: tuple = STUDY_VARIANTS, loose_fill: bool = False) -> None:
         import heapq as _hq
         from types import SimpleNamespace
 
@@ -269,47 +271,47 @@ class HedgeStudy:
         self.counts = {"labelled_events": 0, "no_hedge_touch": 0, "stale_hedge_book": 0, "entry_rule_rejects": 0, "thinned_by_min_gap": 0, "quote_not_reached_by_sweep_volume": 0, "eligible_improving_quote": 0, "eligible": 0, "touch_size_below_hedge_size_at_decision": 0}
         self.rejects: dict[str, int] = {}
         self.hedge_book = self.maker_book = None
+        self.variants, self.loose_fill = tuple(variants), loose_fill        # loose_fill (S3): touching our price is enough to fill us (no visible-queue clearing); default off = the S2 rule
         self.min_gap_s = min_gap_s          # one counted event per side per `min_gap_s`: a persistent dislocation would otherwise count the same quote again and again (the strategy holds one chain at a time)
         self.last_eligible_ts: dict[str, float] = {}
 
     # -- the strategy's own entry rule, applied at the event ------------------------------------------------------------------------------------------------------------
     def _quote(self, row, hedge_book, maker_book):
-        arb, cfg_s, edge_mod = self.arb, self.s, self.edge_mod
-        side = row["side"]
+        return self._quote_core(row["side"], hedge_book.best_bid if row["side"] == "bid" else hedge_book.best_ask, maker_book.best_bid, maker_book.best_ask, row["vol_bps"], row["flow"], row["spread_bps"], hedge_book)
+
+    def quote_from_state(self, side: str, st):
+        """The entry rule on a `QuoteState` (the strategy's own view at the decision time: the maker book `lag` ms old, the hedge book older still): the same rule, from the same function."""
+        from types import SimpleNamespace
+
         bid = side == "bid"
-        hedge_px = hedge_book.best_bid if bid else hedge_book.best_ask
-        touch_bid, touch_ask = maker_book.best_bid, maker_book.best_ask
+        mid = (st.maker_bid + st.maker_ask) / 2
+        flow = (st.sell_vol_1s - st.buy_vol_1s) if bid else (st.buy_vol_1s - st.sell_vol_1s)
+        book = SimpleNamespace(ready=st.hedge_bid > 0 and st.hedge_ask > 0, best_bid=st.hedge_bid, best_ask=st.hedge_ask)
+        return self._quote_core(side, st.hedge_bid if bid else st.hedge_ask, st.maker_bid, st.maker_ask, st.vol_bps, flow, (st.maker_ask - st.maker_bid) / mid * 1e4 if mid > 0 else 0.0, book)
+
+    def _quote_core(self, side, hedge_px, touch_bid, touch_ask, vol_bps, flow, spread_bps, hedge_book):
+        arb, cfg_s, edge_mod = self.arb, self.s, self.edge_mod
+        bid = side == "bid"
         fee_bps = cfg_s["maker_bps"] + cfg_s["hedge_taker_bps"]
         table = arb.adverse_table
         if table is not None:
-            move = table.expected_move_reaching_bps(side, quote_depth_ticks=0, vol_bps=row["vol_bps"], flow=row["flow"], spread_bps=row["spread_bps"], horizon_s=arb.adverse_horizon_s)
+            move = table.expected_move_reaching_bps(side, quote_depth_ticks=0, vol_bps=vol_bps, flow=flow, spread_bps=spread_bps, horizon_s=arb.adverse_horizon_s)
         else:
             move = arb.expected_hedge_move_bps_bid if bid else arb.expected_hedge_move_bps_ask
         limit = self.quote_limit(self.ns, side, hedge_px, fee_bps, move)
         px = self.quote_to_tick(self.ns, "bybit", limit, side)
         joins = False
-        if bid:
-            was_ok = touch_bid < limit < touch_ask
-            if abs(px - touch_bid) < 1e-6 * arb.venue_ticks["bybit"]:
-                px = touch_bid
-            if was_ok and not touch_bid < px < touch_ask:
-                if arb.join_touch_on_tick_rounding and px == touch_bid:
-                    joins = True
-                else:
-                    return None, "tick_rounding_no_improve"
-            if not joins and (px <= touch_bid or px >= touch_ask):
-                return None, "no_edge"
-        else:
-            was_ok = touch_bid < limit < touch_ask
-            if abs(px - touch_ask) < 1e-6 * arb.venue_ticks["bybit"]:
-                px = touch_ask
-            if was_ok and not touch_bid < px < touch_ask:
-                if arb.join_touch_on_tick_rounding and px == touch_ask:
-                    joins = True
-                else:
-                    return None, "tick_rounding_no_improve"
-            if not joins and (px <= touch_bid or px >= touch_ask):
-                return None, "no_edge"
+        was_ok = touch_bid < limit < touch_ask
+        edge_touch = touch_bid if bid else touch_ask
+        if abs(px - edge_touch) < 1e-6 * arb.venue_ticks["bybit"]:
+            px = edge_touch
+        if was_ok and not touch_bid < px < touch_ask:
+            if arb.join_touch_on_tick_rounding and px == edge_touch:
+                joins = True
+            else:
+                return None, "tick_rounding_no_improve"
+        if not joins and (px <= touch_bid or px >= touch_ask):
+            return None, "no_edge"
         er = edge_mod.maker_taker_expected_edge_bps(px, side, hedge_book, self.size, cfg_s["maker_bps"], cfg_s["hedge_taker_bps"], expected_hedge_move_bps=move,
                                                     expected_hedge_slippage_bps=arb.expected_hedge_slippage_bps, funding_holding_bps=arb.funding_holding_bps, p_fail=arb.p_fail, loss_fail_bps=arb.loss_fail_bps)
         if er.net_bps is None or er.net_bps - arb.safety_buffer_bps < arb.min_net_edge_bps:
@@ -317,7 +319,7 @@ class HedgeStudy:
         return px, "ok"
 
     # -- timed actions ---------------------------------------------------------------------------------------------------------------------------------------------------
-    def tick(self, ts: float) -> None:
+    def tick(self, ts: float, *_) -> None:
         self.limit = ts
         self._drain(ts)
 
@@ -415,7 +417,7 @@ class HedgeStudy:
         improves = q > touch_px if bid else q < touch_px
         # would the sweep have filled OUR quote? an improving quote is alone at its price; a quote joining the touch sits behind the whole displayed touch size (no cancellations assumed: conservative)
         need = self.size if improves else touch_size + self.size
-        if sweep["volume"] < need - 1e-12:
+        if sweep["volume"] < need - 1e-12 and not self.loose_fill:
             c["quote_not_reached_by_sweep_volume"] += 1
             return
         self.last_eligible_ts[row["side"]] = row["ts"]
@@ -424,9 +426,9 @@ class HedgeStudy:
         size_at = hedge_book.best_bid_size if bid else hedge_book.best_ask_size
         if size_at < self.size - 1e-12:
             c["touch_size_below_hedge_size_at_decision"] += 1
-        ev = {"ts": row["ts"], "side": row["side"], "q": q, "hedge_touch": hedge_book.best_bid if bid else hedge_book.best_ask, "maker_touch": maker_book.best_bid if bid else maker_book.best_ask, "variants": {}}
+        ev = {"ts": row["ts"], "side": row["side"], "q": q, "hedge_touch": hedge_book.best_bid if bid else hedge_book.best_ask, "maker_touch": maker_book.best_bid if bid else maker_book.best_ask, "fills_if_queue_clears": bool(sweep["volume"] >= need - 1e-12), "variants": {}}
         self.events.append(ev)
-        for v in STUDY_VARIANTS:
+        for v in self.variants:
             ch = {"variant": v, "side": row["side"], "q": q, "t0": row["ts"], "submits": 0, "event": ev}
             self._dispatch(row["ts"], ch)
         self._drain(self.limit)           # arrivals that fall before the stream item being applied now are judged against the books as they stand now
@@ -444,6 +446,252 @@ def day_hedge_study(data_root, pair: str, day: str, profile_name: str = "perp_pe
                             "fill_rule": "an improving quote is filled when the sweep prints at least our size; a quote joining the touch when the sweep prints at least the displayed touch size plus our size (no cancellations: conservative)",
                             "label": "ASSUMED delays (no measured Binance delay exists); Binance March-2024 is best bid/ask only: the hedge size is assumed to fit at the touch"},
             "truncation": lab["truncation"]}
+
+
+# ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+# S3 (owner 10 Nov): the do-not-quote study. Same events as S2 (the v1_6 entry rule posts a quote and the sweep fills it), now with the quote-time FEATURES of `edge.QuoteFeatures` read `lag` seconds
+# before the sweep (a filter cannot act on what happened inside its own feed and cancel latency), the hedge-mid move after the fill at 50 ms and 1 s, the slack-5 hedge cost, and v1_6's toxic gate.
+# ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+class QuoteFilterStudy:
+    """Streams a day once and, for every eligible event under BOTH fill rules (`clear`: the sweep must print the visible queue ahead of us plus our size, the S2 rule; `touch`: touching our price is enough), records
+    the features at each lag in `lags_s`, the realised hedge-mid moves, the slack-5 hedge chain cost and whether v1_6's `block_on_toxic` gate would have blocked the quote.
+    Features: a ring of book snapshots (one per book item of either venue, kept 6 s) from which a `QuoteState` is assembled at `ts - lag`; the printed-volume flows come from the same prints the venue state sees. The assembly
+    mirrors `QuoteFeatures.observe` field by field (tests/test_quote_filter.py compares the two on one stream); `QuoteFeatures.vector` is the single feature definition.
+    ASSUMED, not measured: the lag of 8 ms = the maker venue's feed 2 ms + its cancel 6 ms (latency preset singapore, `LATENCY_PRESETS`); a lag of 1 s stands for a quote that was not cancelled in time."""
+
+    def __init__(self, setup: dict, *, lags_s: tuple = (0.008, 1.0), **kw) -> None:
+        from crypto_stat_arb.simulation.venue_state import VenueState
+        from crypto_stat_arb.strategies.edge import AdverseFeatures, QuoteFeatures
+
+        kw = {**kw, "variants": ("slack5",)}
+        self.clear = HedgeStudy(setup, **kw)
+        self.touch = HedgeStudy(setup, loose_fill=True, **kw)
+        self.lags_s = tuple(lags_s)
+        self.setup = setup
+        self.qf = QuoteFeatures(AdverseFeatures())
+        self.state = VenueState("BYBIT")
+        arb = setup["arb"]
+        self.toxic_sign, self.toxic_collapse = arb.toxic_trade_sign, arb.toxic_depth_collapse
+        self.ring: list = []                       # snapshots (ts, maker..., hedge..., vol_bps, touch_change_ts, toxic), oldest first
+        self.prev = None                           # the previous stream item, post-processed at the next tick
+        self.cur = {"mb": 0.0, "ma": 0.0, "mbs": 0.0, "mas": 0.0, "mb5": 0.0, "ma5": 0.0, "hb": 0.0, "ha": 0.0, "hbs": 0.0, "has": 0.0, "vol": None, "tc": None, "toxic": False}
+        self.trades: list = []                     # (ts, volume, sign) of the maker venue, kept 6 s
+        self.records: list[dict] = []
+        self.rows: dict[int, dict] = {}
+
+    # -- the stream ---------------------------------------------------------------------------------------------------------------------------------------------------------
+    def tick(self, ts, kind, ev, hedge_book, maker_book) -> None:
+        self.clear.tick(ts)
+        self.touch.tick(ts)
+        if self.prev is not None:
+            pts, pkind, pev = self.prev
+            c = self.cur
+            if pkind == 1 and pev.kind == TRADE:
+                price, vol, sign = trade_fields(pev.payload)
+                if price > 0 and vol > 0:
+                    self.state.on_trade(pts, price, vol, sign)
+                    self.trades.append((pts, vol, sign))
+                    c["toxic"] = self._toxic(maker_book)
+            elif pkind == 1:
+                if maker_book.ready:
+                    self.state.on_book(maker_book, pts)
+                    self.qf.on_touch(pts, maker_book.best_bid, maker_book.best_ask)
+                    c.update(mb=maker_book.best_bid, ma=maker_book.best_ask, mbs=maker_book.best_bid_size, mas=maker_book.best_ask_size,
+                             mb5=sum(z for _, z in maker_book.levels("bid", 5)), ma5=sum(z for _, z in maker_book.levels("ask", 5)), tc=self.qf._touch_ts, toxic=self._toxic(maker_book))
+            elif pkind == 0 and hedge_book.ready:
+                self.qf.adverse.on_mid("hedge", pts, hedge_book.mid)
+                c.update(hb=hedge_book.best_bid, ha=hedge_book.best_ask, hbs=hedge_book.best_bid_size, has=hedge_book.best_ask_size, vol=self.qf.adverse.vol_bps("hedge", hedge_book.mid))
+            if pkind == 0 or (pkind == 1 and pev.kind != TRADE):
+                self.ring.append((pts, c["mb"], c["ma"], c["mbs"], c["mas"], c["mb5"], c["ma5"], c["hb"], c["ha"], c["hbs"], c["has"], c["vol"], c["tc"], c["toxic"]))
+            if len(self.ring) > 20000:          # trim in bulk (a list pop(0) per item would be quadratic): keep the last 6 s
+                cut = pts - 6.0
+                del self.ring[:bisect.bisect_left(self.ring, cut, key=lambda r: r[0])]
+            if len(self.trades) > 4000:
+                cut = pts - 6.0
+                del self.trades[:bisect.bisect_left(self.trades, cut, key=lambda r: r[0])]
+        self.prev = (ts, kind, ev) if kind is not None else None
+
+    def _toxic(self, maker_book) -> bool:
+        return bool(maker_book.ready and self.state.is_toxic(maker_book, self.toxic_sign, self.toxic_collapse))
+
+    def _state_at(self, t: float):
+        """The QuoteState as it stood after the last book item at or before `t`, or None when the ring does not reach that far back."""
+        from crypto_stat_arb.strategies.edge import QuoteState
+
+        i = bisect.bisect_right(self.ring, t, key=lambda r: r[0]) - 1
+        if i < 0:
+            return None, False
+        r = self.ring[i]
+        if r[1] <= 0 or r[7] <= 0:
+            return None, False
+        buy = sell = 0.0
+        lo = bisect.bisect_left(self.trades, t - 1.0, key=lambda x: x[0])
+        for ts_, v, s in self.trades[lo:]:
+            if ts_ > t:
+                break
+            if s > 0:
+                buy += v
+            else:
+                sell += v
+        return QuoteState(r[1], r[2], r[3], r[4], r[5], r[6], r[7], r[8], r[9], r[10], r[11], (t - r[12]) if r[12] is not None else 0.0, buy, sell), bool(r[13])
+
+    # -- the event ---------------------------------------------------------------------------------------------------------------------------------------------------------
+    def on_event(self, row: dict, hedge_book, maker_book, sweep: dict) -> None:
+        from crypto_stat_arb.strategies.edge import QuoteFeatures
+
+        n_c, n_t = len(self.clear.events), len(self.touch.events)
+        self.clear.on_event(row, hedge_book, maker_book, sweep)
+        self.touch.on_event(row, hedge_book, maker_book, sweep)
+        for study, n0, rule in ((self.clear, n_c, "clear"), (self.touch, n_t, "touch")):
+            if len(study.events) == n0:
+                continue
+            ev = study.events[-1]
+            feats, toxic = {}, {}
+            for lag in self.lags_s:
+                st, tx = self._state_at(row["ts"] - lag)
+                if st is None:
+                    continue
+                feats[f"{lag:g}"] = QuoteFeatures.vector(row["side"], st, ev["q"], self.setup["maker_bps"], self.setup["hedge_taker_bps"])
+                toxic[f"{lag:g}"] = tx
+            self.records.append({"rule": rule, "ts": row["ts"], "side": row["side"], "q": ev["q"], "fills_if_queue_clears": ev["fills_if_queue_clears"], "features": feats, "toxic_gate_blocks": toxic,
+                                 "entry_at_strategy_view": self._strategy_view_entry(row, study), "_ev": ev, "_row": row})
+
+    VIEW_LAGS_S = {"maker": 0.008, "hedge": 0.042}          # the decision is made on the maker book 2 ms old and the hedge book 36 ms old (singapore preset feed delays), and the order needs 6 ms to arrive (entry): the quote that is resting at the sweep was decided that much earlier (ASSUMED, singapore preset)
+
+    def _strategy_view_entry(self, row: dict, study) -> dict:
+        """Would the entry rule have posted this quote on what the strategy could SEE when it had to decide (the replay's view), not on the exchange-time books at the sweep? Maker side at ts - 8 ms, hedge side at ts - 42 ms."""
+        from crypto_stat_arb.strategies.edge import QuoteState
+
+        sm, _ = self._state_at(row["ts"] - self.VIEW_LAGS_S["maker"])
+        sh, _ = self._state_at(row["ts"] - self.VIEW_LAGS_S["hedge"])
+        if sm is None or sh is None:
+            return {"ok": None, "reason": "no_state"}
+        mixed = QuoteState(sm.maker_bid, sm.maker_ask, sm.maker_bid_size, sm.maker_ask_size, sm.maker_bid_top5, sm.maker_ask_top5, sh.hedge_bid, sh.hedge_ask, sh.hedge_bid_size, sh.hedge_ask_size, sh.vol_bps,
+                           sm.since_touch_change_s, sm.buy_vol_1s, sm.sell_vol_1s)
+        q, why = study.quote_from_state(row["side"], mixed)
+        return {"ok": q is not None, "reason": why, "q": q}
+
+    def finish(self) -> list[dict]:
+        out = []
+        for r in self.records:
+            ev, row = r.pop("_ev"), r.pop("_row")
+            done = ev["variants"].get("slack5")
+            if done is None:
+                continue
+            r["cost_bps_slack5"], r["outcome_slack5"] = done["cost_bps"], done["outcome"]
+            r["move_50ms"], r["move_1s"] = row.get("move_0.05s"), row.get("move_1s")
+            out.append(r)
+        return out
+
+
+def day_quote_filter_study(data_root, pair: str, day: str, profile_name: str = "perp_perp_maker_taker_v1_6", maker_venue: str = "bybit", hedge_venue: str = "binance", **kw) -> dict:
+    """One day of the S3 study (see `QuoteFilterStudy`). Market data only; no simulator fill is used."""
+    setup = study_setup(profile_name)
+    st = QuoteFilterStudy(setup, **kw)
+    lab = day_labels(data_root, pair, day, maker_venue, hedge_venue, horizons=(0.05, 1.0), hook=st.on_event, tick_hook=st.tick)
+    recs = st.finish()
+    return {"day": day, "profile": profile_name, "counts": {"clear": st.clear.counts, "touch": st.touch.counts, "label_counts": lab["counts"]}, "records": recs, "lags_s": list(st.lags_s),
+            "assumptions": {"lags_s": "8 ms = Bybit feed 2 ms + cancel 6 ms (singapore preset, ASSUMED); 1 s = a quote not cancelled in time", "d_send_s": st.clear.d_send, "backoff_s": setup["backoff_s"], "retries": setup["retries"],
+                            "maker_bps": setup["maker_bps"], "hedge_taker_bps": setup["hedge_taker_bps"], "unwind_band_bps": setup["unwind_band_bps"], "min_gap_s": st.clear.min_gap_s,
+                            "cost": "the slack-5 hedge chain of the S2 study, bps of the quote price after fees, positive = a loss", "labels": "Binance mid move after the fill at 50 ms and 1 s, negative = adverse"},
+            "truncation": lab["truncation"]}
+
+
+# ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+# no_edge fee diagnostic (owner 10 Nov, report only, no profile change): how far below the entry threshold is the best maker-taker edge at the moments v1_6 rejects for no_edge, and what would other fees change?
+# ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+FEE_SCENARIOS = {"headline_2.7bps": (1.0, 1.7), "mm_rebate_1.2bps": (-0.5, 1.7), "vip0_7.0bps": (2.0, 5.0)}          # (Bybit maker bps, Binance taker bps): VIP5 + VIP9 (the v1_6 headline, PUBLIC_SCHEDULE_UNVERIFIED), the MM rebate (UNCONFIRMED), VIP0 + VIP0
+SHORTFALL_BUCKET_BPS = 0.1
+SHORTFALL_CLIP_BPS = 40.0
+
+
+class NoEdgeDiagnostic:
+    """At every maker-venue book update with both books fresh, for each side: the conditional edge of a quote JOINING THE TOUCH (the best price a passive quote can rest at without improving the spread), by the strategy's own
+    `maker_taker_expected_edge_bps` with the frozen S1 table's move at the volatility, flow and spread now, less the profile's safety buffer; SHORTFALL = min_net_edge_bps - that edge (positive = v1_6 would reject it for no_edge).
+    The same edge is recomputed under each entry of `FEE_SCENARIOS`. Counted per UTC hour: evaluations, rejects (shortfall > 0), the shortfall histogram of the rejects (0.1 bps buckets, clipped), and the moments a scenario
+    would ADD (rejected at the headline fees, accepted at the scenario's), both as evaluation moments and as distinct one-second episodes per side. `toxic_blocked` counts the moments v1_6's `block_on_toxic` gate would block anyway
+    (the venue state fed by the same stream), so the added moments can also be read after that gate. A moment is not a trade: the strategy's other gates (inventory, one chain at a time, clip size) are not applied here."""
+
+    def __init__(self, setup: dict, *, max_book_age_s: float = 2.0) -> None:
+        from crypto_stat_arb.simulation.venue_state import VenueState
+        from crypto_stat_arb.strategies import edge as edge_mod
+
+        self.s, self.arb, self.edge_mod, self.max_age = setup, setup["arb"], edge_mod, max_book_age_s
+        self.state = VenueState("BYBIT")
+        self.adverse = edge_mod.AdverseFeatures()
+        self.prev = None
+        self.hours: dict[int, dict] = {}
+        self.last_episode: dict = {}
+        self.fee_note = {k: {"maker_bps": v[0], "taker_bps": v[1], "pair_bps": v[0] + v[1]} for k, v in FEE_SCENARIOS.items()}
+
+    def _hour(self, ts: float) -> dict:
+        h = int(ts // 3600) % 24
+        return self.hours.setdefault(h, {"evaluations": 0, "toxic_blocked": 0, **{f"{side}": {"rejects": 0, "hist": {}, "added": {k: 0 for k in FEE_SCENARIOS}, "added_not_toxic": {k: 0 for k in FEE_SCENARIOS},
+                                                                                       "added_episodes": {k: 0 for k in FEE_SCENARIOS}} for side in ("bid", "ask")}})
+
+    def _edge(self, side: str, q: float, hedge_book, move: float, maker_bps: float, taker_bps: float) -> float | None:
+        arb = self.arb
+        er = self.edge_mod.maker_taker_expected_edge_bps(q, side, hedge_book, 1.0, maker_bps, taker_bps, expected_hedge_move_bps=move, expected_hedge_slippage_bps=arb.expected_hedge_slippage_bps,
+                                                         funding_holding_bps=arb.funding_holding_bps, p_fail=arb.p_fail, loss_fail_bps=arb.loss_fail_bps)
+        return None if er.net_bps is None else er.net_bps - arb.safety_buffer_bps
+
+    def tick(self, ts, kind, ev, hedge_book, maker_book) -> None:
+        if self.prev is not None:
+            pts, pkind, pev = self.prev
+            if pkind == 1 and pev.kind == TRADE:
+                price, vol, sign = trade_fields(pev.payload)
+                if price > 0 and vol > 0:
+                    self.state.on_trade(pts, price, vol, sign)
+            elif pkind == 1 and maker_book.ready:
+                self.state.on_book(maker_book, pts)
+                self._evaluate(pts, maker_book, hedge_book)
+            elif pkind == 0 and hedge_book.ready:
+                self.adverse.on_mid("hedge", pts, hedge_book.mid)
+        self.prev = (ts, kind, ev) if kind is not None else None
+
+    def _evaluate(self, ts: float, maker_book, hedge_book) -> None:
+        if not (hedge_book.ready and maker_book.ready) or ts - hedge_book.last_update_ts > self.max_age or ts - maker_book.last_update_ts > self.max_age:
+            return
+        arb, h = self.arb, self._hour(ts)
+        h["evaluations"] += 1
+        toxic = bool(self.state.is_toxic(maker_book, arb.toxic_trade_sign, arb.toxic_depth_collapse))
+        h["toxic_blocked"] += int(toxic)
+        vol = self.adverse.vol_bps("hedge", hedge_book.mid)
+        spread = maker_book.spread_bps
+        sec = int(ts)
+        for side in ("bid", "ask"):
+            bid = side == "bid"
+            q = maker_book.best_bid if bid else maker_book.best_ask
+            signed = self.state.signed_volume_within(ts, 1.0)
+            flow = -signed if bid else signed
+            move = arb.adverse_table.expected_move_reaching_bps(side, quote_depth_ticks=0, vol_bps=vol, flow=flow, spread_bps=spread, horizon_s=arb.adverse_horizon_s) if arb.adverse_table is not None else (
+                arb.expected_hedge_move_bps_bid if bid else arb.expected_hedge_move_bps_ask)
+            base = {k: self._edge(side, q, hedge_book, move, mk, tk) for k, (mk, tk) in FEE_SCENARIOS.items()}
+            if base["headline_2.7bps"] is None:
+                continue
+            short = arb.min_net_edge_bps - base["headline_2.7bps"]
+            d = h[side]
+            if short > 0:
+                d["rejects"] += 1
+                b = int(min(short, SHORTFALL_CLIP_BPS) / SHORTFALL_BUCKET_BPS)
+                d["hist"][b] = d["hist"].get(b, 0) + 1
+                for k in FEE_SCENARIOS:
+                    if k != "headline_2.7bps" and base[k] is not None and arb.min_net_edge_bps - base[k] <= 0:
+                        d["added"][k] += 1
+                        d["added_not_toxic"][k] += int(not toxic)
+                        if self.last_episode.get((side, k)) != sec:
+                            d["added_episodes"][k] += 1
+                            self.last_episode[(side, k)] = sec
+
+
+def day_no_edge_diagnostic(data_root, pair: str, day: str, profile_name: str = "perp_perp_maker_taker_v1_6", maker_venue: str = "bybit", hedge_venue: str = "binance", **kw) -> dict:
+    """One day of the no_edge fee diagnostic (see `NoEdgeDiagnostic`): hourly counts and shortfall histograms. Market data only."""
+    setup = study_setup(profile_name)
+    dg = NoEdgeDiagnostic(setup, **kw)
+    day_labels(data_root, pair, day, maker_venue, hedge_venue, horizons=(), tick_hook=dg.tick)
+    return {"day": day, "profile": profile_name, "min_net_edge_bps": setup["arb"].min_net_edge_bps, "safety_buffer_bps": setup["arb"].safety_buffer_bps, "fee_scenarios": dg.fee_note,
+            "bucket_bps": SHORTFALL_BUCKET_BPS, "clip_bps": SHORTFALL_CLIP_BPS, "hours": {str(k): {kk: ({sd: {**v, "hist": {str(b): n for b, n in v["hist"].items()}} for sd, v in vv.items()} if kk in ("bid", "ask") else vv) for kk, vv in hv.items()}
+                                                                                     for k, hv in sorted(dg.hours.items())}}
 
 
 def combine(per_day: list[dict], horizon_s: float, maker_venue: str, hedge_venue: str, pair: str, data_root: str) -> dict:
@@ -485,10 +733,18 @@ def _main() -> None:
     ap.add_argument("--jobs", type=int, default=1); ap.add_argument("--day-file", default=None, help="internal: compute one day and write its raw stats here")
     ap.add_argument("--labels-out", default=None, help="S1: write the per-print LABEL ROWS of the first day in --days to this JSON file and stop")
     ap.add_argument("--label-horizons", default="1,5,30", help="S1: the horizons in seconds of the label rows (e.g. 0.05,0.15,1,5,30)")
+    ap.add_argument("--no-edge-out", default=None, help="no_edge fee diagnostic: run it for the first day in --days and write the hourly counts to this JSON file")
+    ap.add_argument("--quote-filter-out", default=None, help="S3: run the do-not-quote study for the first day in --days and write its event records to this JSON file")
     ap.add_argument("--hedge-study-out", default=None, help="S2: run the hedge event study for the first day in --days and write its events to this JSON file")
     ap.add_argument("--profile", default="perp_perp_maker_taker_v1_6", help="S2: the profile whose entry rule, fees and retry rule the study uses")
     ap.add_argument("--d-send-s", type=float, default=0.045, help="S2: hedge dispatch-to-arrival delay (ASSUMED)")
     a = ap.parse_args()
+    if a.no_edge_out:
+        Path(a.no_edge_out).write_text(json.dumps(day_no_edge_diagnostic(a.data_root, a.pair, a.days.split(",")[0], a.profile, a.maker_venue, a.hedge_venue, max_book_age_s=a.max_book_age_s)))
+        return
+    if a.quote_filter_out:
+        Path(a.quote_filter_out).write_text(json.dumps(day_quote_filter_study(a.data_root, a.pair, a.days.split(",")[0], a.profile, a.maker_venue, a.hedge_venue, d_send_s=a.d_send_s, d_report_s=a.d_send_s, max_book_age_s=a.max_book_age_s)))
+        return
     if a.hedge_study_out:
         Path(a.hedge_study_out).write_text(json.dumps(day_hedge_study(a.data_root, a.pair, a.days.split(",")[0], a.profile, a.maker_venue, a.hedge_venue, d_send_s=a.d_send_s, d_report_s=a.d_send_s, max_book_age_s=a.max_book_age_s)))
         return

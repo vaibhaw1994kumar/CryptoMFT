@@ -60,12 +60,38 @@ class SessionReplayEndToEnd(unittest.TestCase):
         self.assertTrue(plans)
         self.assertNotIn("REJECTED", {p.state.value for p in plans})
 
+    def test_markouts_are_recorded_by_venue_and_role_from_the_ledger_fills(self):
+        """Owner 10 Nov (the `markout_by_venue_role` port): the maker bid fill is a bybit maker, the hedge a binance taker, each one fill of 1 SOL, resolved on market-data time (a bid bought at 100.247 under a mid of about 100.15 is a loss)."""
+        mk = self.result["markout_by_venue_role"]
+        self.assertEqual(sorted(mk), ["binance/taker", "bybit/maker"])
+        for key in mk:
+            self.assertEqual((mk[key]["1s"]["count"], mk[key]["30s"]["count"]), (1.0, 1.0))
+        self.assertLess(mk["bybit/maker"]["1s"]["qty_weighted_markout_bps"], 0.0)
+        self.assertEqual(set(self.result["markout_summary"]), {"1s", "5s", "30s"})
+
+    def test_the_strategy_counters_are_reported_with_the_rejects_by_reason(self):
+        c = self.result["strategy_counters"]
+        self.assertGreaterEqual(c["signals"], 1)
+        self.assertIsInstance(c["rejects"], dict)
+
     def test_the_manifest_labels_the_policy_the_sequence_and_the_differences(self):
         m = self.result["manifest"]
         self.assertEqual((m["invalid_book_policy"]["resync_delay_label"], m["feed"]["sequence_numbers"], m["feed"]["sequence_gaps"]["status"]), ("ASSUMED", "SYNTHETIC", "NOT_MEASURED"))
         self.assertIn("suspension_intervals_ns", m["invalid_book_policy"])
         self.assertTrue(m["differences_from_backtester_loop"])
         self.assertTrue(self.result["label"].startswith("EXPLORATORY"))
+
+
+class MarkoutsOffByDefault(unittest.TestCase):
+    def test_a_session_without_horizons_has_no_tracker_and_one_with_horizons_has_one(self):
+        from crypto_stat_arb.config import load_config
+        from crypto_stat_arb.session import TradingSession
+
+        cfg, _ = load_config(Path(__file__).resolve().parents[1] / "config" / "research.json")
+        self.assertIsNone(TradingSession(cfg).markouts)
+        session = TradingSession(cfg, markout_horizons_s=(1.0, 5.0))
+        self.assertEqual(session.markouts.horizons_s, (1.0, 5.0))
+        session.resolve_markouts(10 * 10**9, finalize=True)             # nothing pending: harmless
 
 
 if __name__ == "__main__":

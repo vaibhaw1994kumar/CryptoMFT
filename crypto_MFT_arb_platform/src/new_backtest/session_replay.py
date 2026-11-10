@@ -11,9 +11,12 @@ Order of work for one market event (the same for every venue):
   4. `TradingSession.on_event(apply_book=False)`: gate, OMS, strategy, dispatch.
 A trade print reaches the venue state first and then the session's trade hook (queue fills come from prints only).
 
-Differences from the backtester's loop, recorded in the manifest (nothing here pretends to be the same loop): no timing timelines or venue-truth books (the core latency model draws the
-order latencies), no maker-lifetime timer, hedge faults, breaker, requote or margin step of the backtester (the core OMS, risk engine and book gate replace them), a book
-that ends a message crossed is invalidated by the core (the backtester repairs it), and the sequence numbers are SYNTHETIC. Parity is explained, not forced (prompt, PHASE D).
+Differences from the backtester's loop, recorded in the manifest (nothing here pretends to be the same loop). Timing IS shared since 9 Nov: the profile's timing block (latency preset, floors, jitter) drives
+the feed delay, the clock and every order delay through `Timelines` / `TimelinesLatencyModel`, and the venue-truth books are built here (`TruthBooks`) for taker arrivals and PostOnly checks. What the session runtime still LACKS
+(owner audit 10 Nov; each item has a Phase E step in the plan): E0 the ems/ layer (S0 repricing `decide_reprice`, the tactic switch, PASSIVE placements, risk gate, pairing, venue selector never reach this path); E1 the maker order
+lifetime as a TIMER (`oms.order_lifetime_ns` exists and fires only when a market event or `tick` advances the OMS clock); E2 hedge-fault injection in the queue adapter (reject probability, outages, lost ack, ghost hedge, partial hedge,
+failed unwind, restart with an open position; the fault presets and conditional scenarios do not run here); E3 the participation cap and the size sweep; the circuit breaker (`circuit_breaker.py` is not wired into the session); the
+backtester's own margin step (the core margin engine replaces it). A book that ends a message crossed is invalidated by the core (the backtester repairs it), and the sequence numbers are SYNTHETIC. Parity is explained, not forced (prompt, PHASE D).
 """
 from __future__ import annotations
 
@@ -63,6 +66,20 @@ _NS = 1_000_000_000
 
 def dated_ticks(start_date: str) -> dict[str, float]:
     return dict(DATED_TICKS[start_date[:4]])
+
+
+class TracedRejects(dict):
+    """A reject counter that also records WHEN each reject happened: (evaluation time, reason). Observation only (owner 10 Nov, the event reconciliation): the strategy increments the same keys as ever; the trace is read by the
+    reconciliation wrapper and by nothing else. Enabled by `trace_rejects` on the run config; off by default."""
+
+    def __init__(self, base: dict, strategy, sink: list) -> None:
+        super().__init__(base)
+        self._strategy, self._sink = strategy, sink
+
+    def __setitem__(self, key, value) -> None:
+        if value > self.get(key, 0):
+            self._sink.append((getattr(self._strategy, "last_eval_ts", None), key))
+        super().__setitem__(key, value)
 
 
 class SessionReplay:
@@ -131,6 +148,7 @@ class SessionReplay:
             resync_delay_ns=int(self.resync_delay_s * _NS), resync_source=self.feed.resync_snapshot,
             resync_silence_ns=None if config.timing is None else int(config.timing.dead_feed_s * _NS), latency_model=self.latency_model, hedge_policy=hedge_policy,
             gate_on_every_event=True,          # owner 9 Nov (D7d): the session runtime is v1_5 and later; the gate is evaluated on every event, as the live service does
+            markout_horizons_s=tuple(config.markout_horizons_s),          # owner 9 Nov: forward markouts per fill, by venue and role, as the backtester reports them (the core's MarkoutTracker)
         )
         if config.arb.maker_max_age_s > 0:
             self.session.oms.order_lifetime_ns = int(config.arb.maker_max_age_s * _NS)     # the profile's MANDATORY maker order lifetime (a rule, the same on both runtimes)
@@ -138,6 +156,9 @@ class SessionReplay:
         self.shim = ArbSessionStrategy(self.strategy, ledger=self.session.ledger, oms=self.session.oms, states=self.states, instruments=self.app_config.instruments,
                                        instrument_id=self.instrument_id, venue_names=self.names, eligibility_policy=self.session.alignment_policy, view_books=lambda: self.views)
         self.feeder = SimulatedVenueFeeder(self.session, self.names, self.views, self.states, self.adapters, ets_of=self._ets, delta_uses_book_size=config.delta_uses_book_size)
+        self.reject_trace: list | None = [] if getattr(config, "trace_rejects", False) else None
+        if self.reject_trace is not None:
+            self.strategy.rejects = TracedRejects(self.strategy.rejects, self.strategy, self.reject_trace)
         self.session.strategies.append(self.shim)
         self.session.strategy = self.shim
         self._stream = stream
@@ -195,6 +216,7 @@ class SessionReplay:
             else:
                 self._book(event)
         self.session.drain()
+        self.session.resolve_markouts(self.last_ns, finalize=True)
         return self.result()
 
     def _feed_venue(self, core_name: str) -> str:
@@ -386,6 +408,10 @@ class SessionReplay:
             "days": [self.config.start_date, self.config.end_date], "size_base": float(self.config.arb.max_position_base), "fee_presets": self.profile.get("fee_presets"),
             "events": dict(self.events), "signals": signals, "orders": orders, "fills": fills, "positions": positions, "cash_by_venue": cash, "equity_at_book_mids": str(equity),
             "ledger_event_counts": dict(Counter(e["event_type"] for e in s.ledger.events)),
+            "strategy_counters": {"evaluations": self.strategy.evaluations, "signals": self.strategy.signals, "best_edge_seen_bps": None if self.strategy.best_edge_seen_bps == float("-inf") else self.strategy.best_edge_seen_bps,
+                                  "rejects": {k: v for k, v in self.strategy.rejects.items() if v}},
+            "reject_trace": self.reject_trace,
+            "markout_summary": s.markouts.summary() if s.markouts is not None else None, "markout_by_venue_role": s.markouts.summary_by_venue_role() if s.markouts is not None else None,
             "gate_events": [{k: (str(v) if isinstance(v, Decimal) else v) for k, v in e.items() if k in ("event_type", "ts_ns", "reason", "chain_id", "parent_id")}
                             for e in s.ledger.events if e["event_type"] in ("HEDGE_DISPATCH_HELD", "TIME_INTEGRITY_BLOCK", "ORDER_LIFETIME_EXPIRED", "ORDER_REJECT_CLASSIFIED", "HEDGE_CAP_BREACH_AT_DISPATCH", "HEDGE_ALARM")][:500],
             "grid_snaps": dict(self.shim.grid_snaps), "fills_by_source": {n: dict(a.fills_by_source) for n, a in self.adapters.items()},
@@ -402,7 +428,9 @@ class SessionReplay:
                 "entry_gates": {"book_age_rule": "core, 500 ms, age from the last message of any kind (owner 8 Nov Q-G1)", "dead_feed_5s": "not a blocking gate; the resubscribe trigger only (Q-G2)", "price_sanity_500bps": "core, kept (Q-G3)",
                                 "time_integrity": "core, host-offset correction on (Q-G4)", "circuit_breaker": "NOT IN THE CORE: Phase E (Q-G5); old-path trips are in the parity report"}, "feed": self.feed.manifest(), "ticks": self.ticks, "quantity_step": {"values": quantity_steps(), "label": published_rules()["label"], "fetched": published_rules()["fetched"], "sources": {v: r["source"] for v, r in published_rules()["venues"].items()}},
                 "config_notes": self.config_notes, "timing": {"latency_model": None if self.latency_model is None else self.latency_model.report(), "truth_books": dict(self.timing_stats)}, "release_identity": self.config.release_identity,
-                "differences_from_backtester_loop": ["no timing timelines or venue-truth books", "core latency model", "no maker-lifetime timer, hedge faults, breaker, requote, margin step of the backtester",
+                "differences_from_backtester_loop": ["timing is shared (profile timing block through Timelines; venue-truth books built by this driver): the old text 'no timing timelines or venue-truth books' is no longer true (corrected 10 Nov)",
+                                                     "STILL MISSING in the session runtime (Phase E): E0 ems/ layer (repricing, tactics, PASSIVE placements, risk gate, pairing, venue selector); E1 maker order lifetime as a timer (the OMS deadline fires only on an event or tick); "
+                                                     "E2 hedge-fault injection and the fault presets / conditional scenarios; E3 participation cap and size sweep; circuit breaker not wired; the backtester's margin step (the core margin engine replaces it)",
                                                      "message-end cross invalidates the core book", "sequence SYNTHETIC, gaps NOT_MEASURED"],
             },
         }
@@ -414,7 +442,11 @@ def write_result(result: dict, out_dir: Path) -> None:
         with (out_dir / f"session_{name}.jsonl").open("w") as fh:
             for row in result[name]:
                 fh.write(json.dumps(row, default=str) + "\n")
-    (out_dir / "session_manifest.json").write_text(json.dumps({k: v for k, v in result.items() if k not in ("signals", "orders", "fills")}, indent=1, default=str))
+    if result.get("reject_trace") is not None:
+        with (out_dir / "session_reject_trace.jsonl").open("w") as fh:
+            for ts, reason in result["reject_trace"]:
+                fh.write(json.dumps([ts, reason]) + "\n")
+    (out_dir / "session_manifest.json").write_text(json.dumps({k: v for k, v in result.items() if k not in ("signals", "orders", "fills", "reject_trace")}, indent=1, default=str))
 
 
 # ---- parity (D5): v1_5 on the session against v1_4 on the backtester's loop ----------------------------------------------------------------------------------------------------

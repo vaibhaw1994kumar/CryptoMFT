@@ -1,0 +1,72 @@
+{
+ "label": "EXPLORATORY: block_on_toxic gate flag scored ONCE on HOLDOUT 2024-03-13..15 (full days); no model; net = minus the slack-5 hedge cost of the S2 chain; ASSUMED 8 ms lag",
+ "rule": "5th percentile of the day-block bootstrap of D (flagged minus unflagged mean net) not below -1.0 bps => the gate is not protecting anything => v1_7 with block_on_toxic off",
+ "rules": {
+  "clear": {
+   "per_day": {
+    "2024-03-13": {
+     "events": 840,
+     "flagged": 56,
+     "unflagged": 784,
+     "net_flagged_sum": 104.9548,
+     "net_unflagged_sum": 1481.147
+    },
+    "2024-03-14": {
+     "events": 2042,
+     "flagged": 144,
+     "unflagged": 1898,
+     "net_flagged_sum": 293.2013,
+     "net_unflagged_sum": 3620.0823
+    }
+   },
+   "events": 2882,
+   "flagged": 200,
+   "share_flagged": 0.06939625260235947,
+   "mean_net_flagged": 1.9907805000000003,
+   "mean_net_unflagged": 1.9020243475018643,
+   "D_pooled": 0.08875615249813595,
+   "D_bootstrap_90pct": {
+    "p5": -0.015025255102040669,
+    "p50": 0.08875615249813595,
+    "p95": 0.12880596607540085,
+    "valid_resamples": 10000,
+    "note": "COARSE: the day blocks that finished"
+   }
+  },
+  "touch": {
+   "per_day": {
+    "2024-03-13": {
+     "events": 1434,
+     "flagged": 99,
+     "unflagged": 1335,
+     "net_flagged_sum": 200.9024,
+     "net_unflagged_sum": 2682.8292
+    },
+    "2024-03-14": {
+     "events": 3120,
+     "flagged": 215,
+     "unflagged": 2905,
+     "net_flagged_sum": 451.6523,
+     "net_unflagged_sum": 5806.5853
+    }
+   },
+   "events": 4554,
+   "flagged": 314,
+   "share_flagged": 0.06895037329819939,
+   "mean_net_flagged": 2.0781996815286625,
+   "mean_net_unflagged": 2.002220400943396,
+   "D_pooled": 0.07597928058526637,
+   "D_bootstrap_90pct": {
+    "p5": 0.01970728407672251,
+    "p50": 0.07597928058526637,
+    "p95": 0.10188382820317843,
+    "valid_resamples": 10000,
+    "note": "COARSE: the day blocks that finished"
+   }
+  }
+ },
+ "decision": {
+  "p5_clear": -0.015025255102040669,
+  "gate_off_v1_7": true
+ }
+}

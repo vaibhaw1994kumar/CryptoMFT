@@ -283,3 +283,18 @@ class HorizonTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class V17Tests(unittest.TestCase):
+    def test_v1_7_is_v1_6_with_block_on_toxic_off_and_nothing_else(self):
+        """Owner 10 Nov (the HOLDOUT gate score): v1_7 = v1_6 + arb.block_on_toxic false. The table pin, the runtime and every other setting are v1_6's."""
+        from new_backtest.profiles import apply_profile, load_profile
+
+        a, b = load_profile("perp_perp_maker_taker_v1_6"), load_profile("perp_perp_maker_taker_v1_7")
+        self.assertEqual((a["arb"]["block_on_toxic"], b["arb"]["block_on_toxic"]), (True, False))
+        strip = lambda d: {k: v for k, v in d.items() if k not in ("name", "description", "decision_status") and not k.startswith("_")} | {"arb": {k: v for k, v in d["arb"].items() if k != "block_on_toxic"}}
+        self.assertEqual(strip(a), strip(b))
+        kw = dict(pair="SOLUSDT", start_date="2024-03-11", end_date="2024-03-11", data_root="", output_dir="", dataset="mar2024")
+        ca, cb = apply_profile(a, **kw), apply_profile(b, **kw)
+        self.assertEqual((ca.arb.block_on_toxic, cb.arb.block_on_toxic, cb.runtime), (True, False, "session"))
+        self.assertEqual(ca.arb.adverse_table.to_dict(), cb.arb.adverse_table.to_dict())

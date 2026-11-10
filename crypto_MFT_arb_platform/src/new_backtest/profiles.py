@@ -124,6 +124,7 @@ SWITCHES: tuple[Switch, ...] = (
     Switch("arb.loss_fail_bps", "CALIBRATED", note="SCENARIO, not calibrated (7.8 from a simulated hedge-failure study, not execution logs)"),
     Switch("arb.expected_hedge_move_bps_bid", "CALIBRATED", note="training-day executed hedge move"),
     Switch("adverse_table", "CALIBRATED", note="absent in every profile up to v1_5 (the single pinned hedge move is used); v1_6 (S1) pins a table fitted on market-data labels of TRAIN days only: expected hedge move by depth reached, volatility and flow, in place of that number in the quote price, the entry rule and the repricing rule"),
+    Switch("do_not_quote", "CALIBRATED", note="absent in every profile up to v1_6; v1_7 (S3, owner 10 Nov) pins a do-not-quote filter fitted on market-data labels of TRAIN days only (ridge of the 50 ms hedge-venue move on quote-time features; skip when the naive edge after fees plus the predicted move is below its threshold), in place of block_on_toxic. EXPLORATORY until simulator validation"),
     Switch("latency_preset", "CALIBRATED", note="ASSUMED until ollog measurements replace it"),
     Switch("margin", "MANDATORY", (None,), "margin model configured in a perp profile"),
     Switch("postonly_reject_model", "MANDATORY", ("off", None), "perp profile: PostOnly would-cross orders are rejected at exchange arrival time (lifecycle task 5); perp profiles only"),
@@ -230,7 +231,7 @@ def apply_profile(doc: dict, dataset: str | None = None, **overrides):
         raise ProfileError(f"profile {doc.get('name')}: " + "; ".join(bad))
     body = {k: v for k, v in doc.items() if not k.startswith("_") and k not in ("name", "description", "classification", "decision_status",
                                                                                "product_fee_consistency", "timing", "breaker", "margin",
-                                                                               "fee_presets", "calibration", "execution", "hedge_move_calibration", "adverse_table", "dataset_settings")}
+                                                                               "fee_presets", "calibration", "execution", "hedge_move_calibration", "adverse_table", "do_not_quote", "dataset_settings")}
     ds_applied = None
     ds_cfg = ((doc.get("dataset_settings") or {}).get(dataset) if dataset else None)
     if ds_cfg:
@@ -292,6 +293,9 @@ def apply_profile(doc: dict, dataset: str | None = None, **overrides):
         cfg.arb.adverse_table, at_info = load_adverse_table(doc, at, cfg.start_date)
         cfg.arb.adverse_horizon_s = float(at.get("horizon_s", 1.0))
         cfg.arb.adverse_requote_horizon_s = float(at["requote_horizon_s"]) if at.get("requote_horizon_s") is not None else None
+    dq = doc.get("do_not_quote")
+    if dq:
+        cfg.arb.do_not_quote, dq_info = load_do_not_quote(doc, dq, cfg.start_date)
     require_core_accounting(cfg, doc.get("name"))
     require_runtime(cfg, doc.get("name"))
     cfg.release_identity = release_identity(cfg, doc)
@@ -302,6 +306,8 @@ def apply_profile(doc: dict, dataset: str | None = None, **overrides):
         cfg.release_identity["hedge_move_calibration"] = hm_info
     if at:
         cfg.release_identity["adverse_table"] = {**at_info, "horizon_s": cfg.arb.adverse_horizon_s, "requote_horizon_s": cfg.arb.adverse_requote_horizon_s}
+    if dq:
+        cfg.release_identity["do_not_quote"] = dq_info
     return cfg
 
 
@@ -327,6 +333,28 @@ def load_adverse_table(doc: dict, at: dict, run_start: str):
         if h is not None and f"{float(h):g}" not in {f"{x:g}" for x in table.horizons_s}:
             raise ProfileError(f"profile {doc.get('name')}: adverse_table {key} {h} is not in the table's horizons {table.horizons_s}")
     return table, {"file": str(path), "sha256": got, "days": days, "dims": list(table.dims), "shrink_k": table.shrink_k, "events": table.fitted_on.get("events"), "version": table.version}
+
+
+def load_do_not_quote(doc: dict, dq: dict, run_start: str):
+    """S3: the DoNotQuoteFilter a profile pins: a data file whose sha256 the profile records, fitted on TRAIN days that all end before the run starts, from market-data labels only, with the feature names the code computes.
+    Refuses a missing file, bytes that no longer match the recorded hash, a file with no days or with a day on or after the run's start date, one not marked as fitted on market-data labels, and a feature list that is not the code's."""
+    from crypto_stat_arb.strategies.edge import QUOTE_FEATURE_NAMES, DoNotQuoteFilter
+    p = Path(dq["file"])
+    path = p if p.is_absolute() else PLATFORM_DIR / p
+    if not path.exists():
+        raise ProfileError(f"profile {doc.get('name')}: do_not_quote file {path} does not exist")
+    got = hashlib.sha256(path.read_bytes()).hexdigest()
+    if got != dq.get("sha256"):
+        raise ProfileError(f"profile {doc.get('name')}: do_not_quote {path.name} has sha256 {got}, the profile pins {dq.get('sha256')} (file edited after it was pinned)")
+    flt = DoNotQuoteFilter.load(path)
+    days = (flt.fitted_on or {}).get("days") or []
+    if not days or any(str(x) >= str(run_start) for x in days):
+        raise ProfileError(f"profile {doc.get('name')}: do_not_quote {path.name} must be fitted on TRAIN days strictly before the run start {run_start}; it lists {days}")
+    if (flt.fitted_on or {}).get("source") != "MARKET_DATA_LABELS":
+        raise ProfileError(f"profile {doc.get('name')}: do_not_quote {path.name} is not marked as fitted on market-data labels (fitted_on.source); a filter fitted on strategy fills is refused")
+    if tuple(flt.names) != tuple(QUOTE_FEATURE_NAMES):
+        raise ProfileError(f"profile {doc.get('name')}: do_not_quote {path.name} lists features {flt.names}, the code computes {QUOTE_FEATURE_NAMES}")
+    return flt, {"file": str(path), "sha256": got, "days": days, "horizon_s": flt.horizon_s, "threshold_bps": flt.threshold_bps, "events": (flt.fitted_on or {}).get("events"), "version": flt.version}
 
 
 def load_hedge_move_calibration(doc: dict, hm: dict, run_start: str) -> tuple[float, float, dict]:
