@@ -271,3 +271,93 @@ class CancelOnTripTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class PauseVersusTripTests(unittest.TestCase):
+    """Phase E (owner 9 Nov): a gateway disconnect while flat PAUSES the breaker (no new signals, auto-resume after the reconnect and the reconciliation of open orders); anything else on a down gateway TRIPS it
+    (manual reset). Both options default off: the breaker and its summary are then exactly what they were."""
+    OLD_SUMMARY_KEYS = {"tripped", "trip_count", "manual_reset_only", "manual_resets", "consecutive_failures_current", "unknown_orders_current", "trips"}
+
+    def breaker(self, **kw):
+        cfg = CircuitBreakerConfig(trip_on_gateway_down=True, heartbeat_timeout_s=5.0, **kw)
+        b = CircuitBreaker(cfg, BYBIT, BINANCE)
+        for mon in b.connectivity.values():
+            mon.record_heartbeat(0.0)
+        return b
+
+    @staticmethod
+    def heartbeats(b, ts):
+        for mon in b.connectivity.values():
+            mon.record_heartbeat(ts)
+
+    def test_a_disconnect_while_flat_pauses_and_blocks_new_signals_without_tripping(self):
+        b = self.breaker(pause_on_gateway_down_when_flat=True)
+        b.on_gateway_status(10.0, 0.0, 0, open_orders=0)
+        self.assertEqual((b.state(), b.is_paused(), b.is_tripped(), b.allow_signal(10.0, 0.0)), ("PAUSED", True, False, False))
+        self.assertEqual(len(b.pauses), 1)
+        self.assertEqual(len(b.trips), 0)
+
+    def test_it_resumes_by_itself_only_after_the_reconnect_and_the_reconciliation(self):
+        b = self.breaker(pause_on_gateway_down_when_flat=True)
+        b.on_gateway_status(10.0, 0.0, 0)
+        self.heartbeats(b, 12.0)
+        b.on_gateway_status(12.0, 0.0, 0, reconciled=False)
+        self.assertEqual(b.state(), "PAUSED")                                   # back up, open orders not yet reconciled
+        b.on_gateway_status(12.5, 0.0, 0, reconciled=True)
+        self.assertEqual((b.state(), b.allow_signal(12.5, 0.0), b.pauses[0].resumed_ts), ("OK", True, 12.5))
+        self.assertEqual(b.manual_resets, 0)                                    # nobody reset it
+
+    def test_a_disconnect_with_exposure_a_pending_hedge_or_an_open_order_trips(self):
+        for kw in (dict(net_abs=0.4, pending_hedges=0, open_orders=0), dict(net_abs=0.0, pending_hedges=1, open_orders=0), dict(net_abs=0.0, pending_hedges=0, open_orders=1)):
+            b = self.breaker(pause_on_gateway_down_when_flat=True)
+            b.on_gateway_status(10.0, **kw)
+            self.assertEqual((b.state(), len(b.pauses)), ("TRIPPED", 0), kw)
+            self.assertTrue(b.trips[0].cause.startswith("gateway_down"))
+            self.heartbeats(b, 12.0)
+            b.on_gateway_status(12.0, 0.0, 0)
+            self.assertEqual(b.state(), "TRIPPED", kw)                          # a trip does not clear by itself
+            b.reset()
+            self.assertEqual(b.state(), "OK")
+
+    def test_exposure_appearing_during_a_pause_escalates_to_a_trip(self):
+        b = self.breaker(pause_on_gateway_down_when_flat=True)
+        b.on_gateway_status(10.0, 0.0, 0)
+        self.assertEqual(b.state(), "PAUSED")
+        b.on_gateway_status(11.0, 0.3, 0)                                       # a late fill: not flat any more while the gateway is still down
+        self.assertEqual(b.state(), "TRIPPED")
+
+    def test_with_the_option_off_a_disconnect_trips_as_before_and_the_summary_keeps_its_keys(self):
+        b = self.breaker()
+        b.on_gateway_status(10.0, 0.0, 0)
+        self.assertEqual((b.state(), len(b.pauses)), ("TRIPPED", 0))
+        self.assertEqual(set(b.summary()), self.OLD_SUMMARY_KEYS)
+        on = self.breaker(pause_on_gateway_down_when_flat=True)
+        self.assertTrue({"state", "pause_count", "pauses", "simulated_operator_resets"} <= set(on.summary()))
+
+    def test_the_simulated_operator_reset_waits_n_seconds_after_the_book_is_flat_and_is_labelled(self):
+        b = CircuitBreaker(CircuitBreakerConfig(consecutive_failures=1, simulated_operator_reset_s=300.0), BYBIT, BINANCE)
+        b.on_hedge_result(10.0, failed=True, net_abs=0.5, pending_hedges=0)
+        self.assertTrue(b.is_tripped())
+        self.assertFalse(b.maybe_simulated_operator_reset(20.0, 0.5, 0))        # exposure remains: never
+        self.assertFalse(b.maybe_simulated_operator_reset(30.0, 0.0, 0))        # flat from 30 s
+        self.assertFalse(b.maybe_simulated_operator_reset(329.0, 0.0, 0))
+        self.assertFalse(b.maybe_simulated_operator_reset(100.0, 0.2, 0))       # exposure again: the flat clock restarts
+        self.assertFalse(b.maybe_simulated_operator_reset(400.0, 0.0, 1))       # an open order: not flat
+        self.assertFalse(b.maybe_simulated_operator_reset(500.0, 0.0, 0))
+        self.assertTrue(b.maybe_simulated_operator_reset(800.0, 0.0, 0))
+        self.assertEqual((b.state(), b.simulated_operator_resets, b.manual_resets), ("OK", 1, 0))
+        self.assertIn("SIMULATED_OPERATOR_RESET after 300 s", b.summary()["simulated_operator_reset_label"])
+
+    def test_no_simulated_reset_unless_configured_and_a_manual_reset_still_clears_a_pause(self):
+        b = CircuitBreaker(CircuitBreakerConfig(consecutive_failures=1), BYBIT, BINANCE)
+        b.on_hedge_result(10.0, failed=True, net_abs=0.0, pending_hedges=0)
+        self.assertFalse(b.maybe_simulated_operator_reset(10_000.0, 0.0, 0))
+        self.assertTrue(b.is_tripped())
+        p = self.breaker(pause_on_gateway_down_when_flat=True)
+        p.on_gateway_status(10.0, 0.0, 0)
+        p.reset()
+        self.assertEqual((p.state(), p.manual_resets), ("OK", 1))
+
+    def test_a_non_positive_reset_time_is_refused(self):
+        with self.assertRaises(ValueError):
+            CircuitBreakerConfig(simulated_operator_reset_s=0)
