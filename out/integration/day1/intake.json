@@ -1,0 +1,24 @@
+{
+ "session_id": "e9b81728a3054812a48035a1b3e02d42",
+ "parts_in_catalog": 1452,
+ "checked": 5808,
+ "ok": 5808,
+ "mismatch": [],
+ "missing_on_disk_by_type": {
+  "bbo.jsonl": 1452,
+  "derivatives.jsonl": 1452,
+  "quarantine.jsonl": 1452,
+  "raw.jsonl": 1452,
+  "raw_manifest.json": 1452,
+  "wire.jsonl": 1452
+ },
+ "present_by_type": {
+  "canonical.jsonl": 1452,
+  "live_part_manifest.json": 1452,
+  "trace.jsonl": 1452,
+  "trades.jsonl": 1452
+ },
+ "parts_missing": [],
+ "extra_files": [],
+ "seconds": 19.8
+}

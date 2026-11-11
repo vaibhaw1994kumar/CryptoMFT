@@ -148,6 +148,97 @@ class SessionReplayEndToEnd(unittest.TestCase):
             self.assertTrue(re.fullmatch(r"(self\.observer = None.*|if self\.observer is not None( and to in \(HedgeState\.ESCALATED, HedgeState\.UNWINDING\))?:|self\.observer\.\w+\(.*\))", ln), ln)
 
 
+def _row_snapshot(eid, venue, seq, ts, bid, ask):
+    return {"event_id": eid, "event_type": "BOOK_SNAPSHOT", "venue": venue, "instrument_id": "SOL-USDT-PERP", "exchange_ts_ns": ts, "receive_ts_ns": ts + 1_000_000, "sequence": seq,
+            "bids": [{"price": str(bid), "quantity": "50"}], "asks": [{"price": str(ask), "quantity": "50"}]}
+
+
+def _row_trade(eid, venue, ts, price, qty, side):
+    return {"event_id": eid, "event_type": "TRADE", "venue": venue, "instrument_id": "SOL-USDT-PERP", "trade_id": eid, "exchange_ts_ns": ts, "source_ts_ns": ts, "receive_ts_ns": ts + 1_000_000,
+            "price": price, "quantity": qty, "aggressor_side": side}
+
+
+class RecordedSessionReader(unittest.TestCase):
+    """Owner 11 Nov (the 1-day replay): the recorder's session directory as a STREAM of core events, one part at a time, in the recorder's own arrival order."""
+
+    def _write(self, root, parts):
+        import gzip
+        import json
+        for i, (can, trd, trace) in enumerate(parts, start=1):
+            d = Path(root) / f"part-{i:06d}"
+            d.mkdir()
+            for name, rows in (("canonical", can), ("trades", trd), ("trace", trace)):
+                with gzip.open(d / f"{name}.jsonl.gz", "wt") as fh:
+                    for r in rows:
+                        fh.write(json.dumps(r) + "\n")
+
+    def test_events_come_in_trace_order_across_parts_and_non_market_lines_are_skipped(self):
+        import tempfile
+        from types import GeneratorType
+        from crypto_stat_arb.models import MarketEvent, TradeEvent
+        from new_backtest.session_replay import iter_recorded_events, load_recorded_events
+        p1 = ([_row_snapshot("c1", "BYBIT", 1, 10, 100.0, 100.1), _row_snapshot("c2", "BINANCE", 1, 12, 100.0, 100.1)], [_row_trade("t1", "BYBIT", 11, "100.05", "1", "BUY")],
+              [{"disposition": "CANONICAL", "canonical_event_id": "c1"}, {"disposition": "BBO", "canonical_event_id": "x"}, {"disposition": "TRADE", "canonical_event_id": "t1"},
+               {"disposition": "CONTROL", "canonical_event_id": "y"}, {"disposition": "CANONICAL", "canonical_event_id": "c2"}])
+        p2 = ([_row_snapshot("c3", "BYBIT", 2, 20, 100.0, 100.2)], [], [{"disposition": "DERIVATIVE", "canonical_event_id": "z"}, {"disposition": "CANONICAL", "canonical_event_id": "c3"}])
+        with tempfile.TemporaryDirectory() as d:
+            self._write(d, [p1, p2])
+            it = iter_recorded_events(d)
+            self.assertIsInstance(it, GeneratorType)                           # a stream: nothing is read until it is asked for
+            got = list(it)
+            self.assertEqual([e.event_id for e in got], ["c1", "t1", "c2", "c3"])
+            self.assertEqual([type(e) for e in got], [MarketEvent, TradeEvent, MarketEvent, MarketEvent])
+            self.assertEqual([e.event_id for e in load_recorded_events(d)], ["c1", "t1", "c2", "c3"])
+
+    def test_a_trace_line_whose_row_is_missing_raises_it_is_never_skipped(self):
+        import tempfile
+        from new_backtest.session_replay import iter_recorded_events
+        with tempfile.TemporaryDirectory() as d:
+            self._write(d, [([], [], [{"disposition": "CANONICAL", "canonical_event_id": "gone"}])])
+            with self.assertRaises(KeyError):
+                list(iter_recorded_events(d))
+
+
+@unittest.skipUnless(SLICES.is_dir(), "March slices not available (the profile needs a data root)")
+class RecordedReplayAndDecomposedMarkouts(unittest.TestCase):
+    """The same synthetic stream, as recorded core events: the recorded path runs the session, and the decomposed markouts (M = C + D, mid before the fill's event) are an option that changes nothing else."""
+
+    @staticmethod
+    def _core_events():
+        from new_backtest.canonical_feed import CanonicalFeed
+        feed = CanonicalFeed("SOL-USDT-PERP", venue_names={"bybit": "BYBIT", "binance": "BINANCE"})
+        return list(feed.convert(stream()))
+
+    def _replay(self, **kw):
+        profile = load_profile("perp_perp_maker_taker_v1_5")
+        cfg = apply_profile(profile, dataset="mar2024", data_root=str(SLICES), pair="SOLUSDT", start_date="2024-03-11", end_date="2024-03-11", output_dir="/tmp/x_d5_rec")
+        cfg.arb.max_position_base = 1.0
+        return SessionReplay(cfg, profile, recorded=True, **kw)
+
+    def test_the_recorded_run_trades_and_the_decomposed_option_changes_nothing_else(self):
+        plain = self._replay().run_recorded(iter(self._core_events()))
+        dec = self._replay(decompose_markouts=True).run_recorded(iter(self._core_events()))
+        self.assertEqual(sorted(f["venue"] for f in plain["fills"]), ["BINANCE", "BYBIT"])              # a maker fill by a print and its hedge
+        for key in ("signals", "orders", "fills", "positions", "cash_by_venue"):
+            self.assertEqual(plain[key], dec[key], key)
+        self.assertNotIn("markout_decomposed", plain)
+        md = dec["markout_decomposed"]
+        self.assertEqual(md["fills_skipped_no_mid_before"], 0)
+        rows = dec["_markout_rows"]
+        self.assertTrue(rows)
+        for r in rows:
+            self.assertAlmostEqual(r["m_bps"], r["captured_bps"] + r["adverse_bps"])
+            self.assertAlmostEqual(r["net_bps"], r["m_bps"] + r["fee_bps"])
+        self.assertEqual({r["role"] for r in rows}, {"maker", "taker"})
+        self.assertIn("BYBIT|maker", md["by_venue_role"])
+
+    def test_run_recorded_needs_the_recorded_flag(self):
+        profile = load_profile("perp_perp_maker_taker_v1_5")
+        cfg = apply_profile(profile, dataset="mar2024", data_root=str(SLICES), pair="SOLUSDT", start_date="2024-03-11", end_date="2024-03-11", output_dir="/tmp/x_d5_rec")
+        with self.assertRaises(ValueError):
+            SessionReplay(cfg, profile).run_recorded(iter(()))
+
+
 class MarkoutsOffByDefault(unittest.TestCase):
     def test_a_session_without_horizons_has_no_tracker_and_one_with_horizons_has_one(self):
         from crypto_stat_arb.config import load_config

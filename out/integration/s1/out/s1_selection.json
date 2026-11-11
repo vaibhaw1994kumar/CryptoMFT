@@ -1,5 +1,6 @@
 {
  "label": "EXPLORATORY: S1 adverse-selection table; market-data labels only",
+ "data_resolution_label": "50 ms is below the data resolution for March 2024 (Bybit receive time constructed, Binance best bid/ask): the 50 ms hedge-move label and every table cell read at that horizon are on a time scale the data cannot resolve; the 1 s labels are not affected.",
  "train_days": [
   "2024-03-01",
   "2024-03-02",

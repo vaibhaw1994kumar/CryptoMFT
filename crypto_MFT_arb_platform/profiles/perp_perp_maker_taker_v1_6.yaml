@@ -1,3 +1,4 @@
+# Owner 11 Nov (S1 label check): the 50 ms hedge-move horizon of the adverse table is below the data resolution for March 2024 (Bybit receive time constructed, Binance best bid/ask). Label only: no number, no switch and no table changed (decision_status.s1_label_resolution).
 # perp_perp_maker_taker_v1_6 = perp_perp_maker_taker_v1_5 + ONE switch (owner 9 Nov, S1): adverse_table. The strategy's expected hedge move per side (the pinned -0.488 bps) is replaced by a table fitted from MARKET-DATA labels only
 # (every public print on Bybit that would fill a passive quote; the Binance mid move at 50 ms and at 1 s afterwards), by depth reached, hedge-mid volatility and same-direction flow; TRAIN 03-01..03-07, scheme and shrinkage chosen on SELECT, HOLDOUT never read.
 # block_on_toxic is NOT changed here (one change at a time); the table-with-toxic-gate-off variant is a separate labelled run.
@@ -60,6 +61,7 @@ decision_status:                         # carried into every result's release_i
   queue_parameters: SPOT_PRIOR_PERP_UNVALIDATED   # decision E: calibrated on Bybit SPOT orders, never validated on the perp target
   hedge_move: PROBE_ARRIVAL_ESTIMATE_45MS_PINNED_BY_SHA256_EXPLORATORY
   adverse_table: MARKET_DATA_LABELS_TRAIN_ONLY_PINNED_BY_SHA256_EXPLORATORY   # S1: replaces the single hedge-move number in the quote price, the entry rule and the repricing rule
+  s1_label_resolution: BELOW_DATA_RESOLUTION_50MS_MARCH_2024_BYBIT_RECEIVE_TIME_CONSTRUCTED_BINANCE_BEST_BID_ASK   # owner 11 Nov: 50 ms is below the data resolution for March 2024 (Bybit receive time constructed, Binance best bid/ask); the 1 s table is not affected
   data_manifest: REQUIRED_AT_RUN                  # ladder step 1: the runner supplies the manifest path; a truncated day needs a written reason
   unknown_queue_fit: PER_DAY_FILE_FROM_STRICTLY_EARLIER_DAYS   # ladder step 6: the runner supplies the day's fit; the profile alone cannot run a fitted queue
 product_fee_consistency: true            # MANDATORY: fee presets must be perp presets

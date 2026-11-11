@@ -51,7 +51,8 @@ from .event_loader import BOOK, DELTA, delta_fields, snapshot_levels
 from .order_book import OrderBook
 
 # The dated price grid per dataset (the Phase B data checks' ticks) and the quantity step. The step is ASSUMED: no instrument master is stored for these datasets (lot NOT_MEASURED).
-DATED_TICKS = {"2022": {"bybit": 0.005, "binance": 0.001}, "2024": {"bybit": 0.001, "binance": 0.001}}
+DATED_TICKS = {"2022": {"bybit": 0.005, "binance": 0.001}, "2024": {"bybit": 0.001, "binance": 0.001},
+               "2026": {"bybit": 0.01, "binance": 0.01}}          # 2026: the published rules of 8 Nov 2026 (config/instrument_rules_solusdt_perp.json), checked against the recorded 2026-10-29 books
 _RULES_FILE = Path(__file__).resolve().parents[2] / "config" / "instrument_rules_solusdt_perp.json"
 
 
@@ -87,10 +88,21 @@ class TracedRejects(dict):
 class SessionReplay:
     """One replay on the session. `stream` is any iterable of `TimedEvent` built with `decimal_numbers=True` (the real feed or a synthetic list); consumed lazily."""
 
-    def __init__(self, config, profile: dict, *, stream: Iterable | None = None, ticks: dict[str, float] | None = None) -> None:
+    def __init__(self, config, profile: dict, *, stream: Iterable | None = None, ticks: dict[str, float] | None = None, recorded: bool = False,
+                 decompose_markouts: bool = False) -> None:
         if config.runtime != "session":
             raise ValueError("SessionReplay runs the session runtime only")
         self.config, self.profile = config, profile
+        # Decomposed markouts (owner 11 Nov, the 09 Nov note): captured / adverse / M / fee / net per fill and horizon, from the replay's own fills, with the mid BEFORE the event that caused the fill
+        # (m(t-)) and the mid in force at each horizon. Observation only; off by default, so no other run changes.
+        self.decomp = None
+        if decompose_markouts:
+            from crypto_stat_arb.simulation.latency_model import MarkoutTracker
+            self.decomp = MarkoutTracker(tuple(config.markout_horizons_s), decompose=True)
+        self._mid_pre: dict[str, float] = {}
+        self._decomp_pos = 0
+        self.decomp_skipped_no_mid = 0
+        self.recorded = recorded          # the input is a recorded live session (core events already): `run_recorded`; no venue-truth books (they are built from raw research events)
         venues = tuple(config.venues)
         self.venues = venues
         self.names = {v: v.upper() for v in venues}
@@ -117,7 +129,7 @@ class SessionReplay:
         self.venue_span: dict[str, list[int]] = {}
         self.book_only_ns_by_day: dict[str, int] = {}
         self.truth = None
-        if config.timing is not None and config.timing.truth_books:       # WP3 truth books, the shared rule (timing.TruthBooks): taker arrivals and PostOnly checks use the venue-truth book at the arrival's exchange time
+        if config.timing is not None and config.timing.truth_books and not recorded:       # WP3 truth books, the shared rule (timing.TruthBooks): taker arrivals and PostOnly checks use the venue-truth book at the arrival's exchange time
             truth_books = {v: OrderBook(v, config.pair, self.venue_specs[v].delta_semantics, tape_repair=config.book_tape_repair, own_overlay=config.own_impact == "overlay",
                                         message_atomic=config.message_atomic_book) for v in venues}
             self.truth = TruthBooks(truth_books, self._truth_apply, message_atomic=config.message_atomic_book, aligner_of=lambda: self.latency.aligner, stats=self.timing_stats)
@@ -207,20 +219,58 @@ class SessionReplay:
     # -- loop --------------------------------------------------------------------------------------------------------------
 
     def run(self) -> dict[str, Any]:
+        return self._run_events(self.feed.convert(self._with_truth(self._timed_stream())))
+
+    def run_recorded(self, events: Iterable) -> dict[str, Any]:
+        """The same loop on a recorded LIVE session's core events (`iter_recorded_events`): nothing is converted, the receive time of each event is the clock."""
+        if not self.recorded:
+            raise ValueError("run_recorded needs SessionReplay(..., recorded=True)")
+        return self._run_events(events)
+
+    def _run_events(self, events: Iterable) -> dict[str, Any]:
         limit_ns = None if self.config.max_event_ts is None else int(self.config.max_event_ts * _NS)
-        for event in self.feed.convert(self._with_truth(self._timed_stream())):
+        for event in events:
             if self.config.max_events is not None and sum(self.events.values()) >= self.config.max_events:
                 break
             if limit_ns is not None and event.receive_ts_ns > limit_ns:
                 break
             self.last_ns = event.receive_ts_ns
+            if self.decomp is not None and self.decomp.due(self.last_ns / _NS):
+                self.decomp.resolve_asof(self.last_ns / _NS, self._mid_pre)        # the mids as they stood BEFORE this event: the mid at each target
             if isinstance(event, TradeEvent):
                 self._trade(event)
             else:
                 self._book(event)
+            if self.decomp is not None:
+                self._decomp_after(event)
         self.session.drain()
         self.session.resolve_markouts(self.last_ns, finalize=True)
+        if self.decomp is not None:
+            self._decomp_after(None)
+            end = self.last_ns / _NS + 1e-9
+            self.decomp.resolve_asof(end, self._mid_pre)
+            self.decomp.resolve_asof(end, self._mid_pre, finalize=True)
         return self.result()
+
+    def _decomp_after(self, event) -> None:
+        """Record the fills this event caused with the mid before it, then move that mid on to the state after it."""
+        events = self.session.ledger.events
+        while self._decomp_pos < len(events):
+            e = events[self._decomp_pos]
+            self._decomp_pos += 1
+            if e.get("event_type") != "FILL":
+                continue
+            venue = e["venue"]
+            m0 = self._mid_pre.get(venue)
+            if m0 is None or m0 <= 0:
+                self.decomp_skipped_no_mid += 1
+                continue
+            role = "maker" if (e.get("order") or {}).get("post_only") else "taker"
+            self.decomp.record_fill(e["ts_ns"] / _NS, venue, str(e["side"]).lower(), float(e["fill_price"]), float(e["fill_quantity"]), role, mid_at_fill=m0, fee=float(e.get("fee_delta") or 0.0))
+        if event is not None and not isinstance(event, TradeEvent):
+            book = self.session.books[(event.venue, event.instrument_id)]
+            if book.bids and book.asks:
+                self._mid_pre[event.venue] = float((book.best_bid + book.best_ask) / 2)
 
     def _feed_venue(self, core_name: str) -> str:
         return next(v for v, n in self.names.items() if n == core_name)
@@ -415,6 +465,10 @@ class SessionReplay:
                                   "rejects": {k: v for k, v in self.strategy.rejects.items() if v}},
             "reject_trace": self.reject_trace,
             "execution_layer": s.intent_report(), "intent_journal": list(s.intent_observer.layer.journal) if s.intent_observer is not None else None, "intent_fills": list(s.intent_observer.layer.fills) if s.intent_observer is not None else None,
+            **({} if self.decomp is None else {"markout_decomposed": {
+                "label": "EXPLORATORY: decomposed markouts (captured C, adverse D, M = C + D, fee, net) per fill and horizon, bps of the mid at the fill, positive = good for us; mid at the fill = the mid before the event that caused it",
+                "by_venue_role": self.decomp.decomposed_summary(by=("venue", "role")), "excluded_counts": self.decomp.excluded_counts(), "fills_skipped_no_mid_before": self.decomp_skipped_no_mid,
+                "rows": len(self.decomp.rows), "age_rule": "off (no mid_max_age_s)"}, "_markout_rows": list(self.decomp.rows)}),
             "markout_summary": s.markouts.summary() if s.markouts is not None else None, "markout_by_venue_role": s.markouts.summary_by_venue_role() if s.markouts is not None else None,
             "gate_events": [{k: (str(v) if isinstance(v, Decimal) else v) for k, v in e.items() if k in ("event_type", "ts_ns", "reason", "chain_id", "parent_id")}
                             for e in s.ledger.events if e["event_type"] in ("HEDGE_DISPATCH_HELD", "TIME_INTEGRITY_BLOCK", "ORDER_LIFETIME_EXPIRED", "ORDER_REJECT_CLASSIFIED", "HEDGE_CAP_BREACH_AT_DISPATCH", "HEDGE_ALARM")][:500],
@@ -455,6 +509,10 @@ def write_result(result: dict, out_dir: Path) -> None:
             with (out_dir / f"{name}.jsonl").open("w") as fh:
                 for row in result[key]:
                     fh.write(json.dumps(row, default=str) + "\n")
+    if result.get("_markout_rows"):
+        with (out_dir / "session_markouts_decomposed.jsonl").open("w") as fh:
+            for row in result["_markout_rows"]:
+                fh.write(json.dumps(row, default=str) + "\n")
     if result.get("intent_journal") is not None:       # 11 Nov (09 Nov markout note): linked pair economics per maker fill, a new file; reads what the run wrote, changes nothing in it
         from crypto_stat_arb.metrics import pair_economics
         pe = pair_economics(result["fills"], result["intent_journal"],
@@ -463,7 +521,7 @@ def write_result(result: dict, out_dir: Path) -> None:
             for row in pe["rows"]:
                 fh.write(json.dumps(row, default=str) + "\n")
         (out_dir / "session_pair_economics.json").write_text(json.dumps({"label": "EXPLORATORY: linked pair economics per maker fill, session runtime", "summary": pe["summary"], "metadata": pe["metadata"]}, indent=1, default=str))
-    (out_dir / "session_manifest.json").write_text(json.dumps({k: v for k, v in result.items() if k not in ("signals", "orders", "fills", "reject_trace", "intent_journal", "intent_fills")}, indent=1, default=str))
+    (out_dir / "session_manifest.json").write_text(json.dumps({k: v for k, v in result.items() if k not in ("signals", "orders", "fills", "reject_trace", "intent_journal", "intent_fills", "_markout_rows")}, indent=1, default=str))
 
 
 # ---- parity (D5): v1_5 on the session against v1_4 on the backtester's loop ----------------------------------------------------------------------------------------------------
@@ -647,11 +705,13 @@ def _open_jsonl(path: Path):
     return path.open()
 
 
-def load_recorded_events(session_dir) -> list:
-    """A recorded LIVE session (the recorder's directory) as one event list in the recorder's own arrival order (trace.jsonl): books from canonical.jsonl, public prints from trades.jsonl. Ticker, control and
-    derivative frames are not market events; the book connection's control frames are `load_keepalive_notes`. Accepts both plain .jsonl and gzip-compressed .jsonl.gz files."""
-    can, trades, order = {}, {}, []
+def iter_recorded_events(session_dir):
+    """A recorded LIVE session (the recorder's directory) as a stream of core events in the recorder's own arrival order (trace.jsonl): books from canonical.jsonl, public prints from trades.jsonl. Ticker, control,
+    best-bid/ask and derivative frames are not market events; the book connection's control frames are `load_keepalive_notes`. Accepts plain .jsonl and gzip-compressed .jsonl.gz files.
+    One part at a time (owner 11 Nov, the 1-day replay): a day of SOLUSDT is about 4.9 million events, more than a list of them holds in memory. Every trace line of a part refers to a row of the SAME part
+    (checked on the 2026-10-29 capture: 0 unresolved of 4.9 million); a reference that is not found raises, never skips."""
     for part in sorted(Path(session_dir).glob("part-*")):
+        can, trades = {}, {}
         with _open_jsonl(part / "canonical.jsonl") as fh:
             for line in fh:
                 row = json.loads(line)
@@ -661,14 +721,17 @@ def load_recorded_events(session_dir) -> list:
                 row = json.loads(line)
                 trades[row["event_id"]] = row
         with _open_jsonl(part / "trace.jsonl") as fh:
-            order += [json.loads(line) for line in fh]
-    out = []
-    for row in order:
-        if row["disposition"] == "CANONICAL":
-            out.append(MarketEvent.from_dict(can[row["canonical_event_id"]]))
-        elif row["disposition"] == "TRADE":
-            out.append(TradeEvent.from_dict(trades[row["canonical_event_id"]]))
-    return out
+            for line in fh:
+                row = json.loads(line)
+                if row["disposition"] == "CANONICAL":
+                    yield MarketEvent.from_dict(can[row["canonical_event_id"]])
+                elif row["disposition"] == "TRADE":
+                    yield TradeEvent.from_dict(trades[row["canonical_event_id"]])
+
+
+def load_recorded_events(session_dir) -> list:
+    """The whole recorded session as one list (a short capture; for a day use `iter_recorded_events`)."""
+    return list(iter_recorded_events(session_dir))
 
 
 def load_keepalive_notes(session_dir) -> list[tuple[int, str]]:

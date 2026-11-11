@@ -1,0 +1,27 @@
+{
+ "day": "2024-03-07",
+ "events": 792087,
+ "events_with_a_binance_update_at_the_same_exchange_ts": 14389,
+ "share_tied": 0.018165933792626314,
+ "wall_s": 816.3,
+ "move_0.05s_tied": {
+  "n": 14389,
+  "mean_bps": -0.25016347088037005,
+  "median_bps": -0.0
+ },
+ "move_0.05s_untied": {
+  "n": 777698,
+  "mean_bps": -0.21060090437657458,
+  "median_bps": 0.0
+ },
+ "move_1s_tied": {
+  "n": 14389,
+  "mean_bps": -0.5059726002378178,
+  "median_bps": -0.32275879876399705
+ },
+ "move_1s_untied": {
+  "n": 777694,
+  "mean_bps": -0.47942818917468777,
+  "median_bps": -0.23780647309429861
+ }
+}

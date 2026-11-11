@@ -1,0 +1,141 @@
+{
+ "trades_by_venue": {
+  "BINANCE": 2187529,
+  "BYBIT": 544531
+ },
+ "trade_quality_flags": {
+  "BINANCE|<none>": 2187529,
+  "BYBIT|<none>": 544531
+ },
+ "flagged_trades_by_venue_and_utc_hour": {},
+ "flag_samples": [],
+ "trace_dispositions": {
+  "CANONICAL": 2191597,
+  "CONTROL": 9393,
+  "DERIVATIVE": 441328,
+  "BBO": 11665562,
+  "TRADE": 2732060
+ },
+ "gaps_by_venue_and_stream": {
+  "BYBIT|CANONICAL": {
+   "n_over_0.5s": 336,
+   "n_over_1s": 93,
+   "n_over_5s": 8,
+   "longest_s": 8.414682881,
+   "longest_at_ns": 1793304255854936952
+  },
+  "BYBIT|DERIVATIVE": {
+   "n_over_0.5s": 3854,
+   "n_over_1s": 276,
+   "n_over_5s": 13,
+   "longest_s": 10.287726807,
+   "longest_at_ns": 1793306850683653980
+  },
+  "BYBIT|CONTROL": {
+   "n_over_0.5s": 5,
+   "n_over_1s": 5,
+   "n_over_5s": 5,
+   "longest_s": 36443.448815432,
+   "longest_at_ns": 1793304255914756971
+  },
+  "BYBIT|BBO": {
+   "n_over_0.5s": 4712,
+   "n_over_1s": 503,
+   "n_over_5s": 2,
+   "longest_s": 8.742002657,
+   "longest_at_ns": 1793310526633682865
+  },
+  "BINANCE|CANONICAL": {
+   "n_over_0.5s": 355,
+   "n_over_1s": 112,
+   "n_over_5s": 13,
+   "longest_s": 9.309470751,
+   "longest_at_ns": 1793306850778216389
+  },
+  "BINANCE|BBO": {
+   "n_over_0.5s": 446,
+   "n_over_1s": 122,
+   "n_over_5s": 1,
+   "longest_s": 5.690418726,
+   "longest_at_ns": 1793306851910213988
+  },
+  "BINANCE|DERIVATIVE": {
+   "n_over_0.5s": 50307,
+   "n_over_1s": 25313,
+   "n_over_5s": 15,
+   "longest_s": 10.208676718,
+   "longest_at_ns": 1793306851695594474
+  },
+  "BINANCE|TRADE": {
+   "n_over_0.5s": 24381,
+   "n_over_1s": 6559,
+   "n_over_5s": 17,
+   "longest_s": 10.710317922,
+   "longest_at_ns": 1793306910491972075
+  },
+  "BYBIT|TRADE": {
+   "n_over_0.5s": 27354,
+   "n_over_1s": 14141,
+   "n_over_5s": 697,
+   "longest_s": 29.901854584,
+   "longest_at_ns": 1793268598579574382
+  },
+  "BINANCE|CONTROL": {
+   "n_over_0.5s": 8104,
+   "n_over_1s": 6579,
+   "n_over_5s": 3091,
+   "longest_s": 237.802010122,
+   "longest_at_ns": 1793269195782805009
+  }
+ },
+ "gaps_over_5s_by_utc_hour": {
+  "BINANCE|BBO|20": 1,
+  "BINANCE|CANONICAL|12": 1,
+  "BINANCE|CANONICAL|20": 11,
+  "BINANCE|CANONICAL|23": 1,
+  "BINANCE|CONTROL|09": 4,
+  "BINANCE|CONTROL|10": 167,
+  "BINANCE|CONTROL|11": 202,
+  "BINANCE|CONTROL|12": 219,
+  "BINANCE|CONTROL|13": 214,
+  "BINANCE|CONTROL|14": 219,
+  "BINANCE|CONTROL|15": 216,
+  "BINANCE|CONTROL|16": 258,
+  "BINANCE|CONTROL|17": 238,
+  "BINANCE|CONTROL|18": 236,
+  "BINANCE|CONTROL|19": 204,
+  "BINANCE|CONTROL|20": 223,
+  "BINANCE|CONTROL|21": 237,
+  "BINANCE|CONTROL|22": 219,
+  "BINANCE|CONTROL|23": 235,
+  "BINANCE|DERIVATIVE|20": 15,
+  "BINANCE|TRADE|09": 3,
+  "BINANCE|TRADE|10": 2,
+  "BINANCE|TRADE|11": 3,
+  "BINANCE|TRADE|12": 5,
+  "BINANCE|TRADE|18": 2,
+  "BINANCE|TRADE|19": 1,
+  "BINANCE|TRADE|20": 1,
+  "BYBIT|BBO|20": 1,
+  "BYBIT|BBO|21": 1,
+  "BYBIT|CANONICAL|20": 8,
+  "BYBIT|CONTROL|20": 2,
+  "BYBIT|CONTROL|21": 3,
+  "BYBIT|DERIVATIVE|20": 13,
+  "BYBIT|TRADE|09": 11,
+  "BYBIT|TRADE|10": 153,
+  "BYBIT|TRADE|11": 176,
+  "BYBIT|TRADE|12": 132,
+  "BYBIT|TRADE|13": 49,
+  "BYBIT|TRADE|14": 25,
+  "BYBIT|TRADE|15": 8,
+  "BYBIT|TRADE|16": 4,
+  "BYBIT|TRADE|17": 25,
+  "BYBIT|TRADE|18": 40,
+  "BYBIT|TRADE|19": 58,
+  "BYBIT|TRADE|20": 5,
+  "BYBIT|TRADE|22": 6,
+  "BYBIT|TRADE|23": 5
+ },
+ "seconds": 110.5
+}

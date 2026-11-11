@@ -1,3 +1,4 @@
+# Owner 11 Nov (S1 label check): the 50 ms hedge-move horizon of the adverse table is below the data resolution for March 2024 (Bybit receive time constructed, Binance best bid/ask). Label only: no number, no switch and no table changed (decision_status.s1_label_resolution).
 # perp_perp_maker_taker_v1_7 = perp_perp_maker_taker_v1_6 + ONE switch (owner 10 Nov, S3 / the HOLDOUT gate score): arb.block_on_toxic false. EXPLORATORY. Evidence: out/integration/s3/study/s3_gate_holdout_report.json (sha256 e1db1d0cf6c847ec8162ef891f7c4b27dbcedb38f45d7c8de18814c2897b256f):
 # on HOLDOUT 2024-03-13 and 03-14 (full days; 03-15 had not finished, so TWO day blocks: the interval is degenerate) the events the gate flags earned +1.99 bps net each against +1.90 for the unflagged (strict queue rule; flagged minus unflagged +0.09, p5 -0.015 bps, the rule's bar is -1.0),
 # i.e. the gate does not protect anything on the market-data events; on SELECT (217 events) it removed 18 events at +2.07 bps each. The S3 filter that was to replace it was REJECTED on reduced data (rerun after Phase E), so v1_7 is the gate OFF, nothing in its place.
@@ -65,6 +66,7 @@ decision_status:                         # carried into every result's release_i
   queue_parameters: SPOT_PRIOR_PERP_UNVALIDATED   # decision E: calibrated on Bybit SPOT orders, never validated on the perp target
   hedge_move: PROBE_ARRIVAL_ESTIMATE_45MS_PINNED_BY_SHA256_EXPLORATORY
   adverse_table: MARKET_DATA_LABELS_TRAIN_ONLY_PINNED_BY_SHA256_EXPLORATORY   # S1: replaces the single hedge-move number in the quote price, the entry rule and the repricing rule
+  s1_label_resolution: BELOW_DATA_RESOLUTION_50MS_MARCH_2024_BYBIT_RECEIVE_TIME_CONSTRUCTED_BINANCE_BEST_BID_ASK   # owner 11 Nov: 50 ms is below the data resolution for March 2024 (Bybit receive time constructed, Binance best bid/ask); the 1 s table is not affected
   data_manifest: REQUIRED_AT_RUN                  # ladder step 1: the runner supplies the manifest path; a truncated day needs a written reason
   unknown_queue_fit: PER_DAY_FILE_FROM_STRICTLY_EARLIER_DAYS   # ladder step 6: the runner supplies the day's fit; the profile alone cannot run a fitted queue
 product_fee_consistency: true            # MANDATORY: fee presets must be perp presets

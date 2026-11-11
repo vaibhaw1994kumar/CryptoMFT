@@ -1,5 +1,6 @@
 {
  "label": "EXPLORATORY: S1 adverse-selection table scored ONCE on HOLDOUT, prediction metrics only; market-data labels, no strategy fill",
+ "data_resolution_label": "50 ms is below the data resolution for March 2024 (Bybit receive time constructed, Binance best bid/ask): the 50 ms hedge-move label and every table cell read at that horizon are on a time scale the data cannot resolve; the 1 s labels are not affected.",
  "table_sha256": "9c06b5c983e7d56cbaeacbd6eb188a6f42fa79246fd78e99febafbe090198854",
  "holdout_days": [
   "2024-03-13",
