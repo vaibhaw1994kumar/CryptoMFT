@@ -29,7 +29,11 @@ from .transfers import RebalanceRule, TransferEngine, TransferRoute
 from .risk import InventoryModel
 from .ledger import Ledger
 from .models import BookState, EventType, MarketEvent, Opportunity, PlanState, TradeEvent
-from .oms import OMS, instrument_assets
+from .oms import LIVE_ORDER_STATES, OMS, instrument_assets
+from .circuit_breaker import CircuitBreaker, CircuitBreakerConfig
+from .hedge_lifecycle import HedgeState
+from .ems.risk import RestingChild, plan_flatten_on_trip
+from .ems.risk_gate import ExposureView, GateChild, GateContext, GateLimits, evaluate as gate_evaluate
 from .orderbook import OrderBook
 from .plan_store import ParentPlanStore
 from .risk import RiskEngine
@@ -178,6 +182,9 @@ class TradingSession:
         gate_on_every_event: bool = False,
         markout_horizons_s: tuple[float, ...] | None = None,
         intent_journal: bool = False,
+        breaker_config: CircuitBreakerConfig | None = None,
+        risk_gate_mode: str = "off",
+        gate_limits: GateLimits | None = None,
     ) -> None:
         execution_mode = ExecutionMode(execution_mode)
         assert_execution_mode(
@@ -375,6 +382,27 @@ class TradingSession:
         self.opportunities_by_strategy: dict[str, int] = {}
         self._tracked_plans: dict[str, Any] = {}
         self.flattening = False
+        # Track A item 1 (owner 11 Nov): the circuit breaker (pause versus trip, flatten on trip, manual reset) and the pre-send risk gate on the session. Both OFF by default: with breaker_config None and
+        # risk_gate_mode "off" nothing below runs and every result is as before. The rules are the pure modules circuit_breaker.py, ems/risk.py (plan_flatten_on_trip) and ems/risk_gate.py.
+        if risk_gate_mode not in ("off", "count", "enforce"):
+            raise ValueError("risk_gate_mode must be off, count or enforce")
+        if breaker_config is not None and len(cfg.venues) != 2:
+            raise ValueError("the circuit breaker watches one venue pair")
+        self.breaker: CircuitBreaker | None = CircuitBreaker(breaker_config, cfg.venues[0], cfg.venues[1]) if breaker_config is not None else None
+        self.risk_gate_mode = risk_gate_mode
+        self.gate_limits = gate_limits
+        self.gate_counts: dict[str, int] = {}
+        self.breaker_alarms: list[dict[str, Any]] = []
+        self._breaker_pos = 0
+        self._breaker_seeded = False
+        self._breaker_state_logged = "OK"
+        self._breaker_chains: set[str] = set()
+        self._breaker_unknown: dict[str, int] = {}
+        self._breaker_trip_handled = False
+        self._breaker_attempt = 0
+        self._breaker_last_attempt_ns = 0
+        self._breaker_alarmed: set[str] = set()
+        self.signals_blocked_by_breaker = 0
 
     def _now(self, event: MarketEvent, now_ns: int | None) -> int:
         if now_ns is not None:
@@ -400,6 +428,8 @@ class TradingSession:
         self.events_processed += 1
         self.last_event_ts_ns = max(self.last_event_ts_ns, now)
         self.last_seen_ts_by_venue[event.venue] = event.receive_ts_ns
+        if self.breaker is not None and event.venue in self.breaker.connectivity:
+            self.breaker.connectivity[event.venue].record_heartbeat(event.receive_ts_ns / 1e9)       # any message from a venue proves its gateway reachable
         assessment = self.time_monitor.observe(event, now_ns=now)
         if assessment.blocking:
             self.ledger.record(
@@ -473,6 +503,7 @@ class TradingSession:
                     self._flatten_surviving_leg(result, now)
             self._evaluate_margin(now)
         self._notify_closed_plans()
+        self._breaker_step(now)
         if gate_allowed is None:
             required = tuple(
                 self.books[(venue, self.cfg.instrument_id)] for venue in self.cfg.venues
@@ -485,6 +516,9 @@ class TradingSession:
         last: Opportunity | None = None
         for strategy in self.strategies:
             if self.flattening and not hasattr(strategy, "force_exit"):
+                continue
+            if self.breaker is not None and not self.breaker.allow_signal(now / 1e9, self._net_abs()) and not hasattr(strategy, "force_exit"):
+                self.signals_blocked_by_breaker += 1           # PAUSED or TRIPPED: no new risk (a force_exit strategy still closes)
                 continue
             started = self.wall_ns()
             opportunity = strategy.evaluate(self.books, now)
@@ -522,6 +556,8 @@ class TradingSession:
         for (v, _), book in self.books.items():
             if v == venue:
                 book.note_venue_message(ts_ns)
+        if self.breaker is not None and venue in self.breaker.connectivity:
+            self.breaker.connectivity[venue].record_heartbeat(ts_ns / 1e9)
 
     def resync_if_due(self, now_ns: int) -> None:
         """For a caller that applies books itself: resync any book whose wait is over BEFORE applying the next event (`on_event` does the same at its start)."""
@@ -600,6 +636,8 @@ class TradingSession:
             maker_venue = next((v for v in self.maker_venues if v in (opportunity.buy_venue, opportunity.sell_venue)), None)
             if maker_venue is None:
                 raise ValueError(f"FILL_TRIGGERED needs a maker venue: none of maker_venues {self.maker_venues} is a venue of the opportunity ({opportunity.buy_venue}, {opportunity.sell_venue})")
+        if self.risk_gate_mode != "off" and not self._risk_gate_allows(opportunity, maker_venue, now):
+            return None
         plan = self.oms.execute(opportunity, self.books, dispatch_ts_ns=dispatch_ts, maker_venue=maker_venue)
         if hasattr(strategy, "on_plan_closed"):
             self._tracked_plans[plan.parent_id] = strategy
@@ -646,10 +684,180 @@ class TradingSession:
             del self._tracked_plans[parent_id]
             strategy.on_plan_closed(plan)
 
+    # -- circuit breaker and risk gate (Track A item 1, owner 11 Nov) -------------------------------------------------------------------------------------------------------------------------
+    def _net_abs(self) -> float:
+        return abs(float(sum(self.ledger.positions.values(), Decimal(0))))
+
+    def _base_by_venue(self) -> dict[str, float]:
+        out: dict[str, float] = {}
+        for (venue, _), qty in self.ledger.positions.items():
+            out[venue] = out.get(venue, 0.0) + float(qty)
+        return out
+
+    def _breaker_inputs(self) -> tuple[float, int, int, bool]:
+        """(|net base|, hedge chains not yet settled, our orders resting or in flight, True when no hedge chain is UNKNOWN: the open orders are reconciled)."""
+        pending = unknown = 0
+        for chains in self.oms.hedge_chains.values():
+            for chain in chains.values():
+                if chain.state not in (HedgeState.HEDGED, HedgeState.RECONCILED, HedgeState.FAILED):
+                    pending += 1
+                if chain.state == HedgeState.UNKNOWN:
+                    unknown += 1
+        open_orders = sum(1 for plan in self.oms.plans.values() for order in plan.children if order.state in LIVE_ORDER_STATES)
+        return self._net_abs(), pending, open_orders, unknown == 0
+
+    def _breaker_ingest(self, net: float, pending: int) -> None:
+        """Feed the breaker from the ledger events written since the last step: a hedge chain's first outcome (success or failure), a hedge going UNKNOWN and being resolved, a failed unwind."""
+        b = self.breaker
+        events = self.ledger.events
+        while self._breaker_pos < len(events):
+            e = events[self._breaker_pos]
+            self._breaker_pos += 1
+            kind, ts = e["event_type"], e["ts_ns"] / 1e9
+            if kind == "HEDGE_STATE":
+                chain, to, frm = e["chain_id"], e["to_state"], e["from_state"]
+                if chain not in self._breaker_chains and to in ("HEDGED", "RECONCILED", "REJECTED", "UNKNOWN", "ESCALATED", "FAILED"):
+                    self._breaker_chains.add(chain)           # the first outcome of a chain: a retry that later succeeds is still the failure it was
+                    b.on_hedge_result(ts, to not in ("HEDGED", "RECONCILED"), net, pending)
+                if to == "UNKNOWN":
+                    key = self._breaker_unknown.setdefault(chain, len(self._breaker_unknown) + 1)
+                    b.on_unknown_order(key, ts, "")
+                elif frm == "UNKNOWN" and chain in self._breaker_unknown:
+                    b.on_order_resolved(self._breaker_unknown[chain])
+            elif kind == "UNWIND_EXHAUSTED_ALARM":
+                b.on_failed_unwind(ts, net, pending)
+
+    def _breaker_step(self, now_ns: int) -> None:
+        """One breaker cycle on the session's clock: feed it, let it decide, and on a trip cancel the resting quotes and flatten the net (see `_breaker_on_trip`)."""
+        b = self.breaker
+        if b is None:
+            return
+        now = now_ns / 1e9
+        if not self._breaker_seeded:
+            self._breaker_seeded = True
+            for mon in b.connectivity.values():
+                mon.record_heartbeat(now)                      # start-up grace: a venue is not 'down' before its first message
+        net, pending, open_orders, reconciled = self._breaker_inputs()
+        self._breaker_ingest(net, pending)
+        b.on_net_update(now, net, pending)
+        b.check_unknown_orders(now, net, pending)
+        b.on_gateway_status(now, net, pending, open_orders, reconciled)
+        b.maybe_simulated_operator_reset(now, net, pending, open_orders)
+        state = b.state()
+        if state != self._breaker_state_logged:
+            self.ledger.record("BREAKER_STATE_TRANSITION", now_ns, previous_state=self._breaker_state_logged, state=state,
+                               cause=(b.trips[-1].cause if state == "TRIPPED" and b.trips else (b.pauses[-1].cause if state == "PAUSED" and b.pauses else "")))
+            self._breaker_state_logged = state
+        if state == "TRIPPED":
+            self._breaker_on_trip(now_ns, net)
+        elif self._breaker_trip_handled:
+            self._breaker_trip_handled, self._breaker_attempt = False, 0
+
+    def _breaker_on_trip(self, now_ns: int, net: float) -> None:
+        """A TRIP: new risk is already blocked. Cancel every resting PASSIVE order (the hedge and unwind children stay), then flatten the NET base with a risk-flatten plan that the OMS prices at the touch plus the
+        unwind band and retries on every new book; when the retry budget is gone with exposure open the plan becomes a persistent ALARM (no more sends). A manual `reset_breaker` is the only way out."""
+        b = self.breaker
+        first = not self._breaker_trip_handled
+        if first:
+            self._breaker_trip_handled = True
+            trip = b.trips[-1] if b.trips else None
+            self.ledger.record("BREAKER_TRIP", now_ns, cause=trip.cause if trip else "", net_base=net, flatten_mode="net")
+        else:
+            flatten_open = any(p.inherited_base and p.state != PlanState.CLOSED for p in self.oms.plans.values())
+            if net <= 1e-10 or flatten_open or now_ns - self._breaker_last_attempt_ns < 1_000_000_000:
+                return
+            self._breaker_attempt += 1
+        self._breaker_last_attempt_ns = now_ns
+        resting = [RestingChild(o.order_id, o.venue, "PASSIVE") for plan in self.oms.plans.values() for o in plan.children
+                   if o.order_role == "PRIMARY" and not o.reduce_only and o.state in LIVE_ORDER_STATES]
+        mid, touch, available = {}, {}, {}
+        for venue in self.cfg.venues:
+            book = self.books.get((venue, self.cfg.instrument_id))
+            ok = book is not None and book.state == BookState.VALID and bool(book.bids) and bool(book.asks)
+            available[venue] = ok
+            if ok:
+                touch[venue] = (float(book.best_bid), float(book.best_ask))
+                mid[venue] = (touch[venue][0] + touch[venue][1]) / 2
+        net_d = sum(self.ledger.positions.values(), Decimal(0))
+        steps = plan_flatten_on_trip(resting, self._base_by_venue(), mid, band_bps=float(self.oms.residual_policy.unwind_price_slippage_bps), attempt=self._breaker_attempt,
+                                     retry_budget=b.config.tripped_unwind_retries, available=available, touch=touch)
+        if any(step.kind == "CANCEL" for step in steps):
+            self.oms._cancel_orders("breaker trip", now_ns, venue=None, preserve_risk_reducing=True, ledger_event="BREAKER_TRIP_CANCEL")
+        for step in steps:
+            if step.kind == "FLATTEN":
+                qty = net_d if abs(float(net_d) - step.qty) < 1e-9 else Decimal(str(step.qty))
+                exposure = abs(qty) if step.side == "sell" else -abs(qty)
+                self.ledger.record("BREAKER_FLATTEN", now_ns, venue=step.venue, side=step.side, quantity=abs(qty), tactic=step.tactic, worst_price=step.worst_price, attempt=self._breaker_attempt)
+                self.oms.open_flatten_plan(step.venue, self.cfg.instrument_id, exposure, now_ns, reason="circuit breaker trip: flatten the net")
+            elif step.kind == "ALARM" and step.reason not in self._breaker_alarmed:
+                self._breaker_alarmed.add(step.reason)
+                alarm = {"ts_ns": now_ns, "reason": step.reason, "venue": step.venue, "quantity": step.qty}
+                self.breaker_alarms.append(alarm)
+                self.ledger.record("BREAKER_ALARM", now_ns, **{k: v for k, v in alarm.items() if k != "ts_ns"})
+
+    def reset_breaker(self, now_ns: int, operator_id: str = "") -> None:
+        """The manual reset, an operator action: the only way a TRIPPED breaker (or a persistent flatten alarm) is cleared."""
+        if self.breaker is None:
+            raise ValueError("no circuit breaker is configured")
+        self.breaker.reset()
+        self.ledger.record("BREAKER_RESET", now_ns, operator_id=operator_id)
+        self._breaker_state_logged = "OK"
+        self._breaker_trip_handled, self._breaker_attempt = False, 0
+        self._breaker_alarmed.clear()
+
+    def _gate_limits(self) -> GateLimits:
+        if self.gate_limits is not None:
+            return self.gate_limits
+        cap = float(self.oms.risk.limits.max_position_base)      # the profile config puts the net ceiling plus the fill headroom here
+        return GateLimits(net_ceiling=cap, fill_headroom=0.0, venue_cap=cap, band_bps=float(self.oms.residual_policy.unwind_price_slippage_bps))
+
+    def _risk_gate_allows(self, opportunity: Opportunity, maker_venue: str | None, now_ns: int) -> bool:
+        """The pre-send gate for the new-risk (maker) leg of an opportunity. `count`: evaluate and log what it would refuse, send anyway; `enforce`: refuse. (The hedge children are the OMS's and the
+        execution layer's: they reach the same rule through `gate_child`, wired in E0 step (c).)"""
+        venue = maker_venue or opportunity.buy_venue
+        buy = venue == opportunity.buy_venue
+        price = opportunity.buy_price if buy else opportunity.sell_price
+        child = GateChild("PRIMARY", "PASSIVE", venue, "buy" if buy else "sell", float(opportunity.quantity), opportunity.opportunity_id, limit_price=float(price))
+        decision = self.gate_child(child)
+        if decision.allowed:
+            return True
+        self.gate_counts[decision.reason] = self.gate_counts.get(decision.reason, 0) + 1
+        enforced = self.risk_gate_mode == "enforce"
+        self.ledger.record("RISK_GATE_REFUSED" if enforced else "RISK_GATE_WOULD_REFUSE", now_ns, opportunity_id=opportunity.opportunity_id, reason=decision.reason, detail=decision.detail,
+                           venue=venue, side=child.side, quantity=child.qty)
+        return not enforced
+
+    def gate_child(self, child: GateChild):
+        """Evaluate one child order against the session's state: the breaker, the reachable exposure (filled + resting primary orders + hedge children in UNKNOWN), the limits, the bands from the touch."""
+        resting: dict[tuple[str, str], float] = {}
+        unknown: dict[tuple[str, str], float] = {}
+        for plan in self.oms.plans.values():
+            for order in plan.children:
+                if order.state not in LIVE_ORDER_STATES and order.state.value != "TIMED_OUT":      # TIMED_OUT = UNKNOWN: it may still be live at the venue, so it counts
+                    continue
+                kind = unknown if order.state.value == "TIMED_OUT" else resting if order.order_role == "PRIMARY" else None
+                if kind is not None:
+                    key = (order.venue, order.side.value.lower())
+                    kind[key] = kind.get(key, 0.0) + float(order.quantity - order.filled_quantity)
+        touch, mid = {}, {}
+        for venue in self.cfg.venues:
+            book = self.books.get((venue, self.cfg.instrument_id))
+            if book is not None and book.state == BookState.VALID and book.bids and book.asks:
+                touch[venue] = (float(book.best_bid), float(book.best_ask))
+                mid[venue] = (touch[venue][0] + touch[venue][1]) / 2
+        ctx = GateContext(breaker_state=self.breaker.state() if self.breaker is not None else "OK",
+                          exposure=ExposureView(filled=self._base_by_venue(), resting=resting, unknown=unknown), limits=self._gate_limits(), mid=mid, touch=touch)
+        return gate_evaluate(child, ctx)
+
+    def breaker_report(self) -> dict[str, Any]:
+        return {"breaker": self.breaker.summary() if self.breaker is not None else None, "breaker_alarms": list(self.breaker_alarms), "signals_blocked_by_breaker": self.signals_blocked_by_breaker,
+                "risk_gate_mode": self.risk_gate_mode, "risk_gate_refusals_by_reason": dict(sorted(self.gate_counts.items()))}
+
     def tick(self, now_ns: int) -> int:
         """Run due timers without a market event (live idle periods)."""
         steps = self.oms.advance_time(now_ns, self.books)
         self._notify_closed_plans()
+        self._breaker_step(now_ns)
         if self.flattening:
             self.flatten_strategies(now_ns)
         return steps
@@ -701,7 +909,10 @@ class TradingSession:
                 "net_pnl": str(sum((plan.net_pnl for plan in plans), start=0)),
                 "summary": summary,
             }
-        return {"flattening": self.flattening, "strategies": report}
+        out: dict[str, Any] = {"flattening": self.flattening, "strategies": report}
+        if self.breaker is not None or self.risk_gate_mode != "off":
+            out["breaker_and_gate"] = self.breaker_report()
+        return out
 
     def drain(self, horizon_ns: int | None = None) -> dict[str, Any]:
         horizon = self.cfg.drain_horizon_ns if horizon_ns is None else horizon_ns

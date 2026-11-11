@@ -73,6 +73,15 @@ class CircuitBreakerConfig:
     # Recovery budget: keep sending unwind attempts even when tripped, up to this many
     tripped_unwind_retries: int = 10
 
+    # Phase E (owner 9 Nov): PAUSE versus TRIP. Both default OFF: with them off the breaker, its summary and every result are exactly as before.
+    # pause_on_gateway_down_when_flat: a gateway going down while |net| = 0, no hedge pending and no open own order PAUSES instead of tripping: no new signals,
+    #   and the breaker resumes by itself once every gateway is back AND the open orders have been reconciled (`reconciled=True`). Anything else on a down gateway
+    #   (exposure, a pending hedge, an open order) is a TRIP and needs a manual reset.
+    pause_on_gateway_down_when_flat: bool = False
+    # simulated_operator_reset_s (BACKTESTS ONLY, labelled in the summary): a TRIPPED breaker is reset by a simulated operator this many seconds after the book
+    #   is flat again (|net| = 0, no hedge pending, no open own order). Never while exposure remains. None = a trip stays until reset() is called.
+    simulated_operator_reset_s: float | None = None
+
     def __post_init__(self) -> None:
         if self.consecutive_failures is not None and self.consecutive_failures < 1:
             raise ValueError("consecutive_failures must be >= 1")
@@ -87,6 +96,8 @@ class CircuitBreakerConfig:
             raise ValueError("net_exposure_s must be > 0")
         if self.unknown_order_s is not None and self.unknown_order_s <= 0:
             raise ValueError("unknown_order_s must be > 0")
+        if self.simulated_operator_reset_s is not None and self.simulated_operator_reset_s <= 0:
+            raise ValueError("simulated_operator_reset_s must be > 0")
 
 
 @dataclass
@@ -110,6 +121,13 @@ class BreakerTrip:
     pending_hedges: int
     consecutive_failures_at_trip: int
     detail: str = ""
+
+
+@dataclass
+class BreakerPause:
+    ts: float
+    cause: str
+    resumed_ts: float | None = None
 
 
 @dataclass
@@ -169,6 +187,10 @@ class CircuitBreaker:
         self.venue_b = venue_b
 
         self._tripped = False
+        self._paused = False
+        self.pauses: list[BreakerPause] = []
+        self.simulated_operator_resets = 0
+        self._flat_since_while_tripped: float | None = None
         self._consecutive_failures = 0
         self._hedge_window: Deque[_HedgeEvent] = deque()
         self._hedge_last_n: Deque[bool] = deque(maxlen=config.failure_rate_window_n or 1)
@@ -235,12 +257,54 @@ class CircuitBreaker:
     def on_order_resolved(self, order_id: int) -> None:
         self._unknown_orders.pop(order_id, None)
 
-    def on_gateway_status(self, ts: float, net_abs: float, pending_hedges: int) -> None:
-        if not self._tripped and self.config.trip_on_gateway_down:
-            for venue, mon in self.connectivity.items():
-                if mon.is_down(ts):
-                    self._trip(ts, f"gateway_down: {venue}", net_abs, pending_hedges)
-                    break
+    def on_gateway_status(self, ts: float, net_abs: float, pending_hedges: int, open_orders: int = 0, reconciled: bool = True) -> None:
+        """`open_orders`: the number of our own orders resting or in flight; `reconciled`: the open orders have been checked against the venue after a reconnect (both only matter when
+        `pause_on_gateway_down_when_flat` is on)."""
+        if self._tripped:
+            return
+        down = next((venue for venue, mon in self.connectivity.items() if mon.is_down(ts)), None)
+        if self.config.pause_on_gateway_down_when_flat:
+            flat = net_abs <= 1e-10 and pending_hedges == 0 and open_orders == 0
+            if down is not None:
+                if flat and not self._paused:
+                    self._paused = True
+                    self.pauses.append(BreakerPause(ts, f"gateway_down while flat: {down}"))
+                    return
+                if flat:
+                    return                                    # already paused
+                if self.config.trip_on_gateway_down:
+                    self._trip(ts, f"gateway_down: {down} (net {net_abs}, pending hedges {pending_hedges}, open orders {open_orders})", net_abs, pending_hedges)
+                return
+            if self._paused and reconciled:
+                self._paused = False                          # back up and the open orders are reconciled: resume by itself
+                self.pauses[-1].resumed_ts = ts
+            return
+        if self.config.trip_on_gateway_down and down is not None:
+            self._trip(ts, f"gateway_down: {down}", net_abs, pending_hedges)
+
+    def is_paused(self) -> bool:
+        return self._paused and not self._tripped
+
+    def state(self) -> str:
+        """"TRIPPED" (manual reset), "PAUSED" (resumes by itself) or "OK"."""
+        return "TRIPPED" if self._tripped else "PAUSED" if self._paused else "OK"
+
+    def maybe_simulated_operator_reset(self, ts: float, net_abs: float, pending_hedges: int, open_orders: int = 0) -> bool:
+        """BACKTESTS ONLY: reset a TRIPPED breaker `simulated_operator_reset_s` seconds after the book is flat again. Returns True when it reset. Counted and labelled in the summary."""
+        n = self.config.simulated_operator_reset_s
+        if n is None or not self._tripped:
+            return False
+        if net_abs > 1e-10 or pending_hedges > 0 or open_orders > 0:
+            self._flat_since_while_tripped = None
+            return False
+        if self._flat_since_while_tripped is None:
+            self._flat_since_while_tripped = ts
+        if ts - self._flat_since_while_tripped >= n:
+            self.reset()
+            self.manual_resets -= 1                         # reset() counts an operator action; this one is simulated and counted separately
+            self.simulated_operator_resets += 1
+            return True
+        return False
 
     # ── Polling ───────────────────────────────────────────────────────────────
 
@@ -257,7 +321,7 @@ class CircuitBreaker:
         return self._tripped
 
     def allow_signal(self, ts: float, net_abs: float) -> bool:
-        return not self._tripped
+        return not self._tripped and not self._paused
 
     def allow_unwind(self) -> bool:
         """Tripped breakers allow unwind attempts up to the configured budget."""
@@ -274,6 +338,8 @@ class CircuitBreaker:
         self.manual_resets += 1
         self._hedge_last_n.clear()
         self._tripped = False
+        self._paused = False
+        self._flat_since_while_tripped = None
         self._consecutive_failures = 0
         self._hedge_window.clear()
         self._unknown_orders.clear()
@@ -313,6 +379,15 @@ class CircuitBreaker:
         self.trips.append(trip)
 
     def summary(self) -> dict:
+        out = self._summary_base()
+        if self.config.pause_on_gateway_down_when_flat or self.config.simulated_operator_reset_s is not None:     # only when Phase E's options are on: every older result keeps its exact keys
+            out.update({"state": self.state(), "pause_count": len(self.pauses),
+                        "pauses": [{"ts": p.ts, "cause": p.cause, "resumed_ts": p.resumed_ts} for p in self.pauses],
+                        "simulated_operator_resets": self.simulated_operator_resets,
+                        "simulated_operator_reset_label": ("SIMULATED_OPERATOR_RESET after %g s once flat (backtest only)" % self.config.simulated_operator_reset_s) if self.config.simulated_operator_reset_s is not None else None})
+        return out
+
+    def _summary_base(self) -> dict:
         return {
             "tripped": self._tripped,
             "trip_count": len(self.trips),

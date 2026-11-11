@@ -80,3 +80,66 @@ class ReservationBook:
 
     def open_total(self) -> float:
         return sum(r.remaining for r in self.held.values())
+
+
+# ── flatten on a breaker trip (Phase E, owner 9 Nov) ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+@dataclass(frozen=True)
+class RestingChild:
+    order_id: str
+    venue: str
+    tactic: str = "PASSIVE"
+
+
+@dataclass(frozen=True)
+class FlattenStep:
+    kind: str                      # "CANCEL" | "FLATTEN" | "ALARM"
+    reason: str
+    venue: str = ""
+    side: str = ""                 # FLATTEN: "buy" | "sell"
+    qty: float = 0.0
+    tactic: str = ""               # FLATTEN: always MARKET_BANDED
+    worst_price: float | None = None
+    order_id: str = ""             # CANCEL
+
+
+def plan_flatten_on_trip(resting: list[RestingChild], base: dict[str, float], mid: dict[str, float], *, band_bps: float, attempt: int, retry_budget: int,
+                         available: dict[str, bool] | None = None, mode: str = "net", touch: dict[str, tuple[float, float]] | None = None) -> list[FlattenStep]:
+    """What the execution layer does when the breaker TRIPS. Pure; the caller executes the steps (cancels with their real latency, the flatten as a MARKET_BANDED intent inside the unwind band) and calls this again
+    after each attempt with `attempt` raised. In order: (1) a CANCEL for every resting PASSIVE child (no new risk may rest); (2) a FLATTEN of the residual exposure, MARKET_BANDED with a worst price `band_bps` from the
+    venue's mid: mode "net" (default) sells or buys only the NET base, on a venue that holds a position of the net's sign (closing both legs would cost two taker fees and is not needed to remove the exposure),
+    mode "all" closes every venue's base; (3) once `attempt` has reached `retry_budget` with exposure still open, no more sends: a persistent ALARM step on every call.
+    `touch` (owner 11 Nov): per venue (best bid, best ask). When given, the worst price is the band from the TOUCH the order would cross (a sell: the bid, a buy: the ask), the unwind rule of the core
+    (a unwind band around the touch); without it the band is from the mid, as before.
+    `base`: signed base quantity per venue (long positive). `available`: a venue whose gateway is down or whose book is not valid cannot be flattened on; another venue holding the sign is used, else an ALARM."""
+    if mode not in ("net", "all"):
+        raise ValueError("mode must be net or all")
+    if retry_budget < 1 or attempt < 0:
+        raise ValueError("retry_budget must be >= 1 and attempt >= 0")
+    steps = [FlattenStep("CANCEL", "TRIP_CANCEL_RESTING", venue=c.venue, order_id=c.order_id) for c in resting if c.tactic == "PASSIVE"]
+    up = lambda v: (available or {}).get(v, True)
+    targets: list[tuple[str, float]] = []                       # (venue, signed quantity to close)
+    if mode == "all":
+        targets = [(v, q) for v, q in sorted(base.items()) if abs(q) > EPS]
+    else:
+        net = sum(base.values())
+        if abs(net) > EPS:
+            holders = sorted((v for v, q in base.items() if q * net > 0 and up(v)), key=lambda v: (-abs(base[v]), v))
+            if holders:
+                targets = [(holders[0], net)]
+            else:
+                steps.append(FlattenStep("ALARM", "NO_AVAILABLE_VENUE_TO_FLATTEN_ON", qty=abs(net)))
+                return steps
+    if not targets:
+        return steps
+    if attempt >= retry_budget:
+        steps.append(FlattenStep("ALARM", "FLATTEN_RETRY_BUDGET_EXHAUSTED", qty=sum(abs(q) for _, q in targets)))
+        return steps
+    for venue, qty in targets:
+        if not up(venue):
+            steps.append(FlattenStep("ALARM", "VENUE_DOWN_CANNOT_FLATTEN", venue=venue, qty=abs(qty)))
+            continue
+        sell = qty > 0
+        m = (touch[venue][0] if sell else touch[venue][1]) if touch and venue in touch else mid[venue]
+        steps.append(FlattenStep("FLATTEN", "TRIP_FLATTEN", venue=venue, side="sell" if sell else "buy", qty=abs(qty), tactic="MARKET_BANDED",
+                                 worst_price=m * (1.0 - band_bps / 1e4) if sell else m * (1.0 + band_bps / 1e4)))
+    return steps
