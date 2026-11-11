@@ -177,6 +177,7 @@ class TradingSession:
         resync_source: Callable[[str, str, int], MarketEvent | None] | None = None,
         gate_on_every_event: bool = False,
         markout_horizons_s: tuple[float, ...] | None = None,
+        intent_journal: bool = False,
     ) -> None:
         execution_mode = ExecutionMode(execution_mode)
         assert_execution_mode(
@@ -196,6 +197,8 @@ class TradingSession:
         # that does not pass horizons: the session replay passes the profile's `markout_horizons_s`. It reads the books and the ledger; it changes no decision.
         self.markouts = None
         self._markout_horizons_s = markout_horizons_s
+        self._intent_journal = intent_journal           # E0 step (a) (owner 10 Nov): journal the OMS's orders as execution-layer intents; observation only, read by nothing
+        self.intent_observer = None
         self._markout_touch: dict[str, tuple] = {}
         self.resync_silence_ns = resync_silence_ns           # a venue silent this long (any message) is treated as a dropped feed: resubscribe after the same delay (Q-G2: the 5 s is a resubscribe trigger, not a blocking gate)
         self.resync_unavailable = 0
@@ -301,6 +304,14 @@ class TradingSession:
             # engines' listeners, which were held back during the rebuild.
             registered = [l for l in self.ledger.trade_fill_listeners if l not in listeners]
             self.ledger.trade_fill_listeners = listeners + registered
+        if self._intent_journal:
+            from .ems.config import ExecutionConfig
+            from .ems.layer import ExecutionLayer, IntentObserver
+
+            self.intent_observer = IntentObserver(ExecutionLayer(
+                ExecutionConfig(), instrument=cfg.instrument_id,
+                dispatch_mode="fill_triggered" if self.oms.dispatch_policy == DispatchPolicy.FILL_TRIGGERED else "simultaneous"))
+            self.oms.observer = self.intent_observer
         self.ledger.journal = self.financing_journal
         # Margin is evaluated during the session, not only at the end (ECO04):
         # on market-data time every ``evaluate_interval_ms`` and after any fill
@@ -697,6 +708,13 @@ class TradingSession:
         result = self.oms.drain(self.last_event_ts_ns + horizon)
         self.finalize_funding()
         return result
+
+    def intent_report(self) -> dict[str, Any] | None:
+        """The execution-layer journal of this session (E0 step a), or None when it is off."""
+        if self.intent_observer is None:
+            return None
+        self.intent_observer.finalize(self.last_event_ts_ns / 1e9)
+        return self.intent_observer.report()
 
     def finalize_funding(self) -> None:
         """Settle everything up to the last market event, never beyond the data."""

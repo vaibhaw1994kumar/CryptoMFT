@@ -17,7 +17,9 @@ Rules enforced here (the profile makes them MANDATORY in perp; docs/strategy_con
 from __future__ import annotations
 
 from collections import Counter
-from typing import Callable
+from decimal import Decimal
+from types import SimpleNamespace
+from typing import Callable, NamedTuple
 
 from ..hedge_lifecycle import touch_slack_price
 from .config import ExecutionConfig
@@ -28,6 +30,41 @@ from .tactics import get_tactic
 JOURNAL_MAX = 200_000
 FILLS_MAX = 2_000_000
 _KIND = {"primary": "P", "hedge": "H", "unwind": "U", "rebalance": "R", "flatten": "F"}
+
+
+# The hedge rules, ONCE (E0 step b, owner 10 Nov). Pure functions on purpose: the OMS hedge dispatch calls them whether or not a layer instance (the intent journal) exists in the
+# session, so a run with the journal off decides exactly as one with it on. The ExecutionLayer methods below delegate to the same functions.
+def touch_slack_bps(max_walk_bps: float, floor_bps: float) -> float:
+    """The effective slack of the cap rule `touch_slack`: max(max_walk_bps, slack_bps_floor)."""
+    return max(float(max_walk_bps), float(floor_bps))
+
+
+def hedge_slack_bps(hedge_cfg: dict, max_walk_bps: float) -> float | None:
+    """The slack the OMS hedge policy carries, from the profile's `execution.hedge` block: the effective slack when the cap rule is `touch_slack`, else None (the cap is the opportunity's price)."""
+    if hedge_cfg.get("cap") != "touch_slack":
+        return None
+    return touch_slack_bps(max_walk_bps, hedge_cfg.get("slack_bps_floor", 5.0))
+
+
+def hedge_cap_on_grid(side: str, touch: Decimal, slack_bps, tick: Decimal) -> Decimal:
+    """Cap rule `touch_slack` for one hedge attempt: the CURRENT hedge touch moved against us by `slack_bps`, on the venue's price grid, never inside the cap
+    (a buy rounds down, a sell rounds up). Decimal throughout; re-taken from the touch at every attempt by the caller."""
+    raw = touch_slack_price(side, touch, Decimal(str(slack_bps)))
+    return (raw / tick).to_integral_value(rounding="ROUND_FLOOR" if side.lower() == "buy" else "ROUND_CEILING") * tick
+
+
+class HedgeRetry(NamedTuple):
+    retry: bool
+    due_ns: int | None         # when the retry is due (None = no retry)
+    why_not: str               # "" when retrying
+
+
+def hedge_retry_decision(retries: int, retry_limit: int, permitted: bool, backoff_ns: int, ts_ns: int) -> HedgeRetry:
+    """Retry rule of a hedge chain: a retry is sent after the backoff when the reject (or the IOC remainder) permits one and the budget is not used; else the chain is unwound.
+    The chain's own limit check (HedgeLifecycle) stays as the second line."""
+    if permitted and retries < retry_limit:
+        return HedgeRetry(True, ts_ns + backoff_ns, "")
+    return HedgeRetry(False, None, "reject not retryable" if not permitted else f"retry budget {retry_limit} used")
 
 
 def _log_violation(rec: dict, mode: str) -> None:
@@ -188,7 +225,7 @@ class ExecutionLayer:
 
     def touch_slack_cap(self, side: str, touch: float, max_walk_bps: float) -> float:
         """Cap rule `touch_slack`: the hedge-venue touch moved against us by max(max_walk_bps, slack_bps_floor) bps."""
-        return touch_slack_price(side, touch, max(max_walk_bps, float(self.cfg.hedge.get("slack_bps_floor", 5.0))))
+        return touch_slack_price(side, touch, touch_slack_bps(max_walk_bps, self.cfg.hedge.get("slack_bps_floor", 5.0)))
 
     def tactic_name(self, intent: ExecutionIntent, leg) -> str:
         if intent.role == Role.HEDGE:
@@ -368,3 +405,127 @@ class ExecutionLayer:
                 "violations": list(self.violations), "risk_refusals": list(self.refusals),
                 "reservations_open": len(self.reservations.held), "reservations_released": self.reservations.released,
                 "reservations_leaked": self.leaked_reservations()}
+
+
+class IntentObserver:
+    """E0 step (a): the session runtime's orders, journaled as intents next to the OMS plan. OBSERVATION ONLY.
+
+    The OMS tells this class what it did (a plan opened, a hedge chain opened, a child added, an order changed); the class opens the
+    matching intent in an `ExecutionLayer`, records the child and the fills, and counts what the layer's rules would have said
+    (`check` violations, over-fills). Nothing here is read back by the OMS: it never refuses, delays or reprices an order, and a rule
+    refusal (IntentError) is counted and kept in `errors`, never raised into the engine. Step (b) onward makes the layer decide.
+    One OMS parent plan = the primary intent of each of its children; one hedge chain = one HEDGE intent; one unwind child = one UNWIND intent.
+    Until step (b) the hedge cap is read from the child itself, so the layer's price-cap check cannot fail on the hedge;
+    `cap_looser_than_opportunity_price` counts the hedge children whose limit is beyond the opportunity's price (the touch_slack rule moves the cap)."""
+
+    def __init__(self, layer: "ExecutionLayer") -> None:
+        self.layer = layer
+        self.errors: list[dict] = []
+        self.error_counts: Counter = Counter()
+        self.counts: Counter = Counter()
+        self._signal: dict[str, int] = {}
+        self._by_order: dict[str, ExecutionIntent] = {}
+        self._by_chain: dict[str, ExecutionIntent] = {}
+        self._spec_price: dict[str, float] = {}
+        self._first_child: dict[str, str] = {}
+        self._filled: dict[str, float] = {}
+        self._closed: set[str] = set()
+
+    def _guard(self, what: str, fn, *args, **kw):
+        try:
+            return fn(*args, **kw)
+        except IntentError as exc:
+            self.error_counts[what] += 1
+            if len(self.errors) < 50:
+                self.errors.append({"call": what, "why": str(exc)})
+            return None
+
+    @staticmethod
+    def _px(v) -> float | None:
+        return None if v is None else float(v)
+
+    def _child(self, intent: ExecutionIntent, order, now: float, passive: bool) -> None:
+        leg = SimpleNamespace(venue=order.venue, side=order.side.value.lower(), qty=float(order.quantity), limit_price=self._px(order.limit_price), is_taker=not passive)
+        name = self._guard("check", self.layer.check, intent, leg)
+        if name is None:
+            name = "PASSIVE" if passive else ("MARKET_BANDED" if intent.role in (Role.UNWIND, Role.FLATTEN) else "IOC_CAPPED")
+        self._by_order[order.order_id] = intent
+        origin = self._first_child.setdefault(intent.intent_id, order.order_id)
+        self.layer.child_sent(intent, order.order_id, origin, name, now)
+
+    def plan_opened(self, plan, now: float) -> None:
+        sid = self._signal.setdefault(plan.parent_id, len(self._signal) + 1)
+        specs = [dict(side=c.side.value.lower(), qty=float(c.quantity), venues=(c.venue,), worst_price=self._px(c.limit_price),
+                      reason="maker leg" if c.post_only else "taker leg") for c in plan.children]
+        intents = self._guard("open_primary", self.layer.open_primary_group, specs, now=now, signal_id=sid)
+        for c, it in zip(plan.children, intents or []):
+            self._child(it, c, now, passive=bool(c.post_only))
+            self.counts["primary_children"] += 1
+
+    def chain_opened(self, plan, chain_id: str, maker, spec: dict, qty, now: float) -> None:
+        sid = self._signal.setdefault(plan.parent_id, len(self._signal) + 1)
+        px = self._px(spec["limit_price"])
+        it = self._guard("open_hedge", self.layer.open_intent, role=Role.HEDGE, side=spec["side"].value.lower(), qty=float(qty), venues=(spec["venue"],),
+                         worst_price=px, now=now, signal_id=sid, parent=self._by_order.get(maker.order_id),
+                         parent_filled_qty=float(maker.filled_quantity), urgency="urgent", reason="hedge after maker fill")
+        if it is not None:
+            self._by_chain[chain_id] = it
+            self._spec_price[it.intent_id] = px
+
+    def hedge_child(self, chain_id: str, order, now: float) -> None:
+        it = self._by_chain.get(chain_id)
+        if it is None:
+            return
+        px, spec_px = self._px(order.limit_price), self._spec_price.get(it.intent_id)
+        if it.children:
+            self._guard("retarget", self.layer.retarget, it, px, qty=float(order.quantity), reason="retry reprice")
+        else:
+            it.worst_price = px                     # the first child's cap, as sent (see the class note)
+        if spec_px is not None and px is not None and ((it.side == "buy" and px > spec_px) or (it.side == "sell" and px < spec_px)):
+            self.counts["cap_looser_than_opportunity_price"] += 1
+        self._child(it, order, now, passive=False)
+        self.counts["hedge_children"] += 1
+
+    def unwind_child(self, plan, order, now: float) -> None:
+        sid = self._signal.setdefault(plan.parent_id, len(self._signal) + 1)
+        it = self._guard("open_unwind", self.layer.open_intent, role=Role.UNWIND, side=order.side.value.lower(), qty=float(order.quantity), venues=(order.venue,),
+                         worst_price=self._px(order.limit_price), now=now, signal_id=sid, urgency="urgent", reason="unwind of a residual")
+        if it is not None:
+            self._child(it, order, now, passive=bool(order.post_only))
+            self.counts["unwind_children"] += 1
+
+    def chain_escalated(self, chain_id: str, now: float, why: str) -> None:
+        it = self._by_chain.get(chain_id)
+        if it is not None:
+            self.layer.escalate(it, now, why)
+
+    def order_changed(self, plan, order, terminal: bool, timed_out: bool, now: float) -> None:
+        """After the OMS reducer applied an update: book the new fill quantity once, and tell the layer when the child is over."""
+        it = self._by_order.get(order.order_id)
+        if it is None:
+            return
+        done = float(order.filled_quantity)
+        delta = done - self._filled.get(order.order_id, 0.0)
+        if delta > 1e-12:
+            self._filled[order.order_id] = done
+            price = float(order.average_price) if order.average_price else None      # the cumulative average: exact when the first fill is the only one, else a close reference
+            self.layer.note_filled(it, delta, now)
+            self.layer.note_fill({"ts": now, "order_id": order.order_id, "child_id": order.order_id, "intent_id": it.intent_id, "role": it.role, "venue": order.venue,
+                                  "side": it.side, "qty": delta, "cum_avg_price": price})
+        if timed_out and order.order_id not in self._closed:
+            self.layer.child_ghosted(order.order_id, now)
+        elif terminal and order.order_id not in self._closed:
+            self._closed.add(order.order_id)
+            self.layer.child_closed(order.order_id)
+
+    def plan_closed(self, plan, now: float) -> None:
+        sid = self._signal.get(plan.parent_id)
+        if sid is not None:
+            self.layer.settle_signal(sid, now, "plan closed")
+
+    def finalize(self, now: float) -> None:
+        self.layer.finalize(now)
+
+    def report(self) -> dict:
+        return {"layer": self.layer.report(), "observer_counts": dict(self.counts), "layer_rule_errors": dict(self.error_counts), "layer_rule_error_samples": list(self.errors),
+                "observation_only": True}

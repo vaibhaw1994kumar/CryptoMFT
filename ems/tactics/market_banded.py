@@ -5,7 +5,7 @@ from .base import Tactic
 
 
 class MarketBanded(Tactic):
-    """IOC with the unwind price band (mid +/- band). The only tactic that may carry no worst_price (legacy unbounded unwind);
+    """IOC with the unwind price band (the touch of the unwinding venue +/- band: a sell at best bid x (1 - band), a buy at best ask x (1 + band); owner 10 Nov 2026. The reference profiles keep the old backtester's mid band). The only tactic that may carry no worst_price (legacy unbounded unwind);
     when a band is configured the child's limit must sit inside it."""
     name = "MARKET_BANDED"
     roles = (Role.UNWIND, Role.FLATTEN)
