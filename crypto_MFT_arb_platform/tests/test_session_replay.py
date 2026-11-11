@@ -2,6 +2,7 @@
 bid after its entry latency, a trade print through the bid fills it (queue adapter, evidence from a print), FILL_TRIGGERED hedges on the other venue, and the ledger carries both legs."""
 import sys
 import unittest
+from decimal import Decimal
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
@@ -68,6 +69,12 @@ class SessionReplayEndToEnd(unittest.TestCase):
             self.assertEqual((mk[key]["1s"]["count"], mk[key]["30s"]["count"]), (1.0, 1.0))
         self.assertLess(mk["bybit/maker"]["1s"]["qty_weighted_markout_bps"], 0.0)
         self.assertEqual(set(self.result["markout_summary"]), {"1s", "5s", "30s"})
+
+    def test_the_end_of_run_residual_is_reported_with_a_flag_when_the_net_position_is_not_zero(self):
+        """D1 (owner 11 Nov): the residual rule does not flatten what is inside its bound, so the result says what is still open."""
+        r = self.result["residual_at_end"]
+        self.assertEqual(set(r), {"net_position_base", "flag", "carried_residual_base", "open_residual_base", "total_residual_base", "open_residual_plans", "limit_breaches"})
+        self.assertEqual(r["flag"], "FLAT_NET" if Decimal(r["net_position_base"]) == 0 else "UNHEDGED_OR_CARRIED_RESIDUAL")
 
     def test_the_strategy_counters_are_reported_with_the_rejects_by_reason(self):
         c = self.result["strategy_counters"]

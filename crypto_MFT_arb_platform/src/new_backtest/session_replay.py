@@ -434,6 +434,14 @@ class SessionReplay:
 
     # -- result ------------------------------------------------------------------------------------------------------------
 
+    def _residual_at_end(self) -> dict[str, Any]:
+        """Owner 11 Nov (D1): what is still open when the run ends. The residual rule does not flatten a residual inside its approved bound (and a part-lot residual cannot be sent: it is below every venue's minimum), so it is
+        reported here, not left to be found in the positions: the OMS's own residual snapshot, the net position over both venues, and a flag when that net is not zero (an unhedged leg or a carried residual)."""
+        snap = self.session.oms.residual_risk_snapshot()
+        net = sum(self.session.ledger.positions.values(), Decimal(0))
+        return {"net_position_base": str(net), "flag": "UNHEDGED_OR_CARRIED_RESIDUAL" if net != 0 else "FLAT_NET",
+                **{k: snap[k] for k in ("carried_residual_base", "open_residual_base", "total_residual_base", "open_residual_plans", "limit_breaches")}}
+
     def result(self) -> dict[str, Any]:
         s = self.session
         orders, fills = [], []
@@ -460,6 +468,7 @@ class SessionReplay:
             "label": "EXPLORATORY: session runtime, not a result to quote", "runtime": "session", "profile": self.profile.get("name"), "pair": self.config.pair,
             "days": [self.config.start_date, self.config.end_date], "size_base": float(self.config.arb.max_position_base), "fee_presets": self.profile.get("fee_presets"),
             "events": dict(self.events), "signals": signals, "orders": orders, "fills": fills, "positions": positions, "cash_by_venue": cash, "equity_at_book_mids": str(equity),
+            "residual_at_end": self._residual_at_end(),
             "ledger_event_counts": dict(Counter(e["event_type"] for e in s.ledger.events)),
             "strategy_counters": {"evaluations": self.strategy.evaluations, "signals": self.strategy.signals, "best_edge_seen_bps": None if self.strategy.best_edge_seen_bps == float("-inf") else self.strategy.best_edge_seen_bps,
                                   "rejects": {k: v for k, v in self.strategy.rejects.items() if v}},

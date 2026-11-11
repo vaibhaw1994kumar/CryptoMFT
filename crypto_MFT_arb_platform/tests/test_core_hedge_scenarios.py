@@ -22,7 +22,7 @@ from crypto_stat_arb.ledger import Ledger
 from crypto_stat_arb.models import OrderState
 from crypto_stat_arb.oms import OMS
 
-from test_fill_triggered import INSTR, MS, S, Venue, book_at, maker_update
+from test_fill_triggered import INSTR, MS, S, Venue, book_at, cb, maker_update
 from test_oms import instrument_master, make_book, opportunity, risk
 
 
@@ -415,9 +415,9 @@ class FailureCasesFromTheReportsNotInH01ToH40OrS1ToS19(Scenario):
         self.assertEqual((events.count("REJECT_AFTER_FILL_ALARM"), events.count("REJECT_AFTER_FILL_REQUERIED")), (1, 1))
 
 
-class HedgeLotRounding(Scenario):
-    """11 Nov (owner): the hedge is a whole number of the hedge venue's lots. Cumulative target floored to the lot; a part-lot residual is carried to the next maker fill and
-    is on record while it is open; a quantity already on the lot behaves exactly as before. Binance lot 0.1 here (Bybit 0.001), so a maker fill of 0.25 hedges 0.2."""
+class _LotVenues:
+    """Binance lot 0.1, Bybit 0.001: a part-lot residual is possible on the hedge venue."""
+
 
     def build(self, *a, **k):
         import test_core_hedge_scenarios as me
@@ -441,6 +441,11 @@ class HedgeLotRounding(Scenario):
 
     def residual_events(self):
         return [e for e in self.ledger.events if e["event_type"] == "HEDGE_LOT_RESIDUAL"]
+
+
+class HedgeLotRounding(_LotVenues, Scenario):
+    """11 Nov (owner): the hedge is a whole number of the hedge venue's lots. Cumulative target floored to the lot; a part-lot residual is carried to the next maker fill and
+    is on record while it is open; a quantity already on the lot behaves exactly as before. Binance lot 0.1 here (Bybit 0.001), so a maker fill of 0.25 hedges 0.2."""
 
     def test_a_part_lot_fill_hedges_the_whole_lots_and_records_the_residual(self):
         self.build(qty="1.0")
@@ -473,6 +478,157 @@ class HedgeLotRounding(Scenario):
         self.assertEqual(self.hedge_qty(), [0.3])
         self.assertEqual(self.residual_events(), [])
         self.assertNotIn("hedge_lot_residual", self.oms.realism_counters)
+
+
+class HedgeLotResidualLimits(_LotVenues, Scenario):
+    """D1 (owner 11 Nov): a part-lot residual left by the lot rounding is real exposure. It counts in the plan, the residual snapshot and the venue positions; inside the approved bound the plan closes with
+    it carried (no unwind: it is below every venue's minimum, nothing is sent, nothing alarms: the rule, as it stands, does not flatten it at the end of the day); a carried residual at the risk limit refuses
+    the next package; above the OMS bound it is a limit breach that cannot be unwound (below the venue minimum), so the 5 s hold and the 30 s kill switch of the residual rule are what alarm."""
+
+    def policy(self, cap, kill_s=30):
+        from crypto_stat_arb.execution import ResidualPolicy
+        return ResidualPolicy(max_residual_base=Decimal(cap), max_residual_age_ns=5 * S, hold_new_risk_on_breach=True, kill_after_ns=kill_s * S)
+
+    def kinds(self):
+        out = {}
+        for e in self.ledger.events:
+            out[e["event_type"]] = out.get(e["event_type"], 0) + 1
+        return out
+
+    def test_the_residual_counts_in_the_plan_the_snapshot_and_the_positions(self):
+        self.build(qty="1.0", residual=self.policy("1.0"))
+        self.maker_fill("0.25", 5 * S)
+        self.assertEqual(self.hedge_qty(), [0.2])
+        self.assertEqual(self.plan.residual_base, Decimal("0.05"))
+        snap = self.oms.residual_risk_snapshot()
+        self.assertEqual((snap["open_residual_plans"], snap["total_residual_base"]), (1, "0.05"))
+        self.assertAlmostEqual(self.position("BYBIT") + self.position("BINANCE"), 0.05)           # long 0.25 on the maker venue, short 0.2 on the hedge venue
+
+    def test_inside_the_bound_the_plan_closes_with_the_residual_carried_and_nothing_alarms(self):
+        self.build(qty="1.0", residual=self.policy("1.0"))
+        self.maker_fill("0.25", 5 * S)
+        self.oms.cancel_open_orders("end of the quote", 8 * S)
+        self.assertEqual(self.plan.state.value, "CLOSED")
+        self.assertEqual(self.oms.carried_residual_base(), Decimal("0.05"))
+        self.oms.advance_time(120 * S)                                                              # a long idle time to the end of the day
+        kinds = self.kinds()
+        self.assertEqual(self.oms.carried_residual_base(), Decimal("0.05"))
+        self.assertEqual(self.oms.residual_risk_snapshot()["carried_residual_base"], "0.05")
+        self.assertEqual((kinds.get("RESIDUAL_WITHIN_APPROVED_BOUND"), kinds.get("UNWIND_VENUE_SKIPPED"), kinds.get("RESIDUAL_LIMIT_BREACH")), (1, None, None))
+        self.assertFalse(self.oms.risk.kill_switch)
+        self.assertEqual(len(self.binance.submits), 1)                                              # only the one 0.2 hedge: no unwind, no sub-lot order
+
+    def test_a_carried_residual_at_the_risk_limit_refuses_the_next_package(self):
+        self.build(qty="1.0", residual=self.policy("1.0"))                                          # risk() limit max_residual_base = 0.002
+        self.maker_fill("0.25", 5 * S)
+        self.oms.cancel_open_orders("end of the quote", 8 * S)
+        opp = replace(opportunity("1.0"), opportunity_id="op-2", buy_venue="BYBIT", sell_venue="BINANCE", buy_price=Decimal("100.0"), sell_price=Decimal("99.0"))
+        plan2 = self.oms.execute(opp, self.books, maker_venue="BYBIT")
+        self.assertEqual(plan2.terminal_outcome, "REJECTED")
+        self.assertTrue(any(e["event_type"] == "PACKAGE_RISK_REJECTED" and e.get("reason") == "carried residual at limit" for e in self.ledger.events))
+
+    def test_above_the_bound_it_cannot_be_unwound_so_the_hold_and_the_kill_switch_alarm(self):
+        self.build(qty="1.0", residual=self.policy("0.04"))
+        self.maker_fill("0.25", 5 * S)
+        self.oms.cancel_open_orders("end of the quote", 8 * S)
+        kinds = self.kinds()
+        self.assertEqual(self.plan.state.value, "HEDGE_UNWIND")
+        self.assertGreaterEqual(kinds.get("RESIDUAL_LIMIT_BREACH", 0), 1)
+        skipped = {e["reason"] for e in self.ledger.events if e["event_type"] == "UNWIND_VENUE_SKIPPED"}
+        self.assertEqual(skipped, {"residual_below_venue_minimum"})                                 # nothing is sent: it is below the venue minimum on both venues
+        self.assertEqual(len(self.binance.submits), 1)
+        self.oms.advance_time(20 * S)
+        self.assertFalse(self.oms.risk.kill_switch)                                                 # the second stage waits for 30 s
+        self.oms.advance_time(45 * S)
+        self.assertTrue(self.oms.risk.kill_switch)
+        self.assertEqual(self.oms.realism_counters["residual_breach_kill_escalations"], 1)
+
+
+class _QuietBybit(Venue):
+    """Bybit that does not answer the submit; a CANCEL is answered CANCELLED only when `cancel_answers`, else it stays in flight (the venue answers later, scripted by the test)."""
+    cancel_answers = False
+
+    def handle(self, req, book):
+        from crypto_stat_arb.execution import OrderAction
+        if req.action == OrderAction.CANCEL:
+            self.cancels += 1
+            return (cb(req, ExecutionEventType.CANCELLED),) if self.cancel_answers else ()
+        self.submits.append(req)
+        return ()
+
+
+class CancelWhileSubmitted(Scenario):
+    """D2 (owner 11 Nov, rule R5): a cancel that leaves while the order is SUBMITTED (SENT, no venue answer yet). The four outcomes are the venue's: the cancel wins (CANCELLED); the submit is refused (REJECTED, no
+    longer an unexpected transition); a fill raced the cancel (booked once, the order ends FILLED and the hedge is sent once); a partial fill then the cancel (CANCELLED with the partial booked). Every cancel
+    sent in SENT is counted (`cancel_while_submitted`) and logged (CANCEL_WHILE_SUBMITTED)."""
+
+    def go(self, cancel_answers):
+        self.ledger = Ledger()
+        self.bybit = _QuietBybit("BYBIT", [], price="99.0")
+        self.bybit.cancel_answers = cancel_answers
+        self.binance = Venue("BINANCE", [("fill", None)], price="99.0")
+        self.books = scenario_books()
+        inst = scenario_instruments()
+        self.oms = OMS(inst, risk(), self.ledger, router=StrategyDirectedRouter(inst, adapters={"BYBIT": self.bybit, "BINANCE": self.binance}), dispatch_policy=DispatchPolicy.FILL_TRIGGERED)
+        opp = replace(opportunity("1.0"), buy_venue="BYBIT", sell_venue="BINANCE", buy_price=Decimal("100.0"), sell_price=Decimal("99.0"))
+        self.plan = self.oms.execute(opp, self.books, maker_venue="BYBIT")
+        self.maker = self.plan.children[0]
+        self.n = 0
+        self.assertEqual(self.maker.state, OrderState.SENT)
+
+    def events(self, name):
+        return [e for e in self.ledger.events if e["event_type"] == name]
+
+    def update(self, state, cum, ts, n=None):
+        self.n = n or self.n + 1
+        self.oms.ingest_order_update(replace(maker_update(self.plan, self.maker, self.n, state, cum, ts), average_price=Decimal("100.0")))
+
+    def test_the_cancel_wins(self):
+        self.go(True)
+        self.oms.cancel_open_orders("stale venue", 2 * S)
+        self.assertEqual(self.maker.state, OrderState.CANCELLED)
+        self.assertEqual((self.position("BYBIT"), self.position("BINANCE")), (0.0, 0.0))
+        self.assertEqual(len(self.binance.submits), 0)
+        self.assertEqual(self.oms.realism_counters["cancel_while_submitted"], 1)
+        (ev,) = self.events("CANCEL_WHILE_SUBMITTED")
+        self.assertEqual((ev["venue"], ev["order_id"]), ("BYBIT", self.maker.order_id))
+
+    def test_the_submit_is_refused_after_the_cancel_left(self):
+        self.go(False)
+        self.oms.cancel_open_orders("stale venue", 2 * S)
+        self.assertEqual(self.maker.state, OrderState.CANCEL_PENDING)
+        self.update(ExecutionEventType.REJECTED, "0", 3 * S)
+        self.assertEqual(self.maker.state, OrderState.REJECTED)
+        self.assertEqual(self.events("ORDER_TRANSITION_UNEXPECTED"), [])
+        self.assertEqual((self.position("BYBIT"), self.position("BINANCE")), (0.0, 0.0))
+        self.assertEqual(self.oms.realism_counters["cancel_while_submitted"], 1)
+
+    def test_a_fill_that_raced_the_cancel_is_booked_once_and_hedged_once(self):
+        self.go(False)
+        self.oms.cancel_open_orders("stale venue", 2 * S)
+        self.update(ExecutionEventType.FILLED, "1.0", 3 * S, n=1)
+        self.update(ExecutionEventType.FILLED, "1.0", 3 * S, n=1)                                   # the same report again: suppressed
+        self.assertEqual(self.maker.state, OrderState.FILLED)
+        self.assertEqual((self.position("BYBIT"), self.position("BINANCE")), (1.0, -1.0))
+        self.assertEqual(len([e for e in self.ledger.events if e["event_type"] == "FILL" and e["venue"] == "BYBIT"]), 1)
+        self.assertEqual(len(self.binance.submits), 1)
+        self.assertEqual(len(self.events("ORDER_UPDATE_DUPLICATE_SUPPRESSED")), 1)
+        self.assertEqual(self.events("ORDER_TRANSITION_UNEXPECTED"), [])
+        with self.assertRaisesRegex(ValueError, "immutable"):                                       # a late report after the plan closed is recorded and refused, never applied
+            self.update(ExecutionEventType.CANCELLED, "1.0", 4 * S)
+        self.assertEqual(len(self.events("CLOSED_PLAN_UPDATE_REJECTED")), 1)
+        self.assertEqual(self.maker.state, OrderState.FILLED)
+
+    def test_a_partial_fill_then_the_cancel_ends_cancelled_with_the_partial_booked(self):
+        self.go(False)
+        self.update(ExecutionEventType.PARTIAL, "0.25", 2 * S)
+        self.oms.cancel_open_orders("stale venue", 3 * S)
+        self.update(ExecutionEventType.CANCELLED, "0.25", 4 * S)
+        self.assertEqual(self.maker.state, OrderState.CANCELLED)
+        self.assertEqual(self.maker.filled_quantity, Decimal("0.25"))
+        self.assertEqual(self.position("BYBIT"), 0.25)
+        self.assertEqual(len(self.binance.submits), 1)                                              # the partial was hedged once
+        self.assertEqual(self.oms.realism_counters.get("cancel_while_submitted", 0), 0)             # the order was PARTIAL, not SUBMITTED, when the cancel left
 
 
 class MakerLifetimeSilentFeed(unittest.TestCase):
