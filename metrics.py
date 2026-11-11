@@ -122,6 +122,18 @@ DICTIONARY: dict[str, Metric] = {m.name: m for m in (
            "integral over the run of sum over instruments of |position summed across venues| dt / run "
            "duration (the cross-venue hedged exposure)", "integral |net position| dt", "end - start",
            "none", ("metrics_report.json",)),
+    # -- linked pair economics (the 09 Nov markout note, section 2: three outputs, this is the third) ----------------------------
+    Metric("pair_gross_bps", "bps of the maker fill price",
+           "one row per maker fill: the price the hedge got against the price the maker leg got, on the hedged quantity (a maker buy hedged by a sell: hedge - maker; a maker sell: maker - hedge)",
+           "side * (hedge_avg_price - maker_price) with side +1 for a maker buy", "maker fill price", "positive = the pair locked a gain before fees",
+           ("session_pair_economics.json",), "the hedge price is the simulated fill at hedge arrival; where the venue data has only the best bid and ask the touch is assumed to fit the size"),
+    Metric("pair_net_bps", "bps of the maker fill price",
+           "pair_gross_bps plus the fees of both legs (a rebate is positive); only for a fully hedged maker fill",
+           "pair_gross_bps - 1e4 * (maker_fee + hedge_fee) / (maker_price * qty)", "maker fill price", "positive = gain",
+           ("session_pair_economics.json",), "no funding, no unwind cost: a maker fill whose hedge did not complete is counted apart"),
+    Metric("unhedged_interval_s", "seconds",
+           "from the maker fill to the last fill of its hedge", "t(last hedge fill) - t(maker fill)", "none", "seconds of open exposure for that fill",
+           ("session_pair_economics.json",), "only fully hedged maker fills; the rest are counted as unhedged or partly hedged"),
     Metric("time_weighted_return", "ratio",
            "chain-linked daily returns: product(1 + daily plan net_pnl / equity at day start) - 1; "
            "equity at day start = initial capital + earlier plan net_pnl",
@@ -154,6 +166,161 @@ def markout_bps(side: str, fill_price: float, later_mid: float) -> float:
     """Positive = favourable: the mid rose after a BUY or fell after a SELL."""
     move = (later_mid - fill_price) / fill_price * 10_000
     return move if side == "BUY" else -move
+
+
+# -- distribution statistics and their support (the 09 Nov markout note, section 7) ---------------------------------------
+# Every result carries: how many rows were kept, how many left out and why, the signed mean, the median, p5 / p95 and a block-bootstrap
+# interval (blocks = days by default, so rows of one day are not treated as independent). A statistic that cannot be given says WHY:
+# "unavailable" (no rows) or "insufficient_support" (too few rows or blocks for the interval). Plain floats: these are report numbers.
+def quantile(sorted_values: list[float], q: float) -> float:
+    """Linear-interpolation quantile of an already sorted, non-empty list."""
+    if len(sorted_values) == 1:
+        return sorted_values[0]
+    pos = q * (len(sorted_values) - 1)
+    lo = int(pos)
+    hi = min(lo + 1, len(sorted_values) - 1)
+    return sorted_values[lo] + (sorted_values[hi] - sorted_values[lo]) * (pos - lo)
+
+
+def block_bootstrap_ci(values: list[float], block_ids: list, *, reps: int = 1000, seed: int = 0, level: float = 0.95,
+                       min_blocks: int = 2) -> list[float] | None:
+    """Percentile interval of the mean, resampling whole BLOCKS (all rows of one block id together) with replacement; deterministic for a given seed.
+    None when there are fewer than `min_blocks` blocks (one day of data cannot give a day-block interval)."""
+    import random
+    sums: dict = {}
+    for v, b in zip(values, block_ids):
+        s_n = sums.setdefault(b, [0.0, 0])
+        s_n[0] += v
+        s_n[1] += 1
+    blocks = list(sums.values())
+    if len(blocks) < min_blocks:
+        return None
+    rng = random.Random(seed)
+    k = len(blocks)
+    means = []
+    for _ in range(reps):
+        tot = cnt = 0
+        for _ in range(k):
+            sm, n = blocks[rng.randrange(k)]
+            tot += sm
+            cnt += n
+        means.append(tot / cnt)
+    means.sort()
+    tail = (1.0 - level) / 2.0
+    return [quantile(means, tail), quantile(means, 1.0 - tail)]
+
+
+def distribution_stats(values: list[float], block_ids: list | None = None, *, reps: int = 1000, seed: int = 0, min_n: int = 1,
+                       min_blocks: int = 2) -> dict[str, Any]:
+    """n, signed mean, median, p5, p95 and the block-bootstrap interval of the mean, with the reason when something is missing.
+    status: "ok" | "unavailable" (no rows) | "insufficient_support" (fewer than min_n rows). ci95 is None with ci_status
+    "insufficient_blocks" when there are fewer than min_blocks blocks (or no block ids were given)."""
+    n = len(values)
+    if n == 0:
+        return {"status": "unavailable", "n": 0, "reason": "no rows"}
+    ordered = sorted(values)
+    out: dict[str, Any] = {"status": "ok" if n >= min_n else "insufficient_support", "n": n, "mean": sum(values) / n,
+                           "median": quantile(ordered, 0.5), "p5": quantile(ordered, 0.05), "p95": quantile(ordered, 0.95)}
+    if n < min_n:
+        out["reason"] = f"{n} rows, {min_n} needed"
+    ci = block_bootstrap_ci(values, block_ids, reps=reps, seed=seed, min_blocks=min_blocks) if block_ids is not None else None
+    out["blocks"] = len(set(block_ids)) if block_ids is not None else 0
+    out["ci95"] = ci
+    out["ci_status"] = "ok" if ci is not None else "insufficient_blocks"
+    return out
+
+
+def metadata_block(*, denominator: str, total: int, kept: int, excluded: dict[str, int] | None = None, splits: dict[str, Any] | None = None,
+                   dependence: str = "", horizon_support: dict[str, Any] | None = None, notes: str = "") -> dict[str, Any]:
+    """The table every result carries (09 Nov markout note, section 7): coverage (kept of total), the denominator in words, the rows left out by
+    reason, horizon support where horizons exist, the split definitions and how dependent rows were treated."""
+    return {"coverage": {"rows_total": total, "rows_kept": kept, "share_kept": kept / total if total else None},
+            "denominator": denominator, "excluded_by_reason": dict(excluded or {}), "horizon_support": horizon_support, "splits": splits,
+            "dependence": dependence, "notes": notes}
+
+
+def _fill_fee(fill: Mapping[str, Any]) -> Any:
+    """The fee of THIS fill: the ledger row carries `fee` (cumulative on the order) and `fee_delta` (this fill); a row without fee_delta is taken as a single fill."""
+    value = fill.get("fee_delta")
+    return value if value not in (None, "") else (fill.get("fee") or 0.0)
+
+
+def pair_economics(fills: list[Mapping[str, Any]], journal: list[Mapping[str, Any]], *, block_s: float = 86_400.0, reps: int = 1000, seed: int = 0,
+                   hedge_price_basis: str = "simulated fill price at hedge arrival") -> dict[str, Any]:
+    """Linked pair economics, one row per maker fill: the Bybit-style maker fill against the hedge fills of the intent opened for it, from the
+    ledger FILL rows (`ts_ns`, `order_id`, `venue`, `side`, `fill_quantity`, `fill_price`, `fee_delta`, else `fee`) and the intent journal (`intent` rows with role, parent_id,
+    qty, created_ts, reason; `child` rows with order_id, ts). Nothing here changes a run: it reads what the run wrote.
+    A maker fill with no hedge intent, or whose hedge did not fill, is a row with hedged_qty 0; one hedged only in part has fully_hedged False and no net."""
+    intents = {r["intent_id"]: r for r in journal if r.get("event") == "intent"}
+    children: dict[str, list[tuple[str, float]]] = defaultdict(list)
+    for r in journal:
+        if r.get("event") == "child":
+            children[r["intent_id"]].append((r["order_id"], float(r["ts"])))
+    fills_by_order: dict[str, list[Mapping[str, Any]]] = defaultdict(list)
+    for f in fills:
+        fills_by_order[f["order_id"]].append(f)
+    hedges_of: dict[str, list[dict]] = defaultdict(list)
+    for iid, it in intents.items():
+        if it.get("role") == "hedge":
+            hedges_of[it["parent_id"]].append(it)
+    rows: list[dict[str, Any]] = []
+    for iid, it in intents.items():
+        if it.get("role") != "primary" or it.get("reason") != "maker leg":
+            continue
+        used: set[str] = set()
+        maker_fills = sorted((f for oid, _ in children.get(iid, ()) for f in fills_by_order.get(oid, ())), key=lambda f: int(f["ts_ns"]))
+        for mf in maker_fills:
+            ts = int(mf["ts_ns"]) / 1e9
+            qty, price, fee = float(mf["fill_quantity"]), float(mf["fill_price"]), float(_fill_fee(mf))
+            hedge = next((h for h in sorted(hedges_of.get(iid, ()), key=lambda h: h["created_ts"])
+                          if h["intent_id"] not in used and abs(float(h["created_ts"]) - ts) < 1e-4), None)
+            row: dict[str, Any] = {"signal_id": it.get("signal_id"), "maker_intent_id": iid, "maker_venue": mf["venue"], "maker_side": str(mf["side"]).lower(), "maker_fill_ts": ts,
+                                   "qty": qty, "maker_price": price, "maker_fee": fee, "hedge_intent_id": None, "hedge_venue": None, "hedged_qty": 0.0,
+                                   "fully_hedged": False, "hedge_avg_price": None, "hedge_cap": None, "hedge_children": 0, "hedge_send_delay_s": None,
+                                   "first_hedge_fill_delay_s": None, "unhedged_interval_s": None, "pair_gross_bps": None, "pair_net_bps": None, "hedge_price_basis": hedge_price_basis}
+            if hedge is not None:
+                used.add(hedge["intent_id"])
+                hid = hedge["intent_id"]
+                kids = children.get(hid, [])
+                hf = sorted((f for oid, _ in kids for f in fills_by_order.get(oid, ())), key=lambda f: int(f["ts_ns"]))
+                hq = sum(float(f["fill_quantity"]) for f in hf)
+                row.update({"hedge_intent_id": hid, "hedge_venue": hedge["venues"][0] if hedge.get("venues") else None, "hedge_cap": hedge.get("worst_price"),
+                            "hedge_children": len(kids), "hedged_qty": hq, "hedge_send_delay_s": (min(t for _, t in kids) - ts) if kids else None})
+                if hf and hq > 0:
+                    avg = sum(float(f["fill_quantity"]) * float(f["fill_price"]) for f in hf) / hq
+                    hfee = sum(float(_fill_fee(f)) for f in hf)
+                    row.update({"hedge_avg_price": avg, "first_hedge_fill_delay_s": int(hf[0]["ts_ns"]) / 1e9 - ts,
+                                "fully_hedged": hq >= qty - 1e-9,
+                                # a maker BUY is hedged by a SELL: the gain is hedge - maker; a maker SELL: maker - hedge
+                                "pair_gross_bps": (avg - price) / price * BPS_F * (1.0 if row["maker_side"] == "buy" else -1.0)})
+                    if row["fully_hedged"]:
+                        row["unhedged_interval_s"] = int(hf[-1]["ts_ns"]) / 1e9 - ts
+                        row["pair_net_bps"] = row["pair_gross_bps"] - (fee + hfee) / (price * qty) * BPS_F
+            rows.append(row)
+    blocks = [int(r["maker_fill_ts"] // block_s) for r in rows]
+    def col(name, only_full=False):
+        idx = [i for i, r in enumerate(rows) if r[name] is not None and (r["fully_hedged"] or not only_full)]
+        return [rows[i][name] for i in idx], [blocks[i] for i in idx]
+    stats = {}
+    for name, full in (("pair_gross_bps", False), ("pair_net_bps", True), ("unhedged_interval_s", True), ("hedge_send_delay_s", False), ("first_hedge_fill_delay_s", False)):
+        v, b = col(name, full)
+        stats[name] = distribution_stats(v, b, reps=reps, seed=seed)
+    n_hedge_intent = sum(1 for r in rows if r["hedge_intent_id"] is not None)
+    excluded = {"no_hedge_intent": len(rows) - n_hedge_intent, "hedge_intent_but_no_fill": sum(1 for r in rows if r["hedge_intent_id"] and not r["hedged_qty"]),
+                "partly_hedged": sum(1 for r in rows if r["hedged_qty"] and not r["fully_hedged"])}
+    kept = sum(1 for r in rows if r["fully_hedged"])
+    meta = metadata_block(denominator="maker fills (one row per maker fill; bps over the maker fill price); net and interval only for fully hedged fills", total=len(rows), kept=kept,
+                          excluded=excluded, splits={"block_s": block_s, "blocks": len(set(blocks)), "days": sorted({time_day(r["maker_fill_ts"]) for r in rows})},
+                          dependence="rows of one block (a day by default) are resampled together in the bootstrap interval; no fill is treated as independent of its day",
+                          notes=hedge_price_basis + "; the pair leaves out funding and the cost of an unwind")
+    return {"rows": rows, "summary": stats, "metadata": meta}
+
+
+BPS_F = 10_000.0
+
+
+def time_day(ts: float) -> str:
+    return datetime.fromtimestamp(ts, timezone.utc).strftime("%Y-%m-%d")
 
 
 def implementation_shortfall(plan: Any) -> dict[str, Decimal] | None:
