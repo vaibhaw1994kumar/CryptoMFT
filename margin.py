@@ -98,6 +98,50 @@ class TierSchedule:
         return None if found is None else max(notional * found[1].initial_rate - found[1].initial_deduction, ZERO)
 
 
+def liq_price_at(
+    schedule: "TierSchedule",
+    is_long: bool,
+    qty: Decimal,
+    entry_price: Decimal,
+    available_margin: Decimal,
+) -> Decimal | None:
+    """Estimated liquidation price for a perpetual position increment.
+
+    Uses the tier at the entry notional (approximation; tier may shift at liquidation).
+    Returns None when the notional is above the last risk tier.
+
+    Long  formula: liq = (margin - qty*entry + deduction) / (qty * (mmr - 1))
+    Short formula: liq = (margin + qty*entry + deduction) / (qty * (mmr + 1))
+
+    Both derived from: equity_at_liq = maintenance_margin_at_liq, where
+      equity = available_margin + unrealised_pnl  and  MM = mmr * qty * liq - deduction.
+    """
+    notional = qty * entry_price
+    found = schedule.tier(notional)
+    if found is None:
+        return None
+    _, tier = found
+    mmr = tier.maintenance_rate
+    deduction = tier.maintenance_deduction
+    if is_long:
+        denom = qty * (mmr - ONE)      # negative (mmr < 1)
+        if denom == ZERO:
+            return None
+        return (available_margin - qty * entry_price + deduction) / denom
+    else:
+        denom = qty * (mmr + ONE)
+        if denom == ZERO:
+            return None
+        return (available_margin + qty * entry_price + deduction) / denom
+
+
+def liq_distance_bps(liq_price: Decimal, entry_price: Decimal, is_long: bool) -> Decimal:
+    """Signed-positive distance from entry to liquidation price in basis points."""
+    if is_long:
+        return (entry_price - liq_price) / entry_price * Decimal("10000")
+    return (liq_price - entry_price) / entry_price * Decimal("10000")
+
+
 @dataclass(frozen=True, slots=True)
 class LiquidationPolicy:
     enabled: bool = False

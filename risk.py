@@ -39,6 +39,11 @@ class RiskLimits:
     strategy_net_limits: dict[str, Decimal] = field(default_factory=dict)
     instrument_gross_limits: dict[str, Decimal] = field(default_factory=dict)
     venue_gross_limits: dict[str, Decimal] = field(default_factory=dict)
+    # Minimum liquidation distance in bps for each tiered-margin leg of a new package.
+    # None = check disabled (default).  When set, any leg whose estimated liq distance
+    # falls below this threshold causes the package to be refused with reason
+    # "liq_distance_too_close".
+    liq_distance_bps_min: Decimal | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -1710,6 +1715,18 @@ class RiskEngine:
                     raise ValueError(
                         f"insufficient margin: {venue} (initial margin +{increment} at tier, free {free})"
                     )
+                if self.limits.liq_distance_bps_min is not None:
+                    from .margin import liq_price_at as _liq_price_at, liq_distance_bps as _liq_dist_bps
+                    schedule = self.margin_config.venues[venue].tiers.get(opportunity.instrument_id)
+                    if schedule is not None:
+                        lp = _liq_price_at(schedule, position_delta > 0, abs(position_delta), price, increment)
+                        if lp is not None:
+                            dist = _liq_dist_bps(lp, price, position_delta > 0)
+                            if dist < self.limits.liq_distance_bps_min:
+                                raise ValueError(
+                                    f"liq_distance_too_close: {venue} liq_distance={float(dist):.1f} bps"
+                                    f" < min={float(self.limits.liq_distance_bps_min):.1f} bps"
+                                )
                 margin[venue] = margin.get(venue, Decimal("0")) + increment
             else:
                 margin[venue] = margin.get(venue, Decimal("0")) + (

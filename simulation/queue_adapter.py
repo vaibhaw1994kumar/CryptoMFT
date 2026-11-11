@@ -15,6 +15,7 @@ signal (``on_snapshot``) is not fed; queue movement comes from the level diff.
 """
 from __future__ import annotations
 
+import hashlib
 from decimal import Decimal
 
 from ..execution import (
@@ -25,6 +26,7 @@ from ..models import MarketEvent, Side as CoreSide
 from ..models import TradeEvent
 from ..orderbook import OrderBook as CoreBook
 from .fill_engine import Fill, MakerExecutor
+from .hedge_faults import HedgeFaultConfig
 from .models import Side as SimSide
 from .order_book import OrderBook as SimBook, core_book_from_float, float_mirror
 from .postonly import would_cross
@@ -40,6 +42,7 @@ class QueueAwareVenueAdapter(DeterministicVenueAdapter):
     def __init__(
         self, venue: str, executor: MakerExecutor, *, tick_size: float, maker_fee_bps: float, pair: str = "",
         state: VenueState | None = None, truth=None, feed_venue: str = "", view_book=None, driver_fed: bool = False,
+        fault_config: HedgeFaultConfig | None = None,
     ) -> None:
         if executor.config.fill_evidence not in EVIDENCE_REQUIRED_MODES:
             raise ValueError(
@@ -65,6 +68,47 @@ class QueueAwareVenueAdapter(DeterministicVenueAdapter):
         self._seen_size: dict[tuple[str, float], float] = {}           # (side, price) -> displayed size at the last book update we looked at
         self._arrival_ns: int | None = None                            # set by handle_at for the one request being handled
         self.fills_by_source: dict[str, int] = {}                      # cause of each fill the executor produced (trade, delta, ...): evidence for the parity manifest
+        # Fault injection (opt-in; None = no faults, same behaviour as before)
+        self._fault_config = fault_config
+        self.hedge_faults_injected: dict[str, int] = {}                # reason -> count, evidence for tests and reports
+
+    # ---- fault injection (IOC taker / hedge orders only) -----------------------------------------------------------------------
+
+    def _fault_draw(self, order_id: str, suffix: str) -> float:
+        """Uniform [0,1) hash draw keyed on (seed, order_id, suffix). Monotone subset property: a draw < p0 implies draw < p1 for p1 > p0."""
+        fc = self._fault_config
+        h = hashlib.sha256(f"{fc.seed}:{order_id}:{suffix}".encode()).digest()  # type: ignore[union-attr]
+        return int.from_bytes(h[:8], "big") / (2**64)
+
+    def _apply_hedge_fault(
+        self, request: CanonicalOrderRequest, arrival_ts_ns: int
+    ) -> tuple[ExecutionCallback, ...] | None:
+        """Return a fault callback to substitute for the normal fill, or None if no fault fires.
+
+        Supported: reject_prob, static outages (all policies mapped to REJECTED; ghost/blackhole/queue are parity
+        differences with the backtester, logged in hedge_faults_injected).  partial_prob is a parity difference (the
+        DeterministicVenueAdapter fill walk is not intercepted here); it is noted but not injected.
+        """
+        fc = self._fault_config
+        if fc is None or not fc.injects:
+            return None
+
+        now_s = arrival_ts_ns / _NS
+
+        # Static outage windows --------------------------------------------------------------------------------------------
+        for outage in fc.outages:
+            if outage.covers(now_s):
+                reason = f"outage:{outage.kind}:{fc.outage_policy}"
+                self.hedge_faults_injected[reason] = self.hedge_faults_injected.get(reason, 0) + 1
+                return (self._callback(request, ExecutionEventType.REJECTED, reason=reason),)
+
+        # reject_prob (hash-based, monotone subset across different reject_prob values) ------------------------------------
+        if fc.reject_prob > 0.0 and self._fault_draw(request.order_id, "reject") < fc.reject_prob:
+            reason = "fault:reject_prob"
+            self.hedge_faults_injected[reason] = self.hedge_faults_injected.get(reason, 0) + 1
+            return (self._callback(request, ExecutionEventType.REJECTED, reason=reason),)
+
+        return None
 
     # ---- boundary conversions -------------------------------------------------------------------------------------------------
 
@@ -106,6 +150,17 @@ class QueueAwareVenueAdapter(DeterministicVenueAdapter):
             and request.order_type == OrderType.LIMIT
         )
         if not (mine or replace_mine or resting):
+            # Fault injection for IOC limit orders (hedge orders): checked before the fill walk so the OMS sees REJECTED and
+            # triggers its own retry/unwind machinery.  Only IOC LIMIT is a hedge; FOK and market orders are not injected.
+            if (self._fault_config is not None and request.time_in_force == TimeInForce.IOC
+                    and request.order_type == OrderType.LIMIT):
+                # Use arrival_ts_ns when set by handle_at; fall back to request creation time when the
+                # router calls handle() directly (session runtime path where handle_at is not invoked).
+                ts_ns = self._arrival_ns if self._arrival_ns is not None else request.created_ts_ns
+                fault_cb = self._apply_hedge_fault(request, ts_ns)
+                if fault_cb is not None:
+                    self._remember(fault_cb)
+                    return fault_cb
             callbacks = super().handle(request, self._taker_book(request, book))      # IOC / FOK / market: a taker fill, the deterministic walk
             if (request.time_in_force == TimeInForce.IOC and len(callbacks) == 1 and callbacks[0].event_type == ExecutionEventType.REJECTED
                     and callbacks[0].reason == "no executable liquidity"):
