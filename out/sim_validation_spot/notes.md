@@ -265,3 +265,25 @@ Method: `march_tie_check/bybit_SOLUSDT_ties.jsonl`, written by a read-only scrat
 - About 97% of the cancels are on one day (05-02), and that day is a different regime.
 - All books are the public archive: the recorder capture was lost, so there is no second book source.
 - Hit rates are an upper bound, because our own fills are in the tape.
+
+## Steps 4 and 5 (owner go 12 Nov)
+
+**Rescoring (`f00918b`)**
+- `TOLERANCES.md` (10 Nov, before any number) fixes its own stale-book definition (last book message older than 1.0 s at placement) and queue buckets (quote currency). The first scoring used other definitions; both are now applied as written.
+- The pass rules don't use those definitions, so no verdict depends on the switch. The earlier breakdowns are kept, labelled supplementary.
+
+**Pre-registered verdicts**
+
+| Check | Verdict | Result |
+|---|---|---|
+| 2a | PASS (all three models) | |
+| 2b | PASS | hit 83.9% vs 80.5% ± 5; premature 4.3% |
+| 2c | **FAIL** | false rejects 52/1,936 = 2.7% [2.1, 3.5] against ≤ 2%; sensitivity 37/38 |
+| 3 | **NO IMPROVEMENT** | Brier −18% and 11/13 days not worse pass; calibration slope 2.11 is outside 0.8–1.2 |
+
+**Step 5, perp taker check (`19450ae`):** "8 orders: gross-error check only, not a calibration".
+- **Data:** ADA and MNT linear perp 2026-04-29, converted with `bybit_perp_archive.py`. 0 gaps, converter rebuild 100%, core T4 pass under both orders (`delta_first` 100% on all metrics). Raw sha256 are in `step5_perp/stats`.
+- **Result:** the 8 real Market IOC orders through the core `TakerExecutor` at create + 6 ms match the real executions exactly: 8/8 price and 8/8 quantity, at 6 ms and at 0 ms.
+- **What it tests:** only that the touch price is right. Every order was 66–100 units against a touch of 262 to 434k units with a 1-tick spread.
+
+**Step 4, report:** `report.html`, built by `new_backtest/validation/build_report.py` from the committed aggregates only.
