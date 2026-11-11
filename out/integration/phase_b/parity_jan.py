@@ -53,7 +53,7 @@ with warnings.catch_warnings():
         from new_backtest.session_replay import SessionReplay, order_times_new, write_result
         if which in GHOST_S:
             cfg.hedge_faults = dataclasses.replace(cfg.hedge_faults, outage_on_fill_s=GHOST_S[which], outage_on_fill_venue="hedge", outage_on_fill_kind="gateway", outage_policy="ghost", ack_timeout_s=2.0)
-        rep = SessionReplay(cfg, doc, hedge_fault_injection=which in GHOST_S)
+        rep = SessionReplay(cfg, doc, **({"hedge_fault_injection": True} if which in GHOST_S else {}))
         res = rep.run()
         write_result(res, out)
         (out / "order_times.json").write_text(json.dumps(order_times_new(rep), indent=1, default=str))
