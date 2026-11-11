@@ -154,7 +154,7 @@ maker/taker opportunity must be built explicitly with `maker=True` and `FILL_TRI
   limit in the profile is 1.25 × max_position_base, and headroom 0 gives the bare 1× ceiling.
 * UNKNOWN orders: the strategy never replaces them blind; the status query has its own failure probability and a bounded
   number of attempts; exhaustion raises an ALARM.
-* Unwind: price-banded (`unwind_band_bps`, 0 = market; profile 15 bps) with `unwind_max_attempts` total sends (profile 3, independent of
+* Unwind: price-banded (`unwind_band_bps`, 0 = market; profile 15 bps) **around the TOUCH of the unwinding venue** (a sell: best bid x (1 - band), a buy: best ask x (1 + band), rounded to the tick; owner 10 Nov 2026, as the OMS does). The reference profiles (`legacy_v0`, `v1`, `v1_1`, `v1_2`, `v1_3`) keep the old backtester's band around the MID unchanged, byte for byte with `unwind_max_attempts` total sends (profile 3, independent of
   the hedge retries); exhaustion raises a persistent ALARM that
   blocks new risk (counted) until `reset_alarm()` — an operator action, never automatic. Exposure retained is reported.
 * Breaker (corrected 2026-11-01: the earlier text said "six triggers, each tested" — that was true of the `CircuitBreaker` class
@@ -318,7 +318,7 @@ Only three tactics exist. There is no speculative-IOC and no scheduled tactic, a
 |---|---|---|
 | `PASSIVE` | the maker leg | PostOnly. `placement` in `{touch, improve, deep}`; one order type, fill model, lifetime and cancel/replace rule for all three |
 | `IOC_CAPPED` | the hedge, and taker_taker legs | capped at the intent's `worst_price` |
-| `MARKET_BANDED` | breaker flatten and unwinds only | the only tactic that may carry no `worst_price` |
+| `MARKET_BANDED` | breaker flatten and unwinds only | the only tactic that may carry no `worst_price`; its band is +/- `band_bps` around the venue's TOUCH, not the mid (owner 10 Nov 2026; reference profiles keep the old mid band) |
 
 * `touch` = best bid (buy) / best ask (sell). `improve` = one tick inside the spread when the spread is wider than one tick, else the
   touch. `deep` = the price the edge requires, or `deep_ticks` ticks behind the touch when `execution.primary.deep_ticks` is set.

@@ -81,6 +81,49 @@ class SessionReplayEndToEnd(unittest.TestCase):
         self.assertTrue(m["differences_from_backtester_loop"])
         self.assertTrue(self.result["label"].startswith("EXPLORATORY"))
 
+    def test_the_orders_are_journaled_as_layer_intents_before_their_children(self):
+        """E0 step (a) (owner 10 Nov): the maker bid is a primary intent, its fill opens one hedge intent, both children are journaled after their intent, both fills are booked once, and the layer's rules found nothing to refuse."""
+        r = self.result
+        lay = r["execution_layer"]
+        self.assertTrue(lay["observation_only"])
+        self.assertEqual(lay["layer"]["intents_by_state"], {"done": 2})
+        self.assertEqual((lay["layer"]["counts"]["intents_primary"], lay["layer"]["counts"]["intents_hedge"], lay["layer"]["counts"].get("intents_unwind", 0)), (1, 1, 0))
+        self.assertEqual(lay["layer_rule_errors"], {})
+        self.assertEqual((lay["layer"]["counts"].get("overfills", 0), lay["layer"]["reservations_leaked"], lay["layer"]["reservations_open"]), (0, [], 0))
+        seen = set()
+        for row in r["intent_journal"]:
+            if row["event"] == "intent":
+                seen.add(row["intent_id"])
+            if row["event"] == "child":
+                self.assertIn(row["intent_id"], seen)                              # the intent line comes first (contract 4h.1)
+        self.assertEqual(len(r["intent_fills"]), 2)
+        self.assertEqual(sorted(f["role"] for f in r["intent_fills"]), ["hedge", "primary"])
+        self.assertEqual(lay["observer_counts"]["primary_children"], 1)
+        self.assertEqual(lay["observer_counts"]["hedge_children"], 1)
+
+    def test_the_layer_is_observation_only_the_run_is_identical_without_it(self):
+        from unittest import mock
+
+        import new_backtest.session_replay as sr
+
+        real = sr.TradingSession
+        cfg = apply_profile(self.profile, dataset="mar2024", data_root=str(SLICES), pair="SOLUSDT", start_date="2024-03-11", end_date="2024-03-11", output_dir="/tmp/x_e0a_off")
+        cfg.arb.max_position_base = 1.0
+        with mock.patch.object(sr, "TradingSession", lambda *a, **k: real(*a, **{**k, "intent_journal": False})):
+            off = SessionReplay(cfg, self.profile, stream=stream()).run()
+        self.assertIsNone(off["execution_layer"])
+        for key in ("orders", "fills", "signals", "positions", "cash_by_venue", "equity_at_book_mids", "ledger_event_counts", "fills_by_source"):
+            self.assertEqual(off[key], self.result[key], key)
+
+    def test_nothing_in_the_oms_reads_the_observer_back(self):
+        """The OMS only CALLS the observer, as a statement: no assignment, return, argument or condition takes a value from it."""
+        import re
+
+        src = (Path(__file__).resolve().parents[1] / "src" / "crypto_stat_arb" / "oms.py").read_text().splitlines()
+        uses = [ln.strip() for ln in src if "observer" in ln]
+        for ln in uses:
+            self.assertTrue(re.fullmatch(r"(self\.observer = None.*|if self\.observer is not None( and to in \(HedgeState\.ESCALATED, HedgeState\.UNWINDING\))?:|self\.observer\.\w+\(.*\))", ln), ln)
+
 
 class MarkoutsOffByDefault(unittest.TestCase):
     def test_a_session_without_horizons_has_no_tracker_and_one_with_horizons_has_one(self):

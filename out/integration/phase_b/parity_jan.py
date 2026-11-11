@@ -10,7 +10,8 @@ import time
 import warnings
 from pathlib import Path
 
-sys.path.insert(0, "/Users/vaibhav/Documents/Newproject/crypto_MFT_arb_platform/src")
+import os
+sys.path.insert(0, os.environ.get("PARITY_SRC", "/Users/vaibhav/Documents/Newproject/crypto_MFT_arb_platform/src"))      # PARITY_SRC: a code snapshot's src/ (before / after identity runs)
 from new_backtest.backtester import CrossVenueArbBacktester
 from new_backtest.profiles import apply_profile, load_profile
 

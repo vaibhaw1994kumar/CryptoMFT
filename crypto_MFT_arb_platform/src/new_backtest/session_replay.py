@@ -20,6 +20,7 @@ backtester's own margin step (the core margin engine replaces it). A book that e
 """
 from __future__ import annotations
 
+import gzip
 import json
 from dataclasses import replace
 from decimal import Decimal
@@ -27,6 +28,7 @@ from pathlib import Path
 from typing import Any, Iterable
 
 from crypto_stat_arb.config import config_from_raw, raw_config_from_profile
+from crypto_stat_arb.ems.layer import hedge_slack_bps
 from crypto_stat_arb.execution import DispatchPolicy
 from crypto_stat_arb.hedge_lifecycle import HedgePolicy
 from crypto_stat_arb.models import EventType, MarketEvent, TradeEvent
@@ -141,13 +143,14 @@ class SessionReplay:
         hf, hedge_cfg = config.hedge_faults, (config.execution.hedge if getattr(config, "execution", None) is not None else {})
         hedge_policy = HedgePolicy(retry_limit=int(getattr(hf, "max_retries", 0) or 0), retry_backoff_ns=int(float(getattr(hf, "retry_backoff_s", 0.0) or 0.0) * _NS),
                                    query_attempt_limit=int(getattr(hf, "unknown_query_max_attempts", 3) or 3),
-                                   touch_slack_bps=max(float(config.arb.max_walk_bps), float(hedge_cfg.get("slack_bps_floor", 5.0))) if hedge_cfg.get("cap") == "touch_slack" else None)
+                                   touch_slack_bps=hedge_slack_bps(hedge_cfg, config.arb.max_walk_bps))
         self.session = TradingSession(
             self.app_config, execution_mode=ExecutionMode.INTERNAL_SIMULATION, adapters=self.adapters, strategies=[],
             dispatch_policy=DispatchPolicy.FILL_TRIGGERED, maker_venues=tuple(self.names[v] for v in config.arb.maker_venues),
             resync_delay_ns=int(self.resync_delay_s * _NS), resync_source=self.feed.resync_snapshot,
             resync_silence_ns=None if config.timing is None else int(config.timing.dead_feed_s * _NS), latency_model=self.latency_model, hedge_policy=hedge_policy,
             gate_on_every_event=True,          # owner 9 Nov (D7d): the session runtime is v1_5 and later; the gate is evaluated on every event, as the live service does
+            intent_journal=True,               # E0 step (a) (owner 10 Nov): the orders are journaled as layer intents next to the OMS plan; observation only
             markout_horizons_s=tuple(config.markout_horizons_s),          # owner 9 Nov: forward markouts per fill, by venue and role, as the backtester reports them (the core's MarkoutTracker)
         )
         if config.arb.maker_max_age_s > 0:
@@ -411,6 +414,7 @@ class SessionReplay:
             "strategy_counters": {"evaluations": self.strategy.evaluations, "signals": self.strategy.signals, "best_edge_seen_bps": None if self.strategy.best_edge_seen_bps == float("-inf") else self.strategy.best_edge_seen_bps,
                                   "rejects": {k: v for k, v in self.strategy.rejects.items() if v}},
             "reject_trace": self.reject_trace,
+            "execution_layer": s.intent_report(), "intent_journal": list(s.intent_observer.layer.journal) if s.intent_observer is not None else None, "intent_fills": list(s.intent_observer.layer.fills) if s.intent_observer is not None else None,
             "markout_summary": s.markouts.summary() if s.markouts is not None else None, "markout_by_venue_role": s.markouts.summary_by_venue_role() if s.markouts is not None else None,
             "gate_events": [{k: (str(v) if isinstance(v, Decimal) else v) for k, v in e.items() if k in ("event_type", "ts_ns", "reason", "chain_id", "parent_id")}
                             for e in s.ledger.events if e["event_type"] in ("HEDGE_DISPATCH_HELD", "TIME_INTEGRITY_BLOCK", "ORDER_LIFETIME_EXPIRED", "ORDER_REJECT_CLASSIFIED", "HEDGE_CAP_BREACH_AT_DISPATCH", "HEDGE_ALARM")][:500],
@@ -446,7 +450,12 @@ def write_result(result: dict, out_dir: Path) -> None:
         with (out_dir / "session_reject_trace.jsonl").open("w") as fh:
             for ts, reason in result["reject_trace"]:
                 fh.write(json.dumps([ts, reason]) + "\n")
-    (out_dir / "session_manifest.json").write_text(json.dumps({k: v for k, v in result.items() if k not in ("signals", "orders", "fills", "reject_trace")}, indent=1, default=str))
+    for key, name in (("intent_journal", "session_intent_journal"), ("intent_fills", "session_intent_fills")):      # E0 step (a): new log files, observation only
+        if result.get(key) is not None:
+            with (out_dir / f"{name}.jsonl").open("w") as fh:
+                for row in result[key]:
+                    fh.write(json.dumps(row, default=str) + "\n")
+    (out_dir / "session_manifest.json").write_text(json.dumps({k: v for k, v in result.items() if k not in ("signals", "orders", "fills", "reject_trace", "intent_journal", "intent_fills")}, indent=1, default=str))
 
 
 # ---- parity (D5): v1_5 on the session against v1_4 on the backtester's loop ----------------------------------------------------------------------------------------------------
@@ -605,7 +614,7 @@ def live_paper_setup(profile_name: str) -> dict:
     hf, hedge_cfg = cfg.hedge_faults, (cfg.execution.hedge if getattr(cfg, "execution", None) is not None else {})
     hedge_policy = HedgePolicy(retry_limit=int(getattr(hf, "max_retries", 0) or 0), retry_backoff_ns=int(float(getattr(hf, "retry_backoff_s", 0.0) or 0.0) * _NS),
                                query_attempt_limit=int(getattr(hf, "unknown_query_max_attempts", 3) or 3),
-                               touch_slack_bps=max(float(cfg.arb.max_walk_bps), float(hedge_cfg.get("slack_bps_floor", 5.0))) if hedge_cfg.get("cap") == "touch_slack" else None)
+                               touch_slack_bps=hedge_slack_bps(hedge_cfg, cfg.arb.max_walk_bps))
     timelines = Timelines(cfg.timing) if cfg.timing is not None else None
     session_kwargs = {"dispatch_policy": DispatchPolicy.FILL_TRIGGERED, "maker_venues": tuple(names[v] for v in cfg.arb.maker_venues), "hedge_policy": hedge_policy,
                       "latency_model": TimelinesLatencyModel(timelines) if timelines is not None else None, "gate_on_every_event": True}
@@ -622,18 +631,29 @@ def live_paper_setup(profile_name: str) -> dict:
     return {"session_kwargs": session_kwargs, "queue_simulation": asdict(cfg.maker), "strategy_builder": build}
 
 
+def _open_jsonl(path: Path):
+    """Open a .jsonl or .jsonl.gz file for line-by-line reading."""
+    gz = path.with_suffix(".jsonl.gz") if path.suffix == ".jsonl" else None
+    if gz and gz.exists():
+        return gzip.open(gz, "rt")
+    return path.open()
+
+
 def load_recorded_events(session_dir) -> list:
     """A recorded LIVE session (the recorder's directory) as one event list in the recorder's own arrival order (trace.jsonl): books from canonical.jsonl, public prints from trades.jsonl. Ticker, control and
-    derivative frames are not market events; the book connection's control frames are `load_keepalive_notes`."""
+    derivative frames are not market events; the book connection's control frames are `load_keepalive_notes`. Accepts both plain .jsonl and gzip-compressed .jsonl.gz files."""
     can, trades, order = {}, {}, []
     for part in sorted(Path(session_dir).glob("part-*")):
-        for line in (part / "canonical.jsonl").open():
-            row = json.loads(line)
-            can[row["event_id"]] = row
-        for line in (part / "trades.jsonl").open():
-            row = json.loads(line)
-            trades[row["event_id"]] = row
-        order += [json.loads(line) for line in (part / "trace.jsonl").open()]
+        with _open_jsonl(part / "canonical.jsonl") as fh:
+            for line in fh:
+                row = json.loads(line)
+                can[row["event_id"]] = row
+        with _open_jsonl(part / "trades.jsonl") as fh:
+            for line in fh:
+                row = json.loads(line)
+                trades[row["event_id"]] = row
+        with _open_jsonl(part / "trace.jsonl") as fh:
+            order += [json.loads(line) for line in fh]
     out = []
     for row in order:
         if row["disposition"] == "CANONICAL":
@@ -648,7 +668,10 @@ def load_keepalive_notes(session_dir) -> list[tuple[int, str]]:
     Applied as `TradingSession.note_venue_message`, the rule the live service uses (a frame on the book stream proves it alive; owner 9 Nov)."""
     notes = []
     for part in sorted(Path(session_dir).glob("part-*")):
-        for line in (part / "wire.jsonl").open():
+        wire = part / "wire.jsonl"
+        if not wire.exists() and not wire.with_suffix(".jsonl.gz").exists():
+            continue
+        for line in _open_jsonl(wire):
             w = json.loads(line)
             ch, fd = w["channel"], w["frame_data"]
             if w["venue"] == "BYBIT" and ch.startswith("orderbook") and '"topic":"orderbook' not in fd:

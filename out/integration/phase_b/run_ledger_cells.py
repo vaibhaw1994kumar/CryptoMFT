@@ -9,7 +9,7 @@ import calendar, json, os, subprocess, sys, time
 from pathlib import Path
 
 ROOT = Path("/Users/vaibhav/Documents/Newproject")
-LIVE = ROOT / "crypto_MFT_arb_platform"
+LIVE = Path(os.environ["LEDGER_SNAP"]) if os.environ.get("LEDGER_SNAP") else ROOT / "crypto_MFT_arb_platform"      # LEDGER_SNAP: a code snapshot instead of the live tree (before / after identity runs)
 X = ROOT / "out" / "queue_v2"
 OUT = Path(os.environ["LEDGER_OUT"]) if os.environ.get("LEDGER_OUT") else ROOT / "out" / "integration" / "phase_b" / "ledger"      # LEDGER_OUT / LEDGER_DAYS: an identity re-run into another folder / on fewer days
 n, dataset, cells = int(sys.argv[1]), sys.argv[2], sys.argv[3:]
