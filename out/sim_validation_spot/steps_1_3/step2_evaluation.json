@@ -1,6 +1,51 @@
 {
  "label": "EXPLORATORY",
  "metric_definitions": "Spot simulator validation, step 2: aggregates from the per-order rows of spot_order_replay (no order ids exist in them; only aggregates leave this module).\n\nClasses (real outcome): CANCELLED (a simulated fill before the real cancel = FALSE FILL; the replay cancels at exactly the real cancel time, so any simulated fill is one),\nFILLED (first-fill timing: hit = |sim - real| <= 1 s, premature = sim more than 1 s early, late = more than 1 s late, unfilled; denominator all orders, the canonical\ndefinition of the cancel-model study), REJECTED PostOnly vs accepted (confusion matrix of the simulated PostOnly check at arrival), PartiallyFilledCanceled (own class).\nExcluded before any rate (owner 11 Nov 2026): 2026-04-23 06:04-06:20 UTC, and any order resting across that day's resync (ADA 06:08:58.321, MNT 06:09:08.302 UTC).\nCensored, counted, never scored: orders resting across the end of their coin-day (one coin-day per replay), and orders the engine skipped (book not ready).\nFresh book: no gap longer than 2 s between depth records over [created - 2 s, real end] (rule (c) of the fill-evidence study; the archive has no receive stamps, so its\n\"delivered more than 1 s late\" half does not apply).",
+ "note": "PRE_* breakdowns and `verdicts` use the definitions of TOLERANCES.md (10 Nov, before any number); the other breakdowns were chosen after the first results and are supplementary",
+ "verdicts": {
+  "2a_false_fill": {
+   "per_model": {
+    "proportional": "PASS",
+    "behind_first": "PASS",
+    "ahead_first": "PASS"
+   },
+   "verdict": "PASS",
+   "rule": "PASS = point <= 5 % AND upper 95 % bound <= 10 %; FAIL = lower bound > 10 %; same under all three models or model-dependent"
+  },
+  "2b_fill_timing": {
+   "hit": 0.8385,
+   "reference": 0.805,
+   "consistent_with_reference": true,
+   "premature": 0.043,
+   "premature_ok": true,
+   "verdict": "PASS",
+   "rule": "hit within 5 points of the earlier 80.5 % (proportional) AND premature <= 10 %"
+  },
+  "2c_postonly": {
+   "sensitivity": {
+    "n": 38,
+    "k": 37,
+    "rate": 0.9737,
+    "ci95": [
+     0.865,
+     0.9953
+    ]
+   },
+   "false_reject_rate": {
+    "n": 1936,
+    "k": 52,
+    "rate": 0.0269,
+    "ci95": [
+     0.0205,
+     0.0351
+    ]
+   },
+   "sensitivity_ok": true,
+   "false_reject_ok": false,
+   "verdict": "FAIL",
+   "rule": "sensitivity >= 70 % AND false-reject rate on real accepted orders <= 2 %"
+  }
+ },
  "results": {
   "proportional": {
    "orders": 1976,
@@ -56,6 +101,64 @@
       "ci95": [
        0.0109,
        0.0697
+      ]
+     }
+    },
+    "PRE_by_queue_quote": {
+     "b. <= 1,000": {
+      "n": 129,
+      "k": 1,
+      "rate": 0.0078,
+      "ci95": [
+       0.0014,
+       0.0426
+      ]
+     },
+     "c. 1,000-10,000": {
+      "n": 325,
+      "k": 3,
+      "rate": 0.0092,
+      "ci95": [
+       0.0031,
+       0.0268
+      ]
+     },
+     "d. > 10,000": {
+      "n": 408,
+      "k": 0,
+      "rate": 0.0,
+      "ci95": [
+       0.0,
+       0.0093
+      ]
+     },
+     "not placed (simulated PostOnly reject)": {
+      "n": 2,
+      "k": 0,
+      "rate": 0.0,
+      "ci95": [
+       0.0,
+       0.6576
+      ]
+     }
+    },
+    "PRE_by_book_age": {
+     "fresh": {
+      "n": 846,
+      "k": 4,
+      "rate": 0.0047,
+      "ci95": [
+       0.0018,
+       0.0121
+      ]
+     },
+     "stale (>1 s)": {
+      "n": 18,
+      "k": 0,
+      "rate": 0.0,
+      "ci95": [
+       0.0,
+       0.1759
       ]
      }
     },
@@ -1085,6 +1188,346 @@
       }
      }
     },
+    "PRE_by_queue_quote": {
+     "a. inside the touch (0)": {
+      "n": 20,
+      "hit": {
+       "n": 20,
+       "k": 14,
+       "rate": 0.7,
+       "ci95": [
+        0.481,
+        0.8545
+       ]
+      },
+      "premature": {
+       "n": 20,
+       "k": 6,
+       "rate": 0.3,
+       "ci95": [
+        0.1455,
+        0.519
+       ]
+      },
+      "late": {
+       "n": 20,
+       "k": 0,
+       "rate": 0.0,
+       "ci95": [
+        0.0,
+        0.1611
+       ]
+      },
+      "unfilled": {
+       "n": 20,
+       "k": 0,
+       "rate": 0.0,
+       "ci95": [
+        0.0,
+        0.1611
+       ]
+      },
+      "sim_rejected": {
+       "n": 20,
+       "k": 0,
+       "rate": 0.0,
+       "ci95": [
+        0.0,
+        0.1611
+       ]
+      }
+     },
+     "b. <= 1,000": {
+      "n": 101,
+      "hit": {
+       "n": 101,
+       "k": 94,
+       "rate": 0.9307,
+       "ci95": [
+        0.8638,
+        0.966
+       ]
+      },
+      "premature": {
+       "n": 101,
+       "k": 2,
+       "rate": 0.0198,
+       "ci95": [
+        0.0054,
+        0.0693
+       ]
+      },
+      "late": {
+       "n": 101,
+       "k": 5,
+       "rate": 0.0495,
+       "ci95": [
+        0.0213,
+        0.1107
+       ]
+      },
+      "unfilled": {
+       "n": 101,
+       "k": 0,
+       "rate": 0.0,
+       "ci95": [
+        0.0,
+        0.0366
+       ]
+      },
+      "sim_rejected": {
+       "n": 101,
+       "k": 0,
+       "rate": 0.0,
+       "ci95": [
+        0.0,
+        0.0366
+       ]
+      }
+     },
+     "c. 1,000-10,000": {
+      "n": 788,
+      "hit": {
+       "n": 788,
+       "k": 687,
+       "rate": 0.8718,
+       "ci95": [
+        0.8467,
+        0.8934
+       ]
+      },
+      "premature": {
+       "n": 788,
+       "k": 36,
+       "rate": 0.0457,
+       "ci95": [
+        0.0332,
+        0.0626
+       ]
+      },
+      "late": {
+       "n": 788,
+       "k": 65,
+       "rate": 0.0825,
+       "ci95": [
+        0.0652,
+        0.1038
+       ]
+      },
+      "unfilled": {
+       "n": 788,
+       "k": 0,
+       "rate": 0.0,
+       "ci95": [
+        0.0,
+        0.0049
+       ]
+      },
+      "sim_rejected": {
+       "n": 788,
+       "k": 0,
+       "rate": 0.0,
+       "ci95": [
+        0.0,
+        0.0049
+       ]
+      }
+     },
+     "d. > 10,000": {
+      "n": 112,
+      "hit": {
+       "n": 112,
+       "k": 103,
+       "rate": 0.9196,
+       "ci95": [
+        0.8543,
+        0.9571
+       ]
+      },
+      "premature": {
+       "n": 112,
+       "k": 2,
+       "rate": 0.0179,
+       "ci95": [
+        0.0049,
+        0.0628
+       ]
+      },
+      "late": {
+       "n": 112,
+       "k": 7,
+       "rate": 0.0625,
+       "ci95": [
+        0.0306,
+        0.1234
+       ]
+      },
+      "unfilled": {
+       "n": 112,
+       "k": 0,
+       "rate": 0.0,
+       "ci95": [
+        0.0,
+        0.0332
+       ]
+      },
+      "sim_rejected": {
+       "n": 112,
+       "k": 0,
+       "rate": 0.0,
+       "ci95": [
+        0.0,
+        0.0332
+       ]
+      }
+     },
+     "not placed (simulated PostOnly reject)": {
+      "n": 50,
+      "hit": {
+       "n": 50,
+       "k": 0,
+       "rate": 0.0,
+       "ci95": [
+        0.0,
+        0.0714
+       ]
+      },
+      "premature": {
+       "n": 50,
+       "k": 0,
+       "rate": 0.0,
+       "ci95": [
+        0.0,
+        0.0714
+       ]
+      },
+      "late": {
+       "n": 50,
+       "k": 0,
+       "rate": 0.0,
+       "ci95": [
+        0.0,
+        0.0714
+       ]
+      },
+      "unfilled": {
+       "n": 50,
+       "k": 0,
+       "rate": 0.0,
+       "ci95": [
+        0.0,
+        0.0714
+       ]
+      },
+      "sim_rejected": {
+       "n": 50,
+       "k": 50,
+       "rate": 1.0,
+       "ci95": [
+        0.9286,
+        1.0
+       ]
+      }
+     }
+    },
+    "PRE_by_book_age": {
+     "fresh": {
+      "n": 1052,
+      "hit": {
+       "n": 1052,
+       "k": 882,
+       "rate": 0.8384,
+       "ci95": [
+        0.8149,
+        0.8594
+       ]
+      },
+      "premature": {
+       "n": 1052,
+       "k": 46,
+       "rate": 0.0437,
+       "ci95": [
+        0.0329,
+        0.0578
+       ]
+      },
+      "late": {
+       "n": 1052,
+       "k": 74,
+       "rate": 0.0703,
+       "ci95": [
+        0.0564,
+        0.0874
+       ]
+      },
+      "unfilled": {
+       "n": 1052,
+       "k": 0,
+       "rate": 0.0,
+       "ci95": [
+        0.0,
+        0.0036
+       ]
+      },
+      "sim_rejected": {
+       "n": 1052,
+       "k": 50,
+       "rate": 0.0475,
+       "ci95": [
+        0.0362,
+        0.0621
+       ]
+      }
+     },
+     "stale (>1 s)": {
+      "n": 19,
+      "hit": {
+       "n": 19,
+       "k": 16,
+       "rate": 0.8421,
+       "ci95": [
+        0.6243,
+        0.9448
+       ]
+      },
+      "premature": {
+       "n": 19,
+       "k": 0,
+       "rate": 0.0,
+       "ci95": [
+        0.0,
+        0.1682
+       ]
+      },
+      "late": {
+       "n": 19,
+       "k": 3,
+       "rate": 0.1579,
+       "ci95": [
+        0.0552,
+        0.3757
+       ]
+      },
+      "unfilled": {
+       "n": 19,
+       "k": 0,
+       "rate": 0.0,
+       "ci95": [
+        0.0,
+        0.1682
+       ]
+      },
+      "sim_rejected": {
+       "n": 19,
+       "k": 0,
+       "rate": 0.0,
+       "ci95": [
+        0.0,
+        0.1682
+       ]
+      }
+     }
+    },
     "by_queue_at_placement": {
      "10-100x": {
       "n": 48,
@@ -1833,6 +2276,64 @@
       "ci95": [
        0.0072,
        0.0599
+      ]
+     }
+    },
+    "PRE_by_queue_quote": {
+     "b. <= 1,000": {
+      "n": 129,
+      "k": 1,
+      "rate": 0.0078,
+      "ci95": [
+       0.0014,
+       0.0426
+      ]
+     },
+     "c. 1,000-10,000": {
+      "n": 325,
+      "k": 2,
+      "rate": 0.0062,
+      "ci95": [
+       0.0017,
+       0.0222
+      ]
+     },
+     "d. > 10,000": {
+      "n": 408,
+      "k": 0,
+      "rate": 0.0,
+      "ci95": [
+       0.0,
+       0.0093
+      ]
+     },
+     "not placed (simulated PostOnly reject)": {
+      "n": 2,
+      "k": 0,
+      "rate": 0.0,
+      "ci95": [
+       0.0,
+       0.6576
+      ]
+     }
+    },
+    "PRE_by_book_age": {
+     "fresh": {
+      "n": 846,
+      "k": 3,
+      "rate": 0.0035,
+      "ci95": [
+       0.0012,
+       0.0104
+      ]
+     },
+     "stale (>1 s)": {
+      "n": 18,
+      "k": 0,
+      "rate": 0.0,
+      "ci95": [
+       0.0,
+       0.1759
       ]
      }
     },
@@ -2862,6 +3363,346 @@
       }
      }
     },
+    "PRE_by_queue_quote": {
+     "a. inside the touch (0)": {
+      "n": 20,
+      "hit": {
+       "n": 20,
+       "k": 14,
+       "rate": 0.7,
+       "ci95": [
+        0.481,
+        0.8545
+       ]
+      },
+      "premature": {
+       "n": 20,
+       "k": 6,
+       "rate": 0.3,
+       "ci95": [
+        0.1455,
+        0.519
+       ]
+      },
+      "late": {
+       "n": 20,
+       "k": 0,
+       "rate": 0.0,
+       "ci95": [
+        0.0,
+        0.1611
+       ]
+      },
+      "unfilled": {
+       "n": 20,
+       "k": 0,
+       "rate": 0.0,
+       "ci95": [
+        0.0,
+        0.1611
+       ]
+      },
+      "sim_rejected": {
+       "n": 20,
+       "k": 0,
+       "rate": 0.0,
+       "ci95": [
+        0.0,
+        0.1611
+       ]
+      }
+     },
+     "b. <= 1,000": {
+      "n": 101,
+      "hit": {
+       "n": 101,
+       "k": 88,
+       "rate": 0.8713,
+       "ci95": [
+        0.7922,
+        0.9232
+       ]
+      },
+      "premature": {
+       "n": 101,
+       "k": 1,
+       "rate": 0.0099,
+       "ci95": [
+        0.0017,
+        0.054
+       ]
+      },
+      "late": {
+       "n": 101,
+       "k": 12,
+       "rate": 0.1188,
+       "ci95": [
+        0.0693,
+        0.1963
+       ]
+      },
+      "unfilled": {
+       "n": 101,
+       "k": 0,
+       "rate": 0.0,
+       "ci95": [
+        0.0,
+        0.0366
+       ]
+      },
+      "sim_rejected": {
+       "n": 101,
+       "k": 0,
+       "rate": 0.0,
+       "ci95": [
+        0.0,
+        0.0366
+       ]
+      }
+     },
+     "c. 1,000-10,000": {
+      "n": 788,
+      "hit": {
+       "n": 788,
+       "k": 596,
+       "rate": 0.7563,
+       "ci95": [
+        0.7252,
+        0.785
+       ]
+      },
+      "premature": {
+       "n": 788,
+       "k": 13,
+       "rate": 0.0165,
+       "ci95": [
+        0.0097,
+        0.028
+       ]
+      },
+      "late": {
+       "n": 788,
+       "k": 177,
+       "rate": 0.2246,
+       "ci95": [
+        0.1969,
+        0.2551
+       ]
+      },
+      "unfilled": {
+       "n": 788,
+       "k": 2,
+       "rate": 0.0025,
+       "ci95": [
+        0.0007,
+        0.0092
+       ]
+      },
+      "sim_rejected": {
+       "n": 788,
+       "k": 0,
+       "rate": 0.0,
+       "ci95": [
+        0.0,
+        0.0049
+       ]
+      }
+     },
+     "d. > 10,000": {
+      "n": 112,
+      "hit": {
+       "n": 112,
+       "k": 82,
+       "rate": 0.7321,
+       "ci95": [
+        0.6434,
+        0.8055
+       ]
+      },
+      "premature": {
+       "n": 112,
+       "k": 0,
+       "rate": 0.0,
+       "ci95": [
+        0.0,
+        0.0332
+       ]
+      },
+      "late": {
+       "n": 112,
+       "k": 30,
+       "rate": 0.2679,
+       "ci95": [
+        0.1945,
+        0.3566
+       ]
+      },
+      "unfilled": {
+       "n": 112,
+       "k": 0,
+       "rate": 0.0,
+       "ci95": [
+        0.0,
+        0.0332
+       ]
+      },
+      "sim_rejected": {
+       "n": 112,
+       "k": 0,
+       "rate": 0.0,
+       "ci95": [
+        0.0,
+        0.0332
+       ]
+      }
+     },
+     "not placed (simulated PostOnly reject)": {
+      "n": 50,
+      "hit": {
+       "n": 50,
+       "k": 0,
+       "rate": 0.0,
+       "ci95": [
+        0.0,
+        0.0714
+       ]
+      },
+      "premature": {
+       "n": 50,
+       "k": 0,
+       "rate": 0.0,
+       "ci95": [
+        0.0,
+        0.0714
+       ]
+      },
+      "late": {
+       "n": 50,
+       "k": 0,
+       "rate": 0.0,
+       "ci95": [
+        0.0,
+        0.0714
+       ]
+      },
+      "unfilled": {
+       "n": 50,
+       "k": 0,
+       "rate": 0.0,
+       "ci95": [
+        0.0,
+        0.0714
+       ]
+      },
+      "sim_rejected": {
+       "n": 50,
+       "k": 50,
+       "rate": 1.0,
+       "ci95": [
+        0.9286,
+        1.0
+       ]
+      }
+     }
+    },
+    "PRE_by_book_age": {
+     "fresh": {
+      "n": 1052,
+      "hit": {
+       "n": 1052,
+       "k": 766,
+       "rate": 0.7281,
+       "ci95": [
+        0.7005,
+        0.7542
+       ]
+      },
+      "premature": {
+       "n": 1052,
+       "k": 20,
+       "rate": 0.019,
+       "ci95": [
+        0.0123,
+        0.0292
+       ]
+      },
+      "late": {
+       "n": 1052,
+       "k": 214,
+       "rate": 0.2034,
+       "ci95": [
+        0.1802,
+        0.2288
+       ]
+      },
+      "unfilled": {
+       "n": 1052,
+       "k": 2,
+       "rate": 0.0019,
+       "ci95": [
+        0.0005,
+        0.0069
+       ]
+      },
+      "sim_rejected": {
+       "n": 1052,
+       "k": 50,
+       "rate": 0.0475,
+       "ci95": [
+        0.0362,
+        0.0621
+       ]
+      }
+     },
+     "stale (>1 s)": {
+      "n": 19,
+      "hit": {
+       "n": 19,
+       "k": 14,
+       "rate": 0.7368,
+       "ci95": [
+        0.5121,
+        0.8819
+       ]
+      },
+      "premature": {
+       "n": 19,
+       "k": 0,
+       "rate": 0.0,
+       "ci95": [
+        0.0,
+        0.1682
+       ]
+      },
+      "late": {
+       "n": 19,
+       "k": 5,
+       "rate": 0.2632,
+       "ci95": [
+        0.1181,
+        0.4879
+       ]
+      },
+      "unfilled": {
+       "n": 19,
+       "k": 0,
+       "rate": 0.0,
+       "ci95": [
+        0.0,
+        0.1682
+       ]
+      },
+      "sim_rejected": {
+       "n": 19,
+       "k": 0,
+       "rate": 0.0,
+       "ci95": [
+        0.0,
+        0.1682
+       ]
+      }
+     }
+    },
     "by_queue_at_placement": {
      "10-100x": {
       "n": 48,
@@ -3610,6 +4451,64 @@
       "ci95": [
        0.0239,
        0.0976
+      ]
+     }
+    },
+    "PRE_by_queue_quote": {
+     "b. <= 1,000": {
+      "n": 129,
+      "k": 2,
+      "rate": 0.0155,
+      "ci95": [
+       0.0043,
+       0.0548
+      ]
+     },
+     "c. 1,000-10,000": {
+      "n": 325,
+      "k": 5,
+      "rate": 0.0154,
+      "ci95": [
+       0.0066,
+       0.0355
+      ]
+     },
+     "d. > 10,000": {
+      "n": 408,
+      "k": 0,
+      "rate": 0.0,
+      "ci95": [
+       0.0,
+       0.0093
+      ]
+     },
+     "not placed (simulated PostOnly reject)": {
+      "n": 2,
+      "k": 0,
+      "rate": 0.0,
+      "ci95": [
+       0.0,
+       0.6576
+      ]
+     }
+    },
+    "PRE_by_book_age": {
+     "fresh": {
+      "n": 846,
+      "k": 7,
+      "rate": 0.0083,
+      "ci95": [
+       0.004,
+       0.017
+      ]
+     },
+     "stale (>1 s)": {
+      "n": 18,
+      "k": 0,
+      "rate": 0.0,
+      "ci95": [
+       0.0,
+       0.1759
       ]
      }
     },
@@ -4635,6 +5534,346 @@
        "ci95": [
         0.0334,
         0.0814
+       ]
+      }
+     }
+    },
+    "PRE_by_queue_quote": {
+     "a. inside the touch (0)": {
+      "n": 20,
+      "hit": {
+       "n": 20,
+       "k": 14,
+       "rate": 0.7,
+       "ci95": [
+        0.481,
+        0.8545
+       ]
+      },
+      "premature": {
+       "n": 20,
+       "k": 6,
+       "rate": 0.3,
+       "ci95": [
+        0.1455,
+        0.519
+       ]
+      },
+      "late": {
+       "n": 20,
+       "k": 0,
+       "rate": 0.0,
+       "ci95": [
+        0.0,
+        0.1611
+       ]
+      },
+      "unfilled": {
+       "n": 20,
+       "k": 0,
+       "rate": 0.0,
+       "ci95": [
+        0.0,
+        0.1611
+       ]
+      },
+      "sim_rejected": {
+       "n": 20,
+       "k": 0,
+       "rate": 0.0,
+       "ci95": [
+        0.0,
+        0.1611
+       ]
+      }
+     },
+     "b. <= 1,000": {
+      "n": 101,
+      "hit": {
+       "n": 101,
+       "k": 86,
+       "rate": 0.8515,
+       "ci95": [
+        0.7693,
+        0.9079
+       ]
+      },
+      "premature": {
+       "n": 101,
+       "k": 9,
+       "rate": 0.0891,
+       "ci95": [
+        0.0476,
+        0.1607
+       ]
+      },
+      "late": {
+       "n": 101,
+       "k": 6,
+       "rate": 0.0594,
+       "ci95": [
+        0.0275,
+        0.1236
+       ]
+      },
+      "unfilled": {
+       "n": 101,
+       "k": 0,
+       "rate": 0.0,
+       "ci95": [
+        0.0,
+        0.0366
+       ]
+      },
+      "sim_rejected": {
+       "n": 101,
+       "k": 0,
+       "rate": 0.0,
+       "ci95": [
+        0.0,
+        0.0366
+       ]
+      }
+     },
+     "c. 1,000-10,000": {
+      "n": 788,
+      "hit": {
+       "n": 788,
+       "k": 647,
+       "rate": 0.8211,
+       "ci95": [
+        0.7928,
+        0.8463
+       ]
+      },
+      "premature": {
+       "n": 788,
+       "k": 96,
+       "rate": 0.1218,
+       "ci95": [
+        0.1008,
+        0.1465
+       ]
+      },
+      "late": {
+       "n": 788,
+       "k": 45,
+       "rate": 0.0571,
+       "ci95": [
+        0.043,
+        0.0756
+       ]
+      },
+      "unfilled": {
+       "n": 788,
+       "k": 0,
+       "rate": 0.0,
+       "ci95": [
+        0.0,
+        0.0049
+       ]
+      },
+      "sim_rejected": {
+       "n": 788,
+       "k": 0,
+       "rate": 0.0,
+       "ci95": [
+        0.0,
+        0.0049
+       ]
+      }
+     },
+     "d. > 10,000": {
+      "n": 112,
+      "hit": {
+       "n": 112,
+       "k": 96,
+       "rate": 0.8571,
+       "ci95": [
+        0.7805,
+        0.9101
+       ]
+      },
+      "premature": {
+       "n": 112,
+       "k": 9,
+       "rate": 0.0804,
+       "ci95": [
+        0.0429,
+        0.1457
+       ]
+      },
+      "late": {
+       "n": 112,
+       "k": 7,
+       "rate": 0.0625,
+       "ci95": [
+        0.0306,
+        0.1234
+       ]
+      },
+      "unfilled": {
+       "n": 112,
+       "k": 0,
+       "rate": 0.0,
+       "ci95": [
+        0.0,
+        0.0332
+       ]
+      },
+      "sim_rejected": {
+       "n": 112,
+       "k": 0,
+       "rate": 0.0,
+       "ci95": [
+        0.0,
+        0.0332
+       ]
+      }
+     },
+     "not placed (simulated PostOnly reject)": {
+      "n": 50,
+      "hit": {
+       "n": 50,
+       "k": 0,
+       "rate": 0.0,
+       "ci95": [
+        0.0,
+        0.0714
+       ]
+      },
+      "premature": {
+       "n": 50,
+       "k": 0,
+       "rate": 0.0,
+       "ci95": [
+        0.0,
+        0.0714
+       ]
+      },
+      "late": {
+       "n": 50,
+       "k": 0,
+       "rate": 0.0,
+       "ci95": [
+        0.0,
+        0.0714
+       ]
+      },
+      "unfilled": {
+       "n": 50,
+       "k": 0,
+       "rate": 0.0,
+       "ci95": [
+        0.0,
+        0.0714
+       ]
+      },
+      "sim_rejected": {
+       "n": 50,
+       "k": 50,
+       "rate": 1.0,
+       "ci95": [
+        0.9286,
+        1.0
+       ]
+      }
+     }
+    },
+    "PRE_by_book_age": {
+     "fresh": {
+      "n": 1052,
+      "hit": {
+       "n": 1052,
+       "k": 828,
+       "rate": 0.7871,
+       "ci95": [
+        0.7613,
+        0.8107
+       ]
+      },
+      "premature": {
+       "n": 1052,
+       "k": 119,
+       "rate": 0.1131,
+       "ci95": [
+        0.0954,
+        0.1337
+       ]
+      },
+      "late": {
+       "n": 1052,
+       "k": 55,
+       "rate": 0.0523,
+       "ci95": [
+        0.0404,
+        0.0674
+       ]
+      },
+      "unfilled": {
+       "n": 1052,
+       "k": 0,
+       "rate": 0.0,
+       "ci95": [
+        0.0,
+        0.0036
+       ]
+      },
+      "sim_rejected": {
+       "n": 1052,
+       "k": 50,
+       "rate": 0.0475,
+       "ci95": [
+        0.0362,
+        0.0621
+       ]
+      }
+     },
+     "stale (>1 s)": {
+      "n": 19,
+      "hit": {
+       "n": 19,
+       "k": 15,
+       "rate": 0.7895,
+       "ci95": [
+        0.5667,
+        0.9149
+       ]
+      },
+      "premature": {
+       "n": 19,
+       "k": 1,
+       "rate": 0.0526,
+       "ci95": [
+        0.0094,
+        0.2464
+       ]
+      },
+      "late": {
+       "n": 19,
+       "k": 3,
+       "rate": 0.1579,
+       "ci95": [
+        0.0552,
+        0.3757
+       ]
+      },
+      "unfilled": {
+       "n": 19,
+       "k": 0,
+       "rate": 0.0,
+       "ci95": [
+        0.0,
+        0.1682
+       ]
+      },
+      "sim_rejected": {
+       "n": 19,
+       "k": 0,
+       "rate": 0.0,
+       "ci95": [
+        0.0,
+        0.1682
        ]
       }
      }

@@ -72,6 +72,26 @@ def records_for_run(run_dir: Path) -> tuple[list[FillLabelRecord], dict]:
     return recs, dict(n)
 
 
+def calibration_slope(y, p, w) -> float | None:
+    """Weighted logistic recalibration: slope b of logit P(y=1) = a + b * logit(p) (Newton steps). 1 = calibrated spread; None when y has no 0s or no 1s."""
+    import numpy as np
+    y, p, w = (np.asarray(v, dtype=float) for v in (y, p, w))
+    if y.min() == y.max():
+        return None
+    x = np.log(np.clip(p, 1e-6, 1 - 1e-6) / (1 - np.clip(p, 1e-6, 1 - 1e-6)))
+    X = np.column_stack([np.ones_like(x), x])
+    beta = np.zeros(2)
+    for _ in range(50):
+        mu = 1 / (1 + np.exp(-(X @ beta)))
+        g = X.T @ (w * (y - mu))
+        H = (X * (w * mu * (1 - mu))[:, None]).T @ X
+        step = np.linalg.solve(H + 1e-9 * np.eye(2), g)
+        beta += step
+        if np.max(np.abs(step)) < 1e-10:
+            break
+    return float(beta[1])
+
+
 def _score(model: FillModelV2, recs: list[FillLabelRecord], base: float, h: int) -> dict:
     hr = [r for r in recs if r.horizon_s == h]
     w = compute_ipcw_weights(hr, h)
@@ -82,8 +102,9 @@ def _score(model: FillModelV2, recs: list[FillLabelRecord], base: float, h: int)
     p = [m.predict(queue_ahead=r.queue_ahead, local_depth=r.local_depth, local_depth_baseline=r.local_depth_baseline, spread_pct=r.spread_pct,
                    short_vol=r.short_vol, trade_count=r.trade_count, trade_sign=r.trade_sign, regime_bucket=r.regime_bucket,
                    relative_to_touch_ticks=r.relative_to_touch_ticks) for r, _ in keep]
-    rep = calibration_report([float(r.filled) for r, _ in keep], p, [wi for _, wi in keep], baseline_p=[base] * len(keep), n_bins=5)
-    return {"n_rows": len(hr), "n_uncensored": len(keep), "censored": sum(1 for r in hr if r.is_censored), **rep}
+    y, w = [float(r.filled) for r, _ in keep], [wi for _, wi in keep]
+    rep = calibration_report(y, p, w, baseline_p=[base] * len(keep), n_bins=5)
+    return {"n_rows": len(hr), "n_uncensored": len(keep), "censored": sum(1 for r in hr if r.is_censored), "calibration_slope": calibration_slope(y, p, w), **rep}
 
 
 def _base_rate(recs: list[FillLabelRecord], h: int) -> float:
@@ -118,7 +139,18 @@ def main(argv=None) -> dict:
                               "headline": test == a.test_day,
                               "by_horizon": {h: {"base_rate_fit": round(_base_rate(fit, h), 4), **_score(model, by_day[test], _base_rate(fit, h), h)} for h in HORIZONS},
                               "censoring_check_fit": informative_censoring_check(fit, GATE_H)}
+    folds = {d: f["by_horizon"][GATE_H] for d, f in out["folds"].items() if "by_horizon" in f}
+    head = folds.get(a.test_day, {})
+    not_worse = sum(1 for f in folds.values() if f.get("brier_model_minus_baseline", 1) <= 0)
+    rel = (head.get("baseline_brier") - head.get("brier")) / head.get("baseline_brier") if head.get("baseline_brier") else None
+    slope = head.get("calibration_slope")
+    out["verdict"] = {"horizon_s": GATE_H, "test_day": a.test_day, "brier_reduction_vs_base_rate": rel, "brier_reduction_ok": rel is not None and rel >= 0.05,
+                      "folds_not_worse": f"{not_worse}/{len(folds)}", "folds_not_worse_ok": bool(folds) and not_worse / len(folds) >= 0.70,
+                      "calibration_slope": slope, "calibration_slope_ok": slope is not None and 0.8 <= slope <= 1.2,
+                      "rule": "TOLERANCES.md: Brier on the test day >= 5 % below the base rate AND no worse than the base rate on >= 70 % of test days AND calibration slope 0.8-1.2"}
+    out["verdict"]["verdict"] = "IMPROVEMENT" if all(out["verdict"][k] for k in ("brier_reduction_ok", "folds_not_worse_ok", "calibration_slope_ok")) else "NO IMPROVEMENT"
     Path(a.out).write_text(json.dumps(out, indent=1, default=str))
+    print(json.dumps(out["verdict"], indent=1, default=str))
     for d, f in out["folds"].items():
         g = f.get("by_horizon", {}).get(GATE_H, {})
         print(d, "fit orders", f.get("n_fit_orders"), "test uncensored", g.get("n_uncensored"), "brier", g.get("brier"), "baseline", g.get("baseline_brier"))

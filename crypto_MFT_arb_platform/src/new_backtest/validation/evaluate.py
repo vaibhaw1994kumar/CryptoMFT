@@ -47,6 +47,75 @@ def excluded(r: dict) -> str:
     return ""
 
 
+PRE_STALE_S = 1.0                    # TOLERANCES.md (10 Nov, before any number): stale = the last book message is older than 1.0 s at placement
+REF_HIT = 0.805                      # the "earlier 81 %" (fill_evidence_report.html: proportional, fresh-book set); consistent if within 5 points
+
+
+def pre_stale(r: dict) -> str:
+    """Pre-registered (TOLERANCES.md): stale when the last book message is older than 1.0 s at placement (exchange clock, the order's arrival)."""
+    return "stale (>1 s)" if (r.get("book_age_at_placement_s") or 0.0) > PRE_STALE_S else "fresh"
+
+
+def pre_queue(r: dict) -> str:
+    """Pre-registered (TOLERANCES.md): simulated queue ahead in quote currency: inside the touch (0), up to 1,000, 1,000 to 10,000, above 10,000."""
+    if r.get("placed_ts") is None:
+        return "not placed (simulated PostOnly reject)"
+    q = (r.get("queue_ahead") or 0.0) * (r.get("price") or 0.0)
+    if q <= 0 or (r.get("relative_to_touch_ticks") or 0) > 0:
+        return "a. inside the touch (0)"
+    return "b. <= 1,000" if q <= 1_000 else "c. 1,000-10,000" if q <= 10_000 else "d. > 10,000"
+
+
+_CACHE: dict = {}
+
+
+def enrich(rows: list[dict], orders_dir: Path, data_root: Path) -> None:
+    """Adds `price` (the real limit price) and `book_age_at_placement_s` (arrival time - last depth record at or before it, exchange clock) to each row.
+    Rows are matched to the real orders by their schedule index (both are in create-time order, see spot_order_replay.main)."""
+    import bisect
+    from new_backtest.validation.spot_order_replay import depth_times, load_orders
+    by = defaultdict(list)
+    for r in rows:
+        by[(r["pair"], r["day"])].append(r)
+    for (pair, day), rs in by.items():
+        if (pair, day) not in _CACHE:
+            _CACHE[(pair, day)] = (load_orders(orders_dir, pair, day), depth_times(data_root, pair, day))
+        orders, times = _CACHE[(pair, day)]
+        for r in rs:
+            o = orders[r["i"]]
+            if abs(o["created"] - r["created"]) > 1e-9 or o["side"] != r["side"]:
+                raise RuntimeError(f"row {r['i']} of {pair} {day} does not match its order")
+            r["price"] = o["price"]
+            t = r.get("arrival_ts") or r["created"]
+            j = bisect.bisect_right(times, t)
+            r["book_age_at_placement_s"] = (t - times[j - 1]) if j else None
+
+
+def verdicts(res: dict) -> dict:
+    """The pass rules of TOLERANCES.md (fixed 10 Nov 2026, before any order row was looked at), applied as written."""
+    out = {}
+    v2a = {}
+    for m, v in res.items():
+        a = v["cancelled_false_fill"]["all"]
+        lo, hi = a["ci95"]
+        v2a[m] = "PASS" if (a["rate"] <= 0.05 and hi <= 0.10) else ("FAIL" if lo > 0.10 else "INCONCLUSIVE")
+    out["2a_false_fill"] = {"per_model": v2a, "verdict": v2a["proportional"] if len(set(v2a.values())) == 1 else "MODEL-DEPENDENT",
+                            "rule": "PASS = point <= 5 % AND upper 95 % bound <= 10 %; FAIL = lower bound > 10 %; same under all three models or model-dependent"}
+    t = res["proportional"]["filled_timing"]["all"]
+    hit, prem = t["hit"]["rate"], t["premature"]["rate"]
+    out["2b_fill_timing"] = {"hit": hit, "reference": REF_HIT, "consistent_with_reference": abs(hit - REF_HIT) <= 0.05, "premature": prem,
+                             "premature_ok": prem <= 0.10, "verdict": "PASS" if (abs(hit - REF_HIT) <= 0.05 and prem <= 0.10) else "FAIL",
+                             "rule": "hit within 5 points of the earlier 80.5 % (proportional) AND premature <= 10 %"}
+    cm = res["proportional"]["postonly_confusion"]
+    rr, ra = cm.get("real_rejected__sim_rejected", 0), cm.get("real_rejected__sim_accepted", 0)
+    ar, aa = cm.get("real_accepted__sim_rejected", 0), cm.get("real_accepted__sim_accepted", 0)
+    sens, fr = rate(rr, rr + ra), rate(ar, ar + aa)
+    out["2c_postonly"] = {"sensitivity": sens, "false_reject_rate": fr, "sensitivity_ok": sens["rate"] >= 0.70, "false_reject_ok": fr["rate"] <= 0.02,
+                          "verdict": "PASS" if (sens["rate"] >= 0.70 and fr["rate"] <= 0.02) else "FAIL",
+                          "rule": "sensitivity >= 70 % AND false-reject rate on real accepted orders <= 2 %"}
+    return out
+
+
 def queue_bucket(r: dict) -> str:
     """Queue ahead at placement in multiples of the order's own size. A new order joins at the back of its level, so its share of the level says
     nothing (it is always the whole level); the size of the queue and the distance from the touch (touch_bucket) do."""
@@ -102,6 +171,8 @@ def evaluate(rows: list[dict]) -> dict:
     ff = lambda sel: rate(sum(1 for r in sel if (r.get("filled_qty") or 0) > 1e-12), len(sel))
     out["cancelled_false_fill"] = {"all": ff(canc), "by_day": {k: ff(v) for k, v in group(canc, lambda r: r["day"]).items()},
                                    "by_pair": {k: ff(v) for k, v in group(canc, lambda r: r["pair"]).items()},
+                                   "PRE_by_queue_quote": {k: ff(v) for k, v in group(canc, pre_queue).items()},
+                                   "PRE_by_book_age": {k: ff(v) for k, v in group(canc, pre_stale).items()},
                                    "by_queue_at_placement": {k: ff(v) for k, v in group(canc, queue_bucket).items()},
                                    "by_ticks_from_touch": {k: ff(v) for k, v in group(canc, touch_bucket).items()},
                                    "by_book": {k: ff(v) for k, v in group(canc, lambda r: "fresh" if r["max_depth_gap_s"] <= FRESH_GAP_S else "stale").items()},
@@ -129,6 +200,8 @@ def evaluate(rows: list[dict]) -> dict:
     out["filled_timing"] = {"all": timing(filled), "by_day": {k: timing(v) for k, v in group(filled, lambda r: r["day"]).items()},
                             "by_pair": {k: timing(v) for k, v in group(filled, lambda r: r["pair"]).items()},
                             "by_book": {k: timing(v) for k, v in group(filled, lambda r: "fresh" if r["max_depth_gap_s"] <= FRESH_GAP_S else "stale").items()},
+                            "PRE_by_queue_quote": {k: timing(v) for k, v in group(filled, pre_queue).items()},
+                            "PRE_by_book_age": {k: timing(v) for k, v in group(filled, pre_stale).items()},
                             "by_queue_at_placement": {k: timing(v) for k, v in group(filled, queue_bucket).items()},
                             "by_ticks_from_touch": {k: timing(v) for k, v in group(filled, touch_bucket).items()},
                             "by_week": {k: timing(v) for k, v in group(filled, lambda r: "04-26..05-02" if r["day"] >= SECOND_WEEK_FROM else "04-19..04-25").items()},
@@ -151,7 +224,14 @@ if __name__ == "__main__":
     import argparse
     ap = argparse.ArgumentParser()
     ap.add_argument("--runs", required=True); ap.add_argument("--out", required=True)
+    ap.add_argument("--orders", required=True); ap.add_argument("--data-root", required=True)
     a = ap.parse_args()
-    res = {m: evaluate(load(Path(a.runs), m)) for m in ("proportional", "behind_first", "ahead_first")}
-    Path(a.out).write_text(json.dumps({"label": "EXPLORATORY", "metric_definitions": __doc__, "results": res}, indent=1))
+    res = {}
+    for m in ("proportional", "behind_first", "ahead_first"):
+        rows = load(Path(a.runs), m)
+        enrich(rows, Path(a.orders), Path(a.data_root))
+        res[m] = evaluate(rows)
+    Path(a.out).write_text(json.dumps({"label": "EXPLORATORY", "metric_definitions": __doc__,
+                                       "note": "PRE_* breakdowns and `verdicts` use the definitions of TOLERANCES.md (10 Nov, before any number); the other breakdowns were chosen after the first results and are supplementary",
+                                       "verdicts": verdicts(res), "results": res}, indent=1))
     print(json.dumps({m: {"scored": v["scored"], "false_fill": v["cancelled_false_fill"]["all"], "hit": v["filled_timing"]["all"].get("hit")} for m, v in res.items()}, indent=1))

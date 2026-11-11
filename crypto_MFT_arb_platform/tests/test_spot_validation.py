@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from new_backtest.validation import evaluate
-from new_backtest.validation.fill_model_fit import records_for_run
+from new_backtest.validation.fill_model_fit import calibration_slope, records_for_run
 from new_backtest.validation.spot_order_replay import max_gap
 
 
@@ -60,6 +60,43 @@ class EvaluateTests(unittest.TestCase):
     def test_max_depth_gap(self):
         self.assertEqual(max_gap([1.0, 2.0, 5.0], 0.0, 6.0), 3.0)
         self.assertEqual(max_gap([], 0.0, 2.5), 2.5)
+
+
+class PreRegisteredTests(unittest.TestCase):
+    """The definitions and pass rules of TOLERANCES.md (10 Nov 2026, fixed before any number)."""
+
+    def test_stale_means_the_last_book_message_is_older_than_one_second_at_placement(self):
+        self.assertEqual(evaluate.pre_stale(row(book_age_at_placement_s=1.01)), "stale (>1 s)")
+        self.assertEqual(evaluate.pre_stale(row(book_age_at_placement_s=1.0)), "fresh")
+
+    def test_queue_buckets_are_in_quote_currency(self):
+        self.assertEqual(evaluate.pre_queue(row(queue_ahead=3000.0, price=0.25)), "b. <= 1,000")
+        self.assertEqual(evaluate.pre_queue(row(queue_ahead=30000.0, price=0.25)), "c. 1,000-10,000")
+        self.assertEqual(evaluate.pre_queue(row(queue_ahead=50000.0, price=0.25)), "d. > 10,000")
+        self.assertEqual(evaluate.pre_queue(row(queue_ahead=0.0, price=0.25)), "a. inside the touch (0)")
+        self.assertEqual(evaluate.pre_queue(row(placed_ts=None)), "not placed (simulated PostOnly reject)")
+
+    def test_verdict_rules(self):
+        def res(k_ff, hit, prem, cm):
+            n = 1000
+            return {"cancelled_false_fill": {"all": evaluate.rate(k_ff, n)},
+                    "filled_timing": {"all": {"hit": {"rate": hit}, "premature": {"rate": prem}}}, "postonly_confusion": cm}
+        cm = {"real_rejected__sim_rejected": 37, "real_rejected__sim_accepted": 1, "real_accepted__sim_rejected": 52, "real_accepted__sim_accepted": 1884}
+        v = evaluate.verdicts({"proportional": res(4, 0.839, 0.043, cm), "behind_first": res(3, 0.7, 0.02, cm), "ahead_first": res(150, 0.7, 0.1, cm)})
+        self.assertEqual(v["2a_false_fill"]["per_model"], {"proportional": "PASS", "behind_first": "PASS", "ahead_first": "FAIL"})
+        self.assertEqual(v["2a_false_fill"]["verdict"], "MODEL-DEPENDENT")
+        self.assertEqual(v["2b_fill_timing"]["verdict"], "PASS")
+        self.assertEqual(v["2c_postonly"]["verdict"], "FAIL")                     # 52 / 1936 = 2.7 % false rejects > 2 %
+
+    def test_calibration_slope_is_one_for_calibrated_and_lower_for_overconfident_probabilities(self):
+        import random
+        rnd = random.Random(7)
+        p = [rnd.uniform(0.05, 0.95) for _ in range(20000)]
+        y = [1.0 if rnd.random() < q else 0.0 for q in p]
+        self.assertAlmostEqual(calibration_slope(y, p, [1.0] * len(p)), 1.0, delta=0.08)
+        over = [min(0.999, max(0.001, 0.5 + 2 * (q - 0.5))) for q in p]           # too extreme
+        self.assertLess(calibration_slope(y, over, [1.0] * len(p)), 0.8)
+        self.assertIsNone(calibration_slope([0.0, 0.0], [0.2, 0.3], [1.0, 1.0]))
 
 
 class RealLabelTests(unittest.TestCase):
