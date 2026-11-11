@@ -1,0 +1,19 @@
+spot 2026-04-25 legacy {'exact_message': (100.0, 100.0, 95.0), 'exact_frame': (100.0, 100.0, 95.0), 'engine_tape_repair_on': (100.0, 100.0, 95.0), 'engine_tape_repair_off': (100.0, 100.0, 95.0), 'engine_frame_tape_repair_on': (100.0, 100.0, 95.0), 'engine_frame_tape_repair_off': (100.0, 100.0, 95.0)} 9.0s
+        9.14 real         8.70 user         0.06 sys
+            30457856  maximum resident set size
+                   0  average shared memory size
+                   0  average unshared data size
+                   0  average unshared stack size
+                2962  page reclaims
+                  14  page faults
+                   0  swaps
+                   0  block input operations
+                   0  block output operations
+                   0  messages sent
+                   0  messages received
+                   0  signals received
+                  13  voluntary context switches
+                2345  involuntary context switches
+        138781557652  instructions retired
+         27368787945  cycles elapsed
+            23184960  peak memory footprint

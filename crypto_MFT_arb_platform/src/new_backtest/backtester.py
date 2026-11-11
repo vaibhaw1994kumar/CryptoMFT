@@ -95,6 +95,7 @@ class ArbBacktestConfig:
     # Queue model v2 (opt-in; the defaults are the legacy behaviour, bit-identical).
     #   book_tape_repair  False: OrderBook.on_trade() changes nothing; the book is rebuilt from book messages only.
     #   event_order       "capture": equal timestamps ordered by exchange time, local receive time, record position (no ordering by kind).
+    #                     "delta_first": equal timestamps ordered delta -> snapshot -> trade (a snapshot stamped with its deltas' update id).
     #   own_impact        "overlay": our own taker consumption (and maker print budget) lives in a shadow overlay cleared at the next public update
     #                     of that price level; the reconstructed public book is never mutated by an own fill. "legacy": consume_liquidity mutates it.
     # Queue model v2: maker-only analysis mode. "maker_only": the strategy and the hedge are switched off and the orders in `scheduled_orders` are injected through the SAME path
