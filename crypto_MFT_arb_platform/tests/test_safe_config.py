@@ -102,5 +102,39 @@ class LiveRefusesWhatTheBacktestRefuses(unittest.TestCase):
         self.assertTrue("breaker=None" in text and "enforce_book_state=False" in text and "physically impossible" in text, text)
 
 
+class RealOrdersStartOnlyFromAProfile(unittest.TestCase):
+    """Owner 11 Nov: VENUE_TESTNET (real orders) is built only from a profile, the route with the safe-config checks. A plain config/*.json is for replay and paper."""
+
+    def test_a_profile_config_carries_its_origin_and_a_plain_file_does_not(self):
+        raw, _ = core.raw_config_from_profile(profile(), **ARGS)
+        cfg, _ = core.config_from_raw(raw)
+        self.assertEqual(cfg.origin, "profile:perp_perp_maker_taker_v1_6")
+        plain, _ = core.load_config(PLATFORM / "config" / "perp_research.json")
+        self.assertEqual(plain.origin, "config_file")
+
+    def test_the_session_refuses_real_orders_from_a_plain_config_and_accepts_them_from_a_profile(self):
+        from crypto_stat_arb.sdk import TestnetVenueAdapter
+        from crypto_stat_arb.session import ExecutionMode, TradingSession
+        plain, _ = core.load_config(PLATFORM / "config" / "perp_research.json")
+        adapters = {v: TestnetVenueAdapter(v, lambda request, secret: []) for v in plain.venues}
+        with self.assertRaises(ValueError) as e:
+            TradingSession(plain, execution_mode=ExecutionMode.VENUE_TESTNET, live_data=True, adapters=adapters)
+        self.assertIn("profile", str(e.exception))
+        raw, _ = core.raw_config_from_profile(profile(), **ARGS)
+        cfg, _ = core.config_from_raw(raw)
+        session = TradingSession(cfg, execution_mode=ExecutionMode.VENUE_TESTNET, live_data=True, adapters={v: TestnetVenueAdapter(v, lambda request, secret: []) for v in cfg.venues})
+        self.assertEqual(session.cfg.origin, "profile:perp_perp_maker_taker_v1_6")
+
+    def test_an_unsafe_profile_never_reaches_a_session_so_real_orders_cannot_start_from_it(self):
+        with self.assertRaises(core.UnsafeConfigError):
+            core.raw_config_from_profile(mutated("breaker", None), **ARGS)
+
+    def test_a_config_file_cannot_claim_a_profile_origin_by_accident_but_paper_and_replay_still_take_files(self):
+        from crypto_stat_arb.session import ExecutionMode, TradingSession
+        plain, _ = core.load_config(PLATFORM / "config" / "perp_research.json")
+        TradingSession(plain, execution_mode=ExecutionMode.INTERNAL_SIMULATION)
+        TradingSession(plain, execution_mode=ExecutionMode.INTERNAL_PAPER, live_data=True)
+
+
 if __name__ == "__main__":
     unittest.main()

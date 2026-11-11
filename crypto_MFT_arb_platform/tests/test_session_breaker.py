@@ -204,15 +204,16 @@ class RiskGateModes(unittest.TestCase):
 
 
 class MarginMarks(unittest.TestCase):
-    """Owner 11 Nov: the margin check marks a position with the venue's own mark when a fresh one arrived, else the mid of a VALID book. Without it a book that goes quiet for 500 ms drops its mark."""
+    """Owner 11 Nov: the margin check marks a position with the venue's own mark when a fresh one arrived, else the mid of a VALID book, and keeps the last good mark for mark_max_age (5 s, ASSUMED)."""
 
-    def test_a_valid_book_gives_its_mid_a_stale_one_gives_none(self):
+    def test_a_valid_book_gives_its_mid_a_stale_one_keeps_the_last_good_mid_for_five_seconds(self):
         s = session()
         with_books(s)
         marks = s._margin_marks(5 * S)
         self.assertEqual(marks, {(A, INSTR): Decimal("100"), (B, INSTR): Decimal("100")})
         s.books[(A, INSTR)].start_resync("test")                                                      # the book is no longer VALID
-        self.assertEqual(set(s._margin_marks(5 * S)), {(B, INSTR)})
+        self.assertEqual(s._margin_marks(7 * S)[(A, INSTR)], Decimal("100"))                         # 2 s old: still the last good mark
+        self.assertEqual(set(s._margin_marks(11 * S)), {(B, INSTR)})                                 # 6 s old: missing
 
     def test_a_fresh_exchange_mark_survives_a_stale_book_and_wins_over_the_mid_an_old_one_is_ignored(self):
         from crypto_stat_arb.derivatives import DerivativeTicker
@@ -224,8 +225,71 @@ class MarginMarks(unittest.TestCase):
         self.assertEqual(s._margin_marks(5 * S)[(A, INSTR)], Decimal("100.3"))                       # wins over the book mid 100
         s.books[(A, INSTR)].start_resync("test")
         self.assertEqual(s._margin_marks(5 * S)[(A, INSTR)], Decimal("100.3"))                       # the book is stale, the mark is still there
-        self.assertNotIn((A, INSTR), s._margin_marks(15 * S))                                         # 11 s old: not used (the check fails closed on a stale price)
-        self.assertEqual(s._margin_marks(15 * S)[(B, INSTR)], Decimal("100"))
+        self.assertNotIn((A, INSTR), s._margin_marks(15 * S))                                         # 11 s old: not used
+
+
+def margin_session(action="pause"):
+    """A session with one short BINANCE position so that a missing BINANCE price is an unpriced liability (the day-1 case)."""
+    from dataclasses import replace
+    from crypto_stat_arb.models import ChildOrder, OrderState, Side
+    s = TradingSession(replace(CFG, margin=replace(CFG.margin, missing_price_action=action)), execution_mode=ExecutionMode.INTERNAL_SIMULATION)
+    q = Decimal("0.1")
+    s.ledger.apply_fill(ChildOrder(order_id="f1", parent_id="p", opportunity_id="o", venue=A, instrument_id=INSTR, side=Side.SELL, quantity=q, limit_price=Decimal("100"), state=OrderState.FILLED,
+                                   filled_quantity=q, average_price=Decimal("100")), 1)
+    with_books(s)
+    return s
+
+
+class MissingMarginPrice(unittest.TestCase):
+    """Owner 11 Nov: a missing price pauses new risk and resumes by itself; it never latches the kill switch. Only a real shortfall with a fresh price trips it."""
+
+    def test_a_500_ms_stale_binance_book_causes_no_breach(self):
+        s = margin_session()
+        s._evaluate_margin(5 * S)
+        s.books[(A, INSTR)].start_resync("stale")                                                     # the book is STALE from here
+        s._evaluate_margin(5 * S + S // 2)
+        self.assertFalse(s.risk.kill_switch)
+        self.assertFalse(s.margin_price_paused)
+        self.assertEqual(s.risk.margin_states[A].value, "HEALTHY")
+
+    def test_a_ten_second_missing_price_pauses_then_resumes_and_never_trips(self):
+        s = margin_session()
+        s._evaluate_margin(5 * S)
+        s.books[(A, INSTR)].start_resync("stale")
+        s._evaluate_margin(11 * S)                                                                    # last good mark is 6 s old: the price is missing
+        self.assertTrue(s.margin_price_paused)
+        self.assertFalse(s.risk.kill_switch)
+        fake = Fake()
+        s.strategies = [fake]
+        s._margin_due_ns = 10 ** 18                                                                   # no margin evaluation inside this event: the pause stands
+        s.on_event(snapshot(B, 12 * S, seq=2), now_ns=12 * S, gate_allowed=True)
+        self.assertEqual(fake.calls, 0)                                                               # no new risk while paused
+        self.assertEqual(s.signals_blocked_by_margin_price, 1)
+        s._margin_due_ns = None
+        s.books[(A, INSTR)].apply(snapshot(A, 15 * S, seq=3))                                         # a fresh price is back
+        s.oms._books.update(s.books)
+        s._evaluate_margin(16 * S)
+        self.assertFalse(s.margin_price_paused)
+        self.assertFalse(s.risk.kill_switch)
+        self.assertEqual([e["event_type"] for e in events(s, "MARGIN_PRICE_PAUSE", "MARGIN_PRICE_RESUME")], ["MARGIN_PRICE_PAUSE", "MARGIN_PRICE_RESUME"])
+
+    def test_a_real_shortfall_with_a_fresh_price_still_trips_the_kill_switch(self):
+        from crypto_stat_arb.derivatives import DerivativeTicker
+        s = margin_session()
+        s.on_derivative(DerivativeTicker(event_id="d1", venue=A, instrument_id=INSTR, symbol="X", exchange_ts_ns=5 * S, source_ts_ns=5 * S, receive_ts_ns=5 * S, mark_price=Decimal("5000000"),
+                                         index_price=None, funding_rate=None, next_funding_ts_ns=None))
+        s._evaluate_margin(5 * S)
+        self.assertFalse(s.margin_price_paused)
+        self.assertEqual(s.risk.margin_states[A].value, "BREACH")
+        self.assertTrue(s.risk.kill_switch)
+
+    def test_the_old_rule_is_the_default_without_the_pause_setting(self):
+        s = margin_session(action="breach")
+        s._evaluate_margin(5 * S)
+        s.books[(A, INSTR)].start_resync("stale")
+        s._evaluate_margin(11 * S)
+        self.assertEqual(s.risk.margin_states[A].value, "BREACH")                                     # missing price: fail closed, as before
+        self.assertTrue(s.risk.kill_switch)
 
 
 if __name__ == "__main__":
