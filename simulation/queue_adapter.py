@@ -153,8 +153,11 @@ class QueueAwareVenueAdapter(DeterministicVenueAdapter):
             # Fault injection for IOC limit orders (hedge orders): checked before the fill walk so the OMS sees REJECTED and
             # triggers its own retry/unwind machinery.  Only IOC LIMIT is a hedge; FOK and market orders are not injected.
             if (self._fault_config is not None and request.time_in_force == TimeInForce.IOC
-                    and request.order_type == OrderType.LIMIT and self._arrival_ns is not None):
-                fault_cb = self._apply_hedge_fault(request, self._arrival_ns)
+                    and request.order_type == OrderType.LIMIT):
+                # Use arrival_ts_ns when set by handle_at; fall back to request creation time when the
+                # router calls handle() directly (session runtime path where handle_at is not invoked).
+                ts_ns = self._arrival_ns if self._arrival_ns is not None else request.created_ts_ns
+                fault_cb = self._apply_hedge_fault(request, ts_ns)
                 if fault_cb is not None:
                     self._remember(fault_cb)
                     return fault_cb
