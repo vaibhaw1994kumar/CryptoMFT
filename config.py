@@ -42,6 +42,8 @@ class AppConfig:
     drain_horizon_ns: int = 10_000_000_000
     performance: dict[str, Any] = field(default_factory=dict)
     execution_mode: str = "INTERNAL_SIMULATION"
+    # Where the config came from: 'profile:<name>' (raw_config_from_profile, which applies the safe-config checks) or 'config_file'. Real orders (VENUE_TESTNET) are refused for anything but a profile.
+    origin: str = "config_file"
     # oms.rate_limits: scoped venue rate limits (EMS02): enabled, cancel_reserve,
     # risk_reducing_reserve. Empty = defaults (enabled, 0.2, 0.1).
     rate_limits: dict[str, Any] = field(default_factory=dict)
@@ -419,6 +421,7 @@ def config_from_raw(raw: dict) -> tuple[AppConfig, dict]:
         ) * 1_000_000,
         performance=dict(raw.get("performance", {})),
         execution_mode=str(raw.get("execution_mode", "INTERNAL_SIMULATION")).upper(),
+        origin=str(raw.get("origin", "config_file")),
         strategies=dict(raw.get("strategies", {})),
         funding=dict(raw.get("funding", {})),
         borrow=_borrow_section(raw),
@@ -557,6 +560,7 @@ def raw_config_from_profile(
         "strategy": {"strategy_id": str(profile.get("name", "profile")), "instrument_id": instrument_id, "venues": list(names), "quantity": size, "entry_bps": "0",
                      "min_net_edge_bps": str(arb.get("min_net_edge_bps", 0)), "max_book_age_ms": int(round(max_book_age_s * 1000))},
         "execution_mode": "INTERNAL_SIMULATION",
+        "origin": f"profile:{profile.get('name', 'profile')}",
         "latency": {"enabled": True, "seed": seed, "preset": str(profile.get("latency_preset", "singapore")), "profiles": {}},
         "backtest": {"drain_horizon_ms": 10_000},
         "time": {"correct_host_offset": True},          # owner 8 Nov (Q-G4): the time-integrity monitor stays, with host-offset correction
@@ -564,7 +568,8 @@ def raw_config_from_profile(
         "risk": {
             "initial_capital_by_venue": capital, "max_order_notional": "1000000000", "max_gross_notional": "1000000000", "max_residual_base": size,
             "max_position_base": str(ceiling if venue_cap_base is None else max(ceiling, venue_cap_base)), "inventory": {"model": "unconstrained"},
-            "margin": {"evaluate_interval_ms": int(float(margin.get("check_every_s", 1.0)) * 1000), "flatten_after_liquidation": bool(margin.get("flatten_other_venue", True)), "venues": margin_venues},
+            "margin": {"evaluate_interval_ms": int(float(margin.get("check_every_s", 1.0)) * 1000), "flatten_after_liquidation": bool(margin.get("flatten_other_venue", True)), "venues": margin_venues,
+                       "mark_max_age_s": float(margin.get("mark_max_age_s", 5.0)), "missing_price_action": str(margin.get("missing_price_action", "pause"))},   # owner 11 Nov: a missing price pauses new risk, it never trips the kill switch
             "margin_accounts": {v: {"margin_enabled": True} for v in margin_venues},
         },
         "oms": {"residual": {"max_residual_base": size, "max_residual_age_ms": 5_000, "hedge_venue_priority": [names[-1], names[0]], "unwind_price_slippage_bps": str(hedge.get("unwind_band_bps", 15.0)),

@@ -52,6 +52,7 @@ SCHEMA: dict[str, Any] = {
     "strategy": {"strategy_id": ANY, "instrument_id": ANY, "venues": ANY, "quantity": ANY,
                  "entry_bps": ANY, "min_net_edge_bps": ANY, "max_book_age_ms": ANY},
     "execution_mode": ANY,
+    "origin": ANY,                       # set by raw_config_from_profile ('profile:<name>', the route with the safe-config checks); a plain config file has none
     "instruments": ListOf({
         "instrument_id": ANY, "venue": ANY, "symbol": ANY, "base": ANY, "quote": ANY, "tick_size": ANY,
         "quantity_step": ANY, "min_quantity": ANY, "min_notional": ANY, "taker_fee_bps": ANY,
@@ -79,7 +80,7 @@ SCHEMA: dict[str, Any] = {
                                 "maintenance_margin_rate": ANY, "liquidation_buffer_rate": ANY}),
         "inventory": {"model": ANY, "initial_base_by_venue": Map(ANY), "initial_quote_by_venue": Map(ANY)},
         "margin": {
-            "evaluate_interval_ms": ANY, "flatten_after_liquidation": ANY,
+            "evaluate_interval_ms": ANY, "flatten_after_liquidation": ANY, "mark_max_age_s": ANY, "missing_price_action": ANY,
             "venues": Map({
                 "mode": ANY, "reported_tolerance": ANY, "isolated_margin": Map(ANY),
                 "collateral": ListOf({"asset": ANY, "haircut": ANY, "eligible": ANY}),

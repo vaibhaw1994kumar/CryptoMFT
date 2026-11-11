@@ -951,6 +951,7 @@ class RiskEngine:
                 if state == MarginState.BREACH:
                     breach_positions.append(instrument_id)
             position_rows.append(item)
+        price_missing = False
         if config.mode == "ISOLATED":
             # Each isolated position stands alone; the cross wallet is what is
             # left after allocations and isolated PnL, and cannot rescue them.
@@ -971,7 +972,11 @@ class RiskEngine:
             required_buffer = maintenance_total * account.liquidation_buffer_rate
             unpriced_liability = any(r["kind"] == "UNPRICED_LIABILITY" for r in collateral_rows)
             above_limit = any(a.startswith("POSITION_ABOVE_RISK_LIMIT") for a in alerts)
-            if unpriced_liability or above_limit:
+            price_missing = any(a.startswith("COLLATERAL_PRICE_MISSING") for a in alerts) and self.margin_config.missing_price_action == "pause"
+            if price_missing:
+                # Owner 11 Nov: a missing price says nothing about the margin (the equity above is not complete). New risk is paused by the session until a fresh price returns; this is never a BREACH.
+                state = MarginState.WARNING
+            elif unpriced_liability or above_limit:
                 state = MarginState.BREACH          # fail closed: the requirement cannot be met or known
             elif effective < maintenance_total:
                 state = MarginState.BREACH
@@ -985,7 +990,7 @@ class RiskEngine:
         codes = list(dict.fromkeys(alerts))
         if state == MarginState.BREACH and "MARGIN_BELOW_MAINTENANCE" not in codes:
             codes.insert(0, "MARGIN_BELOW_MAINTENANCE")
-        elif state == MarginState.WARNING:
+        elif state == MarginState.WARNING and not price_missing:
             codes.insert(0, "LIQUIDATION_BUFFER_LOW")
         utilization = (
             Decimal("0") if maintenance_total == 0
@@ -1008,6 +1013,7 @@ class RiskEngine:
                     f"SIMULATED (simplified: full close by book walk, fee {liquidation.fee_rate} {liquidation.source})"
                     if liquidation.enabled else "UNSUPPORTED (not simulated for this venue)"
                 ),
+                **({"price_missing": True} if price_missing else {}),
                 "adl": "UNSUPPORTED", "insurance_fund": "UNSUPPORTED",
                 "spot_margin_liquidation": "UNSUPPORTED (borrow-recall buy-in only)",
             },

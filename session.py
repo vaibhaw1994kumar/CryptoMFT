@@ -190,6 +190,9 @@ class TradingSession:
         assert_execution_mode(
             execution_mode, live_data=live_data, adapters=adapters, venues=cfg.venues
         )
+        if execution_mode == ExecutionMode.VENUE_TESTNET and not str(cfg.origin).startswith("profile:"):
+            # Owner 11 Nov: real orders start only from a profile, the route that applies the safe-config checks (config.raw_config_from_profile). A plain config/*.json is for replay and paper.
+            raise ValueError(f"{execution_mode.value} sends real orders and needs a config built from a profile (config.raw_config_from_profile); this config's origin is {cfg.origin!r}")
         self.cfg = cfg
         self.execution_mode = execution_mode
         self.maker_venues = tuple(maker_venues)      # Phase D: under FILL_TRIGGERED the maker leg rests on the first of these venues that the opportunity trades on (the profile's arb.maker_venues)
@@ -403,6 +406,9 @@ class TradingSession:
         self._breaker_last_attempt_ns = 0
         self._breaker_alarmed: set[str] = set()
         self.signals_blocked_by_breaker = 0
+        self._last_good_marks: dict[tuple[str, str], tuple[int, Decimal]] = {}
+        self.margin_price_paused = False                  # a missing margin price pauses new risk (margin.missing_price_action 'pause'); resumes when the price is back
+        self.signals_blocked_by_margin_price = 0
         self.exchange_marks: dict[tuple[str, str], tuple[int, Decimal]] = {}       # (venue, instrument) -> (receive ts, mark price) from the derivatives stream, or the replay's labelled MARK_FROM_MID
 
     def _now(self, event: MarketEvent, now_ns: int | None) -> int:
@@ -520,6 +526,9 @@ class TradingSession:
                 continue
             if self.breaker is not None and not self.breaker.allow_signal(now / 1e9, self._net_abs()) and not hasattr(strategy, "force_exit"):
                 self.signals_blocked_by_breaker += 1           # PAUSED or TRIPPED: no new risk (a force_exit strategy still closes)
+                continue
+            if self.margin_price_paused and not hasattr(strategy, "force_exit"):
+                self.signals_blocked_by_margin_price += 1       # no price for the margin check: no new risk until it is back
                 continue
             started = self.wall_ns()
             opportunity = strategy.evaluate(self.books, now)
@@ -852,6 +861,7 @@ class TradingSession:
 
     def breaker_report(self) -> dict[str, Any]:
         return {"breaker": self.breaker.summary() if self.breaker is not None else None, "breaker_alarms": list(self.breaker_alarms), "signals_blocked_by_breaker": self.signals_blocked_by_breaker,
+                "margin_price_paused": self.margin_price_paused, "signals_blocked_by_margin_price": self.signals_blocked_by_margin_price,
                 "risk_gate_mode": self.risk_gate_mode, "risk_gate_refusals_by_reason": dict(sorted(self.gate_counts.items()))}
 
     def tick(self, now_ns: int) -> int:
@@ -994,22 +1004,34 @@ class TradingSession:
                 reason=reason, now_ns=now_ns, operator_id="liquidation-engine", source="LIQUIDATION",
             )
 
-    # A mark older than this is not used for margin: the margin check fails closed (COLLATERAL_PRICE_MISSING) rather than trade on a stale price. A venue that does not publish marks keeps the book-mid rule below.
-    EXCHANGE_MARK_MAX_AGE_NS = 10 * 1_000_000_000
-
     def _margin_marks(self, now: int) -> dict[tuple[str, str], Decimal]:
-        """Marks for the margin check: the book mid of every VALID book (as before), overridden by the venue's own mark price when one arrived within EXCHANGE_MARK_MAX_AGE_NS. Track A (owner 11 Nov): without
-        the exchange mark a book that goes quiet for 500 ms (STALE) loses its mark, the open position on that venue is priced as missing, the venue is put in margin BREACH and the kill switch trips (seen on the
-        2026-10-29 capture: every breach sat inside a BINANCE:STALE interval)."""
-        marks = {
+        """Marks for the margin check (owner 11 Nov): a venue's own mark price when it arrived within `mark_max_age`, else the book mid of a VALID book. Every mark seen this way is remembered as the last good mark
+        and stays usable for up to `margin_config.mark_max_age_ns` (ASSUMED 5 s, stamped when the evaluation saw it, so up to one evaluation interval generous); only after that is the price missing.
+        Without this a book that goes quiet for 500 ms (STALE) lost its mark, the position was priced as missing, the venue went into margin BREACH and the kill switch tripped (2026-10-29 capture: every breach sat inside a BINANCE:STALE interval)."""
+        max_age = self.margin_config.mark_max_age_ns
+        fresh = {
             key: (book.best_bid + book.best_ask) / Decimal("2")
             for key, book in self.books.items()
             if book.state.value == "VALID" and book.bids and book.asks
         }
         for key, (ts, price) in self.exchange_marks.items():
-            if now - ts <= self.EXCHANGE_MARK_MAX_AGE_NS:
+            if now - ts <= max_age:
+                fresh[key] = price
+        for key, price in fresh.items():
+            self._last_good_marks[key] = (now, price)
+        marks = dict(fresh)
+        for key, (ts, price) in self._last_good_marks.items():
+            if key not in marks and now - ts <= max_age:
                 marks[key] = price
         return marks
+
+    def _margin_price_step(self, report, now: int) -> None:
+        """A missing price pauses new risk and resumes by itself when a fresh price is back; it never trips the kill switch (a real shortfall with a fresh price still does, through the margin BREACH)."""
+        missing = sorted(row.venue for row in report.venues if row.details.get("price_missing"))
+        if bool(missing) == self.margin_price_paused:
+            return
+        self.margin_price_paused = bool(missing)
+        self.ledger.record("MARGIN_PRICE_PAUSE" if missing else "MARGIN_PRICE_RESUME", now, venues=missing, mark_max_age_s=self.margin_config.mark_max_age_ns / 1e9)
 
     def _evaluate_margin(self, now: int) -> None:
         due = self._margin_due_ns is None or now >= self._margin_due_ns
@@ -1021,6 +1043,8 @@ class TradingSession:
         report = self.oms.evaluate_margin(
             now_ns=now, mark_prices=marks, initial_capital_by_venue=self.cfg.initial_capital_by_venue,
         )
+        if self.margin_config.missing_price_action == "pause":
+            self._margin_price_step(report, now)
         for row in report.venues:
             if row.state.value != "BREACH" or row.venue not in self.margin_config.venues:
                 continue

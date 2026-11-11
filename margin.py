@@ -166,6 +166,13 @@ class VenueMarginConfig:
         return self.collateral.get(asset, ONE)
 
 
+def _missing_price_action(value: Any) -> str:
+    value = str(value).lower()
+    if value not in ("breach", "pause"):
+        raise ValueError("margin.missing_price_action must be 'breach' or 'pause'")
+    return value
+
+
 @dataclass(frozen=True, slots=True)
 class MarginConfig:
     venues: dict[str, VenueMarginConfig] = field(default_factory=dict)
@@ -173,6 +180,10 @@ class MarginConfig:
     # After a liquidation closes one leg of a cross-venue hedge, flatten the
     # matching quantity of the opposite position on the other venue.
     flatten_after_liquidation: bool = True
+    # Owner 11 Nov: a mark (exchange mark preferred, else book mid) counts for this long after it was last good (ASSUMED 5 s); after that the price is missing.
+    mark_max_age_ns: int = 5_000_000_000
+    # What a missing price does: "breach" (the old rule: fail closed, margin BREACH, kill switch) or "pause" (new risk is paused until a fresh price returns; only a real shortfall with a fresh price is a BREACH).
+    missing_price_action: str = "breach"
 
     @classmethod
     def from_config(cls, section: dict[str, Any] | None) -> "MarginConfig":
@@ -223,7 +234,9 @@ class MarginConfig:
                     raise ValueError(f"collateral haircut for {venue} {asset} must be within [0, 1]")
         return cls(venues=venues,
                    evaluate_interval_ns=int(section.get("evaluate_interval_ms", 1_000)) * 1_000_000,
-                   flatten_after_liquidation=bool(section.get("flatten_after_liquidation", True)))
+                   flatten_after_liquidation=bool(section.get("flatten_after_liquidation", True)),
+                   mark_max_age_ns=int(float(section.get("mark_max_age_s", 5.0)) * 1_000_000_000),
+                   missing_price_action=_missing_price_action(section.get("missing_price_action", "breach")))
 
     @property
     def configured(self) -> bool:
