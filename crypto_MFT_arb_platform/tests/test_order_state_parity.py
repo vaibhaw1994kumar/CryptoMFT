@@ -201,3 +201,50 @@ def test_oms_and_maker_agree_with_each_other_wherever_both_can_express_the_scrip
             rows.append((name, a, b))
     listed = {s for (s, sys_) in DISAGREEMENTS if sys_ in ("oms", "maker")}
     assert {r[0] for r in rows} <= listed, rows
+
+
+# ── R5 / CR-MQ: a cancel sent before the ack arrives (market-maker flow) ─────────────────────────────────────────────────────────────
+
+def _cancel_before_ack(*tail):
+    from new_backtest.order_state_machine import Event
+    return [Event(Kind.SUBMIT, 0.0, 0.0), Event(Kind.CANCEL_REQUEST, 0.01, 0.01), *tail]
+
+
+def test_r5_the_table_allows_a_cancel_while_the_submit_is_in_flight():
+    assert State.CANCEL_REQUESTED in ALLOWED_TRANSITIONS[State.SUBMITTED]
+    assert State.REJECTED in ALLOWED_TRANSITIONS[State.CANCEL_REQUESTED]
+    assert {State.CANCELLED, State.FILLED, State.PARTIALLY_FILLED} <= ALLOWED_TRANSITIONS[State.CANCEL_REQUESTED]
+
+
+def test_r5_cancel_before_ack_then_cancel_confirm_is_cancelled_without_a_violation():
+    from new_backtest.order_state_machine import Event
+    r = replay(_cancel_before_ack(Event(Kind.CANCEL_CONFIRM, 0.05, 0.05)))
+    assert (r.state, r.booked, r.fills, r.violations) == (State.CANCELLED, 0.0, [], [])
+
+
+def test_r5_cancel_before_ack_then_reject_is_rejected_without_a_violation():
+    from new_backtest.order_state_machine import Event
+    r = replay(_cancel_before_ack(Event(Kind.REJECT, 0.05, 0.05)))
+    assert (r.state, r.booked, r.fills, r.violations) == (State.REJECTED, 0.0, [], [])
+
+
+def test_r5_cancel_before_ack_then_full_fill_is_filled_and_booked_once():
+    from new_backtest.order_state_machine import Event
+    r = replay(_cancel_before_ack(Event(Kind.FILL, 0.02, 0.02, cum=1.0), Event(Kind.FILL, 0.02, 0.03, cum=1.0)))   # the report arrives twice
+    assert (r.state, r.booked, r.fills, r.violations) == (State.FILLED, 1.0, [1.0], [])
+
+
+def test_r5_cancel_before_ack_then_partial_fill_then_cancel_confirm_is_cancelled_with_the_partial_booked():
+    from new_backtest.order_state_machine import Event
+    r = replay(_cancel_before_ack(Event(Kind.FILL, 0.02, 0.02, cum=0.4), Event(Kind.CANCEL_CONFIRM, 0.05, 0.05, cum=0.4)))
+    assert (r.state, r.booked, r.fills, r.violations) == (State.CANCELLED, 0.4, [0.4], [])
+
+
+@pytest.mark.parametrize("tail", [("cancel_confirm",), ("reject",), ("fill",), ("fill_partial", "cancel_confirm")])
+def test_r5_end_state_does_not_depend_on_arrival_order(tail):
+    from new_backtest.order_state_machine import Event
+    mk = {"cancel_confirm": Event(Kind.CANCEL_CONFIRM, 0.05, 0.05), "reject": Event(Kind.REJECT, 0.05, 0.05),
+          "fill": Event(Kind.FILL, 0.02, 0.02, cum=1.0), "fill_partial": Event(Kind.FILL, 0.02, 0.02, cum=0.4)}
+    ev = _cancel_before_ack(*[mk[t] for t in tail])
+    for perm in itertools.permutations(ev):
+        assert (resolve(perm), replay(perm).booked) == (resolve(ev), replay(ev).booked)
