@@ -2,7 +2,9 @@
 # funding, a spot sell needs base held on that venue (REJECT unless borrow is enabled), fee presets must be spot presets.
 # Results are labelled "UNVALIDATED STRATEGY - mechanics only".
 name: spot_spot_maker_taker_v1
-description: spot-spot maker/taker arb; mechanics only, unvalidated strategy
+description: spot-spot maker/taker arb; mechanics only, unvalidated strategy; old backtester only, mechanics
+decision_status:                         # outside the config hash; carried into every result's release_identity
+  scope: OLD_BACKTESTER_ONLY_MECHANICS   # owner 11 Nov 2026 (Track C): runs on the old backtester loop only; tests mechanics, not a validated strategy or P&L
 product: spot
 product_fee_consistency: true
 latency_preset: singapore                # ASSUMED; owner decision 2026-11-02 (was colocated_both, which startup now refuses outside sensitivity runs)

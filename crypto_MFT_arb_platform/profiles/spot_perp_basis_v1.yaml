@@ -1,7 +1,9 @@
 # spot_perp_basis_v1 — spot leg on bybit (spot wallet), perp leg on binance (futures margin). Funding on the perp leg only; the
 # spot-perp basis is reported as its own P&L component; separate wallets. Mechanics only: "UNVALIDATED STRATEGY - mechanics only".
 name: spot_perp_basis_v1
-description: spot-perp basis; funding on the perp leg only; mechanics only, unvalidated strategy
+description: spot-perp basis; funding on the perp leg only; mechanics only, unvalidated strategy; old backtester only, mechanics
+decision_status:                         # outside the config hash; carried into every result's release_identity
+  scope: OLD_BACKTESTER_ONLY_MECHANICS   # owner 11 Nov 2026 (Track C): runs on the old backtester loop only; tests mechanics, not a validated strategy or P&L
 product: spot_perp                       # bybit spot, binance perp (per-venue product follows the fee preset family)
 product_fee_consistency: true
 latency_preset: singapore                # ASSUMED; owner decision 2026-11-02 (was colocated_both, which startup now refuses outside sensitivity runs)
