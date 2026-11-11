@@ -182,7 +182,7 @@ class TestStaticOutage(unittest.TestCase):
         self.assertEqual(total, 1)
 
     def test_all_policies_map_to_rejected(self):
-        for policy in ("reject", "blackhole", "queue", "ghost"):
+        for policy in ("reject", "blackhole", "queue"):                  # "ghost" is not mapped to REJECTED any more: it is held and executed at the reconnect (test_ghost_hedge_ceiling.py)
             with self.subTest(policy=policy):
                 a = self._adapter_with_outage(100.0, 200.0, policy=policy)
                 req = _ioc_limit("ord-pol", self._ts(150.0))

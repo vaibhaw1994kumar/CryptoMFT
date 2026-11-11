@@ -37,6 +37,49 @@ def stream():
 
 
 @unittest.skipUnless(SLICES.is_dir(), "March slices not available (the profile needs a data root)")
+class GhostHedgeInTheReplay(unittest.TestCase):
+    """Owner 11 Nov: with hedge_fault_injection on, a conditional outage of the hedge venue's gateway at every maker fill, policy ghost: the hedge is held and executed at the reconnect (not rejected). Off by default."""
+
+    def _replay(self, faults=None, **kw):
+        profile = load_profile("perp_perp_maker_taker_v1_5")
+        cfg = apply_profile(profile, dataset="mar2024", data_root=str(SLICES), pair="SOLUSDT", start_date="2024-03-11", end_date="2024-03-11", output_dir="/tmp/x_ghost")
+        cfg.arb.max_position_base = 1.0
+        if faults is not None:
+            cfg.hedge_faults = faults
+        return SessionReplay(cfg, profile, stream=stream(), **kw)
+
+    def _faults(self, seconds, **kw):
+        from crypto_stat_arb.simulation.hedge_faults import HedgeFaultConfig
+        return HedgeFaultConfig(outage_on_fill_s=seconds, outage_on_fill_venue="hedge", outage_policy="ghost", max_retries=2, retry_backoff_s=0.25, **kw)
+
+    def test_the_hedge_is_held_during_the_outage_and_executed_at_the_reconnect(self):
+        result = self._replay(self._faults(1.0), hedge_fault_injection=True).run(); base = self._replay().run()
+        fills = {f["venue"]: f for f in result["fills"]}
+        self.assertEqual(sorted(fills), ["BINANCE", "BYBIT"])
+        self.assertGreaterEqual(fills["BINANCE"]["ts_ns"] - fills["BYBIT"]["ts_ns"], 1_000_000_000)   # held for the outage: at least 1 s between the maker fill and the hedge fill
+        self.assertEqual(result["positions"], {"BYBIT:SOL-USDT-PERP": "1.0", "BINANCE:SOL-USDT-PERP": "-1.0"})     # booked once, hedged in full
+        h = result["manifest"]["hedge_fault_injection"]
+        self.assertEqual((h["ghost_hedges_delivered"]["BINANCE"], h["ghost_hedges_held_at_end"]["BINANCE"]), (1, 0))
+        self.assertEqual(h["injected_by_venue"]["BYBIT"], {})                                       # only the hedge venue's gateway goes down
+        self.assertNotIn("hedge_fault_injection", base["manifest"])                                              # off by default: nothing changes without the flag
+        self.assertLess(base["fills"][1]["ts_ns"] - base["fills"][0]["ts_ns"], 1_000_000_000)
+
+    def test_an_outage_past_the_report_deadline_leaves_the_hedge_unknown_and_nothing_is_replaced(self):
+        result = self._replay(self._faults(3.0), hedge_fault_injection=True).run()
+        hedges = [o for o in result["orders"] if o["venue"] == "BINANCE"]
+        self.assertEqual(len(hedges), 1)                                                             # no replacement while the state was unknown
+        self.assertEqual(result["positions"], {"BYBIT:SOL-USDT-PERP": "1.0", "BINANCE:SOL-USDT-PERP": "-1.0"})
+
+    def test_a_fault_block_in_the_profile_does_nothing_unless_the_run_asks_and_unsupported_faults_are_refused(self):
+        plain = self._replay(self._faults(1.0)).run()
+        self.assertNotIn("hedge_fault_injection", plain["manifest"])
+        with self.assertRaises(ValueError):
+            self._replay(self._faults(1.0, partial_prob=0.5), hedge_fault_injection=True)
+        with self.assertRaises(ValueError):
+            self._replay(None, hedge_fault_injection=True)
+
+
+@unittest.skipUnless(SLICES.is_dir(), "March slices not available (the profile needs a data root)")
 class SessionReplayEndToEnd(unittest.TestCase):
     @classmethod
     def setUpClass(cls):

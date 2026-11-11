@@ -18,8 +18,10 @@ from new_backtest.profiles import apply_profile, load_profile
 day, which, runs = sys.argv[1], sys.argv[2], Path(sys.argv[3])
 X = Path("/Users/vaibhav/Documents/Newproject/out/queue_v2")
 REASON = "exploratory: Binance trade tape truncated at ~17 h on 2022-01-05 and 2022-01-13 (queue_v2 manifest); each maker order is judged against the tape of the venue it rests on"
+GHOST_S = {"ghost30": 30.0, "ghost3": 3.0}          # owner 11 Nov: the session replay with a real ghost hedge: an outage of the hedge venue's gateway at every maker fill, policy ghost (the fault_presets "ghost_hedge" is 30 s;
+                                                    # 3 s is the labelled variant that stays inside the order-status query budget); `new` runs are not touched
 name = "perp_perp_maker_taker_v1_4" if which == "old" else "perp_perp_maker_taker_v1_5"
-out = runs / ("g1o" if which == "old" else "g1s") / "base" / name / day
+out = runs / ("g1o" if which == "old" else "g1s" if which == "new" else f"ghost_{which}") / "base" / name / day
 out.mkdir(parents=True, exist_ok=True)
 doc = load_profile(name)
 doc.pop("hedge_move_calibration", None)
@@ -49,7 +51,9 @@ with warnings.catch_warnings():
                    "timing_stats": dict(bt.timing_stats), "breaker_trips": [{"ts": t["ts"], "cause": t["cause"]} for t in ((hr.get("circuit_breaker") or {}).get("trips") or [])], "wall_s": time.time() - t0}
     else:
         from new_backtest.session_replay import SessionReplay, order_times_new, write_result
-        rep = SessionReplay(cfg, doc)
+        if which in GHOST_S:
+            cfg.hedge_faults = dataclasses.replace(cfg.hedge_faults, outage_on_fill_s=GHOST_S[which], outage_on_fill_venue="hedge", outage_on_fill_kind="gateway", outage_policy="ghost", ack_timeout_s=2.0)
+        rep = SessionReplay(cfg, doc, hedge_fault_injection=which in GHOST_S)
         res = rep.run()
         write_result(res, out)
         (out / "order_times.json").write_text(json.dumps(order_times_new(rep), indent=1, default=str))
