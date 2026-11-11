@@ -22,6 +22,8 @@ from dataclasses import dataclass, fields, is_dataclass, replace
 from pathlib import Path
 from typing import Any
 
+from crypto_stat_arb.config import MANDATORY_BY_KEY, SENSITIVITY_ONLY_LATENCY, check_mandatory as core_check_mandatory, latency_preset_problem
+
 from .config import FEE_PRESETS, LATENCY_PRESETS
 
 PROFILES_DIR = Path(__file__).resolve().parents[2] / "profiles"
@@ -87,26 +89,32 @@ class Switch:
     note: str = ""
 
 
+def _mandatory(key: str) -> Switch:
+    """A MANDATORY control: the rule (key, forbidden values, note) lives in the core (`crypto_stat_arb.config.MANDATORY_CONTROLS`), once; this is its row in the switch table."""
+    c = MANDATORY_BY_KEY[key]
+    return Switch(c.key, "MANDATORY", c.forbidden, c.note)
+
+
 SWITCHES: tuple[Switch, ...] = (
     Switch("arb.profile", "LEGACY_COMPAT", note="legacy_v0 | perp_perp_maker_taker_v1 | spot_* (edge expressions and gate)"),
-    Switch("arb.dispatch_mode", "MANDATORY", ("simultaneous",), "the hedge waits for the maker fill (Method A)"),
-    Switch("valuation", "MANDATORY", ("last_mark",), "R11: open position marked at the common timestamp"),
-    Switch("equity_bridge", "MANDATORY", ("off", None), "ledger identity checked at the end of every run"),
-    Switch("enforce_book_state", "MANDATORY", (False,), "no pricing or fills from a non-valid book (WP4)"),
-    Switch("trade_dedupe", "MANDATORY", ("off", None), "trades de-duplicated (native id when present)"),
-    Switch("delta_uses_book_size", "MANDATORY", (False,), "depth-size fix"),
-    Switch("maker.share_trade_volume", "MANDATORY", (False,), "one print fills own orders once in total"),
-    Switch("maker.dedupe_trade_depth", "MANDATORY", (False,), "the same execution is charged once"),
-    Switch("maker.exchange_time_eligibility", "MANDATORY", (False,), "causal fills: nothing executed before arrival fills us"),
-    Switch("arb.count_pending_exposure", "MANDATORY", (False,), "in-flight / pending exposure counts toward the limits"),
-    Switch("arb.count_unknown_exposure", "MANDATORY", (False,), "UNKNOWN orders count toward the limits"),
-    Switch("arb.maker_max_age_s", "MANDATORY", (0, 0.0, None), "order lifetime set"),
-    Switch("timing.dead_feed_s", "MANDATORY", (None, 0, 0.0), "dead-feed gate (WP3)"),
-    Switch("breaker", "MANDATORY", (None, False), "circuit breaker configured"),
-    Switch("hedge_faults.response", "MANDATORY", ("legacy",), "recovery policy, not the latency-free oracle"),
-    Switch("cancel_time_basis", "MANDATORY", ("receive",), "cancels take effect on exchange time (D-03)"),
+    _mandatory("arb.dispatch_mode"),
+    _mandatory("valuation"),
+    _mandatory("equity_bridge"),
+    _mandatory("enforce_book_state"),
+    _mandatory("trade_dedupe"),
+    _mandatory("delta_uses_book_size"),
+    _mandatory("maker.share_trade_volume"),
+    _mandatory("maker.dedupe_trade_depth"),
+    _mandatory("maker.exchange_time_eligibility"),
+    _mandatory("arb.count_pending_exposure"),
+    _mandatory("arb.count_unknown_exposure"),
+    _mandatory("arb.maker_max_age_s"),
+    _mandatory("timing.dead_feed_s"),
+    _mandatory("breaker"),
+    _mandatory("hedge_faults.response"),
+    _mandatory("cancel_time_basis"),
     Switch("timing.equal_time_policy", "LEGACY_COMPAT", note="market_first (v1) | cancel_first (legacy tie rule)"),
-    Switch("timing.truth_books", "MANDATORY", (False,), "venue-truth books for arrivals (WP3)"),
+    _mandatory("timing.truth_books"),
     Switch("maker.cancel_model", "CALIBRATED", note="proportional (fill-evidence study 2026-10-30)"),
     Switch("maker.unknown_queue_model", "CALIBRATED", note="depth_aware; floor / distribution pending calibration (WP4)"),
     Switch("maker.vanish_clears_queue", "LEGACY_COMPAT", note="True in v1 (PROVISIONAL)"),
@@ -119,16 +127,16 @@ SWITCHES: tuple[Switch, ...] = (
     Switch("message_atomic_book", "LEGACY_COMPAT", note="False in v1 / v1.1 (each delta is applied, repaired and evaluated on its own); v1.2 sets True: the deltas of one exchange message are one unit (cross judged at the message end; strategy, touch and maker queue updates run after the whole message)"),
     Switch("arb.join_touch_on_tick_rounding", "LEGACY_COMPAT", note="False in v1 / v1.1 (a quote rounded onto the touch is refused); v1.2 sets True: it joins the back of the touch queue if the edge at the rounded price passes"),
     Switch("hedge_arrival_book", "LEGACY_COMPAT", note="view in v1 (default); v1.1 step 9e sets truth: hedge IOCs execute on the venue-truth book at arrival"),
-    Switch("arb.net_ceiling_multiple", "MANDATORY", note="1.0 in the perp profile — DECISION_PENDING (1x vs fill headroom)"),
+    _mandatory("arb.net_ceiling_multiple"),
     Switch("arb.p_fail", "CALIBRATED", note="SCENARIO, not calibrated (PLACEHOLDER 0.07; no execution logs exist)"),
     Switch("arb.loss_fail_bps", "CALIBRATED", note="SCENARIO, not calibrated (7.8 from a simulated hedge-failure study, not execution logs)"),
     Switch("arb.expected_hedge_move_bps_bid", "CALIBRATED", note="training-day executed hedge move"),
     Switch("adverse_table", "CALIBRATED", note="absent in every profile up to v1_5 (the single pinned hedge move is used); v1_6 (S1) pins a table fitted on market-data labels of TRAIN days only: expected hedge move by depth reached, volatility and flow, in place of that number in the quote price, the entry rule and the repricing rule"),
     Switch("do_not_quote", "CALIBRATED", note="absent in every profile up to v1_6; v1_7 (S3, owner 10 Nov) pins a do-not-quote filter fitted on market-data labels of TRAIN days only (ridge of the 50 ms hedge-venue move on quote-time features; skip when the naive edge after fees plus the predicted move is below its threshold), in place of block_on_toxic. EXPLORATORY until simulator validation"),
     Switch("latency_preset", "CALIBRATED", note="ASSUMED until ollog measurements replace it"),
-    Switch("margin", "MANDATORY", (None,), "margin model configured in a perp profile"),
-    Switch("postonly_reject_model", "MANDATORY", ("off", None), "perp profile: PostOnly would-cross orders are rejected at exchange arrival time (lifecycle task 5); perp profiles only"),
-    Switch("product_fee_consistency", "MANDATORY", (False,), "fee preset must match the venue's product"),
+    _mandatory("margin"),
+    _mandatory("postonly_reject_model"),
+    _mandatory("product_fee_consistency"),
     Switch("book_tape_repair", "LEGACY_COMPAT", note="engine default True (and in v1): the trade tape lowers book levels, which double-depletes when the depth decrease arrives first; v1.1 sets False"),
     Switch("own_impact", "LEGACY_COMPAT", note="legacy (v1): own taker consumption mutates the public book; overlay (v1.1): a shadow overlay cleared at the next public update of that level"),
     Switch("maker.ledger_epoch", "LEGACY_COMPAT", note="off in v1; v1.1 sets True: a snapshot / reset invalidates old netting credit, ambiguous associations are flagged"),
@@ -146,8 +154,8 @@ SWITCHES: tuple[Switch, ...] = (
     Switch("maker.depletion_ledger", "LEGACY_COMPAT", note="False in v1 / v1.1 (a print netted against an earlier depth decrease drains nothing more: book-first leaves the queue ahead further back with size behind us, and trade_after_front uses the whole print); v1.2 sets True: the decrease records the head movement it applied, the print moves the queue only by the rest, and netted pairs with no other proof are counted"),
     Switch("maker.unknown_queue_dist", "CALIBRATED", note="floor in v1 (hand-set 25); v1.1: fitted on strictly earlier days, floor 0, flagged fallback 25 where the fit has no data (unknown_queue_fallback)"),
     Switch("execution.price_cap_required", "CALIBRATED", note="execution layer: every non-unwind intent carries a worst price and every child stays inside it; true in both profiles (today's behaviour), CALIBRATED until the cap decision (brief step 11) is made"),
-    Switch("execution.one_hedge_child", "MANDATORY", ("off",), "execution layer: one live hedge child per hedge intent (counted, or refused in enforce mode)"),
-    Switch("execution.risk_reservation", "MANDATORY", ("off",), "execution layer: primary exposure is checked and reserved in one call and released at the terminal state (counted, or refused in enforce mode)"),
+    _mandatory("execution.one_hedge_child"),
+    _mandatory("execution.risk_reservation"),
 )
 MANDATORY = {s.key: s for s in SWITCHES if s.cls == "MANDATORY"}
 
@@ -175,21 +183,8 @@ def load_profile(path: str | Path) -> dict:
 
 
 def check_mandatory(doc: dict) -> list[str]:
-    """Which MANDATORY controls the profile disables. Empty for a valid non-legacy profile; legacy_v0 is exempt (and says so)."""
-    if doc.get("name") == "legacy_v0":
-        return []
-    bad = []
-    for key, sw in MANDATORY.items():
-        val = _get(doc, key, None) if key != "product_fee_consistency" else doc.get("product_fee_consistency", True)
-        if key == "breaker":
-            val = doc.get("breaker")
-        if key == "margin":
-            val = doc.get("margin")
-        if val in sw.forbidden or (val is None and key in ("timing.dead_feed_s", "breaker", "margin", "postonly_reject_model") and doc.get("product", "perp") == "perp"):
-            if key in ("margin", "postonly_reject_model") and doc.get("product") != "perp":
-                continue
-            bad.append(f"{key}={val!r} disables a MANDATORY control: {sw.note}")
-    return bad
+    """Which MANDATORY controls the profile disables (the rule is the core's: `crypto_stat_arb.config.check_mandatory`). Empty for a valid non-legacy profile; legacy_v0 is exempt (and says so)."""
+    return core_check_mandatory(doc)
 
 
 NESTED = {"arb": "ArbConfig", "maker": "MakerConfig", "venue_state": "VenueStateConfig", "agent_flow": "AgentFlowConfig",
@@ -379,17 +374,12 @@ def load_hedge_move_calibration(doc: dict, hm: dict, run_start: str) -> tuple[fl
 
 # Latency presets that cannot exist in production (config.py: nobody is co-located with both venues). A non-legacy profile refuses
 # them unless the run is declared a sensitivity run: apply_profile(..., latency_sensitivity="<why>"), recorded in release_identity.
-SENSITIVITY_ONLY_LATENCY = ("colocated_both",)
 
 
 def check_latency_preset(doc: dict, latency_preset, timing_preset, sensitivity) -> None:
-    if doc.get("name") == "legacy_v0":              # the frozen comparison baseline keeps its historical preset
-        return
-    used = sorted({p for p in (latency_preset, timing_preset) if p in SENSITIVITY_ONLY_LATENCY})
-    if used and not (isinstance(sensitivity, str) and sensitivity.strip()):
-        raise ProfileError(
-            f"profile {doc.get('name')}: latency preset {', '.join(used)} is physically impossible and allowed only in a sensitivity run; "
-            f"pass latency_sensitivity='<reason>' to label the run, or use singapore / tokyo / neutral")
+    problem = latency_preset_problem(doc, latency_preset, timing_preset, sensitivity)       # the rule is the core's
+    if problem:
+        raise ProfileError(f"profile {doc.get('name')}: {problem}")
 
 
 def _sha_files(paths) -> str:

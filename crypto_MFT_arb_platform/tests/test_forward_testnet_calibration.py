@@ -2,6 +2,7 @@
 
 import asyncio
 from decimal import Decimal
+from dataclasses import replace
 import hashlib
 import hmac
 import json
@@ -147,8 +148,11 @@ class LivePaperTests(unittest.IsolatedAsyncioTestCase):
         }
         with self.assertRaises(ValueError):
             TradingSession(cfg, live_data=False, adapters=adapters)
+        with self.assertRaises(ValueError) as plain:                              # owner 11 Nov: real orders start only from a profile
+            TradingSession(cfg, execution_mode=ExecutionMode.VENUE_TESTNET, live_data=True, adapters=adapters)
+        self.assertIn("profile", str(plain.exception))
         session = TradingSession(
-            cfg, execution_mode=ExecutionMode.VENUE_TESTNET, live_data=True,
+            replace(cfg, origin="profile:test"), execution_mode=ExecutionMode.VENUE_TESTNET, live_data=True,
             adapters=adapters,
         )
         self.assertIsNone(session.router.latency_model)

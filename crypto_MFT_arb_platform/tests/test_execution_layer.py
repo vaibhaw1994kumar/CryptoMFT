@@ -336,6 +336,11 @@ class TacticChoiceTests(unittest.TestCase):
                 self.pick(inventory_pressure=0.2, time_to_limit_s=1.0, spread_bps=40.0)[1], self.pick(mm=False, inventory_pressure=0.2, time_to_limit_s=1.0)[1],
                 self.pick(inventory_pressure=1.0)[1], self.pick(spread_bps=11.0)[1], self.pick(inventory_pressure=0.7)[1], self.pick(inventory_pressure=0.1, inventory_age_s=61.0)[1],
                 self.pick(inventory_pressure=0.3, volatility_bucket="high")[1], self.pick()[1]}
+        from crypto_stat_arb.ems.tactics import TacticChoiceConfig, choose_tactic
+        lq = TacticChoiceConfig(liquidity_aware=True)
+        seen |= {choose_tactic(self.state(inventory_pressure=0.7, expected_fill_time_s=5.0, expected_wait_cost_bps=0.1), lq).reason,
+                 choose_tactic(self.state(inventory_pressure=0.7, order_qty=10.0, executable_depth_within_cap=10.0), lq).reason,
+                 choose_tactic(self.state(inventory_pressure=0.7, order_qty=10.0, executable_depth_within_cap=4.0), lq).reason}
         self.assertEqual(seen, set(TACTIC_CHOICE_REASONS))
 
     def grid(self):
@@ -411,3 +416,126 @@ class TacticChoiceTests(unittest.TestCase):
         got = other.suggest_tactic(emergency)
         self.assertEqual((got.tactic, got.reason), ("IOC_CAPPED", "BREAKER_FLATTEN_MARKET_NOT_ALLOWED"))
         self.assertEqual(other.suggest_tactic(self.state(inventory_pressure=1.2)).tactic, "IOC_CAPPED")
+
+
+class TacticLiquidityAwareTests(unittest.TestCase):
+    """CR-LQ (owner 11 Nov): choose_tactic with TacticChoiceConfig.liquidity_aware (default False) reads the book depth in the IOC cap and the expected wait of a resting order on the soft rules only.
+    Off, or with the new fields None, every answer is the old one; MARKET_BANDED stays emergency-only."""
+
+    LQ = None
+
+    def setUp(self):
+        from crypto_stat_arb.ems.tactics import TacticChoiceConfig
+        self.LQ = TacticChoiceConfig(liquidity_aware=True)
+
+    def state(self, **kw):
+        return TacticChoiceTests.state(self, **kw)
+
+    def grid(self):
+        return TacticChoiceTests.grid(self)
+
+    def pick(self, cfg=None, mm=True, **kw):
+        from crypto_stat_arb.ems.tactics import choose_tactic
+        return choose_tactic(self.state(**kw), cfg or self.LQ, allow_market_banded=mm)
+
+    def test_the_switch_is_off_by_default(self):
+        from crypto_stat_arb.ems.tactics import TacticChoiceConfig
+        self.assertFalse(TacticChoiceConfig().liquidity_aware)
+
+    def test_off_gives_the_old_answer_on_the_whole_grid_even_with_the_new_fields_set(self):
+        from crypto_stat_arb.ems.tactics import TacticChoice, TacticChoiceConfig, choose_tactic
+        off = TacticChoiceConfig()
+        n = 0
+        for st in self.grid():
+            old = choose_tactic(st, off, allow_market_banded=True)
+            self.assertIsInstance(old, TacticChoice)
+            self.assertIsNone(old.covered_qty)
+            self.assertIsNone(old.residual_qty)
+            from dataclasses import replace
+            rich = replace(st, order_qty=10.0, executable_depth_within_cap=1.0, expected_fill_time_s=1.0, expected_wait_cost_bps=0.0)
+            self.assertEqual(choose_tactic(rich, off, allow_market_banded=True), old, st)
+            n += 1
+        self.assertGreater(n, 1000)
+
+    def test_on_with_the_new_fields_unknown_gives_the_old_answer_on_the_whole_grid(self):
+        from crypto_stat_arb.ems.tactics import TacticChoiceConfig, choose_tactic
+        off = TacticChoiceConfig()
+        for st in self.grid():
+            for mm in (True, False):
+                self.assertEqual(choose_tactic(st, self.LQ, allow_market_banded=mm), choose_tactic(st, off, allow_market_banded=mm), st)
+
+    def test_a_cheap_short_wait_stays_passive_with_lq_wait_cheaper(self):
+        # crossing cost = 2.0 / 2 + 5.5 - 2.0 = 4.5 bps
+        for kw in (dict(inventory_pressure=0.7), dict(inventory_pressure=0.1, inventory_age_s=90.0), dict(inventory_pressure=0.4, volatility_bucket="high"), dict(inventory_pressure=0.0)):
+            c = self.pick(expected_fill_time_s=10.0, expected_wait_cost_bps=4.4, **kw)
+            self.assertEqual((c.tactic, c.reason), ("PASSIVE", "LQ_WAIT_CHEAPER"), kw)
+
+    def test_a_long_or_costly_wait_is_not_cheaper(self):
+        c = self.pick(inventory_pressure=0.7, expected_fill_time_s=31.0, expected_wait_cost_bps=0.0)
+        self.assertEqual((c.tactic, c.reason), ("IOC_CAPPED", "INVENTORY_PRESSURE_REDUCE"))
+        c = self.pick(inventory_pressure=0.7, expected_fill_time_s=30.0, expected_wait_cost_bps=4.5)       # equal to the crossing cost: not cheaper
+        self.assertEqual((c.tactic, c.reason), ("IOC_CAPPED", "INVENTORY_PRESSURE_REDUCE"))
+        c = self.pick(inventory_pressure=0.7, expected_fill_time_s=30.0, expected_wait_cost_bps=4.4)       # exactly max_wait_s is allowed
+        self.assertEqual((c.tactic, c.reason), ("PASSIVE", "LQ_WAIT_CHEAPER"))
+        c = self.pick(inventory_pressure=0.7, expected_fill_time_s=5.0)                                    # only one of the two wait fields: unknown
+        self.assertEqual(c.reason, "INVENTORY_PRESSURE_REDUCE")
+
+    def test_an_ioc_that_the_book_covers_is_lq_depth_covers(self):
+        for kw in (dict(inventory_pressure=0.7), dict(inventory_pressure=0.1, inventory_age_s=90.0), dict(inventory_pressure=0.4, volatility_bucket="high")):
+            c = self.pick(order_qty=10.0, executable_depth_within_cap=10.0, **kw)
+            self.assertEqual((c.tactic, c.reason, c.covered_qty, c.residual_qty), ("IOC_CAPPED", "LQ_DEPTH_COVERS", None, None), kw)
+
+    def test_the_depth_margin_is_applied(self):
+        from crypto_stat_arb.ems.tactics import TacticChoiceConfig
+        cfg = TacticChoiceConfig(liquidity_aware=True, depth_margin=1.5)
+        self.assertEqual(self.pick(cfg, inventory_pressure=0.7, order_qty=10.0, executable_depth_within_cap=15.0).reason, "LQ_DEPTH_COVERS")
+        c = self.pick(cfg, inventory_pressure=0.7, order_qty=10.0, executable_depth_within_cap=12.0)
+        self.assertEqual((c.tactic, c.reason, c.covered_qty, c.residual_qty), ("IOC_CAPPED", "LQ_PARTIAL_RESIDUAL", 8.0, 2.0))
+
+    def test_partial_depth_returns_the_covered_part_and_the_residual_state(self):
+        c = self.pick(inventory_pressure=0.7, order_qty=10.0, executable_depth_within_cap=4.0)
+        self.assertEqual((c.tactic, c.reason, c.covered_qty, c.residual_qty), ("IOC_CAPPED", "LQ_PARTIAL_RESIDUAL", 4.0, 6.0))
+
+    def test_no_depth_at_all_is_not_an_ioc(self):
+        c = self.pick(inventory_pressure=0.7, order_qty=10.0, executable_depth_within_cap=0.0)
+        self.assertEqual((c.tactic, c.reason, c.covered_qty, c.residual_qty), ("PASSIVE", "LQ_PARTIAL_RESIDUAL", 0.0, 10.0))
+
+    def test_depth_without_the_order_size_is_unknown(self):
+        self.assertEqual(self.pick(inventory_pressure=0.7, executable_depth_within_cap=0.0).reason, "INVENTORY_PRESSURE_REDUCE")
+
+    def test_a_passive_default_is_never_made_aggressive(self):
+        c = self.pick(order_qty=10.0, executable_depth_within_cap=100.0, expected_fill_time_s=500.0, expected_wait_cost_bps=50.0)
+        self.assertEqual((c.tactic, c.reason), ("PASSIVE", "DEFAULT_PASSIVE"))
+
+    def test_the_emergency_stale_book_and_inventory_at_limit_rules_do_not_read_the_new_fields(self):
+        from crypto_stat_arb.ems.tactics import TacticChoiceConfig, choose_tactic
+        off = TacticChoiceConfig()
+        rich = dict(order_qty=10.0, executable_depth_within_cap=0.0, expected_fill_time_s=1.0, expected_wait_cost_bps=0.0)
+        for kw in (dict(breaker_flatten=True), dict(book_age_s=0.6, inventory_pressure=1.5), dict(inventory_pressure=0.2, time_to_limit_s=10.0), dict(inventory_pressure=0.2, time_to_limit_s=5.0, spread_bps=40.0),
+                   dict(inventory_pressure=1.2), dict(spread_bps=11.0, inventory_pressure=0.7)):
+            for mm in (True, False):
+                self.assertEqual(choose_tactic(self.state(**kw, **rich), self.LQ, allow_market_banded=mm), choose_tactic(self.state(**kw), off, allow_market_banded=mm), kw)
+
+    def test_market_banded_is_never_returned_for_a_non_emergency_reason_over_every_state_and_depth(self):
+        from dataclasses import replace
+        from crypto_stat_arb.ems.tactics import MARKET_BANDED_REASONS, choose_tactic
+        seen = set()
+        for st in self.grid():
+            for extra in (dict(), dict(order_qty=10.0, executable_depth_within_cap=0.0), dict(order_qty=10.0, executable_depth_within_cap=4.0), dict(order_qty=10.0, executable_depth_within_cap=50.0),
+                          dict(expected_fill_time_s=1.0, expected_wait_cost_bps=0.0), dict(expected_fill_time_s=100.0, expected_wait_cost_bps=100.0)):
+                c = choose_tactic(replace(st, **extra), self.LQ, allow_market_banded=True)
+                seen.add(c.reason)
+                if c.tactic == "MARKET_BANDED":
+                    self.assertIn(c.reason, MARKET_BANDED_REASONS, (st, extra))
+                if c.reason.startswith("LQ_"):
+                    self.assertIn(c.tactic, ("PASSIVE", "IOC_CAPPED"))
+        self.assertTrue({"LQ_WAIT_CHEAPER", "LQ_DEPTH_COVERS", "LQ_PARTIAL_RESIDUAL"} <= seen)
+
+    def test_bad_new_inputs_are_refused(self):
+        from crypto_stat_arb.ems.tactics import TacticChoiceConfig, choose_tactic
+        for kw in (dict(order_qty=-1.0), dict(executable_depth_within_cap=float("nan")), dict(expected_fill_time_s=True), dict(expected_wait_cost_bps="0")):
+            with self.assertRaises(ValueError, msg=str(kw)):
+                choose_tactic(self.state(**kw), self.LQ)
+        for bad in (dict(liquidity_aware=1), dict(liquidity_aware=True, depth_margin=0.0), dict(liquidity_aware=True, max_wait_s=-1.0), dict(liquidity_aware=True, taker_fee_bps=float("nan"))):
+            with self.assertRaises(ValueError, msg=str(bad)):
+                choose_tactic(self.state(), TacticChoiceConfig(**bad))

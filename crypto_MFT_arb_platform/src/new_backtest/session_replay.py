@@ -28,6 +28,7 @@ from pathlib import Path
 from typing import Any, Iterable
 
 from crypto_stat_arb.config import config_from_raw, raw_config_from_profile
+from crypto_stat_arb.derivatives import DerivativeTicker
 from crypto_stat_arb.ems.layer import hedge_slack_bps
 from crypto_stat_arb.execution import DispatchPolicy
 from crypto_stat_arb.hedge_lifecycle import HedgePolicy
@@ -89,7 +90,7 @@ class SessionReplay:
     """One replay on the session. `stream` is any iterable of `TimedEvent` built with `decimal_numbers=True` (the real feed or a synthetic list); consumed lazily."""
 
     def __init__(self, config, profile: dict, *, stream: Iterable | None = None, ticks: dict[str, float] | None = None, recorded: bool = False,
-                 decompose_markouts: bool = False) -> None:
+                 decompose_markouts: bool = False, mark_from_mid: bool = False, hedge_fault_injection: bool = False) -> None:
         if config.runtime != "session":
             raise ValueError("SessionReplay runs the session runtime only")
         self.config, self.profile = config, profile
@@ -102,6 +103,13 @@ class SessionReplay:
         self._mid_pre: dict[str, float] = {}
         self._decomp_pos = 0
         self.decomp_skipped_no_mid = 0
+        # Marks for the margin check (owner 11 Nov): the venue's own mark price from the recorded derivatives stream wins when it is present (`_derivative`). With `mark_from_mid` and no exchange mark for a venue, the
+        # replay supplies the last VALID book mid as that venue's mark, at most every 100 ms, labelled MARK_FROM_MID in the manifest: a book that goes quiet for 500 ms then no longer drops its mark and trips the margin
+        # check and the kill switch (every margin breach of the 2026-10-29 run sat inside a BINANCE:STALE interval). Replay only: the core's rule (fail closed on a missing mark) is unchanged.
+        self.mark_from_mid = mark_from_mid
+        self._exchange_mark_venues: set[str] = set()
+        self._last_synth_mark_ns: dict[str, int] = {}
+        self.mark_ticks = {"exchange_mark": 0, "MARK_FROM_MID": 0}
         self.recorded = recorded          # the input is a recorded live session (core events already): `run_recorded`; no venue-truth books (they are built from raw research events)
         venues = tuple(config.venues)
         self.venues = venues
@@ -115,7 +123,7 @@ class SessionReplay:
         self.ticks = ticks or dated_ticks(config.start_date)
         size = float(config.arb.max_position_base)
         raw, self.config_notes = raw_config_from_profile(profile, pair=config.pair, venues=venues, ticks=self.ticks, quantity_steps={v: quantity_steps()[v] for v in venues}, size_base=size,
-                                                         seed=config.seed)
+                                                         seed=config.seed, venue_cap_base=float(config.arb.max_venue_imbalance_base) or None)
         self.app_config, self.raw_config = config_from_raw(raw)
         self.instrument_id = self.app_config.instrument_id
         self.feed = CanonicalFeed(self.instrument_id, venue_names=self.names, delta_semantics={v: s.delta_semantics for v, s in self.venue_specs.items()},
@@ -141,6 +149,23 @@ class SessionReplay:
         executor.own_overlay = config.own_impact == "overlay"
         self.adapters = {self.names[v]: QueueAwareVenueAdapter(self.names[v], executor, tick_size=self.ticks[v], maker_fee_bps=self.venue_specs[v].fees.maker_bps, pair=config.pair,
                                                                state=self.states[v], truth=self.truth, feed_venue=v, view_book=(lambda v=v: self.views[v]), driver_fed=True) for v in venues}
+        # Hedge-fault injection (owner 11 Nov, the ghost hedge): OFF unless the run asks (an existing run never changes because its profile names a fault block). On, the config's hedge_faults reach the venue
+        # simulators: outages (static or one per plan at the first hedge order), reject_prob, and the ghost policy (the hedge is held at the gateway and executed at the reconnect). Faults the simulator does not
+        # model are refused here, not ignored.
+        self.hedge_fault_injection = hedge_fault_injection
+        if hedge_fault_injection:
+            hf_cfg = config.hedge_faults
+            if hf_cfg is None or not hf_cfg.injects:
+                raise ValueError("hedge_fault_injection needs a hedge_faults block that injects something")
+            if hf_cfg.outage_on_fill_s and (hf_cfg.outage_on_fill_venue != "hedge" or hf_cfg.outage_on_fill_kind != "gateway"):
+                raise ValueError("hedge_fault_injection simulates a conditional outage of the hedge venue's gateway only (outage_on_fill_venue 'hedge', kind 'gateway')")
+            unsupported = [n for n in ("delay_prob", "partial_prob", "ack_unknown_prob", "fast_move_reject_prob", "restart_s") if getattr(hf_cfg, n)] + (["disconnects"] if hf_cfg.disconnects else []) + (["reject_prob_by_venue"] if any(p for _, p in hf_cfg.reject_prob_by_venue) else [])
+            if unsupported:
+                raise ValueError(f"hedge_fault_injection does not simulate: {', '.join(unsupported)}")
+            hedge_names = {self.names[v] for v in venues if v not in config.arb.maker_venues}
+            for name, adapter in self.adapters.items():
+                adapter._fault_config = hf_cfg
+                adapter.outage_on_fill_here = name in hedge_names
         self.resync_delay_s = float(getattr(config, "resync_delay_s", 5.0))
         # Timing is a RULE, the same on both runtimes (owner 9 Nov): the profile's timing block (latency preset, floors, jitter) drives the feed delay, the clock and every order delay.
         self.latency = LatencyBook({v: s.latency for v, s in self.venue_specs.items()}, seed=config.seed)
@@ -230,6 +255,9 @@ class SessionReplay:
     def _run_events(self, events: Iterable) -> dict[str, Any]:
         limit_ns = None if self.config.max_event_ts is None else int(self.config.max_event_ts * _NS)
         for event in events:
+            if isinstance(event, DerivativeTicker):
+                self._derivative(event)
+                continue
             if self.config.max_events is not None and sum(self.events.values()) >= self.config.max_events:
                 break
             if limit_ns is not None and event.receive_ts_ns > limit_ns:
@@ -251,6 +279,26 @@ class SessionReplay:
             self.decomp.resolve_asof(end, self._mid_pre)
             self.decomp.resolve_asof(end, self._mid_pre, finalize=True)
         return self.result()
+
+    def _derivative(self, ticker: DerivativeTicker) -> None:
+        """A recorded derivatives frame (mark, index, funding): the session keeps the venue's mark for the margin check (and settles funding when it is configured). Nothing else moves."""
+        self.session.on_derivative(ticker)
+        if ticker.mark_price is not None:
+            self._exchange_mark_venues.add(ticker.venue)
+            self.mark_ticks["exchange_mark"] += 1
+
+    def _synth_mark(self, event) -> None:
+        """MARK_FROM_MID (replay only, off unless asked): the last valid mid of the venue's book as its mark, for a venue with no exchange mark, at most every 100 ms."""
+        if event.venue in self._exchange_mark_venues:
+            return
+        key = (event.venue, event.instrument_id)
+        book = self.session.books[key]
+        now = event.receive_ts_ns
+        if book.state.value != "VALID" or not book.bids or not book.asks or now - self._last_synth_mark_ns.get(event.venue, -10**18) < 100_000_000:
+            return
+        self._last_synth_mark_ns[event.venue] = now
+        self.session.exchange_marks[key] = (now, (book.best_bid + book.best_ask) / 2)
+        self.mark_ticks["MARK_FROM_MID"] += 1
 
     def _decomp_after(self, event) -> None:
         """Record the fills this event caused with the mid before it, then move that mid on to the state after it."""
@@ -423,6 +471,8 @@ class SessionReplay:
         self._deliver(adapter, produced, now, event.exchange_ts_ns)
         self.session.on_event(event, apply_book=False)
         self._book_only_suspension(event.venue, now)
+        if self.mark_from_mid:
+            self._synth_mark(event)
 
     def _trade(self, trade: TradeEvent) -> None:
         if not self.feeder.on_trade(trade):
@@ -480,7 +530,7 @@ class SessionReplay:
                 "rows": len(self.decomp.rows), "age_rule": "off (no mid_max_age_s)"}, "_markout_rows": list(self.decomp.rows)}),
             "markout_summary": s.markouts.summary() if s.markouts is not None else None, "markout_by_venue_role": s.markouts.summary_by_venue_role() if s.markouts is not None else None,
             "gate_events": [{k: (str(v) if isinstance(v, Decimal) else v) for k, v in e.items() if k in ("event_type", "ts_ns", "reason", "chain_id", "parent_id")}
-                            for e in s.ledger.events if e["event_type"] in ("HEDGE_DISPATCH_HELD", "TIME_INTEGRITY_BLOCK", "ORDER_LIFETIME_EXPIRED", "ORDER_REJECT_CLASSIFIED", "HEDGE_CAP_BREACH_AT_DISPATCH", "HEDGE_ALARM")][:500],
+                            for e in s.ledger.events if e["event_type"] in ("HEDGE_DISPATCH_HELD", "TIME_INTEGRITY_BLOCK", "ORDER_LIFETIME_EXPIRED", "ORDER_REJECT_CLASSIFIED", "HEDGE_TOUCH_PAST_PLANNED_LIMIT", "HEDGE_ALARM")][:500],
             "grid_snaps": dict(self.shim.grid_snaps), "fills_by_source": {n: dict(a.fills_by_source) for n, a in self.adapters.items()},
             "manifest": {
                 "invalid_book_policy": s.book_policy_report(self.last_ns),
@@ -491,13 +541,21 @@ class SessionReplay:
                 "price_sanity_core_stats": {f"{v}": {k: getattr(b.stats, k) for k in ("price_jumps", "confirmed_price_moves", "wide_spreads", "crossed_or_locked", "stale_transitions", "invalid_levels", "resyncs", "snapshots", "deltas_applied")}
                                             for (v, _), b in s.books.items()},
                 "time_integrity_blocks": sum(1 for e in s.ledger.events if e["event_type"] == "TIME_INTEGRITY_BLOCK"),
+                **({"hedge_fault_injection": {"faults": self.config.hedge_faults.as_dict(), "injected_by_venue": {n: dict(a.hedge_faults_injected) for n, a in self.adapters.items()},
+                                              "ghost_hedges_held_at_end": {n: len(a._held) for n, a in self.adapters.items()}, "ghost_hedges_delivered": {n: len(a.ghost_delivered) for n, a in self.adapters.items()},
+                                              "not_simulated": "feed darkness (outage kind 'full'), the maker venue's outage, delay, partial_prob, lost ack, fast-move reject, restart, disconnects: refused, not ignored"}}
+                   if self.hedge_fault_injection else {}),
+                **({} if not (self.mark_from_mid or self.mark_ticks["exchange_mark"]) else {"mark_source": {
+                    "exchange_mark_ticks": self.mark_ticks["exchange_mark"], "MARK_FROM_MID_ticks": self.mark_ticks["MARK_FROM_MID"], "venues_with_exchange_marks": sorted(self._exchange_mark_venues),
+                    "label": "the margin check marks a position with the venue's exchange mark when the recorded derivatives stream has one (age at most mark_max_age, 5 s ASSUMED), else with the last good mark or valid book mid (kept for up to 5 s; after that the price is missing and new risk is paused, not the kill switch); MARK_FROM_MID is the replay's "
+                             "labelled fallback for a venue with no exchange mark (replay only; funding is not settled from it)"}}),
                 "sequence_gap_counter_of_the_core_book": "NOT REPORTED: synthetic sequence, gaps NOT_MEASURED",
                 "entry_gates": {"book_age_rule": "core, 500 ms, age from the last message of any kind (owner 8 Nov Q-G1)", "dead_feed_5s": "not a blocking gate; the resubscribe trigger only (Q-G2)", "price_sanity_500bps": "core, kept (Q-G3)",
-                                "time_integrity": "core, host-offset correction on (Q-G4)", "circuit_breaker": "NOT IN THE CORE: Phase E (Q-G5); old-path trips are in the parity report"}, "feed": self.feed.manifest(), "ticks": self.ticks, "quantity_step": {"values": quantity_steps(), "label": published_rules()["label"], "fetched": published_rules()["fetched"], "sources": {v: r["source"] for v, r in published_rules()["venues"].items()}},
+                                "time_integrity": "core, host-offset correction on (Q-G4)", "circuit_breaker": "in the core (CircuitBreaker + pre-send risk gate in TradingSession, Track A item 1, off by default); NOT SWITCHED ON in this replay (no breaker_config is passed); old-path trips are in the parity report"}, "feed": self.feed.manifest(), "ticks": self.ticks, "quantity_step": {"values": quantity_steps(), "label": published_rules()["label"], "fetched": published_rules()["fetched"], "sources": {v: r["source"] for v, r in published_rules()["venues"].items()}},
                 "config_notes": self.config_notes, "timing": {"latency_model": None if self.latency_model is None else self.latency_model.report(), "truth_books": dict(self.timing_stats)}, "release_identity": self.config.release_identity,
                 "differences_from_backtester_loop": ["timing is shared (profile timing block through Timelines; venue-truth books built by this driver): the old text 'no timing timelines or venue-truth books' is no longer true (corrected 10 Nov)",
                                                      "STILL MISSING in the session runtime (Phase E): E0 ems/ layer (repricing, tactics, PASSIVE placements, risk gate, pairing, venue selector); E1 maker order lifetime as a timer (the OMS deadline fires only on an event or tick); "
-                                                     "E2 hedge-fault injection and the fault presets / conditional scenarios; E3 participation cap and size sweep; circuit breaker not wired; the backtester's margin step (the core margin engine replaces it)",
+                                                     "E2 hedge-fault injection and the fault presets / conditional scenarios; E3 participation cap and size sweep; circuit breaker: in the core but not switched on in this replay; the backtester's margin step (the core margin engine replaces it)",
                                                      "message-end cross invalidates the core book", "sequence SYNTHETIC, gaps NOT_MEASURED"],
             },
         }
@@ -720,7 +778,13 @@ def iter_recorded_events(session_dir):
     One part at a time (owner 11 Nov, the 1-day replay): a day of SOLUSDT is about 4.9 million events, more than a list of them holds in memory. Every trace line of a part refers to a row of the SAME part
     (checked on the 2026-10-29 capture: 0 unresolved of 4.9 million); a reference that is not found raises, never skips."""
     for part in sorted(Path(session_dir).glob("part-*")):
-        can, trades = {}, {}
+        can, trades, deriv = {}, {}, None
+        if (part / "derivatives.jsonl").exists() or (part / "derivatives.jsonl.gz").exists():      # the recorder's derivatives frames (mark, index, funding): yielded as DerivativeTicker; a part without the file has none
+            deriv = {}
+            with _open_jsonl(part / "derivatives.jsonl") as fh:
+                for line in fh:
+                    row = json.loads(line)
+                    deriv[row["event_id"]] = row
         with _open_jsonl(part / "canonical.jsonl") as fh:
             for line in fh:
                 row = json.loads(line)
@@ -736,6 +800,8 @@ def iter_recorded_events(session_dir):
                     yield MarketEvent.from_dict(can[row["canonical_event_id"]])
                 elif row["disposition"] == "TRADE":
                     yield TradeEvent.from_dict(trades[row["canonical_event_id"]])
+                elif row["disposition"] == "DERIVATIVE" and deriv is not None:
+                    yield DerivativeTicker.from_dict(deriv[row["canonical_event_id"]])
 
 
 def load_recorded_events(session_dir) -> list:

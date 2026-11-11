@@ -1,9 +1,14 @@
+import sys
 from decimal import Decimal
 from pathlib import Path
 import tempfile
 import unittest
 
-from crypto_stat_arb.execution import StrategyDirectedRouter
+from crypto_stat_arb.execution import (
+    CanonicalOrderUpdate, DispatchPolicy, ExecutionCallback, ExecutionEventType,
+    OrderAction, OrderUpdateSource, ResidualPolicy, StrategyDirectedRouter,
+)
+from crypto_stat_arb.hedge_lifecycle import HedgePolicy
 from crypto_stat_arb.instruments import InstrumentMaster
 from crypto_stat_arb.ledger import Ledger
 from crypto_stat_arb.models import Instrument, MarketEvent, Opportunity, OrderState, PlanState
@@ -293,6 +298,228 @@ class RestartResilienceTests(unittest.TestCase):
             restarted_store.close()
             first_control.close()
             second_control.close()
+
+
+MS = 1_000_000
+INSTR_FT = "BTC-USDT-SPOT"
+
+
+def _ft_instruments() -> InstrumentMaster:
+    return InstrumentMaster([
+        Instrument(
+            instrument_id=INSTR_FT, venue=v, symbol="BTCUSDT", base="BTC", quote="USDT",
+            tick_size=Decimal("0.10"), quantity_step=Decimal("0.001"), min_quantity=Decimal("0.001"),
+            min_notional=Decimal("5"), taker_fee_bps=Decimal("4"),
+        )
+        for v in ("BINANCE", "BYBIT")
+    ])
+
+
+def _ft_opportunity(oid: str = "opp-restart") -> Opportunity:
+    return Opportunity(
+        opportunity_id=oid, strategy_id="strategy-1", instrument_id=INSTR_FT, observed_ts_ns=1,
+        buy_venue="BINANCE", sell_venue="BYBIT",
+        buy_price=Decimal("60000"), sell_price=Decimal("60060"),
+        quantity=Decimal("0.010"), gross_edge_bps=Decimal("10"), estimated_net_edge_bps=Decimal("2"),
+        source_event_ids=("e1", "e2"),
+    )
+
+
+def _ft_books() -> dict:
+    result = {}
+    for venue, bid, ask in (("BINANCE", "59999.90", "60000.00"), ("BYBIT", "60060.00", "60060.10")):
+        book = OrderBook(venue, INSTR_FT)
+        book.apply(MarketEvent.from_dict({"event_type": "BOOK_SNAPSHOT", "venue": venue,
+            "instrument_id": INSTR_FT, "exchange_ts_ns": 1, "receive_ts_ns": 1, "sequence": 1,
+            "bids": [[bid, "5"]], "asks": [[ask, "5"]],
+        }))
+        result[(venue, INSTR_FT)] = book
+    return result
+
+
+def _cb(req, kind, cum="0", last="0", price="0", reason=""):
+    return ExecutionCallback(
+        schema_version="1.0.0", callback_id=f"{kind.value}-{req.request_id}",
+        request_id=req.request_id, order_id=req.order_id,
+        parent_opportunity_id=req.parent_opportunity_id, parent_order_id=req.parent_order_id,
+        venue=req.venue, instrument_id=req.instrument_id, event_type=kind,
+        event_ts_ns=req.created_ts_ns, cumulative_filled_quantity=Decimal(cum),
+        last_fill_quantity=Decimal(last), average_price=Decimal(price), reason=reason,
+    )
+
+
+class ScriptedVenue:
+    """Answers SUBMITs from a fixed script; repeats the last item once depleted."""
+    def __init__(self, venue: str, script: list, price: str = "60000"):
+        self.venue, self.price = venue, price
+        self.script = list(script)
+        self.submits: list = []
+        self.cancels = 0
+
+    def handle(self, req, book):
+        if req.action == OrderAction.CANCEL:
+            self.cancels += 1
+            return (_cb(req, ExecutionEventType.CANCELLED),)
+        self.submits.append(req)
+        what = self.script.pop(0) if self.script else ("fill", None)
+        if what == "ack":
+            return (_cb(req, ExecutionEventType.ACKNOWLEDGED),)
+        kind, arg = what if isinstance(what, tuple) else (what, None)
+        if kind == "reject":
+            return (_cb(req, ExecutionEventType.REJECTED, reason=arg or "simulated"),)
+        qty = Decimal(arg) if arg is not None else req.quantity
+        return (_cb(req, ExecutionEventType.FILLED, cum=str(qty), last=str(qty), price=self.price),)
+
+
+def _maker_update(plan, maker, n, state, cum, ts):
+    return CanonicalOrderUpdate(
+        update_id=f"mk-{n}", source=OrderUpdateSource.PRIVATE_STREAM,
+        parent_order_id=plan.parent_id, order_id=maker.order_id,
+        venue=maker.venue, instrument_id=maker.instrument_id,
+        state=state, event_ts_ns=ts, observed_ts_ns=ts + 1, sequence=n,
+        cumulative_filled_quantity=Decimal(cum), average_price=Decimal("60060"),
+    )
+
+
+class HedgeRecoveryAfterRestartTests(unittest.TestCase):
+    """Track B Item 2 — Test A: open hedge at session death is recovered without duplicate dispatch."""
+
+    def test_open_hedge_recovered_across_restart_no_alarm(self):
+        """Fill triggers a hedge; OMS is replaced before the hedge fills; second OMS recovers the
+        plan from plan_store with the hedge in SUBMITTED state; reconciliation passes; no alarm."""
+        with tempfile.TemporaryDirectory() as directory:
+            plan_path = Path(directory) / "oms.sqlite"
+            inst = _ft_instruments()
+            bk = _ft_books()
+            opp = _ft_opportunity()
+
+            # --- session 1: open hedge, die before it fills -------------------------------------------------------
+            bybit1 = ScriptedVenue("BYBIT", ["ack"], price="60060")
+            # hedge on BINANCE: ack (stays open, never fills during session 1)
+            binance1 = ScriptedVenue("BINANCE", ["ack"], price="60000")
+            store1 = ParentPlanStore(plan_path)
+            oms1 = OMS(inst, risk(), Ledger(), plan_store=store1,
+                       router=StrategyDirectedRouter(inst, adapters={"BYBIT": bybit1, "BINANCE": binance1}),
+                       dispatch_policy=DispatchPolicy.FILL_TRIGGERED,
+                       hedge_policy=HedgePolicy(retry_limit=1))
+            plan1 = oms1.execute(opp, bk, maker_venue="BYBIT")
+            parent_id = plan1.parent_id
+            maker1 = plan1.children[0]
+            # trigger maker fill → hedge dispatched
+            oms1.ingest_order_update(_maker_update(plan1, maker1, 1, ExecutionEventType.FILLED, "0.010", 100 * MS))
+            # hedge has been submitted (ack'd) and is open
+            hedge_children = [o for o in oms1.plans[parent_id].children if o.order_role == "HEDGE"]
+            self.assertTrue(hedge_children, "hedge must have been dispatched")
+            # session dies here: plan in an open state
+            store1.close()
+
+            # --- session 2: restart, recover plan -----------------------------------------------------------------
+            store2 = ParentPlanStore(plan_path)
+            bybit2 = ScriptedVenue("BYBIT", [], price="60060")
+            binance2 = ScriptedVenue("BINANCE", [], price="60000")
+            oms2 = OMS(inst, risk(), Ledger(), plan_store=store2,
+                       router=StrategyDirectedRouter(inst, adapters={"BYBIT": bybit2, "BINANCE": binance2}),
+                       dispatch_policy=DispatchPolicy.FILL_TRIGGERED)
+            # plan was loaded from store; executing the same opportunity returns the recovered plan
+            recovered = oms2.execute(opp, bk, maker_venue="BYBIT")
+            self.assertEqual(recovered.parent_id, parent_id, "must recover the same parent_id")
+            # second OMS must NOT have re-dispatched anything (recovery, no duplicate)
+            self.assertEqual(len(bybit2.submits), 0, "no new maker orders on restart")
+            self.assertEqual(len(binance2.submits), 0, "no new hedge orders on restart (hedge already open)")
+            # no unwind-exhausted alarm on restart
+            self.assertFalse(oms2.unwind_exhausted_alarms, "no alarm on clean restart with open hedge")
+            store2.close()
+
+
+class UnwindExhaustedAlarmPersistsTests(unittest.TestCase):
+    """Track B Item 2 — Test B: unwind-exhausted alarm persists across OMS restart via plan_store."""
+
+    def test_alarm_loads_on_second_oms_and_blocks_new_risk(self):
+        """Raise the unwind-exhausted alarm via the OMS private API; verify it is persisted in
+        plan_store; a second OMS that loads the same store has the alarm active and rejects new risk."""
+        with tempfile.TemporaryDirectory() as directory:
+            plan_path = Path(directory) / "oms.sqlite"
+            inst = _ft_instruments()
+            bk = _ft_books()
+            opp = _ft_opportunity("opp-alarm")
+            # max_unwind_attempts=0 makes _raise_unwind_exhausted_alarm fire without needing actual unwind attempts
+            rp = ResidualPolicy(max_unwind_attempts=0, max_residual_base=Decimal("0.02"), max_residual_age_ns=5_000_000_000)
+
+            # --- session 1: execute plan, manually raise the alarm -----------------------------------------------
+            bybit1 = ScriptedVenue("BYBIT", ["ack"], price="60060")
+            binance1 = ScriptedVenue("BINANCE", ["ack"], price="60000")
+            store1 = ParentPlanStore(plan_path)
+            oms1 = OMS(inst, risk(), Ledger(), plan_store=store1,
+                       router=StrategyDirectedRouter(inst, adapters={"BYBIT": bybit1, "BINANCE": binance1}),
+                       dispatch_policy=DispatchPolicy.FILL_TRIGGERED, residual_policy=rp)
+            plan1 = oms1.execute(opp, bk, maker_venue="BYBIT")
+            parent_id = plan1.parent_id
+            # Directly raise the alarm (testing the persistence path, not the trigger path)
+            oms1._raise_unwind_exhausted_alarm(oms1.plans[parent_id], ts_ns=200 * MS)
+            self.assertIn(parent_id, oms1.unwind_exhausted_alarms, "alarm must be active in OMS1")
+            store1.close()
+
+            # --- session 2: restart, alarm must be loaded --------------------------------------------------------
+            store2 = ParentPlanStore(plan_path)
+            oms2 = OMS(inst, risk(), Ledger(), plan_store=store2,
+                       router=StrategyDirectedRouter(inst),
+                       dispatch_policy=DispatchPolicy.FILL_TRIGGERED)
+            # alarm is loaded from plan_store events at OMS init
+            self.assertIn(parent_id, oms2.unwind_exhausted_alarms,
+                          "alarm must survive restart and be loaded from plan_store")
+
+            # new opportunity must be blocked by the alarm (terminal_outcome="REJECTED", plan closes immediately)
+            opp2 = _ft_opportunity("opp-new")
+            plan2 = oms2.execute(opp2, bk, maker_venue="BYBIT")
+            self.assertEqual(plan2.terminal_outcome, "REJECTED",
+                             "new opportunity must have terminal_outcome=REJECTED while alarm is active")
+            self.assertGreater(oms2.realism_counters.get("new_risk_held_unwind_exhausted", 0), 0,
+                               "new_risk_held_unwind_exhausted counter must be incremented")
+            store2.close()
+
+    def test_alarm_reset_clears_block_and_does_not_persist(self):
+        """After reset_unwind_exhausted_alarm, the RESET event is persisted; a third OMS does NOT
+        reload the alarm and new risk passes."""
+        with tempfile.TemporaryDirectory() as directory:
+            plan_path = Path(directory) / "oms.sqlite"
+            inst = _ft_instruments()
+            bk = _ft_books()
+            opp = _ft_opportunity("opp-reset")
+            rp = ResidualPolicy(max_unwind_attempts=0, max_residual_base=Decimal("0.02"), max_residual_age_ns=5_000_000_000)
+
+            # session 1: raise alarm
+            store1 = ParentPlanStore(plan_path)
+            bybit1 = ScriptedVenue("BYBIT", ["ack"], price="60060")
+            binance1 = ScriptedVenue("BINANCE", ["ack"], price="60000")
+            oms1 = OMS(inst, risk(), Ledger(), plan_store=store1,
+                       router=StrategyDirectedRouter(inst, adapters={"BYBIT": bybit1, "BINANCE": binance1}),
+                       dispatch_policy=DispatchPolicy.FILL_TRIGGERED, residual_policy=rp)
+            plan1 = oms1.execute(opp, bk, maker_venue="BYBIT")
+            parent_id = plan1.parent_id
+            oms1._raise_unwind_exhausted_alarm(oms1.plans[parent_id], ts_ns=200 * MS)
+            # operator resets the alarm
+            reset_ids = oms1.reset_unwind_exhausted_alarm(ts_ns=300 * MS, operator="operator-1")
+            self.assertIn(parent_id, reset_ids)
+            self.assertFalse(oms1.unwind_exhausted_alarms, "alarm must be cleared after reset")
+            store1.close()
+
+            # session 3: alarm is not reloaded
+            store3 = ParentPlanStore(plan_path)
+            bybit3 = ScriptedVenue("BYBIT", ["ack"], price="60060")
+            binance3 = ScriptedVenue("BINANCE", ["ack"], price="60000")
+            oms3 = OMS(inst, risk(), Ledger(), plan_store=store3,
+                       router=StrategyDirectedRouter(inst, adapters={"BYBIT": bybit3, "BINANCE": binance3}),
+                       dispatch_policy=DispatchPolicy.FILL_TRIGGERED)
+            self.assertFalse(oms3.unwind_exhausted_alarms,
+                             "reset must persist: alarm must NOT be reloaded after RESET event")
+            # new risk is not blocked by the alarm (plan dispatches the maker normally, ACK'd)
+            opp3 = _ft_opportunity("opp-after-reset")
+            plan3 = oms3.execute(opp3, bk, maker_venue="BYBIT")
+            self.assertNotEqual(plan3.terminal_outcome, "REJECTED",
+                                "new risk must not be blocked after alarm is reset")
+            self.assertEqual(oms3.realism_counters.get("new_risk_held_unwind_exhausted", 0), 0,
+                             "counter must be 0 when alarm is cleared")
+            store3.close()
 
 
 if __name__ == "__main__":
