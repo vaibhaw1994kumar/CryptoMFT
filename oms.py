@@ -3239,7 +3239,18 @@ class OMS:
         self._fill_triggered_settle(plan, spec, ts_ns)
 
     def _hedge_for_maker_fill(self, plan: ParentPlan, spec: dict[str, Any], maker: ChildOrder, ts_ns: int) -> None:
-        delta = min(maker.filled_quantity, spec["max_qty"]) - spec["requested_qty"]
+        filled = min(maker.filled_quantity, spec["max_qty"])
+        # Lot rule (owner 11 Nov): the hedge is a whole number of the hedge venue's lots. The cumulative target is floored to the lot, so a part-lot
+        # residual is carried to the next maker fill (never lost) and is on record while it is open; a quantity already on the lot is unchanged.
+        target = self.instruments.round_quantity(spec["venue"], spec["instrument_id"], filled, ts_ns)
+        residual = filled - target
+        if residual != spec.get("lot_residual", Decimal("0")):
+            spec["lot_residual"] = residual
+            if residual > 0:
+                self.realism_counters["hedge_lot_residual"] = self.realism_counters.get("hedge_lot_residual", 0) + 1
+                self.ledger.record("HEDGE_LOT_RESIDUAL", ts_ns, parent_id=plan.parent_id, maker_order_id=maker.order_id, venue=spec["venue"], maker_filled=str(maker.filled_quantity),
+                                   hedged_target=str(target), residual=str(residual), lot=str(self.instruments.get(spec["venue"], spec["instrument_id"], ts_ns).quantity_step))
+        delta = target - spec["requested_qty"]
         if delta <= 0:
             return
         spec["requested_qty"] += delta
