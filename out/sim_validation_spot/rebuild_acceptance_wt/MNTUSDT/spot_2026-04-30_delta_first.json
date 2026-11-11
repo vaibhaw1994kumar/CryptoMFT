@@ -1,0 +1,80 @@
+{
+ "day": "2026-04-30",
+ "snapshots_compared": 1,
+ "variants": {
+  "exact_message": {
+   "snapshots": 1,
+   "touch_price_match_pct": 100.0,
+   "touch_size_match_pct": 100.0,
+   "top10_level_match_pct": 100.0,
+   "extra": {
+    "crossed_events": 27742
+   },
+   "mismatch_examples": []
+  },
+  "exact_frame": {
+   "snapshots": 1,
+   "touch_price_match_pct": 100.0,
+   "touch_size_match_pct": 100.0,
+   "top10_level_match_pct": 100.0,
+   "extra": {
+    "crossed_events": 0
+   },
+   "mismatch_examples": []
+  },
+  "engine_tape_repair_on": {
+   "snapshots": 1,
+   "touch_price_match_pct": 100.0,
+   "touch_size_match_pct": 100.0,
+   "top10_level_match_pct": 100.0,
+   "extra": {
+    "trade_repairs": 957,
+    "crossed_events": 1213,
+    "tape_repair": true
+   },
+   "mismatch_examples": []
+  },
+  "engine_tape_repair_off": {
+   "snapshots": 1,
+   "touch_price_match_pct": 100.0,
+   "touch_size_match_pct": 100.0,
+   "top10_level_match_pct": 100.0,
+   "extra": {
+    "trade_repairs": 0,
+    "crossed_events": 2066,
+    "tape_repair": false
+   },
+   "mismatch_examples": []
+  },
+  "engine_frame_tape_repair_on": {
+   "snapshots": 1,
+   "touch_price_match_pct": 100.0,
+   "touch_size_match_pct": 100.0,
+   "top10_level_match_pct": 100.0,
+   "extra": {
+    "trade_repairs": 957,
+    "crossed_events": 0,
+    "tape_repair": true
+   },
+   "mismatch_examples": []
+  },
+  "engine_frame_tape_repair_off": {
+   "snapshots": 1,
+   "touch_price_match_pct": 100.0,
+   "touch_size_match_pct": 100.0,
+   "top10_level_match_pct": 100.0,
+   "extra": {
+    "trade_repairs": 0,
+    "crossed_events": 0,
+    "tape_repair": false
+   },
+   "mismatch_examples": []
+  }
+ },
+ "venue": "spot",
+ "pair": "MNTUSDT",
+ "event_order": "delta_first",
+ "wall_s": 32.3,
+ "flag_below_99": false,
+ "flag_note": ""
+}

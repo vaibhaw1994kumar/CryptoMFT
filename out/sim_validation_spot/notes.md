@@ -65,10 +65,51 @@ A hypothesis, not a proven cause: the archive (ob200) updates every 103 ms (ADA)
 - **The recorder is a weak reference for fills.** Use the archive for trades.
 - **T3 and T4 rest on one snapshot per day.** That makes them agreement checks only. The sequence check is the stronger evidence.
 
-### Open for the owner (before any order replay)
-1. Accept T4 (a harness tie rule) and T5 (the archive is a coarser view) as explained, or ask for more.
-2. Choose the restart window to exclude on 04-23.
-3. The step-0 simulator predates Phase D, S1 and S2. Steps 1–3 would run on this worktree's newer core. Re-run T4 here first?
+### Owner decisions (11 Nov 2026)
+1. **T4:** accept the tie explanation if T4 passes with "updates first, then the snapshot" at equal timestamps. Result below: it does, 28/28.
+2. **T5:** accepted as "the archive is coarser".
+   - Use the recorder's books where they exist (04-19..04-25), and the archive for 04-26..05-02.
+   - Label results from the archive days "public ob200 archive, ~100 ms resolution".
+3. **04-23 restart:** exclude 06:04:00–06:20:00 UTC, plus any order still resting when the book resynced.
+   - Resync times from the data (update id resets to 1):
+     - ADA: last old update 06:08:52.756, resync snapshot 06:08:58.321;
+     - MNT: last old update 06:09:03.423, resync snapshot 06:09:08.302.
+   - Both are inside the window.
+
+### T4 re-run on this worktree's core (owner 11 Nov)
+Code: outer `15d3dcd`, core `4d65ef7`, `crypto_stat_arb` and `new_backtest` loaded from the worktree.
+- **Inputs:** the same converted files as step 0 (`simval_wt/.../converted`), read only.
+- **How:** one coin-day per process, serially. Results in `rebuild_acceptance_wt/`, tables in `rebuild_acceptance_wt/t4_comparison.md`.
+
+**(a) `legacy` order (snapshot first on ties): identical to step 0 on all 28 coin-days.**
+- Every variant and every metric match; 26 PASS and 2 FAIL, as before (ADA 05-02 and MNT 04-30 at 0%).
+- The newer core (Phase D, S1, S2) changed nothing here.
+- Correction to step 0's wording: "the other 26 are 100% on all six variants" holds for touch **price** only, which is what T4 gates. Under `legacy`, touch size was 0% on 12 days (2 of them the failing days) and 50% on 1. Top-10 was 40–100% on the passing days, and only 8 of 28 coin-days were 100% on all three metrics.
+
+**(b) New, non-default `event_order="delta_first"` (deltas, then the snapshot, then trades, on equal exchange timestamps): T4 PASS 28/28.**
+- **Every day has the tie.** Each day's file ends with the next day's 00:00:01 snapshot, which carries the same exchange timestamp and the same update id `u` as the last delta rows (2 to 40 rows on the four days inspected). So that snapshot is the book after those deltas.
+- **Touch price:** 100% on all 28 coin-days, in all six variants. ADA 05-02 and MNT 04-30 go from 0% to 100%.
+- **Touch size and top-10:** 100% on 26 of 28 coin-days, up from 8 of 28 under `legacy`.
+- **The remaining mismatch is only on 04-23, both coins** (size 50%, top-10 85% ADA and 80% MNT). It is the restart snapshot itself, 06:08:58.321 for ADA and 06:09:08.302 for MNT: the pre-restart book against the post-resync book. That is inside the excluded window.
+- **No metric is lower than under `legacy` on any day.**
+- **Legacy unchanged:** after the loader change, a `legacy` re-run of ADA 05-02 is identical to the earlier one.
+- **Tests after the loader change:** `tests` without `platform_kit`: 2474 passed (2472 + the 2 new), 0 failed, 23 skipped, 11 xfailed.
+
+**Code change (outer, `new_backtest`, default unchanged):**
+- `event_loader.iter_venue_events` accepts `event_order="delta_first"`. The `legacy` branch makes the same decisions as before.
+- `scripts/queue_v2_rebuild_acceptance.py` accepts it and writes `<venue>_<day>_delta_first.json`, so legacy outputs are not overwritten.
+- A comment in `backtester.py`.
+- Two tests in `tests/test_queue_v2_invariants.py::EventOrderAndDedupe`:
+  - `delta_first` is delta → snapshot → trade;
+  - a mixed stream where `legacy` and `delta_first` differ only at snapshot/delta ties.
+
+**Reach:** the session runtime reads through `CrossVenueFeed` → `iter_venue_events` with the config's `event_order`, so steps 1–3 can use `delta_first` by setting it.
+- Nothing sets it today. No profile was changed.
+- The core's own readers (`maker_sim`, `session_audit`, `tardis_compare`) were not changed.
+
+### Still open for the owner
+- A go for step 1. It opens the account order file `~/Downloads/bybit_30d.zip` (aggregates only in reports).
+- Whether steps 1–3 run with `event_order="delta_first"` for the spot archive days.
 
 ## (2) Single edge formula: DONE
 
@@ -123,3 +164,6 @@ Run from `crypto_MFT_arb_platform/` with `PYTHONPATH=src:tests python3.12 -m pyt
 | outer `sim-validation` | (this file) | the notes |
 
 Merge order: core `4d65ef7` first, because the guard test imports `edge.cross_gross_bps`.
+
+### Commits for the T4 re-run (local, `sim-validation`, not pushed)
+See `git log sim-validation`: the `delta_first` loader option with its tests, then these notes and the `rebuild_acceptance_wt/` results.
