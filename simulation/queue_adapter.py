@@ -26,7 +26,7 @@ from ..models import MarketEvent, Side as CoreSide
 from ..models import TradeEvent
 from ..orderbook import OrderBook as CoreBook
 from .fill_engine import Fill, MakerExecutor
-from .hedge_faults import HedgeFaultConfig
+from .hedge_faults import HedgeFaultConfig, Outage
 from .models import Side as SimSide
 from .order_book import OrderBook as SimBook, core_book_from_float, float_mirror
 from .postonly import would_cross
@@ -71,6 +71,15 @@ class QueueAwareVenueAdapter(DeterministicVenueAdapter):
         # Fault injection (opt-in; None = no faults, same behaviour as before)
         self._fault_config = fault_config
         self.hedge_faults_injected: dict[str, int] = {}                # reason -> count, evidence for tests and reports
+        # The ghost hedge (owner 11 Nov): a hedge sent into a gateway outage with outage_policy "ghost" is held (no report, nothing the strategy can see) and EXECUTED at the reconnect time, against the book
+        # as it is then. (release ts ns, ordinal, request, book the router passed): the book is the live object, so it is the book at the first event at or after the reconnect.
+        # outage_on_fill_s (the fault presets' conditional outage): the hedge venue's gateway goes down for that long from the first hedge order of every plan, one window per plan. The driver sets
+        # `outage_on_fill_here` on the hedge venue's adapter only (the maker venue is not simulated: see the replay's check). "gateway" kind only: the feed is not darkened here.
+        self.outage_on_fill_here = False
+        self._windows: dict[str, "Outage"] = {}
+        self._held: list[tuple[int, int, CanonicalOrderRequest, CoreBook | None]] = []
+        self._held_ordinal = 0
+        self.ghost_delivered: dict[str, int] = {}                      # order id -> the held-for time in ns, evidence for tests and reports
 
     # ---- fault injection (IOC taker / hedge orders only) -----------------------------------------------------------------------
 
@@ -80,13 +89,45 @@ class QueueAwareVenueAdapter(DeterministicVenueAdapter):
         h = hashlib.sha256(f"{fc.seed}:{order_id}:{suffix}".encode()).digest()  # type: ignore[union-attr]
         return int.from_bytes(h[:8], "big") / (2**64)
 
+    def _outage_at(self, ts_ns: int):
+        """The outage of THIS venue that covers `ts_ns` (outages of another venue do not touch it), or None."""
+        fc = self._fault_config
+        if fc is None:
+            return None
+        now_s = ts_ns / _NS
+        return next((o for o in (*fc.outages, *self._windows.values()) if o.venue.lower() == self.venue.lower() and o.covers(now_s)), None)
+
+    def query_unanswered(self, now_ns: int) -> bool:
+        """A status query sent while the gateway is down gets no answer (the router counts it as failed)."""
+        return self._outage_at(now_ns) is not None
+
+    def next_held_ts(self) -> int | None:
+        return min((item[0] for item in self._held), default=None)
+
+    def release_held(self, now_ns: int) -> list[tuple[CanonicalOrderRequest, tuple[ExecutionCallback, ...], int]]:
+        """The held hedges whose reconnect time has come: each reaches the venue at its release time and is matched like any taker arrival."""
+        due = sorted((item for item in self._held if item[0] <= now_ns), key=lambda item: (item[0], item[1]))
+        if not due:
+            return []
+        self._held = [item for item in self._held if item[0] > now_ns]
+        out = []
+        for release_ns, _, request, book in due:
+            self._arrival_ns = release_ns
+            try:
+                callbacks = self._taker_fill(request, book)
+            finally:
+                self._arrival_ns = None
+            self.ghost_delivered[request.order_id] = release_ns
+            out.append((request, callbacks, release_ns))
+        return out
+
     def _apply_hedge_fault(
-        self, request: CanonicalOrderRequest, arrival_ts_ns: int
+        self, request: CanonicalOrderRequest, arrival_ts_ns: int, book: CoreBook | None = None
     ) -> tuple[ExecutionCallback, ...] | None:
         """Return a fault callback to substitute for the normal fill, or None if no fault fires.
 
-        Supported: reject_prob, static outages (all policies mapped to REJECTED; ghost/blackhole/queue are parity
-        differences with the backtester, logged in hedge_faults_injected).  partial_prob is a parity difference (the
+        Supported: reject_prob, static outages of this venue. Policy "ghost" holds the order and executes it at the reconnect (`release_held`); "reject", "blackhole" and "queue" are all mapped to REJECTED
+        (parity differences with the backtester, logged in hedge_faults_injected).  partial_prob is a parity difference (the
         DeterministicVenueAdapter fill walk is not intercepted here); it is noted but not injected.
         """
         fc = self._fault_config
@@ -96,11 +137,22 @@ class QueueAwareVenueAdapter(DeterministicVenueAdapter):
         now_s = arrival_ts_ns / _NS
 
         # Static outage windows --------------------------------------------------------------------------------------------
-        for outage in fc.outages:
-            if outage.covers(now_s):
-                reason = f"outage:{outage.kind}:{fc.outage_policy}"
-                self.hedge_faults_injected[reason] = self.hedge_faults_injected.get(reason, 0) + 1
-                return (self._callback(request, ExecutionEventType.REJECTED, reason=reason),)
+        if self.outage_on_fill_here and fc.outage_on_fill_s > 0 and request.parent_order_id not in self._windows:
+            start_s = request.created_ts_ns / _NS                              # the first hedge order of the plan: the fill that triggered it is just before
+            self._windows[request.parent_order_id] = Outage(self.venue, start_s, start_s + fc.outage_on_fill_s, kind=fc.outage_on_fill_kind)
+            self.hedge_faults_injected["outage_on_fill:window"] = self.hedge_faults_injected.get("outage_on_fill:window", 0) + 1
+        outage = self._outage_at(arrival_ts_ns)
+        if outage is not None:
+            reason = f"outage:{outage.kind}:{fc.outage_policy}"
+            self.hedge_faults_injected[reason] = self.hedge_faults_injected.get(reason, 0) + 1
+            if fc.outage_policy == "ghost":
+                release_ns = int(round(outage.end_ts * _NS))
+                while (nxt := self._outage_at(release_ns)) is not None:        # back to back outages: reconnect after the last one
+                    release_ns = int(round(nxt.end_ts * _NS))
+                self._held_ordinal += 1
+                self._held.append((release_ns, self._held_ordinal, request, book))
+                return ()                                                    # no report of any kind: the strategy cannot tell this order from a lost one
+            return (self._callback(request, ExecutionEventType.REJECTED, reason=reason),)
 
         # reject_prob (hash-based, monotone subset across different reject_prob values) ------------------------------------
         if fc.reject_prob > 0.0 and self._fault_draw(request.order_id, "reject") < fc.reject_prob:
@@ -157,18 +209,11 @@ class QueueAwareVenueAdapter(DeterministicVenueAdapter):
                 # Use arrival_ts_ns when set by handle_at; fall back to request creation time when the
                 # router calls handle() directly (session runtime path where handle_at is not invoked).
                 ts_ns = self._arrival_ns if self._arrival_ns is not None else request.created_ts_ns
-                fault_cb = self._apply_hedge_fault(request, ts_ns)
+                fault_cb = self._apply_hedge_fault(request, ts_ns, book)
                 if fault_cb is not None:
                     self._remember(fault_cb)
                     return fault_cb
-            callbacks = super().handle(request, self._taker_book(request, book))      # IOC / FOK / market: a taker fill, the deterministic walk
-            if (request.time_in_force == TimeInForce.IOC and len(callbacks) == 1 and callbacks[0].event_type == ExecutionEventType.REJECTED
-                    and callbacks[0].reason == "no executable liquidity"):
-                # An IOC that finds nothing inside its limit is not a venue reject: the exchange ends it unfilled (Bybit "Cancelled", Binance "EXPIRED"). The OMS then sees an unfilled IOC (retry or unwind by its own rule)
-                # instead of an unclassified reject (which fails closed to an unwind at once).
-                callbacks = (self._callback(request, ExecutionEventType.CANCELLED, reason="IOC expired unfilled"),)
-                self._remember(callbacks)
-            return callbacks
+            return self._taker_fill(request, book)
         if resting and not request.post_only:
             callbacks: tuple[ExecutionCallback, ...] = (self._callback(
                 request, ExecutionEventType.REJECTED,
@@ -181,6 +226,16 @@ class QueueAwareVenueAdapter(DeterministicVenueAdapter):
         else:
             callbacks = self._place(request, book)
         self._remember(callbacks)
+        return callbacks
+
+    def _taker_fill(self, request: CanonicalOrderRequest, book: CoreBook | None) -> tuple[ExecutionCallback, ...]:
+        callbacks = super().handle(request, self._taker_book(request, book))      # IOC / FOK / market: a taker fill, the deterministic walk
+        if (request.time_in_force == TimeInForce.IOC and len(callbacks) == 1 and callbacks[0].event_type == ExecutionEventType.REJECTED
+                and callbacks[0].reason == "no executable liquidity"):
+            # An IOC that finds nothing inside its limit is not a venue reject: the exchange ends it unfilled (Bybit "Cancelled", Binance "EXPIRED"). The OMS then sees an unfilled IOC (retry or unwind by its own rule)
+            # instead of an unclassified reject (which fails closed to an unwind at once).
+            callbacks = (self._callback(request, ExecutionEventType.CANCELLED, reason="IOC expired unfilled"),)
+            self._remember(callbacks)
         return callbacks
 
     def _taker_book(self, request: CanonicalOrderRequest, book: CoreBook | None) -> CoreBook | None:

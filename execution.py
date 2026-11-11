@@ -1297,6 +1297,7 @@ class StrategyDirectedRouter:
         """Advance EMS time: release throttled requests in FIFO order, match
         in-flight requests on arrival, and deliver due venue reports."""
         released: list[RoutingResult] = []
+        self._release_held(now_ns)
         current = self._pending
         self._pending = []
         for pending in sorted(
@@ -1400,10 +1401,32 @@ class StrategyDirectedRouter:
         released.extend(self._deliver_due(now_ns))
         return tuple(released)
 
+    def _release_held(self, now_ns: int) -> None:
+        """Orders a venue simulator held while its gateway was down (the ghost hedge): at the reconnect time they reach the venue, are matched against the book as it is then, and their reports are
+        scheduled like any other. The simulator asks nothing of the strategy; the strategy learns about them from a report or a status query."""
+        for venue in sorted(self.adapters):
+            release = getattr(self.adapters[venue], "release_held", None)
+            if release is None:
+                continue
+            for request, callbacks, ts_ns in release(now_ns):
+                callbacks = tuple(replace(callback, event_ts_ns=ts_ns) for callback in callbacks)
+                self._restamp_status(self.adapters[venue], callbacks)
+                self._results[request.idempotency_key] = callbacks
+                self.trace.append({"record_type": "HELD_ORDER_DELIVERED", "ts_ns": ts_ns, "venue": venue, "order_id": request.order_id, "request_id": request.request_id,
+                                   "sent_ts_ns": request.created_ts_ns, "held_ns": ts_ns - request.created_ts_ns})
+                for callback in callbacks:
+                    self.trace.append({"record_type": "EXECUTION_CALLBACK", "ts_ns": callback.event_ts_ns, "callback": callback.to_dict()})
+                self._schedule(stable_id("held-order", request.order_id), request, callbacks, ts_ns)
+
     def next_due_ts(self) -> int | None:
-        """Earliest pending release, arrival or report delivery time."""
+        """Earliest pending release, arrival, held-order release or report delivery time."""
         candidates = [item.release_ts_ns for item in self._pending]
         candidates.extend(item.deliver_ts_ns for item in self._deliveries)
+        for adapter in self.adapters.values():
+            held_due = getattr(adapter, "next_held_ts", None)
+            due = held_due() if held_due is not None else None
+            if due is not None:
+                candidates.append(due)
         return min(candidates) if candidates else None
 
     @staticmethod
@@ -1460,6 +1483,7 @@ class StrategyDirectedRouter:
         self, venue: str, order_id: str, now_ns: int
     ) -> VenueOrderStatus | None:
         """Ask the venue for an order's state; never resends the order."""
+        self._release_held(now_ns)                                       # a held order whose reconnect time has passed has reached the venue: the query sees it
         query = getattr(self.adapters.get(venue), "query_order", None)
         self.trace.append({
             "record_type": "ORDER_QUERY", "ts_ns": now_ns,
@@ -1467,6 +1491,10 @@ class StrategyDirectedRouter:
             "supported": query is not None,
         })
         if query is None:
+            return None
+        unanswered = getattr(self.adapters.get(venue), "query_unanswered", None)
+        if unanswered is not None and unanswered(now_ns):                  # the gateway is down: the status query gets no answer either
+            self.trace.append({"record_type": "ORDER_QUERY_FAILED", "ts_ns": now_ns, "venue": venue, "order_id": order_id, "error": "gateway down"})
             return None
         self._scoped_charge_query(venue, order_id, now_ns)
         try:
