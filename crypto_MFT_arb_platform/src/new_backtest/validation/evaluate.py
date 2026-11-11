@@ -70,25 +70,39 @@ _CACHE: dict = {}
 
 
 def enrich(rows: list[dict], orders_dir: Path, data_root: Path) -> None:
-    """Adds `price` (the real limit price) and `book_age_at_placement_s` (arrival time - last depth record at or before it, exchange clock) to each row.
+    """Adds `price` (the real limit price), `book_age_at_placement_s` (arrival time - last depth record at or before it, exchange clock) and
+    `crosses_at_create` (the recorded price is at or through the opposite touch of the archive book at the real create time) to each row.
     Rows are matched to the real orders by their schedule index (both are in create-time order, see spot_order_replay.main)."""
     import bisect
     from new_backtest.validation.spot_order_replay import depth_times, load_orders
     by = defaultdict(list)
     for r in rows:
         by[(r["pair"], r["day"])].append(r)
+    from new_backtest.validation.perp_taker_check import books_at
     for (pair, day), rs in by.items():
         if (pair, day) not in _CACHE:
-            _CACHE[(pair, day)] = (load_orders(orders_dir, pair, day), depth_times(data_root, pair, day))
-        orders, times = _CACHE[(pair, day)]
+            orders = load_orders(orders_dir, pair, day)
+            cross = {}
+            for (t, book), o in zip(books_at(data_root, pair, day, [o["created"] for o in orders]), orders):
+                cross[o["created"], o["side"], o["price"]] = (o["price"] >= book.best_ask) if o["side"] == "buy" else (o["price"] <= book.best_bid)
+            _CACHE[(pair, day)] = (orders, depth_times(data_root, pair, day), cross)
+        orders, times, cross = _CACHE[(pair, day)]
         for r in rs:
             o = orders[r["i"]]
             if abs(o["created"] - r["created"]) > 1e-9 or o["side"] != r["side"]:
                 raise RuntimeError(f"row {r['i']} of {pair} {day} does not match its order")
             r["price"] = o["price"]
+            r["crosses_at_create"] = cross[o["created"], o["side"], o["price"]]
             t = r.get("arrival_ts") or r["created"]
             j = bisect.bisect_right(times, t)
             r["book_age_at_placement_s"] = (t - times[j - 1]) if j else None
+
+
+def probable_amendment(r: dict) -> bool:
+    """Post hoc (12 Nov), the fill-evidence study's rule (e): Bybit ACCEPTED the PostOnly order, yet its recorded price crosses the archive book at the
+    real create time. Bybit's history keeps the final (amended) price with the original create time, and our MM amends live quotes (FAST_MM
+    bybit_order_manager.amend_order), so the price at creation must have been another one. Amended orders that never crossed cannot be detected."""
+    return bool(r.get("crosses_at_create")) and r["real_status"] != "Rejected"
 
 
 def verdicts(res: dict) -> dict:
@@ -226,12 +240,16 @@ if __name__ == "__main__":
     ap.add_argument("--runs", required=True); ap.add_argument("--out", required=True)
     ap.add_argument("--orders", required=True); ap.add_argument("--data-root", required=True)
     a = ap.parse_args()
-    res = {}
+    res, sens = {}, {}
     for m in ("proportional", "behind_first", "ahead_first"):
         rows = load(Path(a.runs), m)
         enrich(rows, Path(a.orders), Path(a.data_root))
         res[m] = evaluate(rows)
+        sens[m] = evaluate([r for r in rows if not probable_amendment(r)])
+        sens[m]["probable_amendments_removed"] = sum(1 for r in rows if probable_amendment(r))
     Path(a.out).write_text(json.dumps({"label": "EXPLORATORY", "metric_definitions": __doc__,
                                        "note": "PRE_* breakdowns and `verdicts` use the definitions of TOLERANCES.md (10 Nov, before any number); the other breakdowns were chosen after the first results and are supplementary",
-                                       "verdicts": verdicts(res), "results": res}, indent=1))
+                                       "verdicts": verdicts(res), "results": res,
+                                       "sensitivity_without_probable_amendments": {"label": "POST HOC (12 Nov): not the pre-registered verdict; see probable_amendment()",
+                                                                                    "verdicts": verdicts(sens), "results": sens}}, indent=1))
     print(json.dumps({m: {"scored": v["scored"], "false_fill": v["cancelled_false_fill"]["all"], "hit": v["filled_timing"]["all"].get("hit")} for m, v in res.items()}, indent=1))

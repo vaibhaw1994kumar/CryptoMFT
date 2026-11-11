@@ -88,6 +88,11 @@ class PreRegisteredTests(unittest.TestCase):
         self.assertEqual(v["2b_fill_timing"]["verdict"], "PASS")
         self.assertEqual(v["2c_postonly"]["verdict"], "FAIL")                     # 52 / 1936 = 2.7 % false rejects > 2 %
 
+    def test_probable_amendment_is_an_accepted_order_whose_price_crosses_at_create(self):
+        self.assertTrue(evaluate.probable_amendment(row(crosses_at_create=True)))
+        self.assertFalse(evaluate.probable_amendment(row(crosses_at_create=True, real_status="Rejected")))
+        self.assertFalse(evaluate.probable_amendment(row(crosses_at_create=False)))
+
     def test_calibration_slope_is_one_for_calibrated_and_lower_for_overconfident_probabilities(self):
         import random
         rnd = random.Random(7)

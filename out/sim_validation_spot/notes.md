@@ -287,3 +287,25 @@ Method: `march_tie_check/bybit_SOLUSDT_ties.jsonl`, written by a read-only scrat
 - **What it tests:** only that the touch price is right. Every order was 66–100 units against a touch of 262 to 434k units with a 1-tick spread.
 
 **Step 4, report:** `report.html`, built by `new_backtest/validation/build_report.py` from the committed aggregates only.
+
+## 2c cause: amended orders (12 Nov, post hoc)
+
+**What the 52 false rejects look like**
+- All 52 cross the archive book's opposite touch at their real create time, and stay through from 1 s before to 1 s after.
+- The book is sound there.
+- 50 of them filled later as makers at exactly the recorded price.
+
+**Cause:** our MM amends live quotes (`FAST_MM/bybit_order_manager.py` `amend_order`). Bybit's history keeps the final price with the original create time. `bybit_30d.zip` carries no amend flag or amend history, so the real price path cannot be replayed (owner option b is not possible).
+
+**Post hoc sensitivity (owner option a), not the verdict**
+- Rule: exclude probable amendments, i.e. accepted orders whose price crosses at create (fill-evidence rule (e)). 58 orders are removed.
+- 2a stays PASS.
+- 2c becomes PASS: 0/1,878 false rejects.
+- 2b becomes FAIL, because the hit rate is 88.2%, above the two-sided 80.5% ± 5 band.
+- Amended orders that never crossed stay in and cannot be detected.
+
+## Why FillModelV2 failed (step 3)
+- **The slope condition failed** (2.11 on 05-02).
+- **Level:** the model predicts a mean 5 s fill probability of 17% on 05-02, where 0.7% happened. The fit days filled at 20%; that is a regime shift, with 640 of 895 orders censored at 5 s.
+- **The slope rests on about 2 real fills** among 255 uncensored test rows. It cannot be measured with any precision. Both fills are in the two highest-probability bins.
+- **The other folds are unstable too** (slope −0.05 to 8.2, on small samples). On 04-20 (89 fills) it is 0.40: the probabilities are too spread out.

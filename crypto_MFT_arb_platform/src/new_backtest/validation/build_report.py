@@ -79,7 +79,8 @@ before any number existed. <b>EXPLORATORY.</b></p>
 <ul class=keys>
 <li><b>False fills are rare</b>: {kn(p['cancelled_false_fill']['all'])} of real cancels under proportional, all on MNT (ADA 0 of 721). The simulator does not invent fills for orders that were cancelled.</li>
 <li><b>Fill timing is consistent with the earlier study</b> (83.9 % vs 80.5 %), but it is an <b>upper bound</b>: the public trade tape contains our own fills, so a really filled order always has its print in the data.</li>
-<li><b>PostOnly fails on false rejects</b>: the simulator refuses {pct(V['2c_postonly']['false_reject_rate']['rate'])} of orders the exchange accepted (limit 2 %). It catches {V['2c_postonly']['sensitivity']['k']} of {V['2c_postonly']['sensitivity']['n']} real rejects.</li>
+<li><b>PostOnly fails on false rejects</b>: the simulator refuses {pct(V['2c_postonly']['false_reject_rate']['rate'])} of orders the exchange accepted (limit 2 %); it catches {V['2c_postonly']['sensitivity']['k']} of {V['2c_postonly']['sensitivity']['n']} real rejects.
+The cause is in the data, not the check: these orders were <b>amended</b>, and the export records only their final price (<a href='#amend'>details</a>); without them the false-reject rate is 0.</li>
 <li><b>FillModelV2 is not an improvement</b>: its Brier score beats the base rate, but its probabilities are badly calibrated (slope {v3['calibration_slope']:.2f}); 2 May is a different regime (5 s fill rate {pct(head['5']['observed_rate'])} against {pct(head['5']['base_rate_fit'])} on the fit days).</li>
 </ul></section>""")
 
@@ -145,6 +146,28 @@ Orders placed inside the spread (20) are the weakest group: 30 % premature.</p><
 <p>Sensitivity {kn(V['2c_postonly']['sensitivity'])}{ci(V['2c_postonly']['sensitivity'])} (≥ 70 %: met). False-reject rate {kn(V['2c_postonly']['false_reject_rate'])}{ci(V['2c_postonly']['false_reject_rate'])} (≤ 2 %: <b>missed</b>). Identical under all three cancel models (the check runs at arrival, before any queue).
 The one PartiallyFilledCanceled order (ADA 29 April) is reported apart.</p></section>""")
 
+    # 2c cause and the post-hoc sensitivity
+    SN = s2["sensitivity_without_probable_amendments"]
+    SR, SV = SN["results"], SN["verdicts"]
+    srows = []
+    for m in MODELS:
+        for lab, blk, vv in (("all orders (pre-registered)", R[m], V), (f"without {SR[m]['probable_amendments_removed']} probable amendments", SR[m], SV)):
+            t_ = blk["filled_timing"]["all"]
+            srows.append([m, lab, kn(blk["cancelled_false_fill"]["all"]), f"{pct(t_['hit']['rate'])} / {pct(t_['premature']['rate'])}",
+                          pct(t_["sim_rejected"]["rate"]), kn(vv["2c_postonly"]["false_reject_rate"]) if m == "proportional" else "same"])
+    sec.append(f"""<section id=amend><h2>Why 2c fails: amended orders</h2>
+<p>All 52 false rejects cross the opposite touch of the archive book at their real create time (23 exactly at it, the rest 1–11 ticks through), and stay through from 1 s before to 1 s after:
+not a timing or latency effect. The book is sound there (never crossed, 1-tick spread on 49 of 52) and the same book flags 37 of the 38 real rejects. Yet Bybit accepted them, and 50 filled
+later as makers at exactly the recorded price (median 50 s after creation), 40 of them sitting at their own touch at the fill time.</p>
+<p><b>Cause: amendments.</b> Our MM amends live quotes (<code>FAST_MM/bybit_order_manager.py</code> <code>amend_order</code>, <code>/v5/order/amend</code>), and Bybit's order history keeps the
+final price with the original create time. The replay therefore places an amended order at its final price at its creation, where it can cross. The account export has no amend flag or
+amend history (no such field; the bot logs only failed amends, with truncated ids and no times), so the real price path cannot be replayed.</p>
+<p class=note><b>Post hoc sensitivity, not the verdict.</b> Probable amendment = an order Bybit accepted whose recorded price crosses the archive book at its create time (the fill-evidence study's rule (e)).
+Amended orders that never crossed cannot be detected and stay in, with a wrong price before their amendment.
+Without them: 2a {SV['2a_false_fill']['verdict']}, 2b {SV['2b_fill_timing']['verdict']} (hit {pct(SV['2b_fill_timing']['hit'])}, above the 80.5 % ± 5 band: the rule is two-sided, and the upper-bound caveat applies),
+2c {SV['2c_postonly']['verdict']} (false rejects {kn(SV['2c_postonly']['false_reject_rate'])}).</p>
+{table(["Cancel model", "Orders", "2a false fills", "2b hit / premature", "2b sim. rejects", "2c false rejects"], srows)}</section>""")
+
     # step 3
     frows = []
     for d, f in s3["folds"].items():
@@ -164,7 +187,11 @@ IPCW weights as in <code>fill_model_v1</code>. Chronological folds, each fitted 
 {table(["Test day", "Fit orders", "Test rows (uncensored)", "Brier model", "Brier base rate", "Difference", "Calibration slope"], frows)}
 <p>Verdict {badge(v3['verdict'])}: the Brier reduction (−{pct(v3['brier_reduction_vs_base_rate'], 0)}) and the share of days not worse ({v3['folds_not_worse']}) pass; the calibration slope ({v3['calibration_slope']:.2f}) does not.
 2 May is flagged as a different quoting regime: its 5 s fill rate is {pct(head['5']['observed_rate'])}, against {pct(head['5']['base_rate_fit'])} on the fit days.
-The informative-censoring check could not run: the engine's <code>price_moved_through</code> is false on every row, so the IPCW assumption is untested here.</p></section>""")
+The informative-censoring check could not run: the engine's <code>price_moved_through</code> is false on every row, so the IPCW assumption is untested here.</p>
+<p><b>Why it fails.</b> (1) Level: on 2 May the model predicts a mean 5 s fill probability of about 17 % where 0.7 % happened, because the fit days filled at 20 % (regime shift, most 2 May orders were cancelled within seconds: 640 of 895 censored at 5 s).
+(2) The slope itself rests on about 2 real fills among the 255 uncensored test rows, so it is not measurable with any precision; both fills sit in the two highest-probability bins, so the ordering is not wrong.
+(3) The other folds are unstable too (slope −0.05 to 8.2, mostly on 9 to 100 test rows); on 20 April, with 89 fills, the slope is 0.40, i.e. the probabilities are too spread out.
+A pass would need a test period in the same regime as the fit days and many more fills.</p></section>""")
 
     # step 5
     a5 = s5["aggregate"]
@@ -202,7 +229,7 @@ No arb profile was changed; <code>delta_first</code> is used for the spot archiv
 (<code>spot_order_replay</code>, <code>evaluate</code>, <code>fill_model_fit</code>, <code>perp_taker_check</code>, this builder). Per-order rows stay on this Mac in the session scratchpad and carry no order ids.</p></section>""")
 
     nav = "".join(f"<a href='#{i}'>{n}</a>" for i, n in (("summary", "Summary"), ("scope", "Scope"), ("step0", "Step 0"), ("tol", "Tolerances"), ("s2a", "2a"), ("s2b", "2b"),
-                                                      ("s2c", "2c"), ("s3", "Step 3"), ("s5", "Step 5"), ("ties", "March ties"), ("not", "Limits")))
+                                                      ("s2c", "2c"), ("amend", "Amendments"), ("s3", "Step 3"), ("s5", "Step 5"), ("ties", "March ties"), ("not", "Limits")))
     return f"""<!doctype html><html lang=en><head><meta charset=utf-8><meta name=viewport content="width=device-width,initial-scale=1">
 <title>Spot Simulator Validation</title><style>
 :root{{--bg:#ffffff;--fg:#1c2330;--mut:#5b6677;--line:#d9dee7;--head:#f1f4f9;--acc:#1f5fbf;--ok:#1b7a3a;--bad:#b3261e;--warn:#9a6700;--code:#f4f6fa}}
