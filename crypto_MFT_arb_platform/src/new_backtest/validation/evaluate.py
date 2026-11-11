@@ -20,7 +20,7 @@ FRESH_GAP_S = 2.0
 RESYNC = {"ADAUSDT": datetime(2026, 4, 23, 6, 8, 58, 321000, tzinfo=timezone.utc).timestamp(),
           "MNTUSDT": datetime(2026, 4, 23, 6, 9, 8, 302000, tzinfo=timezone.utc).timestamp()}
 WINDOW = (datetime(2026, 4, 23, 6, 4, tzinfo=timezone.utc).timestamp(), datetime(2026, 4, 23, 6, 20, tzinfo=timezone.utc).timestamp())
-ARCHIVE_ONLY_FROM = "2026-04-26"     # owner 11 Nov: results from 04-26..05-02 are labelled "public ob200 archive, ~100 ms resolution"
+SECOND_WEEK_FROM = "2026-04-26"      # all 14 days are the public ob200 archive (owner 12 Nov: the recorder capture of 04-19..04-25 was lost); split kept by week
 
 
 def wilson(k: int, n: int, z: float = 1.96) -> list:
@@ -48,15 +48,21 @@ def excluded(r: dict) -> str:
 
 
 def queue_bucket(r: dict) -> str:
+    """Queue ahead at placement in multiples of the order's own size. A new order joins at the back of its level, so its share of the level says
+    nothing (it is always the whole level); the size of the queue and the distance from the touch (touch_bucket) do."""
+    if r.get("placed_ts") is None:
+        return "not placed (simulated PostOnly reject)"
     if r.get("queue_unknown"):
         return "unknown"
     if r.get("level_was_absent"):
         return "new_level"
-    lvl, qa = r.get("level_size") or 0.0, r.get("queue_ahead") or 0.0
-    if lvl <= 0:
-        return "new_level"
-    f = qa / lvl
-    return "0-25%" if f < 0.25 else "25-50%" if f < 0.5 else "50-75%" if f < 0.75 else "75-100%+"
+    x = (r.get("queue_ahead") or 0.0) / max(r.get("qty") or 0.0, 1e-12)
+    return "<10x" if x < 10 else "10-100x" if x < 100 else "100-1000x" if x < 1000 else ">=1000x"
+
+
+def touch_bucket(r: dict) -> str:
+    t = r.get("relative_to_touch_ticks")
+    return "not placed (simulated PostOnly reject)" if t is None else ("inside the spread" if t > 0 else "at the touch" if t == 0 else f"{-t} tick(s) behind")
 
 
 def sim_first(r: dict):
@@ -97,6 +103,7 @@ def evaluate(rows: list[dict]) -> dict:
     out["cancelled_false_fill"] = {"all": ff(canc), "by_day": {k: ff(v) for k, v in group(canc, lambda r: r["day"]).items()},
                                    "by_pair": {k: ff(v) for k, v in group(canc, lambda r: r["pair"]).items()},
                                    "by_queue_at_placement": {k: ff(v) for k, v in group(canc, queue_bucket).items()},
+                                   "by_ticks_from_touch": {k: ff(v) for k, v in group(canc, touch_bucket).items()},
                                    "by_book": {k: ff(v) for k, v in group(canc, lambda r: "fresh" if r["max_depth_gap_s"] <= FRESH_GAP_S else "stale").items()},
                                    "rejected_by_sim_postonly": sum(1 for r in canc if r.get("rejected"))}
     # b. real FILLED
@@ -122,7 +129,9 @@ def evaluate(rows: list[dict]) -> dict:
     out["filled_timing"] = {"all": timing(filled), "by_day": {k: timing(v) for k, v in group(filled, lambda r: r["day"]).items()},
                             "by_pair": {k: timing(v) for k, v in group(filled, lambda r: r["pair"]).items()},
                             "by_book": {k: timing(v) for k, v in group(filled, lambda r: "fresh" if r["max_depth_gap_s"] <= FRESH_GAP_S else "stale").items()},
-                            "by_source": {k: timing(v) for k, v in group(filled, lambda r: "archive_only_days" if r["day"] >= ARCHIVE_ONLY_FROM else "recorder_days").items()},
+                            "by_queue_at_placement": {k: timing(v) for k, v in group(filled, queue_bucket).items()},
+                            "by_ticks_from_touch": {k: timing(v) for k, v in group(filled, touch_bucket).items()},
+                            "by_week": {k: timing(v) for k, v in group(filled, lambda r: "04-26..05-02" if r["day"] >= SECOND_WEEK_FROM else "04-19..04-25").items()},
                             "reference": "80.5% hit (proportional) on the fresh-book set of the fill-evidence study (22 coins, collector data, 2026-10-30)"}
     # c. PostOnly reject at arrival
     po = [r for r in scored if r["real_status"] in ("Rejected", "Filled", "Cancelled", "PartiallyFilledCanceled")]
