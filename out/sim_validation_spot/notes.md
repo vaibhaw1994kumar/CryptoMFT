@@ -226,7 +226,7 @@ Method: `march_tie_check/bybit_SOLUSDT_ties.jsonl`, written by a read-only scrat
 - By day, all false fills are on 05-01 (1/25) and 05-02 (3/839, proportional).
 - By book: fresh 4/702, stale 0/162.
 - By queue ahead at placement: ≥1000× the order size 0/572; 100–1000× 3/286; 10–100× 1/4.
-- About 99% of the cancels are on 05-02 (839 of 864).
+- About 97% of the cancels are on 05-02 (839 of 864).
 
 **b. First-fill timing (proportional)**
 - By coin: ADA 88% hit, MNT 80%.
