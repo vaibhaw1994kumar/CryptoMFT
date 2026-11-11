@@ -54,6 +54,7 @@ VOLATILITY_BUCKETS = ("low", "normal", "high")
 TACTIC_CHOICE_REASONS = (
     "BREAKER_FLATTEN", "BREAKER_FLATTEN_MARKET_NOT_ALLOWED", "BOOK_STALE_NO_AGGRESSION", "TIME_TO_LIMIT_FLATTEN", "TIME_TO_LIMIT_WIDE_SPREAD_CAPPED", "TIME_TO_LIMIT_MARKET_NOT_ALLOWED",
     "INVENTORY_AT_LIMIT_CAPPED", "SPREAD_WIDE_STAY_PASSIVE", "INVENTORY_PRESSURE_REDUCE", "INVENTORY_AGED", "HIGH_VOL_WITH_INVENTORY", "DEFAULT_PASSIVE",
+    "LQ_WAIT_CHEAPER", "LQ_DEPTH_COVERS", "LQ_PARTIAL_RESIDUAL",              # CR-LQ: only with TacticChoiceConfig.liquidity_aware (default off)
 )
 # the only reasons that may ever produce MARKET_BANDED (owner 9 Nov): emergencies, never a normal exit and never a quote
 MARKET_BANDED_REASONS = ("BREAKER_FLATTEN", "TIME_TO_LIMIT_FLATTEN")
@@ -68,7 +69,12 @@ class MarketState:
     inventory_age_s     how long the open inventory has been held (0 when flat)
     inventory_pressure  |position| divided by its limit (0 flat, 1 at the limit, above 1 over it)
     time_to_limit_s     seconds until a hard time limit by which the inventory must be flat (None: no such limit)
-    breaker_flatten     the circuit breaker has ordered the position flat"""
+    breaker_flatten     the circuit breaker has ordered the position flat
+    CR-LQ, all four OPTIONAL (None = unknown; None never changes an answer, and none is read unless TacticChoiceConfig.liquidity_aware):
+    order_qty                      base quantity of the order the choice is for
+    executable_depth_within_cap    base quantity on the opposite side inside the IOC price cap (core OrderBook.walk(side, qty, limit_price=cap).filled_qty, or the live book's equivalent)
+    expected_fill_time_s           expected wait of a resting post-only order at the chosen price (queue ahead / traded rate at that level)
+    expected_wait_cost_bps         expected adverse drift over expected_fill_time_s (a markout table by coin and book age), in basis points"""
     book_age_s: float
     spread_bps: float
     volatility_bucket: str
@@ -76,6 +82,10 @@ class MarketState:
     inventory_pressure: float
     time_to_limit_s: float | None = None
     breaker_flatten: bool = False
+    order_qty: float | None = None
+    executable_depth_within_cap: float | None = None
+    expected_fill_time_s: float | None = None
+    expected_wait_cost_bps: float | None = None
 
 
 @dataclass(frozen=True)
@@ -89,12 +99,20 @@ class TacticChoiceConfig:
     inventory_age_soft_s: float = 60.0        # inventory held this long is reduced
     wide_spread_bps: float = 10.0             # above this a soft reason does not cross the spread
     market_spread_max_bps: float = 30.0       # above this even an emergency uses a capped IOC, not a banded market order
+    # CR-LQ (liquidity-aware choice; owner 11 Nov). Off by default: with False choose_tactic is exactly the choice above. No arb profile sets it.
+    liquidity_aware: bool = False
+    max_wait_s: float = 30.0                  # ASSUMED: a resting order expected to wait longer than this is not "cheaper than crossing"
+    depth_margin: float = 1.0                 # ASSUMED: the book covers the order when executable depth >= order_qty * depth_margin (1.0 = exactly the order)
+    taker_fee_bps: float = 5.5                # ASSUMED: crossing cost = spread_bps / 2 + taker_fee_bps - maker_fee_bps (the caller sets the venue's own fees)
+    maker_fee_bps: float = 2.0                # ASSUMED: a rebate is a negative number
 
 
 @dataclass(frozen=True)
 class TacticChoice:
     tactic: str                               # PASSIVE | IOC_CAPPED | MARKET_BANDED
     reason: str                               # one of TACTIC_CHOICE_REASONS
+    covered_qty: float | None = None          # CR-LQ_PARTIAL_RESIDUAL only: the part of the order the book covers inside the cap (IOC_CAPPED for this much)
+    residual_qty: float | None = None         # CR-LQ_PARTIAL_RESIDUAL only: the rest, which the caller must decide on (rest passively, retry, or leave as risk)
 
 
 def choose_tactic(state: MarketState, cfg: TacticChoiceConfig | None = None, *, allow_market_banded: bool = False) -> TacticChoice:
@@ -110,6 +128,9 @@ def choose_tactic(state: MarketState, cfg: TacticChoiceConfig | None = None, *, 
       8. high volatility and pressure >= pressure_low         -> IOC_CAPPED     HIGH_VOL_WITH_INVENTORY
       9. otherwise                                            -> PASSIVE        DEFAULT_PASSIVE               (a quote)
 
+    CR-LQ (cfg.liquidity_aware, default False; with False nothing below changes): the answer of rules 6 to 9 is then checked by _liquidity_adjusted against the book depth in the cap and the expected wait of a resting order, adding the reasons
+    LQ_WAIT_CHEAPER, LQ_DEPTH_COVERS and LQ_PARTIAL_RESIDUAL (a covered part and a residual quantity on the TacticChoice). Rules 1 to 5 are untouched, so MARKET_BANDED stays emergency-only.
+
     MARKET_BANDED is possible only from rules 1 and 3 (MARKET_BANDED_REASONS) and only when `allow_market_banded` is True; ExecutionLayer.suggest_tactic passes True for the market-making pairing (maker_maker) and never for another.
     Raises ValueError on an input that is not a number, is negative where a duration or ratio cannot be, or names an unknown volatility bucket: a bad state is never answered with a tactic."""
     cfg = cfg or TacticChoiceConfig()
@@ -124,6 +145,17 @@ def choose_tactic(state: MarketState, cfg: TacticChoiceConfig | None = None, *, 
         raise ValueError(f"time_to_limit_s must be a number or None, not {ttl!r}")
     if not isinstance(state.breaker_flatten, bool):
         raise ValueError(f"breaker_flatten must be a bool, not {state.breaker_flatten!r}")
+    for name in ("order_qty", "executable_depth_within_cap", "expected_fill_time_s", "expected_wait_cost_bps"):
+        v = getattr(state, name)
+        if v is not None and (not isinstance(v, (int, float)) or isinstance(v, bool) or math.isnan(v) or v < 0):
+            raise ValueError(f"{name} must be a number >= 0 or None, not {v!r}")
+    if not isinstance(cfg.liquidity_aware, bool):
+        raise ValueError(f"liquidity_aware must be a bool, not {cfg.liquidity_aware!r}")
+    if cfg.liquidity_aware:
+        for name in ("max_wait_s", "depth_margin", "taker_fee_bps", "maker_fee_bps"):
+            v = getattr(cfg, name)
+            if not isinstance(v, (int, float)) or isinstance(v, bool) or math.isnan(v) or (name == "depth_margin" and v <= 0) or (name == "max_wait_s" and v < 0):
+                raise ValueError(f"TacticChoiceConfig.{name} is not a usable number: {v!r}")
     held = state.inventory_pressure > 0
     if state.breaker_flatten:
         return TacticChoice("MARKET_BANDED", "BREAKER_FLATTEN") if allow_market_banded else TacticChoice("IOC_CAPPED", "BREAKER_FLATTEN_MARKET_NOT_ALLOWED")
@@ -140,9 +172,32 @@ def choose_tactic(state: MarketState, cfg: TacticChoiceConfig | None = None, *, 
     if state.spread_bps > cfg.wide_spread_bps:
         return TacticChoice("PASSIVE", "SPREAD_WIDE_STAY_PASSIVE")
     if state.inventory_pressure >= cfg.pressure_soft:
-        return TacticChoice("IOC_CAPPED", "INVENTORY_PRESSURE_REDUCE")
-    if held and state.inventory_age_s >= cfg.inventory_age_soft_s:
-        return TacticChoice("IOC_CAPPED", "INVENTORY_AGED")
-    if state.volatility_bucket == "high" and state.inventory_pressure >= cfg.pressure_low:
-        return TacticChoice("IOC_CAPPED", "HIGH_VOL_WITH_INVENTORY")
-    return TacticChoice("PASSIVE", "DEFAULT_PASSIVE")
+        soft = TacticChoice("IOC_CAPPED", "INVENTORY_PRESSURE_REDUCE")
+    elif held and state.inventory_age_s >= cfg.inventory_age_soft_s:
+        soft = TacticChoice("IOC_CAPPED", "INVENTORY_AGED")
+    elif state.volatility_bucket == "high" and state.inventory_pressure >= cfg.pressure_low:
+        soft = TacticChoice("IOC_CAPPED", "HIGH_VOL_WITH_INVENTORY")
+    else:
+        soft = TacticChoice("PASSIVE", "DEFAULT_PASSIVE")
+    return _liquidity_adjusted(soft, state, cfg) if cfg.liquidity_aware else soft
+
+
+def _liquidity_adjusted(soft: TacticChoice, state: MarketState, cfg: TacticChoiceConfig) -> TacticChoice:
+    """CR-LQ: the soft rules' (6 to 9) answer, checked against what the book and the queue can do. Only called with cfg.liquidity_aware. A field that is None leaves `soft` as it is; PASSIVE and IOC_CAPPED are the only
+    tactics that can come out (MARKET_BANDED is not reachable from a soft rule), and rules 1 to 5 never get here.
+      expected wait is short enough and cheaper than crossing -> PASSIVE     LQ_WAIT_CHEAPER      (wait <= max_wait_s AND expected_wait_cost_bps < spread_bps / 2 + taker_fee_bps - maker_fee_bps)
+      IOC_CAPPED and the book covers the order in the cap     -> IOC_CAPPED  LQ_DEPTH_COVERS      (executable depth / depth_margin >= order_qty)
+      IOC_CAPPED and the book covers only part                -> IOC_CAPPED  LQ_PARTIAL_RESIDUAL  (covered_qty now, residual_qty left for the caller; with nothing covered: PASSIVE, covered_qty 0, residual_qty the whole order)
+    A passive default is never turned into an aggressive order here: DEFAULT_PASSIVE is a quote."""
+    wait, cost = state.expected_fill_time_s, state.expected_wait_cost_bps
+    if wait is not None and cost is not None and wait <= cfg.max_wait_s and cost < state.spread_bps / 2.0 + cfg.taker_fee_bps - cfg.maker_fee_bps:
+        return TacticChoice("PASSIVE", "LQ_WAIT_CHEAPER")
+    depth, qty = state.executable_depth_within_cap, state.order_qty
+    if soft.tactic != "IOC_CAPPED" or depth is None or qty is None:
+        return soft
+    usable = depth / cfg.depth_margin
+    if usable >= qty:
+        return TacticChoice("IOC_CAPPED", "LQ_DEPTH_COVERS")
+    if usable <= 0:
+        return TacticChoice("PASSIVE", "LQ_PARTIAL_RESIDUAL", covered_qty=0.0, residual_qty=qty)
+    return TacticChoice("IOC_CAPPED", "LQ_PARTIAL_RESIDUAL", covered_qty=usable, residual_qty=qty - usable)
