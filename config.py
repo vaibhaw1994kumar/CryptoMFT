@@ -428,9 +428,101 @@ def config_from_raw(raw: dict) -> tuple[AppConfig, dict]:
     return cfg, raw
 
 
+# -- Safe-config checks (Track A item 4, owner 11 Nov): the rules that refuse an unsafe run live HERE, once. The backtester's profile loader and the live and paper builder
+# (`raw_config_from_profile` below) both call them, so a live or paper run refuses what the backtest refuses. -----------------------------------------------------------------------------------------
+class UnsafeConfigError(ValueError):
+    """A profile disables a MANDATORY control or asks for a physically impossible setup outside a labelled sensitivity run."""
+
+
+@dataclass(frozen=True)
+class MandatoryControl:
+    key: str                  # dotted path into the profile document
+    forbidden: tuple = ()     # the values that count as "disabled" (rejected outside legacy_v0)
+    note: str = ""
+
+
+MANDATORY_CONTROLS: tuple[MandatoryControl, ...] = (
+    MandatoryControl('arb.dispatch_mode', ('simultaneous',), 'the hedge waits for the maker fill (Method A)'),
+    MandatoryControl('valuation', ('last_mark',), 'R11: open position marked at the common timestamp'),
+    MandatoryControl('equity_bridge', ('off', None), 'ledger identity checked at the end of every run'),
+    MandatoryControl('enforce_book_state', (False,), 'no pricing or fills from a non-valid book (WP4)'),
+    MandatoryControl('trade_dedupe', ('off', None), 'trades de-duplicated (native id when present)'),
+    MandatoryControl('delta_uses_book_size', (False,), 'depth-size fix'),
+    MandatoryControl('maker.share_trade_volume', (False,), 'one print fills own orders once in total'),
+    MandatoryControl('maker.dedupe_trade_depth', (False,), 'the same execution is charged once'),
+    MandatoryControl('maker.exchange_time_eligibility', (False,), 'causal fills: nothing executed before arrival fills us'),
+    MandatoryControl('arb.count_pending_exposure', (False,), 'in-flight / pending exposure counts toward the limits'),
+    MandatoryControl('arb.count_unknown_exposure', (False,), 'UNKNOWN orders count toward the limits'),
+    MandatoryControl('arb.maker_max_age_s', (0, 0.0, None), 'order lifetime set'),
+    MandatoryControl('timing.dead_feed_s', (None, 0, 0.0), 'dead-feed gate (WP3)'),
+    MandatoryControl('breaker', (None, False), 'circuit breaker configured'),
+    MandatoryControl('hedge_faults.response', ('legacy',), 'recovery policy, not the latency-free oracle'),
+    MandatoryControl('cancel_time_basis', ('receive',), 'cancels take effect on exchange time (D-03)'),
+    MandatoryControl('timing.truth_books', (False,), 'venue-truth books for arrivals (WP3)'),
+    MandatoryControl('arb.net_ceiling_multiple', (), '1.0 in the perp profile — DECISION_PENDING (1x vs fill headroom)'),
+    MandatoryControl('margin', (None,), 'margin model configured in a perp profile'),
+    MandatoryControl('postonly_reject_model', ('off', None), 'perp profile: PostOnly would-cross orders are rejected at exchange arrival time (lifecycle task 5); perp profiles only'),
+    MandatoryControl('product_fee_consistency', (False,), "fee preset must match the venue's product"),
+    MandatoryControl('execution.one_hedge_child', ('off',), 'execution layer: one live hedge child per hedge intent (counted, or refused in enforce mode)'),
+    MandatoryControl('execution.risk_reservation', ('off',), 'execution layer: primary exposure is checked and reserved in one call and released at the terminal state (counted, or refused in enforce mode)'),
+)
+MANDATORY_BY_KEY = {c.key: c for c in MANDATORY_CONTROLS}
+# Latency presets that cannot exist in production (nobody is co-located with both venues): refused unless the run is labelled a sensitivity run.
+SENSITIVITY_ONLY_LATENCY = ("colocated_both",)
+
+
+def _profile_get(doc: dict, dotted: str, default=None):
+    cur: Any = doc
+    for part in dotted.split("."):
+        if not isinstance(cur, dict) or part not in cur:
+            return default
+        cur = cur[part]
+    return cur
+
+
+def check_mandatory(doc: dict) -> list[str]:
+    """Which MANDATORY controls the profile disables. Empty for a valid non-legacy profile; legacy_v0 is exempt (and says so)."""
+    if doc.get("name") == "legacy_v0":
+        return []
+    bad = []
+    for key, sw in MANDATORY_BY_KEY.items():
+        val = _profile_get(doc, key, None) if key != "product_fee_consistency" else doc.get("product_fee_consistency", True)
+        if key == "breaker":
+            val = doc.get("breaker")
+        if key == "margin":
+            val = doc.get("margin")
+        if val in sw.forbidden or (val is None and key in ("timing.dead_feed_s", "breaker", "margin", "postonly_reject_model") and doc.get("product", "perp") == "perp"):
+            if key in ("margin", "postonly_reject_model") and doc.get("product") != "perp":
+                continue
+            bad.append(f"{key}={val!r} disables a MANDATORY control: {sw.note}")
+    return bad
+
+
+def latency_preset_problem(doc: dict, latency_preset, timing_preset, sensitivity) -> str | None:
+    """The reason a non-legacy profile refuses its latency preset, or None. `sensitivity` is the label of a declared sensitivity run."""
+    if doc.get("name") == "legacy_v0":              # the frozen comparison baseline keeps its historical preset
+        return None
+    used = sorted({p for p in (latency_preset, timing_preset) if p in SENSITIVITY_ONLY_LATENCY})
+    if used and not (isinstance(sensitivity, str) and sensitivity.strip()):
+        return (f"latency preset {', '.join(used)} is physically impossible and allowed only in a sensitivity run; "
+                f"label the run with a latency_sensitivity reason, or use singapore / tokyo / neutral")
+    return None
+
+
+def require_safe_profile(doc: dict, *, latency_sensitivity: str | None = None) -> None:
+    """Refuse a profile that disables a MANDATORY control or uses a sensitivity-only latency preset without saying so. Raises `UnsafeConfigError` with every reason."""
+    reasons = check_mandatory(doc)
+    timing = doc.get("timing") if isinstance(doc.get("timing"), dict) else {}
+    problem = latency_preset_problem(doc, doc.get("latency_preset"), timing.get("from_latency_preset") or doc.get("latency_preset"), latency_sensitivity)
+    if problem:
+        reasons.append(problem)
+    if reasons:
+        raise UnsafeConfigError(f"profile {doc.get('name')}: " + "; ".join(reasons))
+
+
 def raw_config_from_profile(
     profile: dict, *, pair: str, venues: tuple[str, ...], ticks: dict[str, str | float], quantity_steps: dict[str, str | float], size_base: float,
-    seed: int = 7, max_book_age_s: float = 0.5,
+    seed: int = 7, max_book_age_s: float = 0.5, latency_sensitivity: str | None = None,
 ) -> tuple[dict, dict[str, str]]:
     """The run profile (a plain mapping: the YAML after any dataset settings and run overrides were merged) as the raw config the core reads, so a replay and a live run build
     their `AppConfig` from the same profile through `config_from_raw`. Returns (raw, notes): `notes` names every value that the profile does not state and that was chosen here,
@@ -438,6 +530,7 @@ def raw_config_from_profile(
     (Bybit 0.005 in January 2022, 0.001 in March 2024); `size_base` is the run's clip (max position base at the profile's net ceiling multiple)."""
     from .fees import tier_rows
 
+    require_safe_profile(profile, latency_sensitivity=latency_sensitivity)          # live and paper refuse what the backtest refuses (Track A item 4)
     base, quote = pair[:-4], pair[-4:]
     instrument_id = f"{base}-{quote}-PERP"
     names = tuple(v.upper() for v in venues)
