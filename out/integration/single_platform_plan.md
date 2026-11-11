@@ -299,3 +299,5 @@ The adaptive hedge limit stays deferred.
 
 - 7 Nov (a): adverse-selection report and through-print -> 5, Phase B additions; hedge audit, Phase C build and p_fail / loss_fail_bps -> 5, Phase C additions; S1-S3 -> 5, Strategy steps.
 - 7 Nov (b): C16 and S0 -> 5, Step S0; B2 decisions and steps 1-8 -> 5, Phase B2; v1_2 freeze -> status line and section 5, line B.
+
+- 12 Nov (C73): owner order of 11 Nov steps 1 to 5b done and committed locally: margin price rule (pause, 5 s last good mark), real orders only from a profile, Track C merged, day-1 rerun v1_6/v1_7, ghost hedge and partial hedge under faults in the session runtime, both 2022-01-05 ghost replays; CR-B real-fills check passed (0 difference); CR-LQ built behind a default-off switch (core f7b7cc3). Suite 93 = 93. Next: E0 (c) to (g), silence alarm.
