@@ -631,6 +631,30 @@ class CancelWhileSubmitted(Scenario):
         self.assertEqual(self.oms.realism_counters.get("cancel_while_submitted", 0), 0)             # the order was PARTIAL, not SUBMITTED, when the cancel left
 
 
+class HedgeTouchPastPlannedLimit(Scenario):
+    """Track A (owner 11 Nov): the old HEDGE_CAP_BREACH_AT_DISPATCH is HEDGE_TOUCH_PAST_PLANNED_LIMIT. It says the market had moved past the hedge price the opportunity planned by the time the hedge was dispatched; it does
+    NOT say the child broke its cap (the child's cap is taken from the current touch). The hedge is still sent."""
+
+    def test_the_touch_past_the_planned_limit_is_recorded_with_both_prices_and_the_hedge_is_still_sent(self):
+        self.build(hedge=[("fill", None)], policy=HedgePolicy(touch_slack_bps=5.0))
+        self.oms._books[("BINANCE", INSTR)] = make_book("BINANCE", "90.0", "91.0", "5")                 # the hedge venue's bid fell well below the planned sell limit before the maker filled
+        self.maker_fill("2.0", 5 * S, ExecutionEventType.FILLED)
+        (ev,) = [e for e in self.ledger.events if e["event_type"] == "HEDGE_TOUCH_PAST_PLANNED_LIMIT"]
+        self.assertEqual(ev["touch"], "90.0")
+        self.assertEqual(ev["reason"], "touch_past_planned_limit")
+        self.assertGreater(Decimal(ev["planned_limit"]), Decimal(ev["touch"]))                         # the planned sell limit is above the new bid
+        self.assertLessEqual(Decimal(ev["child_cap"]), Decimal(ev["touch"]))                           # the child that is sent is capped from the CURRENT touch: it is not in breach
+        self.assertEqual(len(self.binance.submits), 1)                                                 # still sent
+        self.assertEqual(self.oms.realism_counters["hedge_touch_past_planned_limit"], 1)
+        self.assertNotIn("hedge_cap_breach_at_dispatch", self.oms.realism_counters)
+        self.assertEqual([e for e in self.ledger.events if e["event_type"] == "HEDGE_CAP_BREACH_AT_DISPATCH"], [])
+
+    def test_a_touch_inside_the_planned_limit_records_nothing(self):
+        self.build(hedge=[("fill", None)], policy=HedgePolicy(touch_slack_bps=5.0))
+        self.maker_fill("2.0", 5 * S, ExecutionEventType.FILLED)
+        self.assertEqual([e for e in self.ledger.events if e["event_type"] == "HEDGE_TOUCH_PAST_PLANNED_LIMIT"], [])
+
+
 class MakerLifetimeSilentFeed(unittest.TestCase):
     """E1 (owner 10/11 Nov): the maker lifetime is a timer, not a check on market events. With NO market event after the venue accepted the order, advancing time to the
     deadline (what `TradingSession.tick` does in a live idle period) cancels it, at the deadline, from the venue's acceptance time."""

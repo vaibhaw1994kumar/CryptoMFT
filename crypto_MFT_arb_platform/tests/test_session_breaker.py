@@ -203,5 +203,30 @@ class RiskGateModes(unittest.TestCase):
         self.assertEqual(s.gate_counts, {"BREAKER_TRIPPED": 1})
 
 
+class MarginMarks(unittest.TestCase):
+    """Owner 11 Nov: the margin check marks a position with the venue's own mark when a fresh one arrived, else the mid of a VALID book. Without it a book that goes quiet for 500 ms drops its mark."""
+
+    def test_a_valid_book_gives_its_mid_a_stale_one_gives_none(self):
+        s = session()
+        with_books(s)
+        marks = s._margin_marks(5 * S)
+        self.assertEqual(marks, {(A, INSTR): Decimal("100"), (B, INSTR): Decimal("100")})
+        s.books[(A, INSTR)].start_resync("test")                                                      # the book is no longer VALID
+        self.assertEqual(set(s._margin_marks(5 * S)), {(B, INSTR)})
+
+    def test_a_fresh_exchange_mark_survives_a_stale_book_and_wins_over_the_mid_an_old_one_is_ignored(self):
+        from crypto_stat_arb.derivatives import DerivativeTicker
+        s = session()
+        with_books(s)
+        tick = lambda v, ts, mark: DerivativeTicker(event_id=f"d-{v}-{ts}", venue=v, instrument_id=INSTR, symbol="X", exchange_ts_ns=ts, source_ts_ns=ts, receive_ts_ns=ts, mark_price=Decimal(mark),
+                                                    index_price=None, funding_rate=None, next_funding_ts_ns=None)
+        s.on_derivative(tick(A, 4 * S, "100.3"))                                                      # funding is not configured: the mark is still kept
+        self.assertEqual(s._margin_marks(5 * S)[(A, INSTR)], Decimal("100.3"))                       # wins over the book mid 100
+        s.books[(A, INSTR)].start_resync("test")
+        self.assertEqual(s._margin_marks(5 * S)[(A, INSTR)], Decimal("100.3"))                       # the book is stale, the mark is still there
+        self.assertNotIn((A, INSTR), s._margin_marks(15 * S))                                         # 11 s old: not used (the check fails closed on a stale price)
+        self.assertEqual(s._margin_marks(15 * S)[(B, INSTR)], Decimal("100"))
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -206,6 +206,31 @@ class RecordedSessionReader(unittest.TestCase):
                 list(iter_recorded_events(d))
 
 
+    def test_derivatives_frames_are_yielded_when_the_part_has_the_file_and_skipped_when_it_has_not(self):
+        import gzip
+        import json
+        import tempfile
+        from crypto_stat_arb.derivatives import DerivativeTicker
+        from new_backtest.session_replay import iter_recorded_events
+        row = {"event_id": "d1", "venue": "BINANCE", "instrument_id": "SOL-USDT-PERP", "symbol": "SOLUSDT", "exchange_ts_ns": 15, "receive_ts_ns": 16, "mark_price": "100.02", "index_price": "100.0",
+               "funding_rate": "0.0001", "next_funding_ts_ns": 99}
+        trace = [{"disposition": "CANONICAL", "canonical_event_id": "c1"}, {"disposition": "DERIVATIVE", "canonical_event_id": "d1"}]
+        with tempfile.TemporaryDirectory() as d:
+            self._write(d, [([_row_snapshot("c1", "BYBIT", 1, 10, 100.0, 100.1)], [], trace)])
+            self.assertEqual([e.event_id for e in iter_recorded_events(d)], ["c1"])                          # no derivatives file in the part: the line is skipped, as before
+            with gzip.open(Path(d) / "part-000001" / "derivatives.jsonl.gz", "wt") as fh:
+                fh.write(json.dumps(row) + "\n")
+            got = list(iter_recorded_events(d))
+            self.assertEqual([type(e).__name__ for e in got], ["MarketEvent", "DerivativeTicker"])
+            self.assertEqual((got[1].venue, got[1].mark_price, got[1].receive_ts_ns), ("BINANCE", Decimal("100.02"), 16))
+        with tempfile.TemporaryDirectory() as d:                                                              # a derivatives line whose row is missing raises, like every other reference
+            self._write(d, [([], [], [{"disposition": "DERIVATIVE", "canonical_event_id": "gone"}])])
+            with gzip.open(Path(d) / "part-000001" / "derivatives.jsonl.gz", "wt") as fh:
+                fh.write("")
+            with self.assertRaises(KeyError):
+                list(iter_recorded_events(d))
+
+
 @unittest.skipUnless(SLICES.is_dir(), "March slices not available (the profile needs a data root)")
 class RecordedReplayAndDecomposedMarkouts(unittest.TestCase):
     """The same synthetic stream, as recorded core events: the recorded path runs the session, and the decomposed markouts (M = C + D, mid before the fill's event) are an option that changes nothing else."""
@@ -238,6 +263,46 @@ class RecordedReplayAndDecomposedMarkouts(unittest.TestCase):
             self.assertAlmostEqual(r["net_bps"], r["m_bps"] + r["fee_bps"])
         self.assertEqual({r["role"] for r in rows}, {"maker", "taker"})
         self.assertIn("BYBIT|maker", md["by_venue_role"])
+
+    def test_mark_from_mid_is_labelled_off_by_default_and_an_exchange_mark_wins_for_its_venue(self):
+        from crypto_stat_arb.derivatives import DerivativeTicker
+        plain = self._replay().run_recorded(iter(self._core_events()))
+        self.assertNotIn("mark_source", plain["manifest"])                                                   # off: the manifest and every number are as before
+        fb = self._replay(mark_from_mid=True)
+        res = fb.run_recorded(iter(self._core_events()))
+        ms = res["manifest"]["mark_source"]
+        self.assertGreater(ms["MARK_FROM_MID_ticks"], 0)
+        self.assertEqual((ms["exchange_mark_ticks"], ms["venues_with_exchange_marks"]), (0, []))
+        self.assertEqual({v for v, _ in fb.session.exchange_marks}, {"BYBIT", "BINANCE"})
+        for key in ("signals", "orders", "fills", "positions", "cash_by_venue"):
+            self.assertEqual(plain[key], res[key], key)                                                      # the fallback moves a mark, never a decision here
+        events = self._core_events()
+        tick = DerivativeTicker(event_id="d1", venue="BYBIT", instrument_id="SOL-USDT-PERP", symbol="SOLUSDT", exchange_ts_ns=events[0].receive_ts_ns, source_ts_ns=events[0].receive_ts_ns,
+                                receive_ts_ns=events[0].receive_ts_ns, mark_price=Decimal("123.45"), index_price=None, funding_rate=None, next_funding_ts_ns=None)
+        both = self._replay(mark_from_mid=True)
+        res2 = both.run_recorded(iter([events[0], tick] + events[1:]))
+        ms2 = res2["manifest"]["mark_source"]
+        self.assertEqual((ms2["exchange_mark_ticks"], ms2["venues_with_exchange_marks"]), (1, ["BYBIT"]))
+        self.assertEqual(both.session.exchange_marks[("BYBIT", "SOL-USDT-PERP")][1], Decimal("123.45"))     # the exchange mark stays: no mid is written over it
+        self.assertGreater(ms2["MARK_FROM_MID_ticks"], 0)                                                    # BINANCE has none, so it still gets the fallback
+
+    def test_the_per_venue_cap_lifts_the_venue_room_and_leaves_the_net_ceiling(self):
+        """Owner 11 Nov: 5 SOL gross per venue with a 1 SOL clip. After a first pair (Bybit +1, Binance -1) the old room was 0.25 (the per-venue cap equalled the net ceiling 1.25)."""
+        from crypto_stat_arb.config import config_from_raw, raw_config_from_profile
+        from new_backtest.arb_strategy import InventoryBook
+        profile = load_profile("perp_perp_maker_taker_v1_5")
+        args = dict(pair="SOLUSDT", venues=("bybit", "binance"), ticks={"bybit": 0.01, "binance": 0.01}, quantity_steps={"bybit": 0.1, "binance": 0.01}, size_base=1.0)
+        self.assertEqual(config_from_raw(raw_config_from_profile(profile, **args)[0])[0].risk_limits.max_position_base, Decimal("1.25"))
+        self.assertEqual(config_from_raw(raw_config_from_profile(profile, venue_cap_base=5.0, **args)[0])[0].risk_limits.max_position_base, Decimal("5.0"))
+        for cap, room in ((0.0, 0.25), (5.0, 1.25)):
+            cfg = apply_profile(profile, dataset="mar2024", data_root=str(SLICES), pair="SOLUSDT", start_date="2024-03-11", end_date="2024-03-11", output_dir="/tmp/x_d5_rec")
+            cfg.arb.max_position_base, cfg.arb.max_venue_imbalance_base = 1.0, cap
+            replay = SessionReplay(cfg, profile, recorded=True)
+            inv = InventoryBook()
+            inv.ensure(("bybit", "binance"))
+            inv.base["bybit"], inv.base["binance"] = 1.0, -1.0
+            self.assertAlmostEqual(replay.strategy._inventory_room("bybit", "binance", inv), room, msg=f"cap {cap}")
+            self.assertEqual(replay.app_config.risk_limits.max_position_base, Decimal("5.0") if cap else Decimal("1.25"))
 
     def test_run_recorded_needs_the_recorded_flag(self):
         profile = load_profile("perp_perp_maker_taker_v1_5")

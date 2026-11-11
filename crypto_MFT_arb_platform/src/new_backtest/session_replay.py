@@ -28,6 +28,7 @@ from pathlib import Path
 from typing import Any, Iterable
 
 from crypto_stat_arb.config import config_from_raw, raw_config_from_profile
+from crypto_stat_arb.derivatives import DerivativeTicker
 from crypto_stat_arb.ems.layer import hedge_slack_bps
 from crypto_stat_arb.execution import DispatchPolicy
 from crypto_stat_arb.hedge_lifecycle import HedgePolicy
@@ -89,7 +90,7 @@ class SessionReplay:
     """One replay on the session. `stream` is any iterable of `TimedEvent` built with `decimal_numbers=True` (the real feed or a synthetic list); consumed lazily."""
 
     def __init__(self, config, profile: dict, *, stream: Iterable | None = None, ticks: dict[str, float] | None = None, recorded: bool = False,
-                 decompose_markouts: bool = False) -> None:
+                 decompose_markouts: bool = False, mark_from_mid: bool = False) -> None:
         if config.runtime != "session":
             raise ValueError("SessionReplay runs the session runtime only")
         self.config, self.profile = config, profile
@@ -102,6 +103,13 @@ class SessionReplay:
         self._mid_pre: dict[str, float] = {}
         self._decomp_pos = 0
         self.decomp_skipped_no_mid = 0
+        # Marks for the margin check (owner 11 Nov): the venue's own mark price from the recorded derivatives stream wins when it is present (`_derivative`). With `mark_from_mid` and no exchange mark for a venue, the
+        # replay supplies the last VALID book mid as that venue's mark, at most every 100 ms, labelled MARK_FROM_MID in the manifest: a book that goes quiet for 500 ms then no longer drops its mark and trips the margin
+        # check and the kill switch (every margin breach of the 2026-10-29 run sat inside a BINANCE:STALE interval). Replay only: the core's rule (fail closed on a missing mark) is unchanged.
+        self.mark_from_mid = mark_from_mid
+        self._exchange_mark_venues: set[str] = set()
+        self._last_synth_mark_ns: dict[str, int] = {}
+        self.mark_ticks = {"exchange_mark": 0, "MARK_FROM_MID": 0}
         self.recorded = recorded          # the input is a recorded live session (core events already): `run_recorded`; no venue-truth books (they are built from raw research events)
         venues = tuple(config.venues)
         self.venues = venues
@@ -115,7 +123,7 @@ class SessionReplay:
         self.ticks = ticks or dated_ticks(config.start_date)
         size = float(config.arb.max_position_base)
         raw, self.config_notes = raw_config_from_profile(profile, pair=config.pair, venues=venues, ticks=self.ticks, quantity_steps={v: quantity_steps()[v] for v in venues}, size_base=size,
-                                                         seed=config.seed)
+                                                         seed=config.seed, venue_cap_base=float(config.arb.max_venue_imbalance_base) or None)
         self.app_config, self.raw_config = config_from_raw(raw)
         self.instrument_id = self.app_config.instrument_id
         self.feed = CanonicalFeed(self.instrument_id, venue_names=self.names, delta_semantics={v: s.delta_semantics for v, s in self.venue_specs.items()},
@@ -230,6 +238,9 @@ class SessionReplay:
     def _run_events(self, events: Iterable) -> dict[str, Any]:
         limit_ns = None if self.config.max_event_ts is None else int(self.config.max_event_ts * _NS)
         for event in events:
+            if isinstance(event, DerivativeTicker):
+                self._derivative(event)
+                continue
             if self.config.max_events is not None and sum(self.events.values()) >= self.config.max_events:
                 break
             if limit_ns is not None and event.receive_ts_ns > limit_ns:
@@ -251,6 +262,26 @@ class SessionReplay:
             self.decomp.resolve_asof(end, self._mid_pre)
             self.decomp.resolve_asof(end, self._mid_pre, finalize=True)
         return self.result()
+
+    def _derivative(self, ticker: DerivativeTicker) -> None:
+        """A recorded derivatives frame (mark, index, funding): the session keeps the venue's mark for the margin check (and settles funding when it is configured). Nothing else moves."""
+        self.session.on_derivative(ticker)
+        if ticker.mark_price is not None:
+            self._exchange_mark_venues.add(ticker.venue)
+            self.mark_ticks["exchange_mark"] += 1
+
+    def _synth_mark(self, event) -> None:
+        """MARK_FROM_MID (replay only, off unless asked): the last valid mid of the venue's book as its mark, for a venue with no exchange mark, at most every 100 ms."""
+        if event.venue in self._exchange_mark_venues:
+            return
+        key = (event.venue, event.instrument_id)
+        book = self.session.books[key]
+        now = event.receive_ts_ns
+        if book.state.value != "VALID" or not book.bids or not book.asks or now - self._last_synth_mark_ns.get(event.venue, -10**18) < 100_000_000:
+            return
+        self._last_synth_mark_ns[event.venue] = now
+        self.session.exchange_marks[key] = (now, (book.best_bid + book.best_ask) / 2)
+        self.mark_ticks["MARK_FROM_MID"] += 1
 
     def _decomp_after(self, event) -> None:
         """Record the fills this event caused with the mid before it, then move that mid on to the state after it."""
@@ -423,6 +454,8 @@ class SessionReplay:
         self._deliver(adapter, produced, now, event.exchange_ts_ns)
         self.session.on_event(event, apply_book=False)
         self._book_only_suspension(event.venue, now)
+        if self.mark_from_mid:
+            self._synth_mark(event)
 
     def _trade(self, trade: TradeEvent) -> None:
         if not self.feeder.on_trade(trade):
@@ -480,7 +513,7 @@ class SessionReplay:
                 "rows": len(self.decomp.rows), "age_rule": "off (no mid_max_age_s)"}, "_markout_rows": list(self.decomp.rows)}),
             "markout_summary": s.markouts.summary() if s.markouts is not None else None, "markout_by_venue_role": s.markouts.summary_by_venue_role() if s.markouts is not None else None,
             "gate_events": [{k: (str(v) if isinstance(v, Decimal) else v) for k, v in e.items() if k in ("event_type", "ts_ns", "reason", "chain_id", "parent_id")}
-                            for e in s.ledger.events if e["event_type"] in ("HEDGE_DISPATCH_HELD", "TIME_INTEGRITY_BLOCK", "ORDER_LIFETIME_EXPIRED", "ORDER_REJECT_CLASSIFIED", "HEDGE_CAP_BREACH_AT_DISPATCH", "HEDGE_ALARM")][:500],
+                            for e in s.ledger.events if e["event_type"] in ("HEDGE_DISPATCH_HELD", "TIME_INTEGRITY_BLOCK", "ORDER_LIFETIME_EXPIRED", "ORDER_REJECT_CLASSIFIED", "HEDGE_TOUCH_PAST_PLANNED_LIMIT", "HEDGE_ALARM")][:500],
             "grid_snaps": dict(self.shim.grid_snaps), "fills_by_source": {n: dict(a.fills_by_source) for n, a in self.adapters.items()},
             "manifest": {
                 "invalid_book_policy": s.book_policy_report(self.last_ns),
@@ -491,6 +524,10 @@ class SessionReplay:
                 "price_sanity_core_stats": {f"{v}": {k: getattr(b.stats, k) for k in ("price_jumps", "confirmed_price_moves", "wide_spreads", "crossed_or_locked", "stale_transitions", "invalid_levels", "resyncs", "snapshots", "deltas_applied")}
                                             for (v, _), b in s.books.items()},
                 "time_integrity_blocks": sum(1 for e in s.ledger.events if e["event_type"] == "TIME_INTEGRITY_BLOCK"),
+                **({} if not (self.mark_from_mid or self.mark_ticks["exchange_mark"]) else {"mark_source": {
+                    "exchange_mark_ticks": self.mark_ticks["exchange_mark"], "MARK_FROM_MID_ticks": self.mark_ticks["MARK_FROM_MID"], "venues_with_exchange_marks": sorted(self._exchange_mark_venues),
+                    "label": "the margin check marks a position with the venue's exchange mark when the recorded derivatives stream has one (age at most 10 s), else with the last valid book mid; MARK_FROM_MID is the replay's "
+                             "labelled fallback for a venue with no exchange mark (replay only; funding is not settled from it)"}}),
                 "sequence_gap_counter_of_the_core_book": "NOT REPORTED: synthetic sequence, gaps NOT_MEASURED",
                 "entry_gates": {"book_age_rule": "core, 500 ms, age from the last message of any kind (owner 8 Nov Q-G1)", "dead_feed_5s": "not a blocking gate; the resubscribe trigger only (Q-G2)", "price_sanity_500bps": "core, kept (Q-G3)",
                                 "time_integrity": "core, host-offset correction on (Q-G4)", "circuit_breaker": "NOT IN THE CORE: Phase E (Q-G5); old-path trips are in the parity report"}, "feed": self.feed.manifest(), "ticks": self.ticks, "quantity_step": {"values": quantity_steps(), "label": published_rules()["label"], "fetched": published_rules()["fetched"], "sources": {v: r["source"] for v, r in published_rules()["venues"].items()}},
@@ -720,7 +757,13 @@ def iter_recorded_events(session_dir):
     One part at a time (owner 11 Nov, the 1-day replay): a day of SOLUSDT is about 4.9 million events, more than a list of them holds in memory. Every trace line of a part refers to a row of the SAME part
     (checked on the 2026-10-29 capture: 0 unresolved of 4.9 million); a reference that is not found raises, never skips."""
     for part in sorted(Path(session_dir).glob("part-*")):
-        can, trades = {}, {}
+        can, trades, deriv = {}, {}, None
+        if (part / "derivatives.jsonl").exists() or (part / "derivatives.jsonl.gz").exists():      # the recorder's derivatives frames (mark, index, funding): yielded as DerivativeTicker; a part without the file has none
+            deriv = {}
+            with _open_jsonl(part / "derivatives.jsonl") as fh:
+                for line in fh:
+                    row = json.loads(line)
+                    deriv[row["event_id"]] = row
         with _open_jsonl(part / "canonical.jsonl") as fh:
             for line in fh:
                 row = json.loads(line)
@@ -736,6 +779,8 @@ def iter_recorded_events(session_dir):
                     yield MarketEvent.from_dict(can[row["canonical_event_id"]])
                 elif row["disposition"] == "TRADE":
                     yield TradeEvent.from_dict(trades[row["canonical_event_id"]])
+                elif row["disposition"] == "DERIVATIVE" and deriv is not None:
+                    yield DerivativeTicker.from_dict(deriv[row["canonical_event_id"]])
 
 
 def load_recorded_events(session_dir) -> list:
