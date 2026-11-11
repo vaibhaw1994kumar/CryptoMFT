@@ -122,6 +122,7 @@ ALLOWED_ORDER_TRANSITIONS: dict[OrderState, frozenset[OrderState]] = {
     }),
     OrderState.CANCEL_PENDING: frozenset({
         OrderState.CANCELLED, OrderState.FILLED, OrderState.PARTIAL, OrderState.ACKNOWLEDGED,
+        OrderState.REJECTED,       # a cancel raced the submit and the venue refuses the submit (R5; 11 Nov: no longer an unexpected transition)
         OrderState.TIMED_OUT,      # PARTIAL / ACKNOWLEDGED: a venue query says the cancel did not take
     }),
     OrderState.TIMED_OUT: frozenset({      # later venue evidence clears an unknown state (D-04)
@@ -509,6 +510,11 @@ class OMS:
             if action == "SUBMIT" and status in ("DISPATCHED", "RELEASED"):
                 self._record_internal_update(plan, order, ExecutionEventType.SENT, ts_ns, request.request_id)
             elif action == "CANCEL" and status == "DISPATCHED":
+                if order.state == OrderState.SENT:
+                    # 11 Nov (owner, R5): a cancel that leaves while the venue has not yet answered the submit. Counted and logged so its frequency can be read from any run's ledger;
+                    # the outcome is the venue's: CANCELLED (cancel wins), REJECTED (submit refused), or a fill that raced it (booked once, the order ends FILLED).
+                    self.realism_counters["cancel_while_submitted"] = self.realism_counters.get("cancel_while_submitted", 0) + 1
+                    self.ledger.record("CANCEL_WHILE_SUBMITTED", ts_ns, parent_id=plan.parent_id, order_id=order.order_id, venue=order.venue, order_role=order.order_role)
                 self._record_internal_update(
                     plan, order, ExecutionEventType.CANCEL_REQUESTED, ts_ns, request.request_id,
                 )
