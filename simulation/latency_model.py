@@ -504,6 +504,7 @@ class MarkoutTracker:
       adverse_h = s * (m_h - m0) / m0 * 1e4        m_h = the venue mid as of fill_ts + h
       fee       = -fee_paid / notional * 1e4       a maker rebate is positive
       net_h     = captured + adverse_h + fee
+      m_h       = captured + adverse_h              the note's M(h) = C + D (fill price to the horizon mid, before fees; owner 11 Nov)
     The 09 Nov markout note divides captured and adverse by the FILL PRICE p, not by m0; the difference is under 1 % of the markout and the
     denominator is kept as m0 so the market-maker tracker stays bit-equal (recorded 11 Nov, to revisit with the MM side).
     `mid_max_age_s` (default None = off; owner 11 Nov): the age of a mid is the time since the last BOOK MESSAGE of any kind on that venue (the clock
@@ -625,7 +626,7 @@ class MarkoutTracker:
             self.rows.append({"ts": pm.fill_ts, "horizon_s": pm.horizon_s, "venue": pm.venue, "side": pm.side, "price": pm.price,
                               "qty": pm.qty, "role": pm.role, "mid_at_fill": pm.mid0, "mid_at_h": m, "captured_bps": captured,
                               "adverse_bps": adverse, "fee_bps": fee, "net_bps": captured + adverse + fee,
-                              "at_end": at_end, **pm.tags})
+                              "m_bps": captured + adverse, "at_end": at_end, **pm.tags})
 
     def _group_key(self, r: dict, by: tuple[str, ...]) -> str:
         return "|".join(str(r.get(k)) for k in by) if by else "all"
@@ -677,8 +678,8 @@ class MarkoutTracker:
             for k, col in (("c", "captured_bps"), ("a", "adverse_bps"), ("f", "fee_bps")):
                 g[k] += r[col]
                 g[k + "q"] += r[col] * r["qty"] * r["price"]
-            c = cols.setdefault((key, h), {"captured_bps": [], "adverse_bps": [], "fee_bps": [], "net_bps": [], "blocks": []})
-            for col in ("captured_bps", "adverse_bps", "fee_bps", "net_bps"):
+            c = cols.setdefault((key, h), {"captured_bps": [], "adverse_bps": [], "fee_bps": [], "net_bps": [], "m_bps": [], "blocks": []})
+            for col in ("captured_bps", "adverse_bps", "fee_bps", "net_bps", "m_bps"):
                 c[col].append(r[col])
             c["blocks"].append(int(r["ts"] // block_s))
         support = self.support_counts(by)
@@ -690,8 +691,8 @@ class MarkoutTracker:
                 cap, adv, fee = g["c"] / n, g["a"] / n, g["f"] / n
                 c = cols[(key, h)]
                 out[key][h] = {"n": n, "captured_bps": cap, "adverse_bps": adv, "fee_bps": fee, "net_bps": cap + adv + fee,
-                               "notional_weighted_net_bps": (g["cq"] + g["aq"] + g["fq"]) / q if q > 0 else 0.0,
-                               "stats": {col: distribution_stats(c[col], c["blocks"], reps=reps, seed=seed) for col in ("captured_bps", "adverse_bps", "fee_bps", "net_bps")},
+                               "notional_weighted_net_bps": (g["cq"] + g["aq"] + g["fq"]) / q if q > 0 else 0.0, "m_bps": cap + adv,
+                               "stats": {col: distribution_stats(c[col], c["blocks"], reps=reps, seed=seed) for col in ("captured_bps", "adverse_bps", "fee_bps", "net_bps", "m_bps")},
                                "support": support[key][h]}
         return out
 
