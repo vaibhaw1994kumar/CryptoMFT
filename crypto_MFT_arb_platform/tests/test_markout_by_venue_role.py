@@ -117,6 +117,128 @@ class MarkoutDecomposeTests(unittest.TestCase):
         self.assertEqual(mt.rows, [])
 
 
+class MarkoutNoteAlignmentTests(unittest.TestCase):
+    """11 Nov (09 Nov markout note): the horizon-mid max-age rule, rows kept and left out by reason, median / p5 / p95 and a block bootstrap. Additive, default unchanged."""
+
+    def _tr(self, fill_age=0.1, **kw):
+        mt = MarkoutTracker((1.0, 5.0), decompose=True, **kw)
+        extra = {"mid_ts_basis": "last_book_message"} if kw.get("mid_max_age_s") is not None else {}
+        for ts, side, px, q, fee, k in ((10.0, "buy", 99.98, 2.0, -0.01, "a"), (10.5, "sell", 100.03, 1.0, 0.02, "b")):
+            mt.record_fill(ts, "bybit", side, px, q, "maker", mid_at_fill=100.0, fee=fee, tags={"k": k},
+                           **({"mid_at_fill_ts": ts - fill_age, **extra} if extra else {}))
+        return mt
+
+    def test_the_max_age_rule_is_off_by_default_and_refused_without_decompose(self):
+        self.assertIsNone(MarkoutTracker((1.0,), decompose=True).mid_max_age_s)
+        with self.assertRaises(ValueError):
+            MarkoutTracker((1.0,), mid_max_age_s=2.0)
+        with self.assertRaises(ValueError):
+            MarkoutTracker((1.0,), decompose=True, mid_max_age_s=-1.0)
+        mt = self._tr()
+        mt.resolve_asof(30.0, {"bybit": 100.0}, mid_ts={"bybit": 0.0}, mid_ts_basis="last_book_message")          # off: mid_ts is ignored, nothing is left out
+        self.assertEqual((len(mt.rows), mt.excluded), (4, []))
+
+    def test_a_stale_mid_at_the_horizon_leaves_the_row_out_with_its_reason(self):
+        mt = self._tr(mid_max_age_s=2.0)
+        mt.resolve_asof(11.6, {"bybit": 100.0}, mid_ts={"bybit": 10.0}, mid_ts_basis="last_book_message")          # fill 1 target 11.0, mid age 1.0 s: kept; fill 2 target 11.5, age 1.5 s: kept
+        self.assertEqual(len(mt.rows), 2)
+        mt.resolve_asof(16.0, {"bybit": 100.0}, mid_ts={"bybit": 12.0}, mid_ts_basis="last_book_message")          # targets 15.0 and 15.5: ages 3.0 and 3.5 s, over 2 s: left out
+        self.assertEqual(len(mt.rows), 2)
+        self.assertEqual([(x["reason"], x["horizon_s"], x["k"]) for x in mt.excluded], [("stale_mid", 5.0, "a"), ("stale_mid", 5.0, "b")])
+        self.assertAlmostEqual(mt.excluded[0]["mid_age_s"], 3.0)
+        self.assertEqual(mt.excluded_counts(), {"1s": {}, "5s": {"stale_mid": 2}})
+
+    def test_a_stale_mid_at_the_fill_leaves_every_horizon_of_that_fill_out(self):
+        mt = self._tr(fill_age=3.0, mid_max_age_s=2.0)                      # both fills' last book message is 3 s old
+        self.assertEqual(mt._pending, [])
+        self.assertEqual([(x["reason"], x["horizon_s"], x["k"]) for x in mt.excluded],
+                         [("stale_mid_at_fill", 1.0, "a"), ("stale_mid_at_fill", 5.0, "a"), ("stale_mid_at_fill", 1.0, "b"), ("stale_mid_at_fill", 5.0, "b")])
+        self.assertEqual(mt.excluded_counts(), {"1s": {"stale_mid_at_fill": 2}, "5s": {"stale_mid_at_fill": 2}})
+        self.assertEqual(mt.decomposed_summary(), {})
+        mixed = MarkoutTracker((1.0,), decompose=True, mid_max_age_s=2.0)
+        mixed.record_fill(10.0, "bybit", "buy", 99.98, 1.0, mid_at_fill=100.0, mid_at_fill_ts=9.9, mid_ts_basis="last_book_message", tags={"k": "fresh"})
+        mixed.record_fill(20.0, "bybit", "buy", 99.98, 1.0, mid_at_fill=100.0, mid_at_fill_ts=15.0, mid_ts_basis="last_book_message", tags={"k": "old"})
+        mixed.resolve_asof(30.0, {"bybit": 100.0}, mid_ts={"bybit": 20.5}, mid_ts_basis="last_book_message")
+        self.assertEqual([r["k"] for r in mixed.rows], ["fresh"])
+        self.assertEqual(mixed.excluded_counts()["1s"].get("stale_mid_at_fill"), 1)
+        self.assertEqual(mixed.support_counts(by=("k",))["old"]["1s"], {"kept": 0, "excluded": {"stale_mid_at_fill": 1}})
+
+    def test_the_rule_is_refused_on_a_change_only_mid_path_never_applied_by_dropping_rows(self):
+        mt = MarkoutTracker((1.0,), decompose=True, mid_max_age_s=2.0)
+        for basis in (None, "mid_change"):
+            with self.assertRaisesRegex(ValueError, "not evaluable"):
+                mt.record_fill(10.0, "bybit", "buy", 99.98, 1.0, mid_at_fill=100.0, mid_at_fill_ts=9.9, mid_ts_basis=basis)
+        mt.record_fill(10.0, "bybit", "buy", 99.98, 1.0, mid_at_fill=100.0, mid_at_fill_ts=9.9, mid_ts_basis="last_book_message")
+        with self.assertRaisesRegex(ValueError, "not evaluable"):
+            mt.resolve_asof(30.0, {"bybit": 100.0}, mid_ts={"bybit": 10.5}, mid_ts_basis="mid_change")
+        self.assertEqual((mt.rows, mt.excluded), ([], []))                  # refused: nothing dropped
+        with self.assertRaises(ValueError):
+            mt.record_fill(11.0, "bybit", "buy", 99.98, 1.0, mid_at_fill=100.0, mid_ts_basis="last_book_message")      # no mid_at_fill_ts
+        off = MarkoutTracker((1.0,), decompose=True)                         # rule off: the extra arguments change nothing
+        off.record_fill(10.0, "bybit", "buy", 99.98, 1.0, mid_at_fill=100.0, mid_at_fill_ts=1.0, mid_ts_basis="mid_change")
+        off.resolve_asof(30.0, {"bybit": 100.0}, mid_ts={"bybit": 2.0}, mid_ts_basis="mid_change")
+        self.assertEqual((len(off.rows), off.excluded), (1, []))
+        with self.assertRaises(ValueError):
+            MarkoutTracker((1.0,)).record_fill(10.0, "bybit", "buy", 99.98, 1.0, mid_at_fill_ts=1.0)
+
+    def test_the_age_is_read_at_the_horizon_not_at_the_resolve_time(self):
+        mt = self._tr(mid_max_age_s=2.0)
+        mt.resolve_asof(500.0, {"bybit": 100.0}, mid_ts={"bybit": 10.9}, mid_ts_basis="last_book_message")        # resolved long after, but the mid was 0.1 s old at the 1 s horizon
+        self.assertEqual(sorted((r["k"], r["horizon_s"]) for r in mt.rows), [("a", 1.0), ("b", 1.0)])
+
+    def test_mid_ts_is_required_when_the_rule_is_on(self):
+        mt = self._tr(mid_max_age_s=2.0)
+        with self.assertRaises(ValueError):
+            mt.resolve_asof(30.0, {"bybit": 100.0})
+
+    def test_counts_per_horizon_and_reason_include_at_end_and_missing_mid(self):
+        mt = self._tr(mid_max_age_s=2.0)
+        mt.resolve_asof(11.6, {"bybit": 100.0}, mid_ts={"bybit": 10.0}, mid_ts_basis="last_book_message")          # 2 kept at 1 s
+        mt.resolve_asof(12.0, {"bybit": 100.0}, finalize=True, mid_ts={"bybit": 10.0}, mid_ts_basis="last_book_message")   # the two 5 s targets (15.0, 15.5) are at_end
+        self.assertEqual(mt.excluded_counts(), {"1s": {}, "5s": {"at_end": 2}})
+        sc = mt.support_counts()["all"]
+        self.assertEqual((sc["1s"], sc["5s"]), ({"kept": 2, "excluded": {}}, {"kept": 0, "excluded": {"at_end": 2}}))
+        mt2 = self._tr()
+        mt2.resolve_asof(30.0, {})
+        self.assertEqual(mt2.excluded_counts(), {"1s": {"no_mid": 2}, "5s": {"no_mid": 2}})
+        self.assertEqual(mt2.decomposed_summary(), {})
+
+    def test_the_old_fields_of_the_summary_are_unchanged_and_the_new_ones_are_added(self):
+        a, b = self._tr(), self._tr()
+        for t in (a, b):
+            t.resolve_asof(30.0, {"bybit": 100.0})
+        old = {k: v for k, v in a.decomposed_summary()["all"]["1s"].items() if k not in ("stats", "support")}
+        self.assertEqual(sorted(old), ["adverse_bps", "captured_bps", "fee_bps", "n", "net_bps", "notional_weighted_net_bps"])
+        cell = b.decomposed_summary()["all"]["1s"]
+        self.assertEqual(cell["support"], {"kept": 2, "excluded": {}})
+        st = cell["stats"]["captured_bps"]
+        self.assertEqual((st["n"], st["status"]), (2, "ok"))
+        self.assertAlmostEqual(st["mean"], cell["captured_bps"])
+        self.assertAlmostEqual(st["median"], cell["captured_bps"])           # two values: the median is their mean
+        self.assertEqual((st["ci95"], st["ci_status"], st["blocks"]), (None, "insufficient_blocks", 1))       # one day: no day-block interval
+
+    def test_median_percentiles_and_the_block_interval_over_several_days(self):
+        mt = MarkoutTracker((1.0,), decompose=True)
+        day = 86_400.0
+        for d in range(3):
+            for i in range(10):
+                mt.record_fill(d * day + 100.0 + i, "bybit", "buy", 100.0 - 0.01 * (i + 1) - d, 1.0, "maker", mid_at_fill=100.0, fee=0.0)
+        mt.resolve_asof(10 * day, {"bybit": 100.0})
+        cell = mt.decomposed_summary(reps=300, seed=3)["all"]["1s"]
+        cap = cell["stats"]["captured_bps"]
+        self.assertEqual((cap["n"], cap["blocks"]), (30, 3))
+        vals = sorted(r["captured_bps"] for r in mt.rows)
+        self.assertAlmostEqual(cap["median"], (vals[14] + vals[15]) / 2)
+        self.assertAlmostEqual(cap["p5"], vals[1] + (vals[2] - vals[1]) * (0.05 * 29 - 1))          # linear interpolation at position 1.45
+        self.assertAlmostEqual(cap["p95"], vals[27] + (vals[28] - vals[27]) * (0.95 * 29 - 27))
+        lo, hi = cap["ci95"]
+        self.assertLessEqual(lo, cap["mean"] + 1e-9)
+        self.assertGreaterEqual(hi, cap["mean"] - 1e-9)
+        self.assertEqual(mt.decomposed_summary(reps=300, seed=3), mt.decomposed_summary(reps=300, seed=3))     # deterministic
+        hourly = mt.decomposed_summary(block_s=3600.0, reps=300, seed=3)["all"]["1s"]["stats"]["captured_bps"]
+        self.assertEqual(hourly["blocks"], 3)                                  # the fills of a day fall in one hour: time blocks work the same way
+
+
 def _fills(n=2000, seed=7):
     import random
     rnd, t, out = random.Random(seed), 0.0, []
