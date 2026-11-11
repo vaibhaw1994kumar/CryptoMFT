@@ -1,0 +1,445 @@
+{
+ "pair": "MNTUSDT",
+ "day": "2026-04-29",
+ "converter": "bybit_perp_archive v1 (mm-integration, 9 Nov 2026)",
+ "raw": {
+  "orderbook": {
+   "file": "2026-04-29_MNTUSDT_ob200.data.zip",
+   "sha256": "832d62e9b601d89bdfc57775167f032f743345d8f641b1d7612d376e84b9e406",
+   "inner": [
+    "2026-04-29_MNTUSDT_ob200.data"
+   ]
+  },
+  "trades": {
+   "file": "MNTUSDT2026-04-29.csv.gz",
+   "sha256": "aebdcdb3612703501666ba44c3bc92320bb40270cb13a49f7e289ed0020bc521"
+  }
+ },
+ "product": {
+  "topics": [
+   "orderbook.200.MNTUSDT"
+  ],
+  "source_url_pattern": "quote-saver.bycsi.com/orderbook/linear/<SYM>/ and public.bybit.com/trading/<SYM>/ (derivatives)",
+  "linear_perp": true
+ },
+ "tick": 0.0001,
+ "book": {
+  "messages": 246981,
+  "snapshots": 2,
+  "deltas": 246979,
+  "level_updates": 877234,
+  "first_ts": 1777420801963,
+  "last_ts": 1777507201963,
+  "coverage_h": 24.0,
+  "ts_minus_cts_ms": {
+   "p1": 2.0,
+   "p10": 7.0,
+   "p50": 25.0,
+   "p90": 84.0,
+   "p99": 99.0,
+   "p99.9": 101.0,
+   "min": 1.0,
+   "max": 583.0,
+   "mean": 36.74968519845656,
+   "n": 246981
+  },
+  "ts_minus_cts_negative": 0,
+  "gaps_first_20": [],
+  "spread_ticks_1s": {
+   "p1": 1.0,
+   "p10": 1.0,
+   "p50": 1.0,
+   "p90": 1.0,
+   "p99": 2.0,
+   "p99.9": 2.0,
+   "min": 1.0,
+   "max": 7.0,
+   "mean": 1.0103125,
+   "n": 86400
+  },
+  "seconds_sampled": 86400
+ },
+ "acceptance": {
+  "snapshots_compared": 1,
+  "touch_price_match_pct": 100.0,
+  "touch_size_match_pct": 100.0,
+  "top10_level_match_pct": 100.0,
+  "comparisons": [
+   {
+    "cts": 1777507201851,
+    "prev_u": 2343191,
+    "u": 2343191,
+    "gap_since_prev_snapshot": null,
+    "touch_price_match": true,
+    "touch_size_match": true,
+    "top10_levels_match": 20,
+    "top10_levels": 20,
+    "u_continuous": false
+   }
+  ]
+ },
+ "queue_dynamics": {
+  "inside": {
+   "avg_depth": 0.0,
+   "arrival_per_s": 185.17187037036933,
+   "removal_per_s": 0.0,
+   "trade_removal_per_s": 0.0,
+   "cancel_per_s": 0.0,
+   "cancel_rate_per_unit_depth_per_s": null,
+   "arrival_rate_per_unit_depth_per_s": null,
+   "updates_up": 8062,
+   "updates_down": 0
+  },
+  "0": {
+   "avg_depth": 3221.3066620369095,
+   "arrival_per_s": 267.5787546296353,
+   "removal_per_s": 232.49314583333623,
+   "trade_removal_per_s": 52.69124189814832,
+   "cancel_per_s": 179.80190393517455,
+   "cancel_rate_per_unit_depth_per_s": 0.055816450527402285,
+   "arrival_rate_per_unit_depth_per_s": 0.08306528458871991,
+   "updates_up": 53826,
+   "updates_down": 52309
+  },
+  "1": {
+   "avg_depth": 6308.155188656938,
+   "arrival_per_s": 211.98463078703648,
+   "removal_per_s": 317.0328692129693,
+   "trade_removal_per_s": 26.353798611111173,
+   "cancel_per_s": 290.6790706018573,
+   "cancel_rate_per_unit_depth_per_s": 0.046079885784126605,
+   "arrival_rate_per_unit_depth_per_s": 0.03360485347098283,
+   "updates_up": 28061,
+   "updates_down": 32519
+  },
+  "2": {
+   "avg_depth": 8904.466748841782,
+   "arrival_per_s": 188.98811805555354,
+   "removal_per_s": 252.34194791666764,
+   "trade_removal_per_s": 10.187304398148138,
+   "cancel_per_s": 242.15464351851858,
+   "cancel_rate_per_unit_depth_per_s": 0.027194738365440695,
+   "arrival_rate_per_unit_depth_per_s": 0.021223968080978633,
+   "updates_up": 26443,
+   "updates_down": 25971
+  },
+  "3-5": {
+   "avg_depth": 30258.966734957794,
+   "arrival_per_s": 472.1768194444486,
+   "removal_per_s": 511.2835983796298,
+   "trade_removal_per_s": 8.57836342592593,
+   "cancel_per_s": 502.7052349537059,
+   "cancel_rate_per_unit_depth_per_s": 0.016613430305038705,
+   "arrival_rate_per_unit_depth_per_s": 0.015604525547098368,
+   "updates_up": 55320,
+   "updates_down": 53443
+  },
+  "6-10": {
+   "avg_depth": 66884.21707174154,
+   "arrival_per_s": 902.7072430555436,
+   "removal_per_s": 948.6932291666141,
+   "trade_removal_per_s": 3.2900104166666657,
+   "cancel_per_s": 945.4032187499479,
+   "cancel_rate_per_unit_depth_per_s": 0.014134922409809876,
+   "arrival_rate_per_unit_depth_per_s": 0.013496565895168948,
+   "updates_up": 71401,
+   "updates_down": 76273
+  },
+  "11-20": {
+   "avg_depth": 164152.85506356944,
+   "arrival_per_s": 2434.221396990607,
+   "removal_per_s": 2342.2566562499105,
+   "trade_removal_per_s": 1.9692268518518523,
+   "cancel_per_s": 2340.287429398061,
+   "cancel_rate_per_unit_depth_per_s": 0.014256757389274568,
+   "arrival_rate_per_unit_depth_per_s": 0.014828992136919801,
+   "updates_up": 77760,
+   "updates_down": 75716
+  },
+  ">20": {
+   "avg_depth": 1442230.5440010845,
+   "arrival_per_s": 2575.2629131943672,
+   "removal_per_s": 2636.1691215277165,
+   "trade_removal_per_s": 2.3858402777777785,
+   "cancel_per_s": 2633.783281249934,
+   "cancel_rate_per_unit_depth_per_s": 0.001826187423505263,
+   "arrival_rate_per_unit_depth_per_s": 0.0017856111312481195,
+   "updates_up": 119868,
+   "updates_down": 120262
+  }
+ },
+ "trades": {
+  "count": 67734,
+  "symbols": [
+   "MNTUSDT"
+  ],
+  "first_ts": 1777420800.0765,
+  "last_ts": 1777507178.832,
+  "duplicate_trdMatchID": 0,
+  "rpi_count": 632,
+  "rpi_pct_count": 0.9330616824637552,
+  "volume": 11189189.5,
+  "notional_usd": 7045898.7539099995,
+  "rpi_pct_volume": 5.4552575054699,
+  "rpi_pct_volume_by_size_usd": {
+   "0-100": {
+    "trades": 53536,
+    "rpi_pct_volume": 0.8707565176268863
+   },
+   "100-1000": {
+    "trades": 13269,
+    "rpi_pct_volume": 2.4165945237098065
+   },
+   "1000-10000": {
+    "trades": 915,
+    "rpi_pct_volume": 16.569725298654873
+   },
+   "10000-100000": {
+    "trades": 14,
+    "rpi_pct_volume": 0.0
+   },
+   "100000-inf": {
+    "trades": 0,
+    "rpi_pct_volume": null
+   }
+  },
+  "rpi_pct_volume_by_hour_utc": {
+   "0": 10.379775641143759,
+   "1": 1.3615490693529624,
+   "2": 2.3288891166126238,
+   "3": 4.751874696576708,
+   "4": 7.380118157879062,
+   "5": 12.85775380018073,
+   "6": 5.915092059965291,
+   "7": 4.581221471639725,
+   "8": 3.0515928429685863,
+   "9": 5.7450619636417555,
+   "10": 11.763909948429667,
+   "11": 4.526503036737601,
+   "12": 9.643554242027545,
+   "13": 3.158890850064737,
+   "14": 2.2207858728261662,
+   "15": 4.959789234148723,
+   "16": 2.835497421757664,
+   "17": 7.651366918011996,
+   "18": 3.6003612147419104,
+   "19": 0.9588958119274491,
+   "20": 4.185800145241767,
+   "21": 13.213458500585649,
+   "22": 0.8972994763956141,
+   "23": 0.3218261366037998
+  },
+  "volume_by_hour_utc": {
+   "0": 217080.8,
+   "1": 92747.29999999999,
+   "2": 850933.6000000001,
+   "3": 620420.4,
+   "4": 372687.8,
+   "5": 279427.5,
+   "6": 382381.19999999995,
+   "7": 380608.10000000003,
+   "8": 66670.1,
+   "9": 493571.70000000007,
+   "10": 627453.8,
+   "11": 121314.40000000001,
+   "12": 794670.7000000001,
+   "13": 511144.6,
+   "14": 188595.40000000002,
+   "15": 1592819.7,
+   "16": 465607.9,
+   "17": 288089.69999999995,
+   "18": 1573025.5,
+   "19": 265795.30000000005,
+   "20": 402501.3,
+   "21": 261506.1,
+   "22": 213329.0,
+   "23": 126807.59999999999
+  },
+  "markout_rule": "s * (mid(t+h) - mid(t)) / mid(t) * 1e4, s = +1 buy-aggressor; mid as of the last book update at or before t (Bybit perp book only); + = moved with the aggressor (adverse for the maker it hit)",
+  "markout_after_trade": {
+   "all": {
+    "1s": {
+     "n": 67727,
+     "mean_bps": 3.0103378761003983,
+     "se_bps": 0.025617958752420268,
+     "notional_weighted_bps": 3.6760017911319833
+    },
+    "5s": {
+     "n": 67727,
+     "mean_bps": 3.177066194216538,
+     "se_bps": 0.03107480922997491,
+     "notional_weighted_bps": 3.7591783853577945
+    },
+    "30s": {
+     "n": 67711,
+     "mean_bps": 3.344209605789049,
+     "se_bps": 0.03729822099670459,
+     "notional_weighted_bps": 3.8102606075182943
+    }
+   },
+   "rpi": {
+    "1s": {
+     "n": 632,
+     "mean_bps": 2.3896028299806313,
+     "se_bps": 0.4090118885661613,
+     "notional_weighted_bps": 4.677390758252267
+    },
+    "5s": {
+     "n": 632,
+     "mean_bps": 2.2969108611113582,
+     "se_bps": 0.4284000410329891,
+     "notional_weighted_bps": 4.599510747434941
+    },
+    "30s": {
+     "n": 632,
+     "mean_bps": 2.1031424736201654,
+     "se_bps": 0.42962300050264896,
+     "notional_weighted_bps": 3.9934355655531775
+    }
+   },
+   "non_rpi": {
+    "1s": {
+     "n": 67095,
+     "mean_bps": 3.016184877354555,
+     "se_bps": 0.02557004664475791,
+     "notional_weighted_bps": 3.6181091398008536
+    },
+    "5s": {
+     "n": 67095,
+     "mean_bps": 3.1853567996345644,
+     "se_bps": 0.0311055197249106,
+     "notional_weighted_bps": 3.710596795149248
+    },
+    "30s": {
+     "n": 67079,
+     "mean_bps": 3.355902601026467,
+     "se_bps": 0.03742883752939015,
+     "notional_weighted_bps": 3.799668506263576
+    }
+   },
+   "by_size_usd": {
+    "0-100": {
+     "1s": {
+      "n": 53529,
+      "mean_bps": 3.035209083616393,
+      "se_bps": 0.0288581032171552,
+      "notional_weighted_bps": 2.4428213679178916
+     },
+     "5s": {
+      "n": 53529,
+      "mean_bps": 3.2397961267176334,
+      "se_bps": 0.03447682459304535,
+      "notional_weighted_bps": 2.5996623572216575
+     },
+     "30s": {
+      "n": 53518,
+      "mean_bps": 3.455986304785703,
+      "se_bps": 0.04130021095086427,
+      "notional_weighted_bps": 2.7096604571235905
+     }
+    },
+    "100-1000": {
+     "1s": {
+      "n": 13269,
+      "mean_bps": 2.824937587135175,
+      "se_bps": 0.055001434871094775,
+      "notional_weighted_bps": 3.2268200466066794
+     },
+     "5s": {
+      "n": 13269,
+      "mean_bps": 2.8674507503554145,
+      "se_bps": 0.0702044046850473,
+      "notional_weighted_bps": 3.2609592620569865
+     },
+     "30s": {
+      "n": 13264,
+      "mean_bps": 2.850467509617941,
+      "se_bps": 0.08622431456204901,
+      "notional_weighted_bps": 3.1868924444449322
+     }
+    },
+    "1000-10000": {
+     "1s": {
+      "n": 915,
+      "mean_bps": 4.126154808373437,
+      "se_bps": 0.32080356517479863,
+      "notional_weighted_bps": 4.311620727204532
+     },
+     "5s": {
+      "n": 915,
+      "mean_bps": 3.890577193571717,
+      "se_bps": 0.4198472650050449,
+      "notional_weighted_bps": 4.299042476538023
+     },
+     "30s": {
+      "n": 915,
+      "mean_bps": 3.831029675269919,
+      "se_bps": 0.4562037124429544,
+      "notional_weighted_bps": 4.531004757774961
+     }
+    },
+    "10000-100000": {
+     "1s": {
+      "n": 14,
+      "mean_bps": 10.708414599387732,
+      "se_bps": 4.037535873199858,
+      "notional_weighted_bps": 10.476024103877446
+     },
+     "5s": {
+      "n": 14,
+      "mean_bps": 10.145223575081278,
+      "se_bps": 5.594354410499791,
+      "notional_weighted_bps": 11.50575149427946
+     },
+     "30s": {
+      "n": 14,
+      "mean_bps": 12.022025544052196,
+      "se_bps": 5.531291948539033,
+      "notional_weighted_bps": 12.023861648197729
+     }
+    },
+    "100000-inf": {
+     "1s": {
+      "n": 0
+     },
+     "5s": {
+      "n": 0
+     },
+     "30s": {
+      "n": 0
+     }
+    }
+   }
+  }
+ },
+ "trade_vs_rebuilt_book": {
+  "prints_checked": 67727,
+  "at_rebuilt_touch_pct": 55.38706867275975,
+  "through_touch_pct": 41.34835442290372,
+  "inside_touch_pct": 3.2645769043365274,
+  "non_rpi_at_touch_pct": 55.609210820478424,
+  "rpi_inside_touch_pct": 9.018987341772151,
+  "bursts_checked_non_rpi": 19797,
+  "burst_best_print_at_touch_pct": 79.81512350356115,
+  "burst_best_print_through_touch_pct": 14.628479062484216,
+  "burst_best_print_inside_touch_pct": 5.556397433954639,
+  "note": "buy prints vs the rebuilt best ask, sell prints vs the best bid, book as of the last update strictly before the print; RPI orders rest hidden from the public book, so RPI prints can print inside it"
+ },
+ "outputs": {
+  "book_snapshots": {
+   "path": "book_snapshots/pair=MNTUSDT/date=2026-04-29/1777420800000.jsonl.gz",
+   "sha256": "b423d3af9aa2af87d59c25752d51464cb7ccf5177659869e66186c574bce0157",
+   "bytes": 4421
+  },
+  "book_events": {
+   "path": "book_events/pair=MNTUSDT/date=2026-04-29/1777420800000.jsonl.gz",
+   "sha256": "142c5c149e270d6e16bbe4ca0cc0cac0056159ed06cd1328cf9b579d31832e0b",
+   "bytes": 12224165
+  },
+  "trades": {
+   "path": "trades/pair=MNTUSDT/date=2026-04-29/1777420800000.jsonl.gz",
+   "sha256": "7116fe3be416450b9e0642343182acaf2c886ce44da6b13bde6a3a60adff6593",
+   "bytes": 2167828
+  }
+ }
+}

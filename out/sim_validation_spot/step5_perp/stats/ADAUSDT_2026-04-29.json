@@ -1,0 +1,445 @@
+{
+ "pair": "ADAUSDT",
+ "day": "2026-04-29",
+ "converter": "bybit_perp_archive v1 (mm-integration, 9 Nov 2026)",
+ "raw": {
+  "orderbook": {
+   "file": "2026-04-29_ADAUSDT_ob200.data.zip",
+   "sha256": "a94ed81013398866c14a4741147c8a451c529ecb37f8681e16dac43987ceb20f",
+   "inner": [
+    "2026-04-29_ADAUSDT_ob200.data"
+   ]
+  },
+  "trades": {
+   "file": "ADAUSDT2026-04-29.csv.gz",
+   "sha256": "6df40a8b93cb477d83a547679fe186e2077450f440d15583d94df805e8ff134f"
+  }
+ },
+ "product": {
+  "topics": [
+   "orderbook.200.ADAUSDT"
+  ],
+  "source_url_pattern": "quote-saver.bycsi.com/orderbook/linear/<SYM>/ and public.bybit.com/trading/<SYM>/ (derivatives)",
+  "linear_perp": true
+ },
+ "tick": 0.0001,
+ "book": {
+  "messages": 702223,
+  "snapshots": 2,
+  "deltas": 702221,
+  "level_updates": 2915367,
+  "first_ts": 1777420801705,
+  "last_ts": 1777507201705,
+  "coverage_h": 24.0,
+  "ts_minus_cts_ms": {
+   "p1": 1.0,
+   "p10": 2.0,
+   "p50": 17.0,
+   "p90": 59.0,
+   "p99": 96.0,
+   "p99.9": 100.0,
+   "min": 1.0,
+   "max": 117.0,
+   "mean": 23.973293384010493,
+   "n": 702223
+  },
+  "ts_minus_cts_negative": 0,
+  "gaps_first_20": [],
+  "spread_ticks_1s": {
+   "p1": 1.0,
+   "p10": 1.0,
+   "p50": 1.0,
+   "p90": 1.0,
+   "p99": 1.0,
+   "p99.9": 1.0,
+   "min": 1.0,
+   "max": 2.0,
+   "mean": 1.0000810185185185,
+   "n": 86400
+  },
+  "seconds_sampled": 86400
+ },
+ "acceptance": {
+  "snapshots_compared": 1,
+  "touch_price_match_pct": 100.0,
+  "touch_size_match_pct": 100.0,
+  "top10_level_match_pct": 100.0,
+  "comparisons": [
+   {
+    "cts": 1777507201691,
+    "prev_u": 5620212,
+    "u": 5620212,
+    "gap_since_prev_snapshot": null,
+    "touch_price_match": true,
+    "touch_size_match": true,
+    "top10_levels_match": 20,
+    "top10_levels": 20,
+    "u_continuous": false
+   }
+  ]
+ },
+ "queue_dynamics": {
+  "inside": {
+   "avg_depth": 0.0,
+   "arrival_per_s": 18547.30275462963,
+   "removal_per_s": 0.0,
+   "trade_removal_per_s": 0.0,
+   "cancel_per_s": 0.0,
+   "cancel_rate_per_unit_depth_per_s": null,
+   "arrival_rate_per_unit_depth_per_s": null,
+   "updates_up": 7481,
+   "updates_down": 0
+  },
+  "0": {
+   "avg_depth": 423809.7231712963,
+   "arrival_per_s": 60201.91162037037,
+   "removal_per_s": 48734.69489583333,
+   "trade_removal_per_s": 2985.578703703704,
+   "cancel_per_s": 45749.11619212963,
+   "cancel_rate_per_unit_depth_per_s": 0.10794730203402779,
+   "arrival_rate_per_unit_depth_per_s": 0.14204938756451757,
+   "updates_up": 257470,
+   "updates_down": 218941
+  },
+  "1": {
+   "avg_depth": 1261113.4275462963,
+   "arrival_per_s": 23949.66412037037,
+   "removal_per_s": 50370.013032407405,
+   "trade_removal_per_s": 525.5058217592592,
+   "cancel_per_s": 49844.507210648146,
+   "cancel_rate_per_unit_depth_per_s": 0.03952420624656169,
+   "arrival_rate_per_unit_depth_per_s": 0.01899088820818313,
+   "updates_up": 251901,
+   "updates_down": 229681
+  },
+  "2": {
+   "avg_depth": 1038513.8018634259,
+   "arrival_per_s": 16784.543425925927,
+   "removal_per_s": 18534.562314814815,
+   "trade_removal_per_s": 70.2228125,
+   "cancel_per_s": 18464.339502314815,
+   "cancel_rate_per_unit_depth_per_s": 0.017779580270559606,
+   "arrival_rate_per_unit_depth_per_s": 0.016162080268754337,
+   "updates_up": 132982,
+   "updates_down": 129941
+  },
+  "3-5": {
+   "avg_depth": 3013244.3811689815,
+   "arrival_per_s": 13902.465555555556,
+   "removal_per_s": 15936.35175925926,
+   "trade_removal_per_s": 19.19150462962963,
+   "cancel_per_s": 15917.160254629629,
+   "cancel_rate_per_unit_depth_per_s": 0.005282399381245872,
+   "arrival_rate_per_unit_depth_per_s": 0.004613786270518863,
+   "updates_up": 171695,
+   "updates_down": 174717
+  },
+  "6-10": {
+   "avg_depth": 4283990.420983796,
+   "arrival_per_s": 27601.934780092593,
+   "removal_per_s": 36432.424050925925,
+   "trade_removal_per_s": 0.5702430555555555,
+   "cancel_per_s": 36431.85380787037,
+   "cancel_rate_per_unit_depth_per_s": 0.008504186570870993,
+   "arrival_rate_per_unit_depth_per_s": 0.006443043066784905,
+   "updates_up": 129626,
+   "updates_down": 130878
+  },
+  "11-20": {
+   "avg_depth": 10222344.125706019,
+   "arrival_per_s": 132454.98482638889,
+   "removal_per_s": 124135.81528935186,
+   "trade_removal_per_s": 0.0,
+   "cancel_per_s": 124135.81528935186,
+   "cancel_rate_per_unit_depth_per_s": 0.012143576244629532,
+   "arrival_rate_per_unit_depth_per_s": 0.012957398342059896,
+   "updates_up": 230942,
+   "updates_down": 227524
+  },
+  ">20": {
+   "avg_depth": 48513477.37259259,
+   "arrival_per_s": 177219.8080324074,
+   "removal_per_s": 176560.7135300926,
+   "trade_removal_per_s": 0.0,
+   "cancel_per_s": 176560.7135300926,
+   "cancel_rate_per_unit_depth_per_s": 0.0036394157477946435,
+   "arrival_rate_per_unit_depth_per_s": 0.0036530015498853255,
+   "updates_up": 302575,
+   "updates_down": 319013
+  }
+ },
+ "trades": {
+  "count": 153588,
+  "symbols": [
+   "ADAUSDT"
+  ],
+  "first_ts": 1777420800.0302,
+  "last_ts": 1777507170.3369,
+  "duplicate_trdMatchID": 0,
+  "rpi_count": 0,
+  "rpi_pct_count": 0.0,
+  "volume": 354602107.0,
+  "notional_usd": 87246981.8282,
+  "rpi_pct_volume": 0.0,
+  "rpi_pct_volume_by_size_usd": {
+   "0-100": {
+    "trades": 98329,
+    "rpi_pct_volume": 0.0
+   },
+   "100-1000": {
+    "trades": 39694,
+    "rpi_pct_volume": 0.0
+   },
+   "1000-10000": {
+    "trades": 14113,
+    "rpi_pct_volume": 0.0
+   },
+   "10000-100000": {
+    "trades": 1448,
+    "rpi_pct_volume": 0.0
+   },
+   "100000-inf": {
+    "trades": 4,
+    "rpi_pct_volume": 0.0
+   }
+  },
+  "rpi_pct_volume_by_hour_utc": {
+   "0": 0.0,
+   "1": 0.0,
+   "2": 0.0,
+   "3": 0.0,
+   "4": 0.0,
+   "5": 0.0,
+   "6": 0.0,
+   "7": 0.0,
+   "8": 0.0,
+   "9": 0.0,
+   "10": 0.0,
+   "11": 0.0,
+   "12": 0.0,
+   "13": 0.0,
+   "14": 0.0,
+   "15": 0.0,
+   "16": 0.0,
+   "17": 0.0,
+   "18": 0.0,
+   "19": 0.0,
+   "20": 0.0,
+   "21": 0.0,
+   "22": 0.0,
+   "23": 0.0
+  },
+  "volume_by_hour_utc": {
+   "0": 3414732.0,
+   "1": 4070369.0,
+   "2": 2827489.0,
+   "3": 15674404.0,
+   "4": 10719167.0,
+   "5": 4568600.0,
+   "6": 12399843.0,
+   "7": 9085690.0,
+   "8": 5986095.0,
+   "9": 22512867.0,
+   "10": 20368660.0,
+   "11": 10813311.0,
+   "12": 33856481.0,
+   "13": 20134430.0,
+   "14": 9518694.0,
+   "15": 28156898.0,
+   "16": 19088517.0,
+   "17": 10946927.0,
+   "18": 73071130.0,
+   "19": 9996952.0,
+   "20": 9807529.0,
+   "21": 6628798.0,
+   "22": 5988417.0,
+   "23": 4966107.0
+  },
+  "markout_rule": "s * (mid(t+h) - mid(t)) / mid(t) * 1e4, s = +1 buy-aggressor; mid as of the last book update at or before t (Bybit perp book only); + = moved with the aggressor (adverse for the maker it hit)",
+  "markout_after_trade": {
+   "all": {
+    "1s": {
+     "n": 153585,
+     "mean_bps": 2.5258723943584416,
+     "se_bps": 0.009666627405214316,
+     "notional_weighted_bps": 2.8056778090914505
+    },
+    "5s": {
+     "n": 153585,
+     "mean_bps": 2.5658368222411765,
+     "se_bps": 0.016991545293352697,
+     "notional_weighted_bps": 2.9734588709053504
+    },
+    "30s": {
+     "n": 153585,
+     "mean_bps": 2.9041742676748474,
+     "se_bps": 0.03269808755083914,
+     "notional_weighted_bps": 3.0269502331960108
+    }
+   },
+   "rpi": {
+    "1s": {
+     "n": 0
+    },
+    "5s": {
+     "n": 0
+    },
+    "30s": {
+     "n": 0
+    }
+   },
+   "non_rpi": {
+    "1s": {
+     "n": 153585,
+     "mean_bps": 2.5258723943584416,
+     "se_bps": 0.009666627405214316,
+     "notional_weighted_bps": 2.8056778090914505
+    },
+    "5s": {
+     "n": 153585,
+     "mean_bps": 2.5658368222411765,
+     "se_bps": 0.016991545293352697,
+     "notional_weighted_bps": 2.9734588709053504
+    },
+    "30s": {
+     "n": 153585,
+     "mean_bps": 2.9041742676748474,
+     "se_bps": 0.03269808755083914,
+     "notional_weighted_bps": 3.0269502331960108
+    }
+   },
+   "by_size_usd": {
+    "0-100": {
+     "1s": {
+      "n": 98326,
+      "mean_bps": 2.5170069450317953,
+      "se_bps": 0.012140144795778053,
+      "notional_weighted_bps": 2.473900822206863
+     },
+     "5s": {
+      "n": 98326,
+      "mean_bps": 2.5219648895585416,
+      "se_bps": 0.02154816009794823,
+      "notional_weighted_bps": 2.391360561261946
+     },
+     "30s": {
+      "n": 98326,
+      "mean_bps": 2.988968446468685,
+      "se_bps": 0.04150513642694718,
+      "notional_weighted_bps": 2.7177056560465958
+     }
+    },
+    "100-1000": {
+     "1s": {
+      "n": 39694,
+      "mean_bps": 2.4712528756397303,
+      "se_bps": 0.018001074952584007,
+      "notional_weighted_bps": 2.368216474375021
+     },
+     "5s": {
+      "n": 39694,
+      "mean_bps": 2.5756793801636926,
+      "se_bps": 0.030991095288363326,
+      "notional_weighted_bps": 2.460652704418514
+     },
+     "30s": {
+      "n": 39694,
+      "mean_bps": 2.6932750746723015,
+      "se_bps": 0.06014273505872208,
+      "notional_weighted_bps": 2.5717533532067676
+     }
+    },
+    "1000-10000": {
+     "1s": {
+      "n": 14113,
+      "mean_bps": 2.6753270459518776,
+      "se_bps": 0.03462975779730203,
+      "notional_weighted_bps": 2.678226678015532
+     },
+     "5s": {
+      "n": 14113,
+      "mean_bps": 2.751965058511437,
+      "se_bps": 0.06017890309875286,
+      "notional_weighted_bps": 2.8481328908261436
+     },
+     "30s": {
+      "n": 14113,
+      "mean_bps": 2.816721822491836,
+      "se_bps": 0.11229051565933801,
+      "notional_weighted_bps": 2.9595794390399117
+     }
+    },
+    "10000-100000": {
+     "1s": {
+      "n": 1448,
+      "mean_bps": 3.1586698259224235,
+      "se_bps": 0.11725577819984728,
+      "notional_weighted_bps": 3.1137809360207194
+     },
+     "5s": {
+      "n": 1448,
+      "mean_bps": 3.4485343014080265,
+      "se_bps": 0.20111814306549214,
+      "notional_weighted_bps": 3.298285732119308
+     },
+     "30s": {
+      "n": 1448,
+      "mean_bps": 3.7485716994786373,
+      "se_bps": 0.40882189122936646,
+      "notional_weighted_bps": 3.126832843832602
+     }
+    },
+    "100000-inf": {
+     "1s": {
+      "n": 4,
+      "mean_bps": 6.082664311747685,
+      "se_bps": 1.1652723503719138,
+      "notional_weighted_bps": 6.0666174825865244
+     },
+     "5s": {
+      "n": 4,
+      "mean_bps": 7.087689437375715,
+      "se_bps": 0.9929666926390167,
+      "notional_weighted_bps": 7.534840070716181
+     },
+     "30s": {
+      "n": 4,
+      "mean_bps": 14.276429411695798,
+      "se_bps": 5.203548730096309,
+      "notional_weighted_bps": 11.315501533392624
+     }
+    }
+   }
+  }
+ },
+ "trade_vs_rebuilt_book": {
+  "prints_checked": 153585,
+  "at_rebuilt_touch_pct": 87.39460233746786,
+  "through_touch_pct": 10.012696552397696,
+  "inside_touch_pct": 2.5927011101344535,
+  "non_rpi_at_touch_pct": 87.39460233746786,
+  "rpi_inside_touch_pct": null,
+  "bursts_checked_non_rpi": 44025,
+  "burst_best_print_at_touch_pct": 91.23225440090857,
+  "burst_best_print_through_touch_pct": 4.615559341283362,
+  "burst_best_print_inside_touch_pct": 4.152186257808064,
+  "note": "buy prints vs the rebuilt best ask, sell prints vs the best bid, book as of the last update strictly before the print; RPI orders rest hidden from the public book, so RPI prints can print inside it"
+ },
+ "outputs": {
+  "book_snapshots": {
+   "path": "book_snapshots/pair=ADAUSDT/date=2026-04-29/1777420800000.jsonl.gz",
+   "sha256": "ac6f1b6d22359655a3de1e73298d2c43be76e2e9a3eb6459025e67a2a9070605",
+   "bytes": 4593
+  },
+  "book_events": {
+   "path": "book_events/pair=ADAUSDT/date=2026-04-29/1777420800000.jsonl.gz",
+   "sha256": "4355c4197ca8aa18823ba77c7c9e381b6436512ecc69c1f6b511dd9cc13d5491",
+   "bytes": 37798599
+  },
+  "trades": {
+   "path": "trades/pair=ADAUSDT/date=2026-04-29/1777420800000.jsonl.gz",
+   "sha256": "af496fc2b95d9afd9ee3a22f37bd528db82ca4b00ffc5b1f1b56d1f4d009f77d",
+   "bytes": 4807416
+  }
+ }
+}

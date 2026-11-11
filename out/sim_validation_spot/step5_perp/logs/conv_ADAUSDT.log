@@ -1,0 +1,20 @@
+ADAUSDT 2026-04-29 702223 msgs 0 gaps 1 comparisons
+       46.57 real        45.58 user         0.52 sys
+           246464512  maximum resident set size
+                   0  average shared memory size
+                   0  average unshared data size
+                   0  average unshared stack size
+               43581  page reclaims
+                 136  page faults
+                   0  swaps
+                   0  block input operations
+                   0  block output operations
+                   0  messages sent
+                   0  messages received
+                   0  signals received
+                 296  voluntary context switches
+               29306  involuntary context switches
+        653265909945  instructions retired
+        132797542046  cycles elapsed
+           224626368  peak memory footprint
+exit 0
