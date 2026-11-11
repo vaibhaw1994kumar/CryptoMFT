@@ -126,9 +126,15 @@ def maker_taker_expected_edge_bps(q: float, side: str, hedge_book_now, size: flo
 
 # ── legacy_v0: the expressions used before 2026-11-01, unchanged ───────────────────────────────────────────────────────
 
+def cross_gross_bps(buy_px, sell_px):
+    """Top-of-book cross-venue gross edge before fees: (sell - buy) / buy x 1e4 (reference = the buy price). Takes floats (legacy_v0, the backtester) or
+    Decimals (the live strategies): the factor is the integer 10_000, so a float result is bit-identical to `* 10_000.0` and a Decimal one to `* Decimal("10000")`."""
+    return (sell_px - buy_px) / buy_px * 10_000
+
+
 def legacy_taker_taker_edge_bps(buy_px: float, sell_px: float, buy_fee_bps: float, sell_fee_bps: float) -> tuple[float, float]:
     """(gross, net) with gross = (sell_bid - buy_ask) / buy_ask x 1e4 (top of book, reference = buy ask); net = gross - fees."""
-    gross = (sell_px - buy_px) / buy_px * 10_000.0
+    gross = cross_gross_bps(buy_px, sell_px)
     return gross, gross - (buy_fee_bps + sell_fee_bps)
 
 
