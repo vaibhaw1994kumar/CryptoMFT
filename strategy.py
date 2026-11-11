@@ -7,6 +7,7 @@ from .instruments import InstrumentMaster
 from .models import Opportunity, Side, stable_id
 from .orderbook import OrderBook
 from .alignment import CrossVenueEligibilityPolicy
+from .strategies.edge import cross_gross_bps
 
 
 class CrossVenueSpreadStrategy:
@@ -45,12 +46,12 @@ class CrossVenueSpreadStrategy:
         candidates = ((first, second), (second, first))
         buy_book, sell_book = max(
             candidates,
-            key=lambda pair: (pair[1].best_bid - pair[0].best_ask) / pair[0].best_ask,
+            key=lambda pair: cross_gross_bps(pair[0].best_ask, pair[1].best_bid),
         )
         pair_key = (buy_book.last_event_id or "", sell_book.last_event_id or "")
         if pair_key in self._seen_pairs:
             return None
-        gross_bps = (sell_book.best_bid - buy_book.best_ask) / buy_book.best_ask * Decimal("10000")
+        gross_bps = cross_gross_bps(buy_book.best_ask, sell_book.best_bid)
         # The dated, effective rate the ledger will book, not the instrument default.
         buy_fee = self.instruments.fee_bps(buy_book.venue, self.instrument_id, Liquidity.TAKER, now_ns)
         sell_fee = self.instruments.fee_bps(sell_book.venue, self.instrument_id, Liquidity.TAKER, now_ns)

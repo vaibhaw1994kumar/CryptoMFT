@@ -33,6 +33,7 @@ from .fees import Liquidity
 from .instruments import InstrumentMaster
 from .models import Opportunity, ParentPlan, PlanState, Side, stable_id
 from .orderbook import OrderBook
+from .strategies.edge import cross_gross_bps
 
 
 STRATEGY_VERSION = "1.0.0"
@@ -259,7 +260,7 @@ class CrossVenueMeanReversionStrategy:
         if quantity <= 0:
             self._skip("no_touch_liquidity")
             return None
-        gross_bps = (sell_price - buy_price) / buy_price * Decimal("10000")
+        gross_bps = cross_gross_bps(buy_price, sell_price)
         fees_bps = (
             self.instruments.fee_bps(buy_venue, self.instrument_id, Liquidity.TAKER, now_ns)
             + self.instruments.fee_bps(sell_venue, self.instrument_id, Liquidity.TAKER, now_ns)
