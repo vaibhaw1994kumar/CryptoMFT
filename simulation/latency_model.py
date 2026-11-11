@@ -504,14 +504,29 @@ class MarkoutTracker:
       adverse_h = s * (m_h - m0) / m0 * 1e4        m_h = the venue mid as of fill_ts + h
       fee       = -fee_paid / notional * 1e4       a maker rebate is positive
       net_h     = captured + adverse_h + fee
+    The 09 Nov markout note divides captured and adverse by the FILL PRICE p, not by m0; the difference is under 1 % of the markout and the
+    denominator is kept as m0 so the market-maker tracker stays bit-equal (recorded 11 Nov, to revisit with the MM side).
+    `mid_max_age_s` (default None = off; owner 11 Nov): the age of a mid is the time since the last BOOK MESSAGE of any kind on that venue (the clock
+    of the book gate, Q-G1), never the time since the last mid change. It is applied at both ends: `record_fill(mid_at_fill_ts=...)` (the last book
+    message before the fill) and `resolve_asof(mid_ts=...)` (the last book message at or before the horizon). A fill whose mid is older than the limit
+    leaves all its horizons out with reason "stale_mid_at_fill"; a horizon whose mid is older leaves that row out with reason "stale_mid". The
+    caller must say what its timestamps are (`mid_ts_basis="last_book_message"`); a change-only mid path (a mid recorded only when it moves) cannot
+    give them, and the rule is REFUSED there (ValueError: not evaluable), never applied by dropping rows. Rows left out, and why, are counted per
+    horizon (`excluded_counts`, `support_counts`); rows resolved at the end of the run stay in `rows` flagged at_end and are counted as "at_end".
     Exactness: the caller runs `resolve_asof(now, mids)` BEFORE applying the event stamped `now`, so a markout whose target is
     before `now` is read on the mid that was valid at its target.
     """
 
-    def __init__(self, horizons_s: tuple[float, ...] = (1.0, 5.0, 30.0), decompose: bool = False) -> None:
+    def __init__(self, horizons_s: tuple[float, ...] = (1.0, 5.0, 30.0), decompose: bool = False, mid_max_age_s: float | None = None) -> None:
+        if mid_max_age_s is not None and not decompose:
+            raise ValueError("mid_max_age_s is for MarkoutTracker(decompose=True) only")
+        if mid_max_age_s is not None and mid_max_age_s < 0:
+            raise ValueError("mid_max_age_s must not be negative")
         self.horizons_s = horizons_s
         self.decompose = decompose
+        self.mid_max_age_s = mid_max_age_s
         self.rows: list[dict] = []            # decompose only: one row per (fill, horizon)
+        self.excluded: list[dict] = []        # decompose only: rows left out (stale_mid, no_mid), with their tags; at_end rows stay in `rows`
         self._pending: list[tuple[float, int, _PendingMarkout]] = []
         self._counter = itertools.count()
         self.stats: dict[float, dict[str, float]] = {
@@ -521,14 +536,23 @@ class MarkoutTracker:
         self.by_venue_role: dict[str, dict[float, dict[str, float]]] = {}
 
     def record_fill(self, ts: float, venue: str, side: str, price: float, qty: float, role: str = "", *,
-                    mid_at_fill: float | None = None, fee: float | None = None, tags: dict | None = None) -> None:
-        if not self.decompose and (mid_at_fill is not None or fee is not None or tags is not None):
-            raise ValueError("mid_at_fill, fee and tags are for MarkoutTracker(decompose=True) only")
+                    mid_at_fill: float | None = None, fee: float | None = None, tags: dict | None = None,
+                    mid_at_fill_ts: float | None = None, mid_ts_basis: str | None = None) -> None:
+        if not self.decompose and (mid_at_fill is not None or fee is not None or tags is not None or mid_at_fill_ts is not None or mid_ts_basis is not None):
+            raise ValueError("mid_at_fill, fee, tags, mid_at_fill_ts and mid_ts_basis are for MarkoutTracker(decompose=True) only")
         if price <= 0 or qty <= 0:
             return
         if self.decompose:
             if mid_at_fill is None or mid_at_fill <= 0:
                 raise ValueError("decompose: record_fill needs the exchange-time venue mid at the fill (mid_at_fill)")
+            if self.mid_max_age_s is not None:
+                self._check_basis(mid_ts_basis)
+                if mid_at_fill_ts is None:
+                    raise ValueError("mid_max_age_s is set: record_fill needs mid_at_fill_ts (the last book message before the fill)")
+                if ts - mid_at_fill_ts > self.mid_max_age_s:           # the fill's own mid is too old: every horizon of this fill is left out
+                    for h in self.horizons_s:
+                        self.excluded.append({"reason": "stale_mid_at_fill", "horizon_s": h, "ts": ts, "mid_age_s": ts - mid_at_fill_ts, **dict(tags or {})})
+                    return
             for h in self.horizons_s:
                 dm = _DecomposedMarkout(ts + h, h, venue, side, price, qty, role, mid_at_fill, fee or 0.0, dict(tags or {}), ts)
                 heapq.heappush(self._pending, (dm.target_ts, next(self._counter), dm))
@@ -536,6 +560,12 @@ class MarkoutTracker:
         for h in self.horizons_s:
             pm = _PendingMarkout(ts + h, h, venue, side, price, qty, role)
             heapq.heappush(self._pending, (pm.target_ts, next(self._counter), pm))
+
+    @staticmethod
+    def _check_basis(basis: str | None) -> None:
+        if basis != "last_book_message":
+            raise ValueError(f"mid_max_age_s is not evaluable on mid_ts_basis={basis!r}: the age must be the time since the last book message of any kind "
+                             "(the book gate's clock), not since the last mid change; pass mid_ts_basis='last_book_message' or leave the rule off")
 
     def due(self, now: float) -> bool:
         """True when at least one pending markout has reached its horizon at `now`."""
@@ -565,16 +595,29 @@ class MarkoutTracker:
                 sv["bps_qty_sum"] += bps * pm.qty
                 sv["adverse"] += float(bps < 0.0)
 
-    def resolve_asof(self, now: float, mids: dict[str, float], finalize: bool = False) -> None:
+    def resolve_asof(self, now: float, mids: dict[str, float], finalize: bool = False, mid_ts: dict[str, float] | None = None,
+                     mid_ts_basis: str | None = None) -> None:
         """decompose only: resolve every markout whose target is strictly before `now` on `mids` (the state before the event at
-        `now`, i.e. the mid as of the target). finalize: resolve the rest on the last mids, flagged at_end."""
+        `now`, i.e. the mid as of the target). finalize: resolve the rest on the last mids, flagged at_end.
+        `mid_ts`: the time of the last book message of each venue at or before the horizon; required when mid_max_age_s is set (the age at the horizon is
+        target - mid_ts), together with mid_ts_basis='last_book_message'."""
         if not self.decompose:
             raise RuntimeError("resolve_asof is for MarkoutTracker(decompose=True); use resolve")
+        if self.mid_max_age_s is not None:
+            self._check_basis(mid_ts_basis)
         while self._pending and (finalize or self._pending[0][0] < now):
             _, _, pm = heapq.heappop(self._pending)
             m = mids.get(pm.venue, 0.0)
             if m <= 0:
+                self.excluded.append({"reason": "no_mid", "horizon_s": pm.horizon_s, "ts": pm.fill_ts, **pm.tags})
                 continue
+            at_end = bool(finalize and pm.target_ts >= now)
+            if self.mid_max_age_s is not None and not at_end:
+                if mid_ts is None or pm.venue not in mid_ts:
+                    raise ValueError("mid_max_age_s is set: resolve_asof needs mid_ts for every venue it resolves")
+                if pm.target_ts - mid_ts[pm.venue] > self.mid_max_age_s:
+                    self.excluded.append({"reason": "stale_mid", "horizon_s": pm.horizon_s, "ts": pm.fill_ts, "mid_age_s": pm.target_ts - mid_ts[pm.venue], **pm.tags})
+                    continue
             s = 1.0 if pm.side == "buy" else -1.0
             captured = s * (pm.mid0 - pm.price) / pm.mid0 * 10_000.0
             adverse = s * (m - pm.mid0) / pm.mid0 * 10_000.0
@@ -582,30 +625,74 @@ class MarkoutTracker:
             self.rows.append({"ts": pm.fill_ts, "horizon_s": pm.horizon_s, "venue": pm.venue, "side": pm.side, "price": pm.price,
                               "qty": pm.qty, "role": pm.role, "mid_at_fill": pm.mid0, "mid_at_h": m, "captured_bps": captured,
                               "adverse_bps": adverse, "fee_bps": fee, "net_bps": captured + adverse + fee,
-                              "at_end": bool(finalize and pm.target_ts >= now), **pm.tags})
+                              "at_end": at_end, **pm.tags})
 
-    def decomposed_summary(self, by: tuple[str, ...] = ()) -> dict:
+    def _group_key(self, r: dict, by: tuple[str, ...]) -> str:
+        return "|".join(str(r.get(k)) for k in by) if by else "all"
+
+    def excluded_counts(self) -> dict[str, dict[str, int]]:
+        """{"1s": {"stale_mid": n, "no_mid": n, "at_end": n}, ...}: the rows that are not in the statistics, per horizon and reason."""
+        out: dict[str, dict[str, int]] = {f"{h:g}s": {} for h in self.horizons_s}
+        for r in self.rows:
+            if r["at_end"]:
+                cell = out.setdefault(f"{r['horizon_s']:g}s", {})
+                cell["at_end"] = cell.get("at_end", 0) + 1
+        for x in self.excluded:
+            cell = out.setdefault(f"{x['horizon_s']:g}s", {})
+            cell[x["reason"]] = cell.get(x["reason"], 0) + 1
+        return out
+
+    def support_counts(self, by: tuple[str, ...] = ()) -> dict:
+        """Per group and horizon: rows kept in the statistics and rows left out by reason (stale_mid, no_mid, at_end). Groups with only excluded rows appear here."""
+        out: dict = {}
+        def cell(r):
+            return out.setdefault(self._group_key(r, by), {}).setdefault(f"{r['horizon_s']:g}s", {"kept": 0, "excluded": {}})
+        for r in self.rows:
+            c = cell(r)
+            if r["at_end"]:
+                c["excluded"]["at_end"] = c["excluded"].get("at_end", 0) + 1
+            else:
+                c["kept"] += 1
+        for x in self.excluded:
+            c = cell(x)
+            c["excluded"][x["reason"]] = c["excluded"].get(x["reason"], 0) + 1
+        return out
+
+    def decomposed_summary(self, by: tuple[str, ...] = (), *, block_s: float = 86_400.0, reps: int = 1000, seed: int = 0) -> dict:
         """Mean captured / adverse / fee / net (bps, plain and notional-weighted) per horizon, optionally grouped by tag keys.
-        Rows resolved at the end of the run (at_end) are excluded."""
+        Rows resolved at the end of the run (at_end) are excluded. Added 11 Nov (09 Nov markout note), new keys only: `stats` (per column: n, mean,
+        median, p5, p95 and a block-bootstrap 95 % interval of the mean, blocks of `block_s` seconds of fill time, default a day; with fewer than two
+        blocks the interval is None and ci_status says insufficient_blocks) and `support` (rows kept and rows left out by reason)."""
+        from ..metrics import distribution_stats
         groups: dict = {}
+        cols: dict = {}
         for r in self.rows:
             if r["at_end"]:
                 continue
-            key = "|".join(str(r.get(k)) for k in by) if by else "all"
-            g = groups.setdefault(key, {}).setdefault(f"{r['horizon_s']:g}s", {"n": 0, "q": 0.0, "c": 0.0, "a": 0.0, "f": 0.0, "cq": 0.0, "aq": 0.0, "fq": 0.0})
+            key = self._group_key(r, by)
+            h = f"{r['horizon_s']:g}s"
+            g = groups.setdefault(key, {}).setdefault(h, {"n": 0, "q": 0.0, "c": 0.0, "a": 0.0, "f": 0.0, "cq": 0.0, "aq": 0.0, "fq": 0.0})
             g["n"] += 1
             g["q"] += r["qty"] * r["price"]
             for k, col in (("c", "captured_bps"), ("a", "adverse_bps"), ("f", "fee_bps")):
                 g[k] += r[col]
                 g[k + "q"] += r[col] * r["qty"] * r["price"]
+            c = cols.setdefault((key, h), {"captured_bps": [], "adverse_bps": [], "fee_bps": [], "net_bps": [], "blocks": []})
+            for col in ("captured_bps", "adverse_bps", "fee_bps", "net_bps"):
+                c[col].append(r[col])
+            c["blocks"].append(int(r["ts"] // block_s))
+        support = self.support_counts(by)
         out: dict = {}
         for key, per_h in groups.items():
             out[key] = {}
             for h, g in per_h.items():
                 n, q = g["n"], g["q"]
                 cap, adv, fee = g["c"] / n, g["a"] / n, g["f"] / n
+                c = cols[(key, h)]
                 out[key][h] = {"n": n, "captured_bps": cap, "adverse_bps": adv, "fee_bps": fee, "net_bps": cap + adv + fee,
-                               "notional_weighted_net_bps": (g["cq"] + g["aq"] + g["fq"]) / q if q > 0 else 0.0}
+                               "notional_weighted_net_bps": (g["cq"] + g["aq"] + g["fq"]) / q if q > 0 else 0.0,
+                               "stats": {col: distribution_stats(c[col], c["blocks"], reps=reps, seed=seed) for col in ("captured_bps", "adverse_bps", "fee_bps", "net_bps")},
+                               "support": support[key][h]}
         return out
 
     def summary(self) -> dict[str, dict[str, float]]:
