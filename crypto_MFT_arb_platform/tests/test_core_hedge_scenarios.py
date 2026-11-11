@@ -415,5 +415,104 @@ class FailureCasesFromTheReportsNotInH01ToH40OrS1ToS19(Scenario):
         self.assertEqual((events.count("REJECT_AFTER_FILL_ALARM"), events.count("REJECT_AFTER_FILL_REQUERIED")), (1, 1))
 
 
+class HedgeLotRounding(Scenario):
+    """11 Nov (owner): the hedge is a whole number of the hedge venue's lots. Cumulative target floored to the lot; a part-lot residual is carried to the next maker fill and
+    is on record while it is open; a quantity already on the lot behaves exactly as before. Binance lot 0.1 here (Bybit 0.001), so a maker fill of 0.25 hedges 0.2."""
+
+    def build(self, *a, **k):
+        import test_core_hedge_scenarios as me
+        real = me.scenario_instruments
+
+        def lots():
+            from crypto_stat_arb.instruments import InstrumentMaster
+            from crypto_stat_arb.models import Instrument
+            rows = {"BYBIT": ("-0.5", "5.5", "0.001"), "BINANCE": ("2.0", "5.0", "0.1")}
+            return InstrumentMaster([Instrument(instrument_id=INSTR, venue=v, symbol="BTCUSDT", base="BTC", quote="USDT", tick_size=Decimal("0.10"), quantity_step=Decimal(rows[v][2]),
+                                                min_quantity=Decimal(rows[v][2]), min_notional=Decimal("5"), maker_fee_bps=Decimal(rows[v][0]), taker_fee_bps=Decimal(rows[v][1]))
+                                     for v in ("BINANCE", "BYBIT")])
+        me.scenario_instruments = lots
+        try:
+            return super().build(*a, **k)
+        finally:
+            me.scenario_instruments = real
+
+    def hedge_qty(self):
+        return [float(o.quantity) for o in self.plan.children if o.order_role == "HEDGE"]
+
+    def residual_events(self):
+        return [e for e in self.ledger.events if e["event_type"] == "HEDGE_LOT_RESIDUAL"]
+
+    def test_a_part_lot_fill_hedges_the_whole_lots_and_records_the_residual(self):
+        self.build(qty="1.0")
+        self.maker_fill("0.25", 5 * S)
+        self.assertEqual(self.hedge_qty(), [0.2])
+        (ev,) = self.residual_events()
+        self.assertEqual((ev["residual"], ev["hedged_target"], ev["lot"], ev["venue"]), ("0.05", "0.2", "0.1", "BINANCE"))
+        self.assertEqual(self.oms.realism_counters["hedge_lot_residual"], 1)
+
+    def test_the_residual_is_carried_to_the_next_fill_never_lost(self):
+        self.build(qty="1.0")
+        self.maker_fill("0.25", 5 * S)
+        self.maker_fill("0.40", 6 * S)                       # cumulative 0.40 -> target 0.4: the next hedge is 0.2, the residual is gone
+        self.assertEqual(self.hedge_qty(), [0.2, 0.2])
+        self.assertEqual(len(self.residual_events()), 1)      # one event for the one residual that opened; closing it is silent
+        self.maker_fill("0.43", 7 * S)                        # a new part-lot residual of 0.03
+        self.assertEqual(self.hedge_qty(), [0.2, 0.2])         # below one lot: nothing to send
+        self.assertEqual([e["residual"] for e in self.residual_events()], ["0.05", "0.03"])
+
+    def test_a_fill_below_one_lot_sends_no_hedge_and_leaves_the_exposure_on_record(self):
+        self.build(qty="1.0")
+        self.maker_fill("0.06", 5 * S)
+        self.assertEqual(self.hedge_qty(), [])
+        self.assertEqual(len(self.oms.hedge_chains.get(self.plan.parent_id, {})), 0)
+        self.assertEqual([e["residual"] for e in self.residual_events()], ["0.06"])
+
+    def test_a_fill_already_on_the_lot_is_exactly_as_before(self):
+        self.build(qty="1.0")
+        self.maker_fill("0.30", 5 * S)
+        self.assertEqual(self.hedge_qty(), [0.3])
+        self.assertEqual(self.residual_events(), [])
+        self.assertNotIn("hedge_lot_residual", self.oms.realism_counters)
+
+
+class MakerLifetimeSilentFeed(unittest.TestCase):
+    """E1 (owner 10/11 Nov): the maker lifetime is a timer, not a check on market events. With NO market event after the venue accepted the order, advancing time to the
+    deadline (what `TradingSession.tick` does in a live idle period) cancels it, at the deadline, from the venue's acceptance time."""
+
+    def _build(self, lifetime_s):
+        self.ledger = Ledger()
+        self.bybit = Venue("BYBIT", ["ack"], price="99.0")
+        self.binance = Venue("BINANCE", [], price="99.0")
+        inst = scenario_instruments()
+        self.oms = OMS(inst, risk(), self.ledger, router=StrategyDirectedRouter(inst, adapters={"BYBIT": self.bybit, "BINANCE": self.binance}), dispatch_policy=DispatchPolicy.FILL_TRIGGERED)
+        self.oms.order_lifetime_ns = int(lifetime_s * S)
+        opp = replace(opportunity("2.0"), buy_venue="BYBIT", sell_venue="BINANCE", buy_price=Decimal("100.0"), sell_price=Decimal("99.0"))
+        self.plan = self.oms.execute(opp, scenario_books(), maker_venue="BYBIT")
+        self.maker = self.plan.children[0]
+        return next(e["update"]["event_ts_ns"] for e in self.ledger.events if e["event_type"] == "ORDER_STATE_UPDATE_APPLIED" and e["order_id"] == self.maker.order_id
+                    and e["update"]["state"] == "ACKNOWLEDGED")
+
+    def expired(self):
+        return [e for e in self.ledger.events if e["event_type"] == "ORDER_LIFETIME_EXPIRED"]
+
+    def test_no_market_event_the_timer_alone_cancels_at_the_deadline(self):
+        ack = self._build(15.0)
+        self.assertEqual(self.oms.next_timer_ts(), ack + 15 * S)                       # the deadline is a timer the session can sleep until
+        self.oms.advance_time(ack + 14 * S)
+        self.assertEqual((self.expired(), self.bybit.cancels), ([], 0))                  # not before
+        self.oms.advance_time(ack + 20 * S)                                              # one jump, no events in between
+        (ev,) = self.expired()
+        self.assertEqual((ev["ts_ns"], self.bybit.cancels), (ack + 15 * S, 1))           # stamped at its own deadline, not at the time of the jump
+        self.assertEqual(self.maker.state, OrderState.CANCELLED)
+
+    def test_off_when_the_lifetime_is_unset_and_not_after_a_fill(self):
+        self.ledger = Ledger()
+        ack = self._build(15.0)
+        u = maker_update(self.plan, self.maker, 1, ExecutionEventType.FILLED, "2.0", ack + 5 * S)
+        self.oms.ingest_order_update(replace(u, average_price=Decimal("100.0")))
+        self.oms.advance_time(ack + 30 * S)
+        self.assertEqual((self.expired(), self.bybit.cancels), ([], 0))                  # a filled order is not cancelled
+
+
 if __name__ == "__main__":
     unittest.main()
