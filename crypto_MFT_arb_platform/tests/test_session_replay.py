@@ -101,6 +101,29 @@ class SessionReplayEndToEnd(unittest.TestCase):
         self.assertEqual(lay["observer_counts"]["primary_children"], 1)
         self.assertEqual(lay["observer_counts"]["hedge_children"], 1)
 
+    def test_the_pair_economics_file_links_the_maker_fill_to_its_hedge(self):
+        """11 Nov (09 Nov markout note): one row per maker fill, the hedge's price against the maker's, the interval and the metadata; a new file, nothing else in the output changes."""
+        import json
+        import tempfile
+        from new_backtest.session_replay import write_result
+        r = self.result
+        with tempfile.TemporaryDirectory() as d:
+            write_result(r, Path(d))
+            rows = [json.loads(x) for x in (Path(d) / "session_pair_economics.jsonl").read_text().splitlines()]
+            doc = json.loads((Path(d) / "session_pair_economics.json").read_text())
+            self.assertTrue((Path(d) / "session_manifest.json").exists())
+        (row,) = rows
+        mk = next(f for f in r["fills"] if f["venue"] == "BYBIT")
+        hd = next(f for f in r["fills"] if f["venue"] == "BINANCE")
+        self.assertEqual((row["maker_side"], row["fully_hedged"], row["hedge_venue"]), ("buy", True, "BINANCE"))
+        self.assertAlmostEqual(row["maker_price"], float(mk["fill_price"]))
+        self.assertAlmostEqual(row["hedge_avg_price"], float(hd["fill_price"]))
+        self.assertAlmostEqual(row["pair_gross_bps"], (float(hd["fill_price"]) - float(mk["fill_price"])) / float(mk["fill_price"]) * 1e4)
+        self.assertGreaterEqual(row["unhedged_interval_s"], 0.0)
+        self.assertEqual(doc["metadata"]["coverage"]["rows_kept"], 1)
+        self.assertIn("touch is assumed to fit", doc["metadata"]["notes"])
+        self.assertEqual(doc["summary"]["pair_net_bps"]["ci_status"], "insufficient_blocks")      # one fill, one day: said, not guessed
+
     def test_the_layer_is_observation_only_the_run_is_identical_without_it(self):
         from unittest import mock
 

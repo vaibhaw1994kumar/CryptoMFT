@@ -136,5 +136,108 @@ class ReportsUseTheDictionaryTests(unittest.TestCase):
         self.assertEqual(set(report["definitions"]), set(metrics.DICTIONARY))
 
 
+class DistributionStatsAndPairEconomics(unittest.TestCase):
+    """The 09 Nov markout note, sections 2 and 7: the statistics every result carries, and the linked pair economics per maker fill."""
+
+    def test_quantile_is_linear_interpolation(self):
+        v = [1.0, 2.0, 3.0, 4.0, 5.0]
+        self.assertEqual([metrics.quantile(v, q) for q in (0.0, 0.5, 1.0)], [1.0, 3.0, 5.0])
+        self.assertAlmostEqual(metrics.quantile(v, 0.05), 1.2)
+        self.assertEqual(metrics.quantile([7.0], 0.95), 7.0)
+
+    def test_distribution_stats_says_why_something_is_missing(self):
+        self.assertEqual(metrics.distribution_stats([])["status"], "unavailable")
+        one = metrics.distribution_stats([2.0], [0], min_n=5)
+        self.assertEqual((one["status"], one["n"], one["ci_status"], one["ci95"]), ("insufficient_support", 1, "insufficient_blocks", None))
+        ok = metrics.distribution_stats([1.0, 2.0, 3.0, 4.0], [0, 0, 1, 1], reps=100)
+        self.assertEqual((ok["status"], ok["median"], ok["blocks"], ok["ci_status"]), ("ok", 2.5, 2, "ok"))
+        self.assertIsNone(metrics.distribution_stats([1.0, 2.0])["ci95"])               # no block ids: no interval
+
+    def test_the_block_interval_is_deterministic_and_brackets_a_known_mean(self):
+        vals = [float(i % 7) for i in range(210)]
+        blocks = [i // 30 for i in range(210)]
+        a = metrics.block_bootstrap_ci(vals, blocks, reps=400, seed=5)
+        self.assertEqual(a, metrics.block_bootstrap_ci(vals, blocks, reps=400, seed=5))
+        self.assertLess(a[0], sum(vals) / len(vals))
+        self.assertGreater(a[1], sum(vals) / len(vals))
+        self.assertIsNone(metrics.block_bootstrap_ci(vals, [0] * 210))
+
+    @staticmethod
+    def _journal(maker_side="buy", hedge=True, qty=1.0, hedge_created=100.0):
+        hs = "sell" if maker_side == "buy" else "buy"
+        j = [{"event": "intent", "intent_id": "sig1-P1", "role": "primary", "reason": "maker leg", "signal_id": 1, "venues": ["BYBIT"], "qty": qty, "created_ts": 99.0, "parent_id": ""},
+             {"event": "child", "intent_id": "sig1-P1", "order_id": "m1", "ts": 99.0}]
+        if hedge:
+            j += [{"event": "intent", "intent_id": "sig1-H1", "role": "hedge", "reason": "hedge after maker fill", "signal_id": 1, "venues": ["BINANCE"], "qty": qty, "worst_price": 99.5,
+                   "created_ts": hedge_created, "parent_id": "sig1-P1"},
+                  {"event": "child", "intent_id": "sig1-H1", "order_id": "h1", "ts": hedge_created + 0.004}]
+        return j, hs
+
+    @staticmethod
+    def _fill(oid, venue, side, qty, price, ts, fee):
+        return {"order_id": oid, "venue": venue, "side": side.upper(), "fill_quantity": str(qty), "fill_price": str(price), "ts_ns": int(round(ts * 1e9)), "fee": str(fee)}
+
+    def test_a_maker_buy_hedged_by_a_sell_gross_net_and_the_unhedged_interval(self):
+        j, _ = self._journal("buy")
+        fills = [self._fill("m1", "BYBIT", "buy", 1.0, 100.00, 100.0, -0.005), self._fill("h1", "BINANCE", "sell", 1.0, 100.05, 100.031, 0.05)]
+        r = metrics.pair_economics(fills, j, reps=50)
+        (row,) = r["rows"]
+        self.assertTrue(row["fully_hedged"])
+        self.assertAlmostEqual(row["pair_gross_bps"], 5.0)                                  # sold 5 bps above where it bought
+        self.assertAlmostEqual(row["pair_net_bps"], 5.0 - (-0.005 + 0.05) / 100.0 * 1e4)   # a rebate on the maker leg, the taker fee on the hedge
+        self.assertAlmostEqual(row["unhedged_interval_s"], 0.031, places=6)
+        self.assertAlmostEqual(row["hedge_send_delay_s"], 0.004, places=6)
+        self.assertEqual((row["hedge_children"], row["hedge_cap"]), (1, 99.5))
+        self.assertEqual(r["metadata"]["coverage"], {"rows_total": 1, "rows_kept": 1, "share_kept": 1.0})
+        self.assertEqual(r["summary"]["pair_net_bps"]["n"], 1)
+
+    def test_a_maker_sell_is_the_mirror_image(self):
+        j, _ = self._journal("sell")
+        fills = [self._fill("m1", "BYBIT", "sell", 1.0, 100.00, 100.0, 0.0), self._fill("h1", "BINANCE", "buy", 1.0, 99.97, 100.02, 0.0)]
+        (row,) = metrics.pair_economics(fills, j)["rows"]
+        self.assertAlmostEqual(row["pair_gross_bps"], 3.0)                                   # bought 3 bps below where it sold
+
+    def test_an_unhedged_or_partly_hedged_fill_is_counted_not_hidden(self):
+        j, _ = self._journal("buy", hedge=False)
+        r = metrics.pair_economics([self._fill("m1", "BYBIT", "buy", 1.0, 100.0, 100.0, 0.0)], j)
+        self.assertEqual((r["rows"][0]["hedged_qty"], r["rows"][0]["pair_net_bps"]), (0.0, None))
+        self.assertEqual(r["metadata"]["excluded_by_reason"]["no_hedge_intent"], 1)
+        self.assertEqual(r["summary"]["pair_net_bps"]["status"], "unavailable")
+        j, _ = self._journal("buy")
+        part = metrics.pair_economics([self._fill("m1", "BYBIT", "buy", 1.0, 100.0, 100.0, 0.0), self._fill("h1", "BINANCE", "sell", 0.4, 100.02, 100.02, 0.0)], j)
+        row = part["rows"][0]
+        self.assertEqual((row["fully_hedged"], row["hedged_qty"], row["pair_net_bps"], row["unhedged_interval_s"]), (False, 0.4, None, None))
+        self.assertAlmostEqual(row["pair_gross_bps"], 2.0)
+        self.assertEqual(part["metadata"]["excluded_by_reason"]["partly_hedged"], 1)
+
+    def test_two_maker_fills_of_one_order_pair_with_their_own_hedges(self):
+        j = [{"event": "intent", "intent_id": "sig1-P1", "role": "primary", "reason": "maker leg", "signal_id": 1, "venues": ["BYBIT"], "qty": 1.0, "created_ts": 1.0, "parent_id": ""},
+             {"event": "child", "intent_id": "sig1-P1", "order_id": "m1", "ts": 1.0}]
+        fills = []
+        for k, (mt, q, mp, hp) in enumerate(((10.0, 0.4, 100.0, 100.01), (20.0, 0.6, 100.1, 100.12)), start=1):
+            j += [{"event": "intent", "intent_id": f"sig1-H{k}", "role": "hedge", "reason": "hedge after maker fill", "signal_id": 1, "venues": ["BINANCE"], "qty": q,
+                   "worst_price": 99.0, "created_ts": mt, "parent_id": "sig1-P1"}, {"event": "child", "intent_id": f"sig1-H{k}", "order_id": f"h{k}", "ts": mt + 0.01}]
+            fills += [self._fill("m1", "BYBIT", "buy", q, mp, mt, 0.0), self._fill(f"h{k}", "BINANCE", "sell", q, hp, mt + 0.05, 0.0)]
+        rows = metrics.pair_economics(fills, j)["rows"]
+        self.assertEqual([(r["qty"], r["hedge_intent_id"], r["fully_hedged"]) for r in rows], [(0.4, "sig1-H1", True), (0.6, "sig1-H2", True)])
+        self.assertAlmostEqual(rows[1]["pair_gross_bps"], (100.12 - 100.1) / 100.1 * 1e4)
+
+    def test_the_fee_of_a_partial_fill_is_the_fee_delta_not_the_cumulative_fee(self):
+        j = [{"event": "intent", "intent_id": "sig1-P1", "role": "primary", "reason": "maker leg", "signal_id": 1, "venues": ["BYBIT"], "qty": 1.0, "created_ts": 1.0, "parent_id": ""},
+             {"event": "child", "intent_id": "sig1-P1", "order_id": "m1", "ts": 1.0}]
+        fills = []
+        for k, (mt, q, cum) in enumerate(((10.0, 0.6, 0.6), (20.0, 0.4, 1.0)), start=1):
+            j += [{"event": "intent", "intent_id": f"sig1-H{k}", "role": "hedge", "reason": "hedge after maker fill", "signal_id": 1, "venues": ["BINANCE"], "qty": q,
+                   "worst_price": 99.0, "created_ts": mt, "parent_id": "sig1-P1"}, {"event": "child", "intent_id": f"sig1-H{k}", "order_id": f"h{k}", "ts": mt + 0.01}]
+            fills += [{**self._fill("m1", "BYBIT", "buy", q, 100.0, mt, cum * 0.01), "fee_delta": str(q * 0.01)}, self._fill(f"h{k}", "BINANCE", "sell", q, 100.0, mt + 0.05, 0.0)]
+        rows = metrics.pair_economics(fills, j)["rows"]
+        self.assertAlmostEqual(rows[0]["pair_net_bps"], -0.01 / 100.0 * 1e4)       # 0.006 / (100 * 0.6) of fee, per unit: 1 bp
+        self.assertAlmostEqual(rows[1]["pair_net_bps"], rows[0]["pair_net_bps"])    # the same fee rate: the second row must not carry the first fill's fee
+
+    def test_the_dictionary_defines_the_pair_metrics(self):
+        for name in ("pair_gross_bps", "pair_net_bps", "unhedged_interval_s"):
+            self.assertIn(name, metrics.DICTIONARY)
+
+
 if __name__ == "__main__":
     unittest.main()

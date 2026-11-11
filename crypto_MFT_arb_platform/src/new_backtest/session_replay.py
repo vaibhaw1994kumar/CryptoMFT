@@ -455,6 +455,14 @@ def write_result(result: dict, out_dir: Path) -> None:
             with (out_dir / f"{name}.jsonl").open("w") as fh:
                 for row in result[key]:
                     fh.write(json.dumps(row, default=str) + "\n")
+    if result.get("intent_journal") is not None:       # 11 Nov (09 Nov markout note): linked pair economics per maker fill, a new file; reads what the run wrote, changes nothing in it
+        from crypto_stat_arb.metrics import pair_economics
+        pe = pair_economics(result["fills"], result["intent_journal"],
+                            hedge_price_basis="simulated fill price at hedge arrival (size-aware where the venue book has depth; with best bid/ask only, as Binance in March 2024, the touch is assumed to fit the size)")
+        with (out_dir / "session_pair_economics.jsonl").open("w") as fh:
+            for row in pe["rows"]:
+                fh.write(json.dumps(row, default=str) + "\n")
+        (out_dir / "session_pair_economics.json").write_text(json.dumps({"label": "EXPLORATORY: linked pair economics per maker fill, session runtime", "summary": pe["summary"], "metadata": pe["metadata"]}, indent=1, default=str))
     (out_dir / "session_manifest.json").write_text(json.dumps({k: v for k, v in result.items() if k not in ("signals", "orders", "fills", "reject_trace", "intent_journal", "intent_fills")}, indent=1, default=str))
 
 
