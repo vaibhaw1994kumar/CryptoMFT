@@ -403,6 +403,7 @@ class TradingSession:
         self._breaker_last_attempt_ns = 0
         self._breaker_alarmed: set[str] = set()
         self.signals_blocked_by_breaker = 0
+        self.exchange_marks: dict[tuple[str, str], tuple[int, Decimal]] = {}       # (venue, instrument) -> (receive ts, mark price) from the derivatives stream, or the replay's labelled MARK_FROM_MID
 
     def _now(self, event: MarketEvent, now_ns: int | None) -> int:
         if now_ns is not None:
@@ -993,17 +994,30 @@ class TradingSession:
                 reason=reason, now_ns=now_ns, operator_id="liquidation-engine", source="LIQUIDATION",
             )
 
+    # A mark older than this is not used for margin: the margin check fails closed (COLLATERAL_PRICE_MISSING) rather than trade on a stale price. A venue that does not publish marks keeps the book-mid rule below.
+    EXCHANGE_MARK_MAX_AGE_NS = 10 * 1_000_000_000
+
+    def _margin_marks(self, now: int) -> dict[tuple[str, str], Decimal]:
+        """Marks for the margin check: the book mid of every VALID book (as before), overridden by the venue's own mark price when one arrived within EXCHANGE_MARK_MAX_AGE_NS. Track A (owner 11 Nov): without
+        the exchange mark a book that goes quiet for 500 ms (STALE) loses its mark, the open position on that venue is priced as missing, the venue is put in margin BREACH and the kill switch trips (seen on the
+        2026-10-29 capture: every breach sat inside a BINANCE:STALE interval)."""
+        marks = {
+            key: (book.best_bid + book.best_ask) / Decimal("2")
+            for key, book in self.books.items()
+            if book.state.value == "VALID" and book.bids and book.asks
+        }
+        for key, (ts, price) in self.exchange_marks.items():
+            if now - ts <= self.EXCHANGE_MARK_MAX_AGE_NS:
+                marks[key] = price
+        return marks
+
     def _evaluate_margin(self, now: int) -> None:
         due = self._margin_due_ns is None or now >= self._margin_due_ns
         if not (due or self._margin_dirty):
             return
         self._margin_dirty = False
         self._margin_due_ns = now + self.margin_config.evaluate_interval_ns
-        marks = {
-            key: (book.best_bid + book.best_ask) / Decimal("2")
-            for key, book in self.books.items()
-            if book.state.value == "VALID" and book.bids and book.asks
-        }
+        marks = self._margin_marks(now)
         report = self.oms.evaluate_margin(
             now_ns=now, mark_prices=marks, initial_capital_by_venue=self.cfg.initial_capital_by_venue,
         )
@@ -1074,6 +1088,8 @@ class TradingSession:
     def on_derivative(self, ticker) -> None:
         """Venue mark/index/funding (derivatives stream): the exchange mark for
         settlements and the predicted rate for funding forecasts, never realised funding."""
+        if ticker.mark_price is not None:
+            self.exchange_marks[(ticker.venue, ticker.instrument_id)] = (ticker.receive_ts_ns, Decimal(ticker.mark_price))      # the margin check prefers a fresh exchange mark to a book mid (see _margin_marks)
         if not self.funding.configured:
             return
         if ticker.mark_price is not None:

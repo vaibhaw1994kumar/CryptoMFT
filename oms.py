@@ -3300,17 +3300,20 @@ class OMS:
         self._hedge_held.pop(chain.chain_id, None)
         book = self._books[(spec["venue"], spec["instrument_id"])]
         touch = book.best_ask if spec["side"] == Side.BUY else book.best_bid
-        if (spec["side"] == Side.BUY and touch > spec["limit_price"]) or (spec["side"] == Side.SELL and touch < spec["limit_price"]):
-            # the hedge reduces exposure just taken, so it is still sent, at its cap (it may find nothing: ioc_unfilled -> retry or unwind); the breach is on record
-            self.realism_counters["hedge_cap_breach_at_dispatch"] = self.realism_counters.get("hedge_cap_breach_at_dispatch", 0) + 1
-            self.ledger.record("HEDGE_CAP_BREACH_AT_DISPATCH", ts_ns, parent_id=plan.parent_id, chain_id=chain.chain_id, touch=str(touch), cap=str(spec["limit_price"]),
-                               reason="price_cap_exceeded")
+        touch_past_planned = (spec["side"] == Side.BUY and touch > spec["limit_price"]) or (spec["side"] == Side.SELL and touch < spec["limit_price"])
         done = sum((o.filled_quantity for o in plan.children if o.order_id in self._chain_children[chain.chain_id]), Decimal("0"))
         qty = Decimal(str(chain.exposure_qty)) - done
         attempt = len(self._chain_children[chain.chain_id])
         cap = spec["limit_price"]
         if self.hedge_policy.touch_slack_bps is not None:        # cap rule touch_slack: re-taken from the CURRENT hedge touch on every attempt, on the venue's price grid, never inside the cap
             cap = hedge_cap_on_grid(spec["side"].value, touch, self.hedge_policy.touch_slack_bps, self.instruments.get(spec["venue"], spec["instrument_id"]).tick_size)
+        if touch_past_planned:
+            # Track A (owner 11 Nov): the old name, HEDGE_CAP_BREACH_AT_DISPATCH, read like a breach of the order's price cap. It is not: the cap of the child that is sent (`child_cap`) is always taken from the CURRENT touch and
+            # is never breached. What this records is that by dispatch time the market had moved past the hedge price the opportunity PLANNED (`planned_limit`). The hedge reduces exposure just taken, so it is still sent
+            # at `child_cap` (it may find nothing: ioc_unfilled -> retry or unwind); the move is on record.
+            self.realism_counters["hedge_touch_past_planned_limit"] = self.realism_counters.get("hedge_touch_past_planned_limit", 0) + 1
+            self.ledger.record("HEDGE_TOUCH_PAST_PLANNED_LIMIT", ts_ns, parent_id=plan.parent_id, chain_id=chain.chain_id, touch=str(touch), planned_limit=str(spec["limit_price"]), child_cap=str(cap),
+                               reason="touch_past_planned_limit")
         child = ChildOrder(
             order_id=stable_id("child", plan.parent_id, "HEDGE", chain.chain_id, attempt), parent_id=plan.parent_id, opportunity_id=spec["opportunity_id"],
             venue=spec["venue"], instrument_id=spec["instrument_id"], side=spec["side"], quantity=qty, limit_price=cap, order_role="HEDGE")

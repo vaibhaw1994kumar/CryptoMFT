@@ -522,12 +522,13 @@ def require_safe_profile(doc: dict, *, latency_sensitivity: str | None = None) -
 
 def raw_config_from_profile(
     profile: dict, *, pair: str, venues: tuple[str, ...], ticks: dict[str, str | float], quantity_steps: dict[str, str | float], size_base: float,
-    seed: int = 7, max_book_age_s: float = 0.5, latency_sensitivity: str | None = None,
+    seed: int = 7, max_book_age_s: float = 0.5, latency_sensitivity: str | None = None, venue_cap_base: float | None = None,
 ) -> tuple[dict, dict[str, str]]:
     """The run profile (a plain mapping: the YAML after any dataset settings and run overrides were merged) as the raw config the core reads, so a replay and a live run build
     their `AppConfig` from the same profile through `config_from_raw`. Returns (raw, notes): `notes` names every value that the profile does not state and that was chosen here,
     with its source, for the run manifest. Nothing here imports the backtester. `ticks` and `quantity_steps` are per lower-case venue and are the dated grid of the dataset
-    (Bybit 0.005 in January 2022, 0.001 in March 2024); `size_base` is the run's clip (max position base at the profile's net ceiling multiple)."""
+    (Bybit 0.005 in January 2022, 0.001 in March 2024); `size_base` is the run's clip (max position base at the profile's net ceiling multiple). `venue_cap_base` (owner 11 Nov, a run option, None = the ceiling as before)
+    raises the risk engine's per-venue position limit above the net ceiling, for a run that holds a larger gross position per venue with a small net."""
     from .fees import tier_rows
 
     require_safe_profile(profile, latency_sensitivity=latency_sensitivity)          # live and paper refuse what the backtest refuses (Track A item 4)
@@ -562,7 +563,7 @@ def raw_config_from_profile(
         "fees": fee_rows,
         "risk": {
             "initial_capital_by_venue": capital, "max_order_notional": "1000000000", "max_gross_notional": "1000000000", "max_residual_base": size,
-            "max_position_base": str(ceiling), "inventory": {"model": "unconstrained"},
+            "max_position_base": str(ceiling if venue_cap_base is None else max(ceiling, venue_cap_base)), "inventory": {"model": "unconstrained"},
             "margin": {"evaluate_interval_ms": int(float(margin.get("check_every_s", 1.0)) * 1000), "flatten_after_liquidation": bool(margin.get("flatten_other_venue", True)), "venues": margin_venues},
             "margin_accounts": {v: {"margin_enabled": True} for v in margin_venues},
         },
