@@ -179,6 +179,25 @@ class EventOrderAndDedupe(unittest.TestCase):
                                                                      include_deltas=False, event_order="capture", trade_dedupe="multiset")]
             self.assertEqual(prices, [100.0, 101.0, 102.0, 103.0, 104.0])
 
+    def test_delta_first_policy_is_delta_then_snapshot_then_trade(self):
+        with tempfile.TemporaryDirectory() as d:
+            kinds = [e.kind for e in iter_venue_events(self._tree(d), "bybit", "SOLUSDT", "2022-01-05", "2022-01-05", event_order="delta_first")]
+            self.assertEqual(kinds, ["book_event", "book", "trade"])
+
+    def test_delta_first_changes_only_the_snapshot_delta_tie(self):
+        with tempfile.TemporaryDirectory() as d:
+            root, t = Path(d), 1641340800.0
+            write(root, "bybit", "book_snapshots", "2022-01-05", [{"timestamp": t + x, "local_ts": t + x, "bids": [[100.0, 1.0]], "asks": [[101.0, 1.0]]} for x in (0, 2, 4)])
+            write(root, "bybit", "book_events", "2022-01-05", [{"exchange_ts": t + x, "local_ts": t + x, "side": "bid", "price": 100.0, "volume": 2.0 + n, "event_type": "modify"}
+                                                               for n, x in enumerate((1, 2, 2, 3, 4))])
+            write(root, "bybit", "trades", "2022-01-05", [{"exchange_ts": t + x, "local_ts": t + x, "price": 100.0, "volume": 1.0, "side": "s"} for x in (0, 2, 3.5, 4)])
+            seq = {o: [(e.exchange_ts - t, e.kind) for e in iter_venue_events(root, "bybit", "SOLUSDT", "2022-01-05", "2022-01-05", event_order=o)]
+                   for o in ("legacy", "delta_first")}
+            self.assertEqual(seq["legacy"], [(0, "book"), (0, "trade"), (1, "book_event"), (2, "book"), (2, "book_event"), (2, "book_event"), (2, "trade"),
+                                             (3, "book_event"), (3.5, "trade"), (4, "book"), (4, "book_event"), (4, "trade")])
+            self.assertEqual(seq["delta_first"], [(0, "book"), (0, "trade"), (1, "book_event"), (2, "book_event"), (2, "book_event"), (2, "book"), (2, "trade"),
+                                                  (3, "book_event"), (3.5, "trade"), (4, "book_event"), (4, "book"), (4, "trade")])
+
     def test_an_unknown_event_order_is_an_error(self):
         with self.assertRaises(ValueError):
             list(iter_venue_events("/nonexistent", "bybit", "SOLUSDT", "2022-01-05", "2022-01-05", event_order="random"))

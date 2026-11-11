@@ -266,6 +266,8 @@ def iter_venue_events(
 
     event_order="legacy" (default): equal timestamps are ordered snapshot -> delta -> trade (below).
     event_order="capture": exchange time, then local receive time, then the record's position in its own stream; no ordering by kind.
+    event_order="delta_first": equal timestamps are ordered delta -> snapshot -> trade. For a feed whose snapshot carries the update id
+    of the deltas at its own timestamp (the Bybit spot archive's day-end snapshot), the snapshot is the book after those deltas.
     The position tie-break between streams is the record's index within its stream, then the stream's index (snapshots, deltas, trades):
     when two records of different streams agree on both clocks and on the index, the files do not say which came first.
 
@@ -275,8 +277,8 @@ def iter_venue_events(
     """
     if trade_dedupe not in ("set", "multiset"):
         raise ValueError(f"trade_dedupe must be 'set' or 'multiset', got {trade_dedupe!r}")
-    if event_order not in ("legacy", "capture"):
-        raise ValueError(f"event_order must be 'legacy' or 'capture', got {event_order!r}")
+    if event_order not in ("legacy", "capture", "delta_first"):
+        raise ValueError(f"event_order must be 'legacy', 'capture' or 'delta_first', got {event_order!r}")
     root = venue_root(data_root, venue)
     parse_float = Decimal if decimal_numbers else None
 
@@ -299,12 +301,13 @@ def iter_venue_events(
             ts_d = float(nd.get("exchange_ts", float("inf"))) if nd is not None else float("inf")
             ts_t = float(nt.get("exchange_ts", float("inf"))) if nt is not None else float("inf")
 
-            # Snapshot first on ties: it is a full resync, so applying it before
-            # a same-instant delta keeps the delta from being overwritten.
-            if ts_s <= ts_d and ts_s <= ts_t:
+            # Snapshot first on ties (legacy): it is a full resync, so applying it before
+            # a same-instant delta keeps the delta from being overwritten. delta_first: the delta goes first.
+            snap_first = ts_s < ts_d or (ts_s == ts_d and event_order == "legacy")
+            if snap_first and ts_s <= ts_t:
                 yield RawEvent(ts_s, float(ns.get("local_ts", 0.0) or 0.0), venue, pair, BOOK, ns)
                 ns = next(snaps, None)
-            elif ts_d <= ts_t:
+            elif ts_d <= ts_t and ts_d <= ts_s:
                 yield RawEvent(ts_d, float(nd.get("local_ts", 0.0) or 0.0), venue, pair, DELTA, nd)
                 nd = next(deltas, None)
             else:
