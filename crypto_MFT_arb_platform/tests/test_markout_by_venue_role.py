@@ -203,12 +203,27 @@ class MarkoutNoteAlignmentTests(unittest.TestCase):
         self.assertEqual(mt2.excluded_counts(), {"1s": {"no_mid": 2}, "5s": {"no_mid": 2}})
         self.assertEqual(mt2.decomposed_summary(), {})
 
+    def test_m_is_captured_plus_adverse_before_fees_in_rows_summary_and_stats(self):
+        """The note's M(h) = C + D (owner 11 Nov): a row field, a summary field and a statistics column; net = M + fee."""
+        mt = self._tr()
+        mt.resolve_asof(30.0, {"bybit": 100.02})
+        for r in mt.rows:
+            self.assertAlmostEqual(r["m_bps"], r["captured_bps"] + r["adverse_bps"])
+            self.assertAlmostEqual(r["net_bps"], r["m_bps"] + r["fee_bps"])
+        r1 = mt.rows[0]                              # buy at 99.98, mid at fill 100.0, mid at the horizon 100.02: M = fill price to the horizon mid, in bps of the mid at the fill
+        self.assertAlmostEqual(r1["m_bps"], (100.02 - 99.98) / 100.0 * 1e4)
+        cell = mt.decomposed_summary()["all"]["1s"]
+        self.assertAlmostEqual(cell["m_bps"], cell["captured_bps"] + cell["adverse_bps"])
+        self.assertAlmostEqual(cell["net_bps"], cell["m_bps"] + cell["fee_bps"])
+        self.assertAlmostEqual(cell["stats"]["m_bps"]["mean"], cell["m_bps"])
+        self.assertEqual(cell["stats"]["m_bps"]["n"], cell["n"])
+
     def test_the_old_fields_of_the_summary_are_unchanged_and_the_new_ones_are_added(self):
         a, b = self._tr(), self._tr()
         for t in (a, b):
             t.resolve_asof(30.0, {"bybit": 100.0})
         old = {k: v for k, v in a.decomposed_summary()["all"]["1s"].items() if k not in ("stats", "support")}
-        self.assertEqual(sorted(old), ["adverse_bps", "captured_bps", "fee_bps", "n", "net_bps", "notional_weighted_net_bps"])
+        self.assertEqual(sorted(k for k in old if k != "m_bps"), ["adverse_bps", "captured_bps", "fee_bps", "n", "net_bps", "notional_weighted_net_bps"])      # m_bps added 11 Nov, below
         cell = b.decomposed_summary()["all"]["1s"]
         self.assertEqual(cell["support"], {"kept": 2, "excluded": {}})
         st = cell["stats"]["captured_bps"]
