@@ -14,8 +14,7 @@ A trade print reaches the venue state first and then the session's trade hook (q
 Differences from the backtester's loop, recorded in the manifest (nothing here pretends to be the same loop). Timing IS shared since 9 Nov: the profile's timing block (latency preset, floors, jitter) drives
 the feed delay, the clock and every order delay through `Timelines` / `TimelinesLatencyModel`, and the venue-truth books are built here (`TruthBooks`) for taker arrivals and PostOnly checks. What the session runtime still LACKS
 (owner audit 10 Nov; each item has a Phase E step in the plan): E0 the ems/ layer (S0 repricing `decide_reprice`, the tactic switch, PASSIVE placements, risk gate, pairing, venue selector never reach this path); E1 the maker order
-lifetime as a TIMER (`oms.order_lifetime_ns` exists and fires only when a market event or `tick` advances the OMS clock); E2 hedge-fault injection in the queue adapter (reject probability, outages, lost ack, ghost hedge, partial hedge,
-failed unwind, restart with an open position; the fault presets and conditional scenarios do not run here); E3 the participation cap and the size sweep; the circuit breaker (`circuit_breaker.py` is not wired into the session); the
+lifetime as a TIMER (`oms.order_lifetime_ns` exists and fires only when a market event or `tick` advances the OMS clock); E2 hedge-fault injection is built and opt-in (hedge_fault_injection=True: outage_on_fill on the hedge venue with ghost hedge, partial hedge; the other fault kinds are refused; the fault presets and the other conditional scenarios do not run here); E3 the participation cap and the size sweep; the circuit breaker (`circuit_breaker.py` is not wired into the session); the
 backtester's own margin step (the core margin engine replaces it). A book that ends a message crossed is invalidated by the core (the backtester repairs it), and the sequence numbers are SYNTHETIC. Parity is explained, not forced (prompt, PHASE D).
 """
 from __future__ import annotations
@@ -555,7 +554,7 @@ class SessionReplay:
                 "config_notes": self.config_notes, "timing": {"latency_model": None if self.latency_model is None else self.latency_model.report(), "truth_books": dict(self.timing_stats)}, "release_identity": self.config.release_identity,
                 "differences_from_backtester_loop": ["timing is shared (profile timing block through Timelines; venue-truth books built by this driver): the old text 'no timing timelines or venue-truth books' is no longer true (corrected 10 Nov)",
                                                      "STILL MISSING in the session runtime (Phase E): E0 ems/ layer (repricing, tactics, PASSIVE placements, risk gate, pairing, venue selector); E1 maker order lifetime as a timer (the OMS deadline fires only on an event or tick); "
-                                                     "E2 hedge-fault injection and the fault presets / conditional scenarios; E3 participation cap and size sweep; circuit breaker: in the core but not switched on in this replay; the backtester's margin step (the core margin engine replaces it)",
+                                                     "E2 the fault presets and the conditional scenarios other than outage_on_fill (hedge-fault injection itself is built and opt-in: hedge_fault_injection=True, ghost and partial hedge included; the manifest key hedge_fault_injection lists what it refuses); E3 participation cap and size sweep; circuit breaker: in the core but not switched on in this replay; the backtester's margin step (the core margin engine replaces it)",
                                                      "message-end cross invalidates the core book", "sequence SYNTHETIC, gaps NOT_MEASURED"],
             },
         }
