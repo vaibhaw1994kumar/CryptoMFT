@@ -26,6 +26,10 @@ Rules
     R4  UNKNOWN is entered by TIMEOUT from SUBMITTED only (no answer to the submit; an acknowledged order that is simply quiet is
         RESTING, not unknown) and is left by any ACK, fill, REJECT, CANCEL_CONFIRM or
         RECONCILE. A TIMEOUT never overrides evidence already held.
+    R5  Cancel before ack (CR-MQ, 10 Nov 2026): a cancel may be sent while the order is still SUBMITTED (the exchange accepts a cancel for
+        an order in flight; a market maker does this often). SUBMITTED -> CANCEL_REQUESTED is allowed, and from CANCEL_REQUESTED either the
+        cancel wins (CANCELLED), the submit was refused (REJECTED), or a fill arrives (R2). Specification only: the end state `resolve`
+        gives for these scripts is unchanged; the table no longer lists the path as a violation.
 """
 from __future__ import annotations
 
@@ -52,11 +56,13 @@ TERMINAL = frozenset({State.FILLED, State.REJECTED, State.CANCELLED})
 
 ALLOWED_TRANSITIONS: dict[State, frozenset[State]] = {
     State.SUBMITTED: frozenset({State.ACKNOWLEDGED, State.RESTING, State.REJECTED, State.UNKNOWN,
-                                State.PARTIALLY_FILLED, State.FILLED}),       # a fill report may overtake the ack
+                                State.PARTIALLY_FILLED, State.FILLED,         # a fill report may overtake the ack
+                                State.CANCEL_REQUESTED}),                     # R5: a cancel sent while the submit is still in flight
     State.ACKNOWLEDGED: frozenset({State.RESTING, State.PARTIALLY_FILLED, State.FILLED, State.CANCEL_REQUESTED}),
     State.RESTING: frozenset({State.PARTIALLY_FILLED, State.FILLED, State.CANCEL_REQUESTED}),
     State.PARTIALLY_FILLED: frozenset({State.PARTIALLY_FILLED, State.FILLED, State.CANCEL_REQUESTED}),
-    State.CANCEL_REQUESTED: frozenset({State.CANCELLED, State.FILLED, State.PARTIALLY_FILLED}),   # late fill: keep and book once
+    State.CANCEL_REQUESTED: frozenset({State.CANCELLED, State.FILLED, State.PARTIALLY_FILLED,      # late fill: keep and book once
+                                       State.REJECTED}),                    # R5: the submit was refused while the cancel was in flight
     State.UNKNOWN: frozenset({State.ACKNOWLEDGED, State.RESTING, State.PARTIALLY_FILLED, State.FILLED, State.REJECTED,
                               State.CANCEL_REQUESTED, State.CANCELLED}),
     State.FILLED: frozenset(),

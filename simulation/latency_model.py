@@ -474,16 +474,44 @@ class _PendingMarkout:
     role: str = ""
 
 
+@dataclass
+class _DecomposedMarkout:
+    target_ts: float
+    horizon_s: float
+    venue: str
+    side: str
+    price: float
+    qty: float
+    role: str
+    mid0: float
+    fee: float
+    tags: dict
+    fill_ts: float
+
+
 class MarkoutTracker:
     """Forward price markouts per fill, evaluated against the venue mid.
 
     Streaming rather than batch: pending markouts sit in a heap and resolve as
     the replay passes their horizon, so memory stays flat over a 10-day run.
     Sign convention: positive = price moved in our favour after the fill.
+
+    `decompose=True` (CR-B, market-maker programme; default False, no arb path sets it) splits each fill into captured / adverse / fee
+    at exact horizons. It has its own record and resolve path (`record_fill(mid_at_fill=...)`, `resolve_asof`), and `resolve` refuses.
+    Sign convention (bps, positive = good for us; s = +1 buy, -1 sell; m0 = mid_at_fill, the venue mid on the exchange clock just
+    before the event that caused the fill):
+      captured  = s * (m0 - price) / m0 * 1e4
+      adverse_h = s * (m_h - m0) / m0 * 1e4        m_h = the venue mid as of fill_ts + h
+      fee       = -fee_paid / notional * 1e4       a maker rebate is positive
+      net_h     = captured + adverse_h + fee
+    Exactness: the caller runs `resolve_asof(now, mids)` BEFORE applying the event stamped `now`, so a markout whose target is
+    before `now` is read on the mid that was valid at its target.
     """
 
-    def __init__(self, horizons_s: tuple[float, ...] = (1.0, 5.0, 30.0)) -> None:
+    def __init__(self, horizons_s: tuple[float, ...] = (1.0, 5.0, 30.0), decompose: bool = False) -> None:
         self.horizons_s = horizons_s
+        self.decompose = decompose
+        self.rows: list[dict] = []            # decompose only: one row per (fill, horizon)
         self._pending: list[tuple[float, int, _PendingMarkout]] = []
         self._counter = itertools.count()
         self.stats: dict[float, dict[str, float]] = {
@@ -492,8 +520,18 @@ class MarkoutTracker:
         }
         self.by_venue_role: dict[str, dict[float, dict[str, float]]] = {}
 
-    def record_fill(self, ts: float, venue: str, side: str, price: float, qty: float, role: str = "") -> None:
+    def record_fill(self, ts: float, venue: str, side: str, price: float, qty: float, role: str = "", *,
+                    mid_at_fill: float | None = None, fee: float | None = None, tags: dict | None = None) -> None:
+        if not self.decompose and (mid_at_fill is not None or fee is not None or tags is not None):
+            raise ValueError("mid_at_fill, fee and tags are for MarkoutTracker(decompose=True) only")
         if price <= 0 or qty <= 0:
+            return
+        if self.decompose:
+            if mid_at_fill is None or mid_at_fill <= 0:
+                raise ValueError("decompose: record_fill needs the exchange-time venue mid at the fill (mid_at_fill)")
+            for h in self.horizons_s:
+                dm = _DecomposedMarkout(ts + h, h, venue, side, price, qty, role, mid_at_fill, fee or 0.0, dict(tags or {}), ts)
+                heapq.heappush(self._pending, (dm.target_ts, next(self._counter), dm))
             return
         for h in self.horizons_s:
             pm = _PendingMarkout(ts + h, h, venue, side, price, qty, role)
@@ -504,6 +542,8 @@ class MarkoutTracker:
         return bool(self._pending) and self._pending[0][0] <= now
 
     def resolve(self, now: float, mids: dict[str, float], finalize: bool = False) -> None:
+        if self.decompose:
+            raise RuntimeError("MarkoutTracker(decompose=True) resolves with resolve_asof (exact horizons)")
         while self._pending and (finalize or self._pending[0][0] <= now):
             _, _, pm = heapq.heappop(self._pending)
             mid = mids.get(pm.venue, 0.0)
@@ -524,6 +564,49 @@ class MarkoutTracker:
                 sv["qty"] += pm.qty
                 sv["bps_qty_sum"] += bps * pm.qty
                 sv["adverse"] += float(bps < 0.0)
+
+    def resolve_asof(self, now: float, mids: dict[str, float], finalize: bool = False) -> None:
+        """decompose only: resolve every markout whose target is strictly before `now` on `mids` (the state before the event at
+        `now`, i.e. the mid as of the target). finalize: resolve the rest on the last mids, flagged at_end."""
+        if not self.decompose:
+            raise RuntimeError("resolve_asof is for MarkoutTracker(decompose=True); use resolve")
+        while self._pending and (finalize or self._pending[0][0] < now):
+            _, _, pm = heapq.heappop(self._pending)
+            m = mids.get(pm.venue, 0.0)
+            if m <= 0:
+                continue
+            s = 1.0 if pm.side == "buy" else -1.0
+            captured = s * (pm.mid0 - pm.price) / pm.mid0 * 10_000.0
+            adverse = s * (m - pm.mid0) / pm.mid0 * 10_000.0
+            fee = -pm.fee / (pm.price * pm.qty) * 10_000.0
+            self.rows.append({"ts": pm.fill_ts, "horizon_s": pm.horizon_s, "venue": pm.venue, "side": pm.side, "price": pm.price,
+                              "qty": pm.qty, "role": pm.role, "mid_at_fill": pm.mid0, "mid_at_h": m, "captured_bps": captured,
+                              "adverse_bps": adverse, "fee_bps": fee, "net_bps": captured + adverse + fee,
+                              "at_end": bool(finalize and pm.target_ts >= now), **pm.tags})
+
+    def decomposed_summary(self, by: tuple[str, ...] = ()) -> dict:
+        """Mean captured / adverse / fee / net (bps, plain and notional-weighted) per horizon, optionally grouped by tag keys.
+        Rows resolved at the end of the run (at_end) are excluded."""
+        groups: dict = {}
+        for r in self.rows:
+            if r["at_end"]:
+                continue
+            key = "|".join(str(r.get(k)) for k in by) if by else "all"
+            g = groups.setdefault(key, {}).setdefault(f"{r['horizon_s']:g}s", {"n": 0, "q": 0.0, "c": 0.0, "a": 0.0, "f": 0.0, "cq": 0.0, "aq": 0.0, "fq": 0.0})
+            g["n"] += 1
+            g["q"] += r["qty"] * r["price"]
+            for k, col in (("c", "captured_bps"), ("a", "adverse_bps"), ("f", "fee_bps")):
+                g[k] += r[col]
+                g[k + "q"] += r[col] * r["qty"] * r["price"]
+        out: dict = {}
+        for key, per_h in groups.items():
+            out[key] = {}
+            for h, g in per_h.items():
+                n, q = g["n"], g["q"]
+                cap, adv, fee = g["c"] / n, g["a"] / n, g["f"] / n
+                out[key][h] = {"n": n, "captured_bps": cap, "adverse_bps": adv, "fee_bps": fee, "net_bps": cap + adv + fee,
+                               "notional_weighted_net_bps": (g["cq"] + g["aq"] + g["fq"]) / q if q > 0 else 0.0}
+        return out
 
     def summary(self) -> dict[str, dict[str, float]]:
         out: dict[str, dict[str, float]] = {}
