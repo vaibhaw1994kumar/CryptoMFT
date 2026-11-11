@@ -104,7 +104,9 @@ The cause is in the data, not the check: these orders were <b>amended</b>, and t
 T2 0 sequence gaps; T3 100 % touch match (one snapshot a day). T5 (archive vs recorder) failed on all 14 days and was accepted by the owner as "the archive is coarser".</p>
 <p><b>T4 core rebuild check, re-run on this worktree's simulator</b> (11 Nov): with snapshot-first ordering it is identical to step 0 ({sum(t4.get('legacy', []))}/{len(t4.get('legacy', []))} days pass);
 with updates first at equal timestamps (<code>delta_first</code>) {sum(t4.get('delta_first', []))}/{len(t4.get('delta_first', []))} pass, and touch size and top 10 levels match on 26 of 28.
-The owner accepted the tie explanation on that condition.</p></section>""")
+The owner accepted the tie explanation on that condition.</p>
+<p><b>Re-run on the current core</b> (12 Nov, outer <code>c468a9a</code>, core <code>f7b7cc3</code>, after merging the main branches; cut short at the owner's request):
+T4 on 16 of 28 coin-days, 59 of the 84 step-1 replays (4,848 order rows) and step 5 are identical to the earlier runs, field by field. The scores below use the full earlier set.</p></section>""")
 
     # tolerances
     sec.append(f"""<section id=tol><h2>Tolerances stated before looking</h2>
@@ -145,6 +147,27 @@ Orders placed inside the spread (20) are the weakest group: 30 % premature.</p><
         ["Really accepted", cm.get("real_accepted__sim_rejected", 0), cm.get("real_accepted__sim_accepted", 0)]])}
 <p>Sensitivity {kn(V['2c_postonly']['sensitivity'])}{ci(V['2c_postonly']['sensitivity'])} (≥ 70 %: met). False-reject rate {kn(V['2c_postonly']['false_reject_rate'])}{ci(V['2c_postonly']['false_reject_rate'])} (≤ 2 %: <b>missed</b>). Identical under all three cancel models (the check runs at arrival, before any queue).
 The one PartiallyFilledCanceled order (ADA 29 April) is reported apart.</p></section>""")
+
+    # fill rate including cancels, markouts real vs sim (owner, 12 Nov)
+    def bp(x):
+        return "–" if x is None or x.get("mean_bps") is None else f"{x['mean_bps']:+.2f} <span class=mut>(n {x['n']})</span>"
+    frw, mrw = [], []
+    for m in MODELS:
+        fm = R[m]["fills_and_markouts"]
+        fr = fm["fill_rate"]
+        frw.append([m, fr["accepted_orders"], pct(fr["real"]["rate"]), pct(fr["sim"]["rate"]), fr["both_filled"], fr["real_only"], fr["sim_only"], fr["neither"]])
+        for h, x in fm["markouts"].items():
+            mrw.append([m, h, bp(x["real_fills"]), bp(x["sim_fills"]), bp(x["both_filled_sim_minus_real"]), bp(x["false_fills_sim"])])
+    sec.append(f"""<section id=fills><h2>Fill rate including cancels, and markouts real vs simulated</h2>
+<p>Over every order the exchange accepted (real cancels included; excluded and censored orders out). "Real only" are orders that really filled and the simulator did not fill:
+mostly the simulated PostOnly rejects of amended orders (2c).</p>
+{table(["Cancel model", "Accepted orders", "Real fill rate", "Sim. fill rate", "Both filled", "Real only", "Sim. only", "Neither"], frw)}
+<p>Maker markout of the first fill, in bps: s × (mid at fill + h − price) / price, s = +1 for a buy; <b>+ means the market moved our way after the fill</b>.
+Real fills use the real execution time, simulated fills the simulated fill time; price is the order's limit price; mid is the archive book's.</p>
+{table(["Cancel model", "Horizon", "Real fills", "Simulated fills", "Sim − real, orders filled in both", "Simulated false fills"], mrw)}
+<p>Under proportional the simulated fills carry the same markout as the real ones to within 0.1 bps at 5 s and 30 s; behind_first fills later and 0.3 bps worse at 30 s.
+All markouts here are a fraction of a basis point; the false fills are too few (3–7) to read. The order-by-order table (one row per order and cancel model, schedule index,
+no order ids) stays on this Mac in <code>out/sim_validation_spot/local_only/orders_by_order.csv</code> and is not part of this report.</p></section>""")
 
     # 2c cause and the post-hoc sensitivity
     SN = s2["sensitivity_without_probable_amendments"]
@@ -222,14 +245,15 @@ No arb profile was changed; <code>delta_first</code> is used for the spot archiv
 <li>One book source: the recorder capture of 19–25 April was lost, so there is no second, finer view of the book (the archive updates about every 100 ms; the recorder every 42 ms).</li>
 <li>Fill timing is an upper bound (our own fills are in the tape).</li>
 <li>The archive has no receive time of ours; the feed delay is the profile's assumption.</li>
-<li>The cancel-model bounds are bounds, not measurements.</li></ul></section>""")
+<li>The cancel-model bounds are bounds, not measurements.</li>
+<li>Exclusion window (owner, latest): orders placed 23 April 06:00–06:20 UTC and orders resting across the resync; none of ours fell there.</li></ul></section>""")
 
     sec.append("""<section id=repro><h2>Reproduce</h2>
 <p>Worktree <code>wt_sim-validation</code>, outer branch <code>sim-validation</code>, core branch <code>sim-validation-core</code>; code in <code>src/new_backtest/validation/</code>
 (<code>spot_order_replay</code>, <code>evaluate</code>, <code>fill_model_fit</code>, <code>perp_taker_check</code>, this builder). Per-order rows stay on this Mac in the session scratchpad and carry no order ids.</p></section>""")
 
     nav = "".join(f"<a href='#{i}'>{n}</a>" for i, n in (("summary", "Summary"), ("scope", "Scope"), ("step0", "Step 0"), ("tol", "Tolerances"), ("s2a", "2a"), ("s2b", "2b"),
-                                                      ("s2c", "2c"), ("amend", "Amendments"), ("s3", "Step 3"), ("s5", "Step 5"), ("ties", "March ties"), ("not", "Limits")))
+                                                      ("s2c", "2c"), ("fills", "Fill rate"), ("amend", "Amendments"), ("s3", "Step 3"), ("s5", "Step 5"), ("ties", "March ties"), ("not", "Limits")))
     return f"""<!doctype html><html lang=en><head><meta charset=utf-8><meta name=viewport content="width=device-width,initial-scale=1">
 <title>Spot Simulator Validation</title><style>
 :root{{--bg:#ffffff;--fg:#1c2330;--mut:#5b6677;--line:#d9dee7;--head:#f1f4f9;--acc:#1f5fbf;--ok:#1b7a3a;--bad:#b3261e;--warn:#9a6700;--code:#f4f6fa}}

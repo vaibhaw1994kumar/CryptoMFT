@@ -3,7 +3,7 @@
 Classes (real outcome): CANCELLED (a simulated fill before the real cancel = FALSE FILL; the replay cancels at exactly the real cancel time, so any simulated fill is one),
 FILLED (first-fill timing: hit = |sim - real| <= 1 s, premature = sim more than 1 s early, late = more than 1 s late, unfilled; denominator all orders, the canonical
 definition of the cancel-model study), REJECTED PostOnly vs accepted (confusion matrix of the simulated PostOnly check at arrival), PartiallyFilledCanceled (own class).
-Excluded before any rate (owner 11 Nov 2026): 2026-04-23 06:04-06:20 UTC, and any order resting across that day's resync (ADA 06:08:58.321, MNT 06:09:08.302 UTC).
+Excluded before any rate (owner, latest decision): orders placed 2026-04-23 06:00-06:20 UTC (11 Nov: 06:04-06:20), and any order resting across that day's resync (ADA 06:08:58.321, MNT 06:09:08.302 UTC).
 Censored, counted, never scored: orders resting across the end of their coin-day (one coin-day per replay), and orders the engine skipped (book not ready).
 Fresh book: no gap longer than 2 s between depth records over [created - 2 s, real end] (rule (c) of the fill-evidence study; the archive has no receive stamps, so its
 "delivered more than 1 s late" half does not apply)."""
@@ -19,7 +19,7 @@ HIT_S = 1.0
 FRESH_GAP_S = 2.0
 RESYNC = {"ADAUSDT": datetime(2026, 4, 23, 6, 8, 58, 321000, tzinfo=timezone.utc).timestamp(),
           "MNTUSDT": datetime(2026, 4, 23, 6, 9, 8, 302000, tzinfo=timezone.utc).timestamp()}
-WINDOW = (datetime(2026, 4, 23, 6, 4, tzinfo=timezone.utc).timestamp(), datetime(2026, 4, 23, 6, 20, tzinfo=timezone.utc).timestamp())
+WINDOW = (datetime(2026, 4, 23, 6, 0, tzinfo=timezone.utc).timestamp(), datetime(2026, 4, 23, 6, 20, tzinfo=timezone.utc).timestamp())
 SECOND_WEEK_FROM = "2026-04-26"      # all 14 days are the public ob200 archive (owner 12 Nov: the recorder capture of 04-19..04-25 was lost); split kept by week
 
 
@@ -103,6 +103,81 @@ def probable_amendment(r: dict) -> bool:
     real create time. Bybit's history keeps the final (amended) price with the original create time, and our MM amends live quotes (FAST_MM
     bybit_order_manager.amend_order), so the price at creation must have been another one. Amended orders that never crossed cannot be detected."""
     return bool(r.get("crosses_at_create")) and r["real_status"] != "Rejected"
+
+
+MARKOUT_H = (5.0, 30.0)
+
+
+def add_markouts(rows_by_model: dict[str, list[dict]], data_root: Path) -> None:
+    """Maker markouts of the first fill, real and simulated: s * (mid(t + h) - price) / price * 1e4 bps, s = +1 for a buy, -1 for a sell (+ = the market
+    moved in our favour after the fill). Real: t = the real first execution. Simulated: t = the simulated first fill (exchange time). price = the order's limit
+    price (a maker fills at its limit). mid = the archive book's mid (delta_first, book events only) at t + h. One pass over each coin-day's book."""
+    from new_backtest.validation.perp_taker_check import books_at
+    need = defaultdict(set)
+    for rows in rows_by_model.values():
+        for r in rows:
+            for t in (r.get("real_first_fill"), sim_first(r)):
+                if t is not None:
+                    need[(r["pair"], r["day"])].update(t + h for h in MARKOUT_H)
+    mid = {}
+    for (pair, day), ts in need.items():
+        for t, book in books_at(data_root, pair, day, sorted(ts)):
+            mid[(pair, day, t)] = (book.best_bid + book.best_ask) / 2.0 if book.ready else None
+    for rows in rows_by_model.values():
+        for r in rows:
+            sgn = 1.0 if r["side"] == "buy" else -1.0
+            for who, t in (("real", r.get("real_first_fill")), ("sim", sim_first(r))):
+                for h in MARKOUT_H:
+                    m = mid.get((r["pair"], r["day"], t + h)) if t is not None else None
+                    r[f"markout_{who}_{int(h)}s_bps"] = None if (m is None or not r.get("price")) else sgn * (m - r["price"]) / r["price"] * 1e4
+
+
+def _mean(xs):
+    xs = [x for x in xs if x is not None]
+    return {"n": len(xs), "mean_bps": round(sum(xs) / len(xs), 3) if xs else None}
+
+
+def fills_and_markouts(rows: list[dict]) -> dict:
+    """Fill rate including cancels (real vs simulated, over every order the exchange accepted) and maker markouts real vs simulated."""
+    acc = [r for r in rows if r["real_status"] != "Rejected" and not excluded(r) and not r.get("skipped") and not r["crosses_day_end"]]
+    real_f = lambda r: (r.get("real_filled_qty") or 0) > 1e-12
+    sim_f = lambda r: (r.get("filled_qty") or 0) > 1e-12
+    out = {"fill_rate": {"accepted_orders": len(acc), "real": rate(sum(map(real_f, acc)), len(acc)), "sim": rate(sum(map(sim_f, acc)), len(acc)),
+                         "both_filled": sum(1 for r in acc if real_f(r) and sim_f(r)), "real_only": sum(1 for r in acc if real_f(r) and not sim_f(r)),
+                         "sim_only": sum(1 for r in acc if sim_f(r) and not real_f(r)), "neither": sum(1 for r in acc if not real_f(r) and not sim_f(r))}}
+    mk = {}
+    for h in MARKOUT_H:
+        k = int(h)
+        both = [r for r in acc if real_f(r) and sim_f(r) and r.get(f"markout_real_{k}s_bps") is not None and r.get(f"markout_sim_{k}s_bps") is not None]
+        mk[f"{k}s"] = {"real_fills": _mean([r.get(f"markout_real_{k}s_bps") for r in acc if real_f(r)]),
+                       "sim_fills": _mean([r.get(f"markout_sim_{k}s_bps") for r in acc if sim_f(r)]),
+                       "both_filled_real": _mean([r[f"markout_real_{k}s_bps"] for r in both]), "both_filled_sim": _mean([r[f"markout_sim_{k}s_bps"] for r in both]),
+                       "both_filled_sim_minus_real": _mean([r[f"markout_sim_{k}s_bps"] - r[f"markout_real_{k}s_bps"] for r in both]),
+                       "false_fills_sim": _mean([r.get(f"markout_sim_{k}s_bps") for r in acc if sim_f(r) and not real_f(r)])}
+    out["markouts"] = mk
+    return out
+
+
+ORDER_COLUMNS = ("i", "pair", "day", "side", "real_status", "queue_quote", "book_age_s", "real_first_fill_after_s", "sim_first_fill_after_s",
+                 "sim_minus_real_s", "timing", "real_filled", "sim_filled", "sim_rejected", "markout_real_5s_bps", "markout_sim_5s_bps",
+                 "markout_real_30s_bps", "markout_sim_30s_bps", "probable_amendment", "excluded")
+
+
+def order_rows(rows: list[dict]) -> list[dict]:
+    """One row per order for the LOCAL order-by-order file: schedule index, no order id, no API fields."""
+    out = []
+    for r in rows:
+        s, f = sim_first(r), r.get("real_first_fill")
+        timing = ("sim_rejected" if r.get("rejected") else "" if f is None else "unfilled" if s is None else
+                  "premature" if s < f - HIT_S else "late" if s > f + HIT_S else "hit")
+        rd = lambda x: None if x is None else round(x, 3)
+        out.append({"i": r["i"], "pair": r["pair"], "day": r["day"], "side": r["side"], "real_status": r["real_status"], "queue_quote": pre_queue(r),
+                    "book_age_s": rd(r.get("book_age_at_placement_s")), "real_first_fill_after_s": rd(None if f is None else f - r["created"]),
+                    "sim_first_fill_after_s": rd(None if s is None else s - r["created"]), "sim_minus_real_s": rd(None if (s is None or f is None) else s - f),
+                    "timing": timing, "real_filled": (r.get("real_filled_qty") or 0) > 1e-12, "sim_filled": (r.get("filled_qty") or 0) > 1e-12,
+                    "sim_rejected": bool(r.get("rejected")), **{k: rd(r.get(k)) for k in ORDER_COLUMNS if k.startswith("markout_")},
+                    "probable_amendment": probable_amendment(r), "excluded": excluded(r) or ("censored" if (r.get("skipped") or r["crosses_day_end"]) else "")})
+    return out
 
 
 def verdicts(res: dict) -> dict:
@@ -239,12 +314,16 @@ if __name__ == "__main__":
     ap = argparse.ArgumentParser()
     ap.add_argument("--runs", required=True); ap.add_argument("--out", required=True)
     ap.add_argument("--orders", required=True); ap.add_argument("--data-root", required=True)
+    ap.add_argument("--order-csv", help="LOCAL file for the order-by-order table (schedule index, no order ids); keep it out of reports and git")
     a = ap.parse_args()
-    res, sens = {}, {}
+    res, sens, by_model = {}, {}, {}
     for m in ("proportional", "behind_first", "ahead_first"):
-        rows = load(Path(a.runs), m)
-        enrich(rows, Path(a.orders), Path(a.data_root))
+        by_model[m] = load(Path(a.runs), m)
+        enrich(by_model[m], Path(a.orders), Path(a.data_root))
+    add_markouts(by_model, Path(a.data_root))
+    for m, rows in by_model.items():
         res[m] = evaluate(rows)
+        res[m]["fills_and_markouts"] = fills_and_markouts(rows)
         sens[m] = evaluate([r for r in rows if not probable_amendment(r)])
         sens[m]["probable_amendments_removed"] = sum(1 for r in rows if probable_amendment(r))
     Path(a.out).write_text(json.dumps({"label": "EXPLORATORY", "metric_definitions": __doc__,
@@ -252,4 +331,12 @@ if __name__ == "__main__":
                                        "verdicts": verdicts(res), "results": res,
                                        "sensitivity_without_probable_amendments": {"label": "POST HOC (12 Nov): not the pre-registered verdict; see probable_amendment()",
                                                                                     "verdicts": verdicts(sens), "results": sens}}, indent=1))
+    if a.order_csv:
+        import csv
+        with open(a.order_csv, "w", newline="") as fh:
+            w = csv.DictWriter(fh, fieldnames=("cancel_model",) + ORDER_COLUMNS)
+            w.writeheader()
+            for m, rows in by_model.items():
+                for row in order_rows(rows):
+                    w.writerow({"cancel_model": m, **row})
     print(json.dumps({m: {"scored": v["scored"], "false_fill": v["cancelled_false_fill"]["all"], "hit": v["filled_timing"]["all"].get("hit")} for m, v in res.items()}, indent=1))

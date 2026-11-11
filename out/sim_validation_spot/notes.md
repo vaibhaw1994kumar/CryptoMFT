@@ -309,3 +309,17 @@ Method: `march_tie_check/bybit_SOLUSDT_ties.jsonl`, written by a read-only scrat
 - **Level:** the model predicts a mean 5 s fill probability of 17% on 05-02, where 0.7% happened. The fit days filled at 20%; that is a regime shift, with 640 of 895 orders censored at 5 s.
 - **The slope rests on about 2 real fills** among 255 uncensored test rows. It cannot be measured with any precision. Both fills are in the two highest-probability bins.
 - **The other folds are unstable too** (slope −0.05 to 8.2, on small samples). On 04-20 (89 fills) it is 0.40: the probabilities are too spread out.
+
+## Owner answers (pasted, 12 Nov) and the re-run on the current core
+- **TOLERANCES.md:** T4 and T5 acceptance noted in Addendum 3. The file was copied unchanged from `simval_wt` (sha256 `50924c31…`) before the addendum.
+- **Exclusion window:** now 06:00–06:20 UTC on 04-23 (was 06:04). No order of ours fell in it.
+- **Re-run on the current core:** both main branches were merged into the track branches (outer `c468a9a`, core fast-forward to `f7b7cc3`). Cut short at the owner's request:
+  - T4: 16 of 28 coin-days (33 runs) identical to 11 Nov, including both legacy failures;
+  - step 1: 59 of 84 replays (4,848 order rows) identical field by field;
+  - step 5: identical.
+  - The scores use the full earlier set.
+- **New outputs** (`fills_and_markouts` in `step2_evaluation.json`), under proportional:
+  - fill rate over the 1,936 accepted orders: real 55.4%, sim 53.0%;
+  - both filled 1,022, real only 50 (mostly the amended orders the sim PostOnly-rejects), sim only 4, neither 860.
+  - Maker markouts: real +5 s −0.04 bps, +30 s +0.21 bps; sim +0.01 and +0.13 bps; on the 1,022 orders filled in both, sim minus real is +0.07 (5 s) and −0.08 bps (30 s).
+- **Order by order:** `local_only/orders_by_order.csv` (5,928 rows = 1,976 orders × 3 models; schedule index, no order ids). It is git-ignored and kept off the report and the artifact.

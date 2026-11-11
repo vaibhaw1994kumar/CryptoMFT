@@ -25,8 +25,9 @@ def row(**kw):
 class EvaluateTests(unittest.TestCase):
     def test_restart_window_and_resting_across_the_resync_are_excluded(self):
         self.assertEqual(evaluate.excluded(row(day="2026-04-23", created=ts(6, 5, day=23), real_end=ts(6, 6, day=23))), "restart_window")
-        self.assertEqual(evaluate.excluded(row(day="2026-04-23", created=ts(6, 0, day=23), real_end=ts(6, 25, day=23))), "resting_across_resync")
-        self.assertEqual(evaluate.excluded(row(day="2026-04-23", created=ts(6, 0, day=23), real_end=ts(6, 3, day=23))), "")
+        self.assertEqual(evaluate.excluded(row(day="2026-04-23", created=ts(6, 0, day=23), real_end=ts(6, 1, day=23))), "restart_window")   # window starts at 06:00 (owner, latest)
+        self.assertEqual(evaluate.excluded(row(day="2026-04-23", created=ts(5, 55, day=23), real_end=ts(6, 25, day=23))), "resting_across_resync")
+        self.assertEqual(evaluate.excluded(row(day="2026-04-23", created=ts(5, 55, day=23), real_end=ts(5, 58, day=23))), "")
         self.assertEqual(evaluate.excluded(row(pair="MNTUSDT", day="2026-04-23", created=ts(6, 20, day=23), real_end=ts(6, 30, day=23))), "")     # just after the window
 
     def test_any_simulated_fill_of_a_really_cancelled_order_is_a_false_fill(self):

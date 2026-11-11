@@ -1,6 +1,6 @@
 {
  "label": "EXPLORATORY",
- "metric_definitions": "Spot simulator validation, step 2: aggregates from the per-order rows of spot_order_replay (no order ids exist in them; only aggregates leave this module).\n\nClasses (real outcome): CANCELLED (a simulated fill before the real cancel = FALSE FILL; the replay cancels at exactly the real cancel time, so any simulated fill is one),\nFILLED (first-fill timing: hit = |sim - real| <= 1 s, premature = sim more than 1 s early, late = more than 1 s late, unfilled; denominator all orders, the canonical\ndefinition of the cancel-model study), REJECTED PostOnly vs accepted (confusion matrix of the simulated PostOnly check at arrival), PartiallyFilledCanceled (own class).\nExcluded before any rate (owner 11 Nov 2026): 2026-04-23 06:04-06:20 UTC, and any order resting across that day's resync (ADA 06:08:58.321, MNT 06:09:08.302 UTC).\nCensored, counted, never scored: orders resting across the end of their coin-day (one coin-day per replay), and orders the engine skipped (book not ready).\nFresh book: no gap longer than 2 s between depth records over [created - 2 s, real end] (rule (c) of the fill-evidence study; the archive has no receive stamps, so its\n\"delivered more than 1 s late\" half does not apply).",
+ "metric_definitions": "Spot simulator validation, step 2: aggregates from the per-order rows of spot_order_replay (no order ids exist in them; only aggregates leave this module).\n\nClasses (real outcome): CANCELLED (a simulated fill before the real cancel = FALSE FILL; the replay cancels at exactly the real cancel time, so any simulated fill is one),\nFILLED (first-fill timing: hit = |sim - real| <= 1 s, premature = sim more than 1 s early, late = more than 1 s late, unfilled; denominator all orders, the canonical\ndefinition of the cancel-model study), REJECTED PostOnly vs accepted (confusion matrix of the simulated PostOnly check at arrival), PartiallyFilledCanceled (own class).\nExcluded before any rate (owner, latest decision): orders placed 2026-04-23 06:00-06:20 UTC (11 Nov: 06:04-06:20), and any order resting across that day's resync (ADA 06:08:58.321, MNT 06:09:08.302 UTC).\nCensored, counted, never scored: orders resting across the end of their coin-day (one coin-day per replay), and orders the engine skipped (book not ready).\nFresh book: no gap longer than 2 s between depth records over [created - 2 s, real end] (rule (c) of the fill-evidence study; the archive has no receive stamps, so its\n\"delivered more than 1 s late\" half does not apply).",
  "note": "PRE_* breakdowns and `verdicts` use the definitions of TOLERANCES.md (10 Nov, before any number); the other breakdowns were chosen after the first results and are supplementary",
  "verdicts": {
   "2a_false_fill": {
@@ -2220,7 +2220,88 @@
      "pair": "ADAUSDT",
      "sim_filled": true
     }
-   ]
+   ],
+   "fills_and_markouts": {
+    "fill_rate": {
+     "accepted_orders": 1936,
+     "real": {
+      "n": 1936,
+      "k": 1072,
+      "rate": 0.5537,
+      "ci95": [
+       0.5315,
+       0.5757
+      ]
+     },
+     "sim": {
+      "n": 1936,
+      "k": 1026,
+      "rate": 0.53,
+      "ci95": [
+       0.5077,
+       0.5521
+      ]
+     },
+     "both_filled": 1022,
+     "real_only": 50,
+     "sim_only": 4,
+     "neither": 860
+    },
+    "markouts": {
+     "5s": {
+      "real_fills": {
+       "n": 1072,
+       "mean_bps": -0.043
+      },
+      "sim_fills": {
+       "n": 1026,
+       "mean_bps": 0.011
+      },
+      "both_filled_real": {
+       "n": 1022,
+       "mean_bps": -0.057
+      },
+      "both_filled_sim": {
+       "n": 1022,
+       "mean_bps": 0.014
+      },
+      "both_filled_sim_minus_real": {
+       "n": 1022,
+       "mean_bps": 0.072
+      },
+      "false_fills_sim": {
+       "n": 4,
+       "mean_bps": -0.797
+      }
+     },
+     "30s": {
+      "real_fills": {
+       "n": 1072,
+       "mean_bps": 0.213
+      },
+      "sim_fills": {
+       "n": 1026,
+       "mean_bps": 0.132
+      },
+      "both_filled_real": {
+       "n": 1022,
+       "mean_bps": 0.207
+      },
+      "both_filled_sim": {
+       "n": 1022,
+       "mean_bps": 0.125
+      },
+      "both_filled_sim_minus_real": {
+       "n": 1022,
+       "mean_bps": -0.082
+      },
+      "false_fills_sim": {
+       "n": 4,
+       "mean_bps": 1.98
+      }
+     }
+    }
+   }
   },
   "behind_first": {
    "orders": 1976,
@@ -4395,7 +4476,88 @@
      "pair": "ADAUSDT",
      "sim_filled": false
     }
-   ]
+   ],
+   "fills_and_markouts": {
+    "fill_rate": {
+     "accepted_orders": 1936,
+     "real": {
+      "n": 1936,
+      "k": 1072,
+      "rate": 0.5537,
+      "ci95": [
+       0.5315,
+       0.5757
+      ]
+     },
+     "sim": {
+      "n": 1936,
+      "k": 1022,
+      "rate": 0.5279,
+      "ci95": [
+       0.5056,
+       0.5501
+      ]
+     },
+     "both_filled": 1019,
+     "real_only": 53,
+     "sim_only": 3,
+     "neither": 861
+    },
+    "markouts": {
+     "5s": {
+      "real_fills": {
+       "n": 1072,
+       "mean_bps": -0.043
+      },
+      "sim_fills": {
+       "n": 1022,
+       "mean_bps": -0.184
+      },
+      "both_filled_real": {
+       "n": 1019,
+       "mean_bps": -0.067
+      },
+      "both_filled_sim": {
+       "n": 1019,
+       "mean_bps": -0.18
+      },
+      "both_filled_sim_minus_real": {
+       "n": 1019,
+       "mean_bps": -0.113
+      },
+      "false_fills_sim": {
+       "n": 3,
+       "mean_bps": -1.326
+      }
+     },
+     "30s": {
+      "real_fills": {
+       "n": 1072,
+       "mean_bps": 0.213
+      },
+      "sim_fills": {
+       "n": 1022,
+       "mean_bps": -0.106
+      },
+      "both_filled_real": {
+       "n": 1019,
+       "mean_bps": 0.193
+      },
+      "both_filled_sim": {
+       "n": 1019,
+       "mean_bps": -0.112
+      },
+      "both_filled_sim_minus_real": {
+       "n": 1019,
+       "mean_bps": -0.305
+      },
+      "false_fills_sim": {
+       "n": 3,
+       "mean_bps": 1.849
+      }
+     }
+    }
+   }
   },
   "ahead_first": {
    "orders": 1976,
@@ -6570,7 +6732,88 @@
      "pair": "ADAUSDT",
      "sim_filled": true
     }
-   ]
+   ],
+   "fills_and_markouts": {
+    "fill_rate": {
+     "accepted_orders": 1936,
+     "real": {
+      "n": 1936,
+      "k": 1072,
+      "rate": 0.5537,
+      "ci95": [
+       0.5315,
+       0.5757
+      ]
+     },
+     "sim": {
+      "n": 1936,
+      "k": 1029,
+      "rate": 0.5315,
+      "ci95": [
+       0.5092,
+       0.5537
+      ]
+     },
+     "both_filled": 1022,
+     "real_only": 50,
+     "sim_only": 7,
+     "neither": 857
+    },
+    "markouts": {
+     "5s": {
+      "real_fills": {
+       "n": 1072,
+       "mean_bps": -0.043
+      },
+      "sim_fills": {
+       "n": 1029,
+       "mean_bps": 0.166
+      },
+      "both_filled_real": {
+       "n": 1022,
+       "mean_bps": -0.057
+      },
+      "both_filled_sim": {
+       "n": 1022,
+       "mean_bps": 0.167
+      },
+      "both_filled_sim_minus_real": {
+       "n": 1022,
+       "mean_bps": 0.224
+      },
+      "false_fills_sim": {
+       "n": 7,
+       "mean_bps": 0.111
+      }
+     },
+     "30s": {
+      "real_fills": {
+       "n": 1072,
+       "mean_bps": 0.213
+      },
+      "sim_fills": {
+       "n": 1029,
+       "mean_bps": 0.246
+      },
+      "both_filled_real": {
+       "n": 1022,
+       "mean_bps": 0.207
+      },
+      "both_filled_sim": {
+       "n": 1022,
+       "mean_bps": 0.235
+      },
+      "both_filled_sim_minus_real": {
+       "n": 1022,
+       "mean_bps": 0.028
+      },
+      "false_fills_sim": {
+       "n": 7,
+       "mean_bps": 1.924
+      }
+     }
+    }
+   }
   }
  },
  "sensitivity_without_probable_amendments": {
