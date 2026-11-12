@@ -185,6 +185,7 @@ class TradingSession:
         breaker_config: CircuitBreakerConfig | None = None,
         risk_gate_mode: str = "off",
         gate_limits: GateLimits | None = None,
+        layer_risk_mode: str = "count",
     ) -> None:
         execution_mode = ExecutionMode(execution_mode)
         assert_execution_mode(
@@ -314,14 +315,20 @@ class TradingSession:
             # engines' listeners, which were held back during the rebuild.
             registered = [l for l in self.ledger.trade_fill_listeners if l not in listeners]
             self.ledger.trade_fill_listeners = listeners + registered
+        if layer_risk_mode not in ("count", "enforce"):
+            raise ValueError("layer_risk_mode must be count or enforce")
+        if layer_risk_mode == "enforce" and not self._intent_journal:
+            raise ValueError("layer_risk_mode='enforce' needs the execution layer (intent_journal=True): refusing to run without the gate")
+        self.layer_risk_mode = layer_risk_mode
         if self._intent_journal:
             from .ems.config import ExecutionConfig
             from .ems.layer import ExecutionLayer, IntentObserver
 
             self.intent_observer = IntentObserver(ExecutionLayer(
-                ExecutionConfig(), instrument=cfg.instrument_id,
+                ExecutionConfig(risk_reservation=layer_risk_mode), instrument=cfg.instrument_id,
                 dispatch_mode="fill_triggered" if self.oms.dispatch_policy == DispatchPolicy.FILL_TRIGGERED else "simultaneous"))
             self.oms.observer = self.intent_observer
+            self.intent_observer.layer.set_risk(self._layer_limits, self._base_by_venue)       # E0 step (c): the layer's reservation gate reads the session's own limits and positions (one rule, not a second mapping)
         self.ledger.journal = self.financing_journal
         # Margin is evaluated during the session, not only at the end (ECO04):
         # on market-data time every ``evaluate_interval_ms`` and after any fill
@@ -393,6 +400,9 @@ class TradingSession:
             raise ValueError("the circuit breaker watches one venue pair")
         self.breaker: CircuitBreaker | None = CircuitBreaker(breaker_config, cfg.venues[0], cfg.venues[1]) if breaker_config is not None else None
         self.risk_gate_mode = risk_gate_mode
+        self.hedge_gate_would_refuse: dict[str, int] = {}
+        if risk_gate_mode != "off":
+            self.oms.hedge_gate = self._hedge_gate_observe
         self.gate_limits = gate_limits
         self.gate_counts: dict[str, int] = {}
         self.breaker_alarms: list[dict[str, Any]] = []
@@ -815,6 +825,21 @@ class TradingSession:
         self._breaker_trip_handled, self._breaker_attempt = False, 0
         self._breaker_alarmed.clear()
 
+    def _layer_limits(self):
+        """The limits of the layer's reservation gate: the session's own gate limits, so the base ceiling is one rule (E0 step (c))."""
+        from .ems.risk import RiskLimits as LayerLimits
+        gl = self._gate_limits()
+        return LayerLimits(venue_cap=gl.venue_cap, net_ceiling=gl.net_ceiling + gl.fill_headroom)
+
+    def _hedge_gate_observe(self, child: ChildOrder, ts_ns: int) -> None:
+        """E0 step (c): a hedge child is evaluated against the risk gate and NEVER blocked (a refused hedge would leave naked exposure): the reasons it would have been refused are counted and logged."""
+        decision = self.gate_child(GateChild("HEDGE", "IOC_CAPPED", child.venue, child.side.value.lower(), float(child.quantity), child.order_id, limit_price=float(child.limit_price)))
+        if decision.allowed:
+            return
+        self.hedge_gate_would_refuse[decision.reason] = self.hedge_gate_would_refuse.get(decision.reason, 0) + 1
+        self.ledger.record("RISK_GATE_WOULD_REFUSE", ts_ns, role="HEDGE", reason=decision.reason, detail=decision.detail, venue=child.venue, side=child.side.value.lower(),
+                           quantity=str(child.quantity), never_blocked=True)
+
     def _gate_limits(self) -> GateLimits:
         if self.gate_limits is not None:
             return self.gate_limits
@@ -862,7 +887,8 @@ class TradingSession:
     def breaker_report(self) -> dict[str, Any]:
         return {"breaker": self.breaker.summary() if self.breaker is not None else None, "breaker_alarms": list(self.breaker_alarms), "signals_blocked_by_breaker": self.signals_blocked_by_breaker,
                 "margin_price_paused": self.margin_price_paused, "signals_blocked_by_margin_price": self.signals_blocked_by_margin_price,
-                "risk_gate_mode": self.risk_gate_mode, "risk_gate_refusals_by_reason": dict(sorted(self.gate_counts.items()))}
+                "risk_gate_mode": self.risk_gate_mode, "risk_gate_refusals_by_reason": dict(sorted(self.gate_counts.items())),
+                "layer_risk_mode": self.layer_risk_mode, "hedge_gate_would_refuse_by_reason": dict(sorted(self.hedge_gate_would_refuse.items()))}
 
     def tick(self, now_ns: int) -> int:
         """Run due timers without a market event (live idle periods)."""
@@ -936,7 +962,7 @@ class TradingSession:
         if self.intent_observer is None:
             return None
         self.intent_observer.finalize(self.last_event_ts_ns / 1e9)
-        return self.intent_observer.report()
+        return self.intent_observer.report(self.oms.plans.values())
 
     def finalize_funding(self) -> None:
         """Settle everything up to the last market event, never beyond the data."""

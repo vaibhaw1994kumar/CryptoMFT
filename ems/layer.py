@@ -114,7 +114,8 @@ class ExecutionLayer:
         self._limits_fn, self._base_fn = limits_fn, base_fn
 
     def _risk_gate(self, legs: list[tuple[str, str, float]], signal_id: int) -> None:
-        """Check ONLY (pure). Raises RiskRefused in `enforce`; in `count` it records what would have been refused."""
+        """Check ONLY (pure). Raises RiskRefused in `enforce`; in `count` it records what would have been refused. E0 step (c): this is gate 1 of the two atomic gates (the layer's base ceiling over filled +
+        reserved exposure); the core's notional / margin / residual reservation (`risk.reserve`) is gate 2. Both are decided before anything is written; the layer's check runs first."""
         if self.cfg.risk_reservation == "off" or self._limits_fn is None or self._base_fn is None:
             return
         why = self.reservations.headroom_breach(self._limits_fn(), legs, self._base_fn())
@@ -169,13 +170,14 @@ class ExecutionLayer:
                             parent=parent, parent_filled_qty=parent_filled_qty, urgency=urgency, deadline_ts=deadline_ts,
                             reason=reason, tactic_hint=tactic_hint)
 
-    def open_primary_group(self, specs: list[dict], *, now: float, signal_id: int) -> list[ExecutionIntent]:
+    def open_primary_group(self, specs: list[dict], *, now: float, signal_id: int, gated: bool = False) -> list[ExecutionIntent]:
         """All primary legs of one signal: validate, check the worst-case exposure with every leg added, then create and reserve
         them — all or none, in one call (4h.2). A refusal leaves the layer exactly as it was."""
         for sp in specs:
             self._validate_open(Role.PRIMARY, sp["qty"], sp["worst_price"], signal_id, None, 0.0)
         legs = [(sp["venues"][0], sp["side"], sp["qty"]) for sp in specs]
-        self._risk_gate(legs, signal_id)                                  # may raise; nothing has been written yet
+        if not gated:                                                     # `gated`: the caller already ran this check (IntentObserver.admit) and must not count it twice
+            self._risk_gate(legs, signal_id)                              # may raise; nothing has been written yet
         out = []
         for sp in specs:
             it = self._create(role=Role.PRIMARY, side=sp["side"], qty=sp["qty"], venues=sp["venues"], worst_price=sp["worst_price"],
@@ -430,6 +432,7 @@ class IntentObserver:
         self._first_child: dict[str, str] = {}
         self._filled: dict[str, float] = {}
         self._closed: set[str] = set()
+        self._admitted: set[str] = set()                # plans whose layer gate ran in admit()
 
     def _guard(self, what: str, fn, *args, **kw):
         try:
@@ -450,17 +453,42 @@ class IntentObserver:
         if name is None:
             name = "PASSIVE" if passive else ("MARKET_BANDED" if intent.role in (Role.UNWIND, Role.FLATTEN) else "IOC_CAPPED")
         self._by_order[order.order_id] = intent
+        order.intent_id = intent.intent_id                          # E0 step (e): every order carries its intent id, journaled before this first child (open_intent writes the intent record first)
         origin = self._first_child.setdefault(intent.intent_id, order.order_id)
         self.layer.child_sent(intent, order.order_id, origin, name, now)
 
-    def plan_opened(self, plan, now: float) -> None:
+    def admit(self, plan, now: float) -> str | None:
+        """E0 step (c), gate 1 of 2, BEFORE the OMS reserves anything: the layer's base-ceiling check for the package's legs. Returns the refusal reason in `enforce` (the OMS then rejects the plan with
+        nothing reserved and nothing written), None otherwise (`count` only counts what would have been refused). Pure: it writes nothing but the layer's counters."""
+        if self.layer.cfg.risk_reservation == "off":
+            return None
+        sid = self._signal.setdefault(plan.parent_id, len(self._signal) + 1)
+        legs = [(c.venue, c.side.value.lower(), float(c.quantity)) for c in plan.children]
+        try:
+            self.layer._risk_gate(legs, sid)
+        except RiskRefused as exc:
+            return str(exc)
+        self._admitted.add(plan.parent_id)
+        return None
+
+    def plan_opened(self, plan, now: float) -> str | None:
         sid = self._signal.setdefault(plan.parent_id, len(self._signal) + 1)
         specs = [dict(side=c.side.value.lower(), qty=float(c.quantity), venues=(c.venue,), worst_price=self._px(c.limit_price),
                       reason="maker leg" if c.post_only else "taker leg") for c in plan.children]
-        intents = self._guard("open_primary", self.layer.open_primary_group, specs, now=now, signal_id=sid)
+        try:
+            intents = self.layer.open_primary_group(specs, now=now, signal_id=sid, gated=plan.parent_id in self._admitted)
+        except RiskRefused as exc:                         # only when the layer's state moved between admit and here (cannot happen inside one OMS call): the OMS rolls the plan back
+            self.counts["refused_after_reserve"] += 1
+            return str(exc)
+        except IntentError as exc:
+            self.error_counts["open_primary"] += 1
+            if len(self.errors) < 50:
+                self.errors.append({"call": "open_primary", "why": str(exc)})
+            intents = None
         for c, it in zip(plan.children, intents or []):
             self._child(it, c, now, passive=bool(c.post_only))
             self.counts["primary_children"] += 1
+        return None
 
     def chain_opened(self, plan, chain_id: str, maker, spec: dict, qty, now: float) -> None:
         sid = self._signal.setdefault(plan.parent_id, len(self._signal) + 1)
@@ -526,6 +554,13 @@ class IntentObserver:
     def finalize(self, now: float) -> None:
         self.layer.finalize(now)
 
-    def report(self) -> dict:
+    def orders_without_intent(self, plans) -> list[str]:
+        """E0 step (e): orders that were sent (state beyond CREATED) without an intent id. Must be empty."""
+        return [o.order_id for plan in plans for o in plan.children if not o.intent_id and o.state.value != "CREATED"]
+
+    def report(self, plans=None) -> dict:
+        if plans is not None:
+            missing = self.orders_without_intent(plans)
+            self.counts["orders_without_intent"] = len(missing)
         return {"layer": self.layer.report(), "observer_counts": dict(self.counts), "layer_rule_errors": dict(self.error_counts), "layer_rule_error_samples": list(self.errors),
                 "observation_only": True}

@@ -281,6 +281,7 @@ class ChildOrder:
     fee_rate_bps: Decimal | None = None
     liquidity: str = ""          # MAKER / TAKER / MIXED
     fee_source: str = ""         # VERIFIED / ASSUMED / CONSERVATIVE_ASSUMED / VENUE_REPORTED
+    intent_id: str = ""          # E0 step (e): the execution-layer intent this order belongs to, set before the order is first sent ("" = no layer, or never sent); not persisted by the plan store yet
 
 
 @dataclass(slots=True)

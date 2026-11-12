@@ -50,6 +50,7 @@ class QueueAwareVenueAdapter(DeterministicVenueAdapter):
                 "a fill needs a real trade, so a depth change must never fill an order on its own"
             )
         super().__init__(venue, consume_liquidity=True)
+        self.observer = None          # E0 step (g): an optional observation sink (place / fill / hedge_arrival); it only RECORDS, nothing here reads it back
         self.executor = executor
         self.tick_size = float(tick_size)
         self.maker_fee_bps = float(maker_fee_bps)
@@ -229,6 +230,8 @@ class QueueAwareVenueAdapter(DeterministicVenueAdapter):
         return callbacks
 
     def _taker_fill(self, request: CanonicalOrderRequest, book: CoreBook | None) -> tuple[ExecutionCallback, ...]:
+        if self.observer is not None and request.action == OrderAction.SUBMIT:
+            self.observer.hedge_arrival(self, request, self._at(request))
         callbacks = super().handle(request, self._taker_book(request, book))      # IOC / FOK / market: a taker fill, the deterministic walk
         if (request.time_in_force == TimeInForce.IOC and len(callbacks) == 1 and callbacks[0].event_type == ExecutionEventType.REJECTED
                 and callbacks[0].reason == "no executable liquidity"):
@@ -275,6 +278,8 @@ class QueueAwareVenueAdapter(DeterministicVenueAdapter):
         self._maker_id[request.order_id] = order.order_id
         self._order[order.order_id] = request
         self._cum[request.order_id] = (0.0, 0.0)
+        if self.observer is not None:
+            self.observer.place(self, request, order, now)
         return (self._callback(request, ExecutionEventType.ACKNOWLEDGED),)
 
     def _cancel_own(self, request: CanonicalOrderRequest) -> tuple[ExecutionCallback, ...]:
@@ -357,6 +362,8 @@ class QueueAwareVenueAdapter(DeterministicVenueAdapter):
             if request is None or fill.qty <= 0:
                 continue
             self.fills_by_source[fill.cause or "unknown"] = self.fills_by_source.get(fill.cause or "unknown", 0) + 1
+            if self.observer is not None:
+                self.observer.fill(self, request, fill)
             filled, notional = self._cum[request.order_id]
             filled, notional = filled + fill.qty, notional + fill.qty * fill.price
             self._cum[request.order_id] = (filled, notional)

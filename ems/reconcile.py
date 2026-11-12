@@ -121,3 +121,37 @@ def reconcile(*, fills: list[dict], intents: dict, fee_bps: dict[str, tuple[floa
             "notional": notional, "problems": {k: v for k, v in problems.items()}, "problems_more": dict(more), "overfills": overfills[:20],
             "overfill_count": len(overfills), "per_venue": per_venue, "cash_pnl_journal": total_shadow, "cash_pnl_engine": cash_pnl,
             "fees_journal": fee_sum, "fees_engine": fees_paid, "mode": mode}
+
+
+def reconcile_session(session, *, fee_bps: dict[str, tuple[float, float]], mode: str = "count") -> dict:
+    """E0 step (f): the shadow reconciliation on the session runtime, the same `reconcile` as the old path. The fill journal is rebuilt from the core ledger's FILL events with the intent each order
+    was sent under (the layer's journal), and cash, base and fees are recomputed from those fills and the fee schedule ALONE, then compared with the ledger's own balances, positions and fees.
+    `mode` "count" records a mismatch; "enforce" raises ExecutionReconciliationError on any problem or over-fill. Observation: it reads the session after the run and writes nothing back.
+    `fee_bps[venue]` = (maker_bps, taker_bps) as a positive cost (a rebate is negative)."""
+    layer = session.intent_observer.layer
+    ledger = session.ledger
+    fills: list[dict] = []
+    log: list[dict] = []
+    fees_paid = 0.0
+    for e in ledger.events:
+        if e["event_type"] != "FILL":
+            continue
+        order = e["order"]
+        q, px, fee = float(e["fill_quantity"]), float(e["fill_price"]), float(e["fee"])
+        side = str(e["side"]).lower()
+        oid = e["order_id"]
+        fills.append({"seq": len(fills), "ts": int(e["ts_ns"]) / 1e9, "order_id": oid, "child_id": oid, "intent_id": layer._child_intent.get(oid, ""), "kind": "child",
+                      "venue": e["venue"], "side": side, "qty": q, "price": px, "fee": fee, "taker": str(order.get("liquidity", "")).upper() == "TAKER", "cap": layer._child_cap.get(oid)})
+        log.append({"venue": e["venue"], "side": side, "qty": q, "price": px})
+        fees_paid += fee
+    venues = sorted({f["venue"] for f in fills} | set(fee_bps))
+    inst = session.cfg.instrument_id
+    inv_base = {v: float(ledger.positions.get((v, inst), 0)) for v in venues}
+    inv_cash = {v: float(ledger.cash_deltas.get(v, 0)) for v in venues}
+    doc = reconcile(fills=fills, intents=layer.intents, fee_bps=fee_bps, liquidation_fee_bps=None, inventory_base=inv_base, inventory_cash=inv_cash, fees_paid=fees_paid,
+                    funding_by_venue={}, trade_log=log, cash_pnl=sum(inv_cash.values()), truncated=bool(layer.counts.get("fills_truncated")), mode=mode)
+    doc["reservations_leaked"] = layer.leaked_reservations()
+    doc["funding_not_modelled"] = True
+    if mode == "enforce" and (not doc["ok"] or doc["reservations_leaked"]):
+        raise ExecutionReconciliationError(f"session fill journal and ledger disagree: {sorted(k for k, v in doc['problems'].items() if v)}; leaked reservations {doc['reservations_leaked']}")
+    return doc

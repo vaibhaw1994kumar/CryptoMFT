@@ -301,6 +301,8 @@ class OMS:
         self._deferred_close: dict[str, tuple[str, tuple[str, ...]]] = {}
         self.hedge_policy = hedge_policy or HedgePolicy()
         self.expired_at_release: list[dict[str, Any]] = []
+        self.lot_residual_alarm: dict[str, Any] | None = None          # owner 12 Nov (a): a carried sub-lot residual that reaches one full hedge lot raises this PERSISTENT alarm (it stays set; there is no auto-clear)
+        self.hedge_gate = None                # E0 step (c): a callable(child, ts_ns) the session sets; it only OBSERVES the hedge child against the risk gate (count: what it would refuse); a hedge is never blocked, it reduces exposure
         self.observer = None                  # E0 step (a): an ems IntentObserver (observation only: the OMS never reads it back); None = off
         self._hedge_specs: dict[str, dict[str, Any]] = {}                  # FILL_TRIGGERED: the declared hedge leg of a plan (no ChildOrder until a maker fill)
         self.hedge_chains: dict[str, dict[str, HedgeLifecycle]] = {}       # parent_id -> chain_id -> chain
@@ -1044,6 +1046,7 @@ class OMS:
                 "max_one_sided_notional": str(policy.max_one_sided_notional),
             },
             "open_residual_plans": len(open_residuals),
+            "lot_residual_alarm": self.lot_residual_alarm,
             "carried_residual_base": str(self.carried_residual_base()),
             # Net unhedged base across open and closed plans: what the account
             # actually holds because legs did not pair up.
@@ -2864,6 +2867,14 @@ class OMS:
             return self._close_without_exposure(
                 plan, now, PlanState.REJECTED, reason
             )
+        if self.observer is not None:
+            refusal = self.observer.admit(plan, now / 1e9)         # E0 step (c), gate 1 of 2: the layer's base ceiling, checked before anything is reserved or written
+            if refusal:
+                self.ledger.record(
+                    "LAYER_RISK_REFUSED", now, parent_id=parent_id, opportunity_id=opportunity.opportunity_id,
+                    reason=refusal, dispatched_children=0,
+                )
+                return self._close_without_exposure(plan, now, PlanState.REJECTED, refusal)
         try:
             for order in children:
                 self.instruments.validate_order(order, now)
@@ -2896,7 +2907,13 @@ class OMS:
         )
         self._transition(plan, PlanState.RISK_RESERVED, now)
         if self.observer is not None:
-            self.observer.plan_opened(plan, now / 1e9)
+            late_refusal = self.observer.plan_opened(plan, now / 1e9)
+            if late_refusal:                                         # gate 2 reserved, then the layer refused: roll back, the plan closes REJECTED and _release_and_close returns the OMS reservation
+                self.ledger.record(
+                    "LAYER_RISK_REFUSED", now, parent_id=parent_id, opportunity_id=opportunity.opportunity_id,
+                    reason=late_refusal, dispatched_children=0, after_reserve=True,
+                )
+                return self._close_without_exposure(plan, now, PlanState.REJECTED, late_refusal)
         self._transition(
             plan, PlanState.DISPATCHED, now, event_type="DISPATCH_INTENT"
         )
@@ -3254,8 +3271,13 @@ class OMS:
             spec["lot_residual"] = residual
             if residual > 0:
                 self.realism_counters["hedge_lot_residual"] = self.realism_counters.get("hedge_lot_residual", 0) + 1
+                lot = self.instruments.get(spec["venue"], spec["instrument_id"], ts_ns).quantity_step
                 self.ledger.record("HEDGE_LOT_RESIDUAL", ts_ns, parent_id=plan.parent_id, maker_order_id=maker.order_id, venue=spec["venue"], maker_filled=str(maker.filled_quantity),
-                                   hedged_target=str(target), residual=str(residual), lot=str(self.instruments.get(spec["venue"], spec["instrument_id"], ts_ns).quantity_step))
+                                   hedged_target=str(target), residual=str(residual), lot=str(lot))
+                total = abs(self.carried_residual_base(exclude=plan)) + residual         # what closed plans carry plus this plan's open part-lot
+                if lot > 0 and total >= lot and self.lot_residual_alarm is None:
+                    self.lot_residual_alarm = {"ts_ns": ts_ns, "venue": spec["venue"], "total_residual_base": str(total), "lot": str(lot), "parent_id": plan.parent_id}
+                    self.ledger.record("HEDGE_LOT_RESIDUAL_ALARM", ts_ns, persistent=True, **{k: v for k, v in self.lot_residual_alarm.items() if k != "ts_ns"})
         delta = target - spec["requested_qty"]
         if delta <= 0:
             return
@@ -3323,6 +3345,8 @@ class OMS:
             self.ledger.record("HEDGE_CHILD_INVALID", ts_ns, parent_id=plan.parent_id, chain_id=chain.chain_id, reason=str(exc), quantity=str(qty))
             self._hedge_refused(plan, spec, chain, ts_ns, str(exc), "instrument_check")
             return False
+        if self.hedge_gate is not None:
+            self.hedge_gate(child, ts_ns)
         self._chain_children[chain.chain_id].append(child.order_id)
         self._chain_of_child[child.order_id] = chain
         plan.children.append(child)
