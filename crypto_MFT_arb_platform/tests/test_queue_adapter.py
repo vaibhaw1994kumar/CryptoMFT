@@ -128,6 +128,16 @@ class QueueAdapterTests(unittest.TestCase):
         (maker,) = a.executor.live_orders(VENUE)
         self.assertGreater(maker.queue_ahead, 0.0)
 
+    def test_replace_carries_the_quote_total_and_does_not_offer_again_what_the_old_order_filled(self):
+        """Owner 12 Nov (amend lineage): the REPLACE names the quote's total; the venue's new order has the total less what the old one had filled by then."""
+        a, book = adapter(), core_book([["100.00", "5"]], ASKS)
+        a.handle(request("m1", Side.BUY, "100.00", "10"), book)
+        a.on_trade(sell_print("100.00", "9", 3 * S))                                                 # 5 drains the queue, 4 fill the old order
+        callbacks = a.handle(request("m2", Side.BUY, "100.00", "10", action=OrderAction.REPLACE, target="m1", ts=4 * S), book)
+        self.assertEqual([c.event_type for c in callbacks], [ExecutionEventType.REPLACED, ExecutionEventType.ACKNOWLEDGED])
+        (maker,) = a.executor.live_orders(VENUE)
+        self.assertAlmostEqual(maker.remaining, 6.0)                                                 # 10 - 4, not 10: the quote is never over-filled
+
     def test_the_router_calls_the_hook_and_reports_the_fill_on_the_match_time(self):
         from crypto_stat_arb.instruments import InstrumentMaster
         a, book = adapter(), core_book([["100.00", "5"]], ASKS)
