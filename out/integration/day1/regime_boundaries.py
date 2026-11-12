@@ -32,7 +32,9 @@ for day in DAYS:
     vol += [v[0] for v in vals]; spread += [v[1] for v in vals]; depth += [v[2] for v in vals]
     per_day[day] = {"seconds": len(vals), "wall_s": round(time.time() - t, 1)}
     print(day, per_day[day], flush=True)
-out = {"label": "TRAINING-DAY regime boundaries (March 2024-03-01..07, Bybit view book, one sample per second); a day is bucketed by these, never by its own distribution",
+full = [f"2024-03-0{d}" for d in range(1, 8)]
+out = {"coverage": "FULL (all seven training days)" if DAYS == full else f"PARTIAL: only {DAYS} (the local slices hold a 2-hour slice of 2024-03-01 and nothing else of the training week; replace when the full days are on this machine)",
+       "label": "TRAINING-DAY regime boundaries (March 2024-03-01..07, Bybit view book, one sample per second); a day is bucketed by these, never by its own distribution",
        "boundaries": {"volatility": tercile_cuts(vol), "spread": tercile_cuts(spread), "liquidity": tercile_cuts(depth)},
        "definitions": {"volatility": "|mid change since the previous sample| in bps", "spread": "touch spread in bps", "liquidity": "bid size + ask size at the touch (SOL)",
                        "buckets": "low <= cut1 < mid <= cut2 < high"},

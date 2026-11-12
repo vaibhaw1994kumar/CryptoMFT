@@ -24,7 +24,7 @@ S = 1_000_000_000
 
 
 def limiter(limit=10, interval=1.0, **reserves):
-    """One Bybit IP bucket of ``limit`` per ``interval`` (shares: new risk 0.7, risk-reducing 0.9)."""
+    """One Bybit IP bucket of ``limit`` per ``interval`` (owner 12 Nov: new quotes 0.8 of the window and at least 2 requests left free; hedges, unwinds, flattens and cancels the whole window)."""
     return ScopedRateLimiter({("BYBIT", "SPOT"): [RateLimit("IP", "HTTP", limit, interval, "requests", "DOCUMENTED")]},
                              **reserves)
 
@@ -45,11 +45,13 @@ def cancel_request(venue="BYBIT", ts=100, order_id="o-1"):
 class TierTests(unittest.TestCase):
     def test_new_risk_stops_first_then_risk_reducing_then_cancels(self):
         lim = limiter()
-        fill(lim, "SUBMIT", 7)                                       # 10 x 0.7 used
+        fill(lim, "SUBMIT", 7)
+        self.assertTrue(lim.check("BYBIT", "SPOT", "SUBMIT", NEW_RISK, 0).admitted)      # the 8th request is still inside the quote share (8 of 10)
+        fill(lim, "SUBMIT", 1)                                       # 8 used: 10 x 0.8, the new-quote share
         self.assertFalse(lim.check("BYBIT", "SPOT", "SUBMIT", NEW_RISK, 0).admitted)
         self.assertTrue(lim.check("BYBIT", "SPOT", "SUBMIT", RISK_REDUCING, 0).admitted)
-        fill(lim, "SUBMIT", 2)                                       # 9 used: the risk-reducing share
-        self.assertFalse(lim.check("BYBIT", "SPOT", "SUBMIT", RISK_REDUCING, 0).admitted)
+        fill(lim, "SUBMIT", 1)                                       # 9 used: a hedge still has the whole window
+        self.assertTrue(lim.check("BYBIT", "SPOT", "SUBMIT", RISK_REDUCING, 0).admitted)
         self.assertTrue(lim.check("BYBIT", "SPOT", "CANCEL", CANCEL, 0).admitted)
         fill(lim, "CANCEL", 1)                                       # full capacity
         decision = lim.check("BYBIT", "SPOT", "CANCEL", CANCEL, 0)
@@ -59,14 +61,25 @@ class TierTests(unittest.TestCase):
     def test_the_window_slides_and_next_free_is_exact(self):
         lim = limiter()
         fill(lim, "SUBMIT", 4, ts=0)
-        fill(lim, "SUBMIT", 3, ts=S // 2)
+        fill(lim, "SUBMIT", 4, ts=S // 2)
         decision = lim.check("BYBIT", "SPOT", "SUBMIT", NEW_RISK, S // 2)
         self.assertEqual(decision.next_free_ns, S)                  # the first four expire at t = 1 s
         self.assertTrue(lim.check("BYBIT", "SPOT", "SUBMIT", NEW_RISK, S).admitted)
 
-    def test_reserves_are_validated(self):
+    def test_the_quote_share_and_the_free_requests_are_validated(self):
         with self.assertRaises(ValueError):
-            limiter(cancel_reserve=0.6, risk_reducing_reserve=0.5)
+            limiter(quote_share=0.0)
+        with self.assertRaises(ValueError):
+            limiter(quote_min_free=-1)
+
+    def test_a_new_quote_always_leaves_two_requests_free_even_in_a_tight_window(self):
+        lim = limiter(limit=6)                                       # a tight limit: 80% of 6 is 4, but two must stay free, so a quote may be the 4th request at most
+        fill(lim, "SUBMIT", 3)
+        self.assertTrue(lim.check("BYBIT", "SPOT", "SUBMIT", NEW_RISK, 0).admitted)
+        fill(lim, "SUBMIT", 1)
+        self.assertFalse(lim.check("BYBIT", "SPOT", "SUBMIT", NEW_RISK, 0).admitted)          # 4 used: a 5th would leave 1 free
+        self.assertTrue(lim.check("BYBIT", "SPOT", "SUBMIT", RISK_REDUCING, 0).admitted)      # a hedge and a cancel still fit
+        self.assertTrue(lim.check("BYBIT", "SPOT", "CANCEL", CANCEL, 0).admitted)
 
 
 class ScopeTests(unittest.TestCase):
@@ -74,17 +87,17 @@ class ScopeTests(unittest.TestCase):
         self.lim = scoped_rate_limiter({"BYBIT": "SPOT", "BINANCE": "SPOT"})
 
     def test_each_scope_binds_on_its_own(self):
-        # Bybit create endpoint: 20/s (assumed); 14 new orders fill the new-risk share.
-        fill(self.lim, "SUBMIT", 14)
+        # Bybit create endpoint: 20/s (assumed); 16 new orders fill the new-quote share (0.8).
+        fill(self.lim, "SUBMIT", 16)
         decision = self.lim.check("BYBIT", "SPOT", "SUBMIT", NEW_RISK, 0)
         self.assertEqual((decision.admitted, decision.binding.name), (False, "/v5/order/create"))
         self.assertTrue(self.lim.check("BYBIT", "SPOT", "CANCEL", CANCEL, 0).admitted)   # own endpoint
         # Binance account order count (100 / 10 s, assumed) binds before its IP weight.
-        for _ in range(70):
+        for _ in range(80):
             self.lim.charge("BINANCE", "SPOT", "SUBMIT", 0)
         binding = self.lim.check("BINANCE", "SPOT", "SUBMIT", NEW_RISK, 0).binding
         self.assertEqual((binding.scope, binding.name), ("ACCOUNT", "ORDERS"))
-        for _ in range(30):                                          # the order count is now full
+        for _ in range(20):                                          # the order count is now full
             self.lim.charge("BINANCE", "SPOT", "SUBMIT", 0)
         self.assertTrue(self.lim.check("BINANCE", "SPOT", "CANCEL", CANCEL, 0).admitted)   # cancels skip ORDERS
 
@@ -115,29 +128,49 @@ class RouterTests(unittest.TestCase):
 
     def test_new_risk_at_its_share_is_refused_and_charges_nothing(self):
         router = self.router()
-        fill(router.scoped_limits, "SUBMIT", 7)
+        fill(router.scoped_limits, "SUBMIT", 8)
         result = router.route_controlled(self.instruction(), {("BYBIT", "BTC-USDT-SPOT"): book("BYBIT")})
         self.assertIsNone(result.selected_venue)
         self.assertIn("scoped_rate_limited", result.checks[0].reasons)
-        self.assertEqual(router.scoped_limits.buckets[next(iter(router.scoped_limits.buckets))].used, 7)
+        self.assertEqual(router.scoped_limits.buckets[next(iter(router.scoped_limits.buckets))].used, 8)
         self.assertEqual(router.scoped_limits.throttled["DOCUMENTED"], 1)
         traced = [r for r in router.trace if r["record_type"] == "SCOPED_RATE_LIMITED"]
         self.assertEqual(traced[0]["limit_status"], "DOCUMENTED")
 
     def test_a_risk_reducing_order_still_routes_and_is_charged(self):
         router = self.router()
-        fill(router.scoped_limits, "SUBMIT", 7)
+        fill(router.scoped_limits, "SUBMIT", 8)
         result = router.route_controlled(self.instruction(risk_reducing=True),
                                          {("BYBIT", "BTC-USDT-SPOT"): book("BYBIT")})
         self.assertEqual(result.selected_venue, "BYBIT")
-        self.assertEqual(router.scoped_limits.buckets[next(iter(router.scoped_limits.buckets))].used, 8)
+        self.assertEqual(router.scoped_limits.buckets[next(iter(router.scoped_limits.buckets))].used, 9)
 
-    def test_queue_policy_releases_when_the_bucket_has_room(self):
+    def test_a_risk_reducing_order_at_a_full_window_is_queued_with_priority_never_refused(self):
+        """Owner 12 Nov (the 2f finding): our own limiter never refuses a hedge, an unwind or a flatten; with the window full it waits for room (release when the window slides), under ANY venue policy."""
+        for policy in (RateLimitPolicy.REJECT, RateLimitPolicy.QUEUE):
+            router = self.router(policy=policy)
+            fill(router.scoped_limits, "SUBMIT", 10, ts=0)
+            result = router.route_controlled(self.instruction(risk_reducing=True, created_ts_ns=100), {("BYBIT", "BTC-USDT-SPOT"): book("BYBIT")})
+            self.assertEqual(result.selected_venue, "BYBIT", policy)             # accepted by the router, not refused
+            self.assertEqual(result.release_ts_ns, S, policy)                    # and sent when the first requests expire
+            self.assertEqual(result.throttle_action.value, "QUEUE", policy)
+
+    def test_a_new_quote_that_does_not_fit_its_share_is_skipped_not_queued_even_under_a_queue_policy(self):
         router = self.router(policy=RateLimitPolicy.QUEUE)
-        fill(router.scoped_limits, "SUBMIT", 7, ts=0)
+        fill(router.scoped_limits, "SUBMIT", 8, ts=0)
         result = router.route_controlled(self.instruction(created_ts_ns=100),
                                          {("BYBIT", "BTC-USDT-SPOT"): book("BYBIT")})
-        self.assertEqual(result.release_ts_ns, S)                   # when the first seven expire
+        self.assertIsNone(result.selected_venue)                    # owner 12 Nov: a quote beyond its share is refused and skipped: nothing is queued
+        self.assertIsNone(result.release_ts_ns)
+        self.assertEqual(len(router._pending), 0)
+
+    def test_quote_has_room_is_read_only_and_follows_the_share(self):
+        router = self.router()
+        self.assertTrue(router.quote_has_room("BYBIT", "BTC-USDT-SPOT", 0))
+        fill(router.scoped_limits, "SUBMIT", 8, ts=0)
+        self.assertFalse(router.quote_has_room("BYBIT", "BTC-USDT-SPOT", 100))
+        self.assertEqual(router.scoped_limits.buckets[next(iter(router.scoped_limits.buckets))].used, 8)     # asking charges nothing
+        self.assertTrue(router.quote_has_room("BYBIT", "BTC-USDT-SPOT", S + 1))                              # the window slid
 
     def test_a_cancel_waits_for_room_with_latency_and_is_never_refused(self):
         router = self.router(latency=True)
@@ -177,12 +210,12 @@ class SessionTests(unittest.TestCase):
         limits = TradingSession(cfg, execution_mode=ExecutionMode.INTERNAL_SIMULATION).router.scoped_limits
         self.assertEqual({b.status for b in limits.buckets.values() if b.scope == "IP" and b.key[1] == "BYBIT"},
                          {"DOCUMENTED"})
-        self.assertEqual((limits.cancel_reserve, limits.risk_reducing_reserve), (0.2, 0.1))
+        self.assertEqual((limits.quote_share, limits.quote_min_free), (0.8, 2))
 
-    def test_config_keys_set_the_reserves_or_turn_it_off(self):
-        cfg = self.config_with({"cancel_reserve": 0.3, "risk_reducing_reserve": 0.05})
+    def test_config_keys_set_the_quote_share_or_turn_it_off(self):
+        cfg = self.config_with({"quote_share": 0.6, "quote_min_free": 3})
         limits = TradingSession(cfg, execution_mode=ExecutionMode.INTERNAL_SIMULATION).router.scoped_limits
-        self.assertEqual((limits.cancel_reserve, limits.risk_reducing_reserve), (0.3, 0.05))
+        self.assertEqual((limits.quote_share, limits.quote_min_free), (0.6, 3))
         off = self.config_with({"enabled": False})
         self.assertIsNone(TradingSession(off, execution_mode=ExecutionMode.INTERNAL_SIMULATION).router.scoped_limits)
 

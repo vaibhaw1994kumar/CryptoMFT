@@ -338,7 +338,12 @@ class SessionReplay:
         """The maker quotes (post-only primary orders) as lifecycle rows, from the ledger's order events: when each was sent, acknowledged, asked to cancel, cancelled, and every fill (time, quantity)."""
         events = [e for e in self.session.ledger.events if e["event_type"] in ("ORDER_LIFECYCLE", "QUOTE_WITHDRAWN", "AMEND_REQUESTED")]
         quotes = {c.order_id: c for plan in self.session.oms.plans.values() for c in plan.children if c.post_only and c.order_role == "PRIMARY"}
-        rows = {oid: {"order_id": oid, "sent_ts": None, "ack_ts": None, "cancel_req_ts": None, "cancel_conf_ts": None, "fills": [], "withdrawn": False, "cancel_while_sent": False, "amend_ts": []} for oid in quotes}
+        def entry_spread(c):
+            sig = self.shim.signals.get(self.session.oms.plans[c.parent_id].opportunity.opportunity_id)
+            if sig is None or not (sig.buy_price and sig.sell_price):
+                return None
+            return (sig.sell_price - sig.buy_price) / ((sig.sell_price + sig.buy_price) / 2.0) * 1e4         # hedge-venue price against the quote's price, bps of the mid: what the quote was entered for
+        rows = {oid: {"order_id": oid, "intent_id": quotes[oid].intent_id, "entry_spread_bps": entry_spread(quotes[oid]), "sent_ts": None, "ack_ts": None, "cancel_req_ts": None, "cancel_conf_ts": None, "fills": [], "withdrawn": False, "cancel_while_sent": False, "amend_ts": []} for oid in quotes}
         cum: dict[str, Decimal] = {}
         for e in events:
             oid, ts = e.get("order_id"), e["ts_ns"] / _NS
@@ -366,12 +371,29 @@ class SessionReplay:
                     cum[oid] = filled
         return [r for r in rows.values() if r["sent_ts"] is not None]
 
+    def _ems_coverage(self) -> dict[str, Any]:
+        from crypto_stat_arb.metrics import ems_path_coverage
+        s = self.session
+        children = [c for plan in s.oms.plans.values() for c in plan.children]
+        hedge_ids = {oid for ids in s.oms._chain_children.values() for oid in ids}
+        journal = list(s.intent_observer.layer.journal) if s.intent_observer is not None else []
+        layer_cfg = s.intent_observer.layer.config.as_dict() if s.intent_observer is not None and hasattr(s.intent_observer.layer, "config") else None
+        return ems_path_coverage(s.ledger.events, journal, children, hedge_ids, self.executor.diag, self.strategy.clip_binding, self.ticks, getattr(self, "_lifecycle_rows", []), layer_cfg)
+
     def _lifecycle(self, fills_rows, markout_rows) -> dict[str, Any]:
         from crypto_stat_arb.metrics import lifecycle_report, pair_economics
         journal = list(self.session.intent_observer.layer.journal) if self.session.intent_observer is not None else []
         pairs = pair_economics(fills_rows, journal)["rows"] if journal else []
         chains = [dict(c.as_record(), parent_id=pid) for pid, group in self.session.oms.hedge_chains.items() for c in group.values()]
-        return lifecycle_report(self._lifecycle_orders(), pairs, markout_rows, chains, self._regime_samples, self.regime_boundaries)
+        orders = self._lifecycle_orders()
+        pnl: dict[str, float] = {}
+        for p in pairs:
+            if p.get("pair_net_bps") is not None:
+                pnl[p["maker_intent_id"]] = pnl.get(p["maker_intent_id"], 0.0) + float(p["pair_net_bps"]) / 1e4 * float(p["qty"]) * float(p["maker_price"])
+        for r in orders:
+            r["net_pnl_usdt"] = pnl.get(r["intent_id"])
+        self._lifecycle_rows = orders
+        return lifecycle_report(orders, pairs, markout_rows, chains, self._regime_samples, self.regime_boundaries)
 
     def _derivative(self, ticker: DerivativeTicker) -> None:
         """A recorded derivatives frame (mark, index, funding): the session keeps the venue's mark for the margin check (and settles funding when it is configured). Nothing else moves."""
@@ -621,6 +643,7 @@ class SessionReplay:
             "events": dict(self.events), "signals": signals, "orders": orders, "fills": fills, "positions": positions, "cash_by_venue": cash, "equity_at_book_mids": str(equity),
             "residual_at_end": self._residual_at_end(),
             **({"_lifecycle": self._lifecycle(fills, list(self.decomp.rows) if self.decomp is not None else [])} if self.lifecycle_report else {}),
+            **({"_ems_coverage": self._ems_coverage()} if self.lifecycle_report else {}),
             **({"participation": {"cap_on": bool(self.config.maker.participation_cap), "prints_it_binds_on": self.executor.diag.get("participation_cap_would_bind", 0.0), "excess_fill_qty": self.executor.diag.get("participation_cap_excess_qty", 0.0)}}
                if self.executor.diag.get("participation_cap_would_bind") or self.config.maker.participation_cap else {}),        # E3: only when the cap is on or something would have bound, so every earlier run's manifest is unchanged
             "ledger_event_counts": dict(Counter(e["event_type"] for e in s.ledger.events)),
@@ -690,6 +713,8 @@ def write_result(result: dict, out_dir: Path) -> None:
                 fh.write(json.dumps(row, sort_keys=True, default=str) + "\n")
     if result.get("_lifecycle") is not None:             # owner 12 Nov: the lifecycle report by regime, a new file next to the statistics block; only when the replay was asked for it
         (out_dir / "session_lifecycle_report.json").write_text(json.dumps(result["_lifecycle"], indent=1, default=str))
+    if result.get("_ems_coverage") is not None:           # owner 12 Nov (section J): the EMS path coverage table, tactic and placement of every order, the per-order checks
+        (out_dir / "session_ems_path_coverage.json").write_text(json.dumps(result["_ems_coverage"], indent=1, default=str))
     if result.get("_decision_events"):                    # owner 12 Nov: every size-aware hedge cap decision and every quote withdrawal, one line each; written only when the run produced any (every earlier profile writes nothing new)
         with (out_dir / "session_decision_events.jsonl").open("w") as fh:
             for row in result["_decision_events"]:
@@ -706,7 +731,7 @@ def write_result(result: dict, out_dir: Path) -> None:
             for row in pe["rows"]:
                 fh.write(json.dumps(row, default=str) + "\n")
         (out_dir / "session_pair_economics.json").write_text(json.dumps({"label": "EXPLORATORY: linked pair economics per maker fill, session runtime", "summary": pe["summary"], "metadata": pe["metadata"]}, indent=1, default=str))
-    (out_dir / "session_manifest.json").write_text(json.dumps({k: v for k, v in result.items() if k not in ("signals", "orders", "fills", "reject_trace", "intent_journal", "intent_fills", "_markout_rows", "_maker_observations", "_decision_events", "_lifecycle")}, indent=1, default=str))
+    (out_dir / "session_manifest.json").write_text(json.dumps({k: v for k, v in result.items() if k not in ("signals", "orders", "fills", "reject_trace", "intent_journal", "intent_fills", "_markout_rows", "_maker_observations", "_decision_events", "_lifecycle", "_ems_coverage")}, indent=1, default=str))
 
 
 # ---- parity (D5): v1_5 on the session against v1_4 on the backtester's loop ----------------------------------------------------------------------------------------------------

@@ -1,0 +1,31 @@
+{
+ "coverage": "IN-SAMPLE: the 2026-10-29 capture itself (owner decision 12 Nov; the March training days are not on this machine)",
+ "label": "regime boundaries of the evaluated day's own terciles: no out-of-sample claim",
+ "boundaries": {
+  "volatility": [
+   0.0,
+   0.9810173149547168
+  ],
+  "spread": [
+   0.9931966032667136,
+   0.9985520994562999
+  ],
+  "liquidity": [
+   992.5999999999999,
+   1407.4
+  ]
+ },
+ "definitions": {
+  "volatility": "|mid change since the previous sample| in bps",
+  "spread": "touch spread in bps",
+  "liquidity": "bid size + ask size at the touch (SOL)",
+  "buckets": "low <= cut1 < mid <= cut2 < high"
+ },
+ "days": [
+  "2026-10-29"
+ ],
+ "n_seconds": 50589,
+ "wall_s": 853.0,
+ "script": "regime_boundaries_day1.py",
+ "script_sha256": "e3632c28b4a2e02c8c85ad7e72d71c8224f3a0b5e1dd531162615817f7381990"
+}

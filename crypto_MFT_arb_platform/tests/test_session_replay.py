@@ -1089,6 +1089,14 @@ class LifecycleReportByRegime(unittest.TestCase):
         off, on = run(False), run(True)
         self.assertNotIn("_lifecycle", off)
         self.assertEqual(off["orders"], on["orders"]); self.assertEqual(off["fills"], on["fills"])               # observation only
+        cov = on["_ems_coverage"]                                                                                # owner 12 Nov, section J: every path listed, the per-order checks pass
+        for path in ("intent_states", "maker_placed", "maker_clipped_by_hedge_depth", "maker_withdrawn_on_event", "maker_expired_at_lifetime", "maker_cancel_while_submitted", "hedge_ioc_full", "hedge_ioc_partial",
+                     "hedge_ioc_zero", "hedge_retry", "query_before_replace", "unwind_orders", "flatten_market_banded", "breaker_trip", "margin_pause", "margin_resume", "lot_residual", "rate_limit_deferral",
+                     "duplicate_updates_suppressed", "late_fills_after_cancel", "participation_cap_would_bind", "hedge_cap_size_aware", "hedge_cap_touch_slack"):
+            self.assertIn(path, cov["paths"])
+        self.assertEqual(cov["paths"]["maker_placed"], on["_lifecycle"]["total"]["quotes"]["quotes_placed"])
+        self.assertTrue(cov["checks"]["pass"], cov["checks"]); self.assertEqual(cov["tactic_violations"], [])
+        self.assertIn("matched_entry_spread_bps", on["_lifecycle"]["total"]["quotes"])
         rep = on["_lifecycle"]
         self.assertTrue(rep["partition_ok"])
         self.assertGreaterEqual(rep["total"]["quotes"]["quotes_placed"], 1)
@@ -1348,9 +1356,9 @@ class EmsNoteRateLimitPressure(unittest.TestCase):
         def __init__(self, name, scope, limit, interval_s=100_000.0, status="ASSUMED"):
             self.name, self.scope, self.limit, self.interval_seconds, self.status = name, scope, limit, interval_s, status
 
-    def _limiter(self, used, ts_ns=0):
+    def _limiter(self, used, ts_ns=0, interval_s=100_000.0):
         from crypto_stat_arb.rate_limits import ScopedRateLimiter
-        R = self.Row
+        R = lambda name, scope, limit: self.Row(name, scope, limit, interval_s)
         lim = ScopedRateLimiter({("BYBIT", "PERP"): [R("HTTP", "IP", 100), R("/v5/order/create", "UID_ENDPOINT", 100), R("/v5/order/cancel", "UID_ENDPOINT", 100)],
                                  ("BINANCE", "PERP"): [R("REQUEST_WEIGHT", "IP", 100), R("ORDERS", "ACCOUNT", 100)]})
         for b in lim.buckets.values():
@@ -1360,55 +1368,48 @@ class EmsNoteRateLimitPressure(unittest.TestCase):
     def _replay(self):
         return LayerRiskGateInTheReplay._replay(self)
 
-    def test_at_75_percent_a_new_maker_quote_is_refused(self):
+    def test_at_85_percent_a_new_maker_quote_is_skipped_not_queued_not_retried(self):
+        """Owner 12 Nov (the 2f decision): new quotes use at most 80% of the window and leave 2 requests free; beyond that the quote is SKIPPED (no plan, nothing queued)."""
+        rep = self._replay(); rep.session.oms.router.scoped_limits = self._limiter(85, 1)
+        result = rep.run()
+        self.assertEqual([o for o in result["orders"] if o["post_only"]], [])                          # no maker order was even created
+        self.assertEqual(result["fills"], [])
+        self.assertGreater(rep.session.quotes_skipped_rate_limit, 0)
+        self.assertEqual(len([e for e in rep.session.ledger.events if e["event_type"] == "QUOTE_SKIPPED_RATE_LIMIT"]), min(rep.session.quotes_skipped_rate_limit, 200))
+
+    def test_at_75_percent_a_new_quote_still_fits_its_share(self):
         rep = self._replay(); rep.session.oms.router.scoped_limits = self._limiter(75, 1)
         result = rep.run()
-        sent = [o for o in result["orders"] if o["state"] not in ("CREATED",)]
-        self.assertEqual([o for o in sent if o["post_only"] and o["state"] in ("ACKNOWLEDGED", "FILLED", "PARTIAL")], [])      # no maker quote rests
-        self.assertEqual(result["fills"], [])
-        self.assertGreater(sum(rep.session.oms.router.scoped_limits.throttled.values()), 0)         # and the refusal is counted
+        self.assertTrue(result["fills"])                                                               # the quote rested and filled, the hedge went out
+        self.assertEqual(rep.session.quotes_skipped_rate_limit, 0)
 
-    def test_at_75_percent_the_hedge_still_goes_out_and_at_90_percent_a_cancel_does(self):
+    def test_a_hedge_at_a_full_window_is_queued_with_priority_and_sent_when_the_window_slides_never_refused(self):
+        """Owner 12 Nov: hedges, unwinds, flattens and cancels are never refused by our own limiter. The window is FULL just as the maker fills; the hedge waits for room (1 s window) and goes out."""
         from crypto_stat_arb.oms import OMS
-        holder = {}
         real_hedge = OMS._hedge_for_maker_fill
-        def at_fill(self, plan, spec, maker, ts_ns):
-            self.router.scoped_limits = holder["lim"]                                                # the limiter is at 75% just as the maker fills: the hedge (risk-reducing, 80%) must still go
-            return real_hedge(self, plan, spec, maker, ts_ns)
-        rep = self._replay()
-        holder["lim"] = self._limiter(75, 1)
-        with mock.patch.object(OMS, "_hedge_for_maker_fill", at_fill):
-            result = rep.run()
-        hedges = [o for o in result["orders"] if o["venue"] == "BINANCE" and o["state"] != "CREATED"]
-        self.assertEqual([(o["state"], o["filled_quantity"]) for o in hedges], [("FILLED", "1.0")])   # the hedge (risk-reducing tier) went out near capacity
-        self.assertEqual(result["positions"], {"BYBIT:SOL-USDT-PERP": "1.0", "BINANCE:SOL-USDT-PERP": "-1.0"})
-        # a cancel (cancel tier) still goes at 90%: the limiter is checked for it directly
-        rep2 = self._replay(); rep2.run()
-        lim = self._limiter(90, 1); router = rep2.session.oms.router
-        self.assertFalse(lim.check("BYBIT", "PERP", "SUBMIT", "NEW_RISK", 2).admitted)
-        self.assertFalse(lim.check("BINANCE", "PERP", "SUBMIT", "RISK_REDUCING", 2).admitted)        # 90% is above the risk-reducing share
-        self.assertTrue(lim.check("BYBIT", "PERP", "CANCEL", "CANCEL", 2).admitted)                   # but a cancel is admitted: it has the whole capacity
-        self.assertIsNotNone(router)
-
-    def test_at_90_percent_the_hedge_is_refused_and_the_exposure_ends_as_a_visible_alarm_not_silently(self):
-        """FINDING (owner 12 Nov item 4, advisor check): the risk-reducing tier stops at 80%, so above it a hedge and its unwinds are refused (scoped_rate_limited). Today's end state is a persistent UNWIND_EXHAUSTED alarm that
-        carries the residual and the reason, and new risk is blocked. Whether hedges should be admitted up to 90% is the owner's decision (the tier shares are ASSUMED); this test pins what happens now."""
-        from crypto_stat_arb.oms import OMS
-        holder = {"lim": self._limiter(90, 1)}
-        real_hedge = OMS._hedge_for_maker_fill
-        def at_fill(self, plan, spec, maker, ts_ns):
-            self.router.scoped_limits = holder["lim"]
-            return real_hedge(self, plan, spec, maker, ts_ns)
+        def at_fill(self_, plan, spec, maker, ts_ns):
+            self_.router.scoped_limits = self._limiter(100, ts_ns, interval_s=1.0)
+            return real_hedge(self_, plan, spec, maker, ts_ns)
         rep = self._replay()
         with mock.patch.object(OMS, "_hedge_for_maker_fill", at_fill):
             result = rep.run()
+        write_case("case4_rate_limit_full_window_hedge_queued_with_priority_never_refused", rep.session.ledger.events)
         hedges = [o for o in result["orders"] if o["venue"] == "BINANCE"]
-        write_case("case4_rate_limit_90_percent_hedge_refused_visible_alarm", rep.session.ledger.events)
-        self.assertTrue(hedges and all(o["cancel_reason"] == "scoped_rate_limited" for o in hedges))
-        self.assertEqual(result["residual_at_end"]["flag"], "UNHEDGED_OR_CARRIED_RESIDUAL")
-        alarm = next(e for e in rep.session.ledger.events if e["event_type"] == "UNWIND_EXHAUSTED_ALARM")
-        self.assertEqual(alarm["execution_blocked_reason"], "unwind_exhausted_alarm")
-        self.assertGreater(float(alarm["confirmed_residual_base"]), 0.0)
+        self.assertTrue(hedges)
+        self.assertEqual([o for o in hedges if o["cancel_reason"] == "scoped_rate_limited"], [])        # zero hedges refused
+        self.assertEqual([(o["state"], o["filled_quantity"]) for o in hedges], [("FILLED", "1.0")])
+        self.assertEqual(result["residual_at_end"]["flag"], "FLAT_NET")
+        maker_fill = next(f for f in result["fills"] if f["venue"] == "BYBIT")
+        hedge_fill = next(f for f in result["fills"] if f["venue"] == "BINANCE")
+        self.assertGreaterEqual(hedge_fill["ts_ns"] - maker_fill["ts_ns"], 900_000_000)               # it waited for the window to slide
+        self.assertTrue(any(e["event_type"] == "CHILD_DISPATCH_THROTTLED" for e in rep.session.ledger.events))
+
+    def test_a_cancel_waits_for_room_and_is_never_refused_at_a_full_window(self):
+        rep2 = self._replay(); rep2.run()
+        lim = self._limiter(100, 1)
+        self.assertFalse(lim.check("BYBIT", "PERP", "SUBMIT", "NEW_RISK", 2).admitted)
+        self.assertFalse(lim.check("BINANCE", "PERP", "SUBMIT", "RISK_REDUCING", 2).admitted)       # the venue's own limit is full: the router queues it, it does not drop it
+        self.assertFalse(lim.check("BYBIT", "PERP", "CANCEL", "CANCEL", 2).admitted)                  # at 100% even a cancel must wait (the router delays it, see test_rate_limits)
 
 
 @unittest.skipUnless(SLICES.is_dir(), "March slices not available (the profile needs a data root)")

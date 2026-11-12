@@ -1,0 +1,36 @@
+{
+ "coverage": "PARTIAL: only ['2024-03-01'] (the local slices hold a 2-hour slice of 2024-03-01 and nothing else of the training week; replace when the full days are on this machine)",
+ "label": "TRAINING-DAY regime boundaries (March 2024-03-01..07, Bybit view book, one sample per second); a day is bucketed by these, never by its own distribution",
+ "boundaries": {
+  "volatility": [
+   0.7902365332777679,
+   2.2516955692331524
+  ],
+  "spread": [
+   0.0755440113142181,
+   0.07758644099394242
+  ],
+  "liquidity": [
+   31.76666666666665,
+   63.8
+  ]
+ },
+ "definitions": {
+  "volatility": "|mid change since the previous sample| in bps",
+  "spread": "touch spread in bps",
+  "liquidity": "bid size + ask size at the touch (SOL)",
+  "buckets": "low <= cut1 < mid <= cut2 < high"
+ },
+ "days": [
+  "2024-03-01"
+ ],
+ "seconds_per_day": {
+  "2024-03-01": {
+   "seconds": 7200,
+   "wall_s": 348.0
+  }
+ },
+ "n_seconds": 7200,
+ "script": "regime_boundaries.py",
+ "script_sha256": "80e43698ba1a5deb855994813151c4fdc7c68c57786978accc7bef4c66f7d665"
+}

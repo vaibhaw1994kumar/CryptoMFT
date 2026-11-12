@@ -325,3 +325,22 @@ def test_the_cases_that_the_core_must_not_carry_or_assume_are_refused_by_the_tab
     c.move(H.UNKNOWN, 1.0)
     with pytest.raises(IllegalHedgeTransition):
         c.move(H.RETRYING, 1.1)                                                # unknown -> retry with no query: the backtester's blackhole handling is not a path
+
+
+def test_a_late_success_of_an_earlier_child_ends_a_waiting_retry():
+    """Found by the 2d scenario replay (owner 12 Nov): a ghost hedge executes after the reject or timeout that decided a retry, while the retry still waits out its backoff. The chain goes RETRYING -> HEDGED (or
+    PARTIALLY_FILLED); it must not raise, and the retry that was waiting is cancelled by the move (OMS._hedge_move drops its due time)."""
+    c = chain()
+    to_submitted(c)
+    c.move(H.REJECTED, 0.1)
+    c.note_reject(0.1, "ghost_timeout", True)
+    c.move(H.RETRYING, 0.35)
+    c.move(H.HEDGED, 0.5, filled_qty=c.exposure_qty)
+    assert c.state is H.HEDGED
+    d = chain()
+    to_submitted(d)
+    d.move(H.REJECTED, 0.1)
+    d.note_reject(0.1, "ghost_timeout", True)
+    d.move(H.RETRYING, 0.35)
+    d.move(H.PARTIALLY_FILLED, 0.5, filled_qty=d.exposure_qty / 2)
+    assert d.state is H.PARTIALLY_FILLED

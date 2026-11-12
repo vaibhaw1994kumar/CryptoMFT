@@ -88,3 +88,62 @@ sampled mode (inverse-CDF over the grid) per timeline, off by default; B5 runs a
 
 Queue priority and fill-probability claims wait for the simulator-validation step (controlled live evidence). The timer-only versus
 event-driven comparison is PARKED and, when run, is a full independent replay per policy on the same capture.
+
+---
+
+# Part 2: the EMS acceptance replays (owner order 12 Nov, "v1_9 EMS acceptance replays", all sections of the 09 Nov note)
+
+Written before any further run. Runs already made under Part 1 (v1_9 at 1 SOL, v1_9 with 5+5 ms processing time, v1_7 identity, all on 2026-10-29) stay as recorded and are re-checked against these rules; no other run starts until the owner approves this file and `production_limits_proposal.md`. One job at a time.
+
+## H. Determinism and seeds
+
+* Every replay uses the profile's fixed seeds (timing seed 11 and the queue seeds in the profile); no run draws from the clock or the OS.
+* PASS rule H1: one scenario of the matrix (the 2-hour window of case 2a) is run twice from the same frozen snapshot; every output file except `release_identity.*` and `wall_s` is byte-identical. FAIL: any other byte. Until H1 passes, no other result of this part is reported.
+
+## I. Data available (stated now, so no row is reported as covered that cannot be)
+
+* 2026-10-29 SOLUSDT capture, both venues, full day: available (scenario windows are 2-hour cuts of it, 20:00-21:00 included).
+* March 2024: the local slices hold 2-hour windows of 03-01, 03-08 and 03-11 only (Bybit full book, Binance best bid/ask). The clean replay "March 03-11" is therefore the 2-hour window, labelled as such. The seven training days are not on this machine.
+* 2022-01-05 (and 01-13): to be confirmed on disk before its replay is listed; if absent it is "not covered: data".
+
+## J. Clean-replay rules (part 1 of the order), v1_9, one run per dataset
+
+| # | Output | Pass | Fail |
+|---|---|---|---|
+| J1 | **EMS path coverage table** (`session_ems_path_coverage.json`): count of every path that occurred, from the ledger and the layer journal: intent states incl. escalated and unknown; maker placed / clipped by hedge depth / withdrawn on event / expired at 15 s / cancel while submitted; hedge IOC full, partial, zero; retry; query before replace; unwind; flatten (MARKET_BANDED at the touch band); gate pause, resume, trip; margin pause, resume; lot residual; rate-limit deferral; duplicate updates suppressed; late fills; participation cap binding; hedge cap source (touch_slack vs size_aware) | every listed path appears with an integer count, 0 included; a path with count 0 is listed "not exercised in this run" (never omitted); counts reconcile with the ledger event counts of the same names | a missing path name; a count that differs from the ledger |
+| J2 | **Tactic and placement of every order** | every maker quote PASSIVE with placement deep; every hedge IOC_CAPPED; MARKET_BANDED only on unwind and flatten orders; `tactic_choice` shown as refused for the arb pairing in the manifest; the dynamic venue choice appears as a report-only column | any order with another tactic; a hedge sent as MARKET_BANDED |
+| J3 | **Per-order checks** | no order price off the venue tick; every limit equals the grid rounding that never loosens (buy down, sell up) of its unrounded value | one violation |
+| J4 | **Lifecycle metrics by regime** (v1_9_TOLERANCES.md section D, extended): volatility tercile, spread bucket, liquidity tercile, UTC hour; fill rate, races, message load, residual duration and oldest age, hedge completion, adverse tails, plus MATCHED ENTRY SPREAD and LIFECYCLE NET P&L per quote, with the statistics block | partitions add up; cells under 30 quotes print counts only; boundaries are the training-set ones where the training days exist, else labelled in-sample (the 29 Oct run) or partial (March slice) | a partition that does not add up; a rate in a cell under 30 |
+
+## K. Scenario rules (part 2 of the order; each 2-hour window of 2026-10-29; each writes a stage trace)
+
+Each scenario passes only if its assertions hold AND its stage trace exists (`out/integration/ems_cases/<case>.jsonl`, with market event received, decision, request sent, exchange-effective, fills in between, notification received, hedge sent) AND the coverage matrix row links it.
+
+| Case | Assertion (pass) |
+|---|---|
+| 2a Binance move before the timer tick (quote_withdraw on) | `QUOTE_WITHDRAWN` at the move, before the 15 s expiry; the old quote can still fill during the effective-action delay (a fill in that window, if the capture produces one, is booked once) |
+| 2b Fill during cancel pending (longer cancel latency); 2b2 fill after cancel confirmed | booked once; residual hedged once; the hedge target adjusted to the booked fill |
+| 2c IOC partial and zero fill | only the true residual is retried (retry quantity = exposure less hedged); exposure age and the escalation are in the trace |
+| 2d Timeout then late success (ghost 3 s and 30 s) | no duplicate order, no duplicate hedge; reconciliation agrees on client order id, exchange order id, execution reports and venue position before anything new is sent |
+| 2e Feed gap / stale (20:00-21:00 plus an injected outage) | entries stop; exposure follows the defined path; quoting resumes only after a valid book, resync and reconciliation; zero orders priced from a stale book |
+| 2f Rate-limit pressure (lowered limit) | cancels and hedges keep capacity; the quote population falls; the hedge-above-80% finding is reported as is |
+| 2g Restart with open orders (resting quote and a hedge in flight) | recovered state reconciled against the venue's orders, executions and positions before quoting resumes; nothing booked twice |
+| 2h New-level vs queued fills | the fill record carries the field (level created by us / queued behind others); counts reported; agreement with real fills is a Track C result, not claimed here |
+| 2i Amend paths (S0 test profile v1_9s, ASSUMED values) | fill during amend pending; accepted request confirms nothing; reject then reason inspected, query, re-check; timeout then no second order; cancel during amend; fallback never two live orders; late fill on the old order reduces the replacement |
+| 2j Duplicate Filled in a cancel/fill race (injected) | booked once, hedged once |
+| 2k Breaker | pause (flat, gateway silent) resumes by itself; trip (exposure plus failure) cancels quotes, flattens with MARKET_BANDED at the touch band, stays tripped until a logged manual reset; alarm payloads carry the four fields |
+| 2l Maker-venue (Bybit) outage with quotes resting | new exposure paused; open orders reconciled on reconnect |
+| 2m Latency | one run with processing latency on both paths; one at p99 and one at p99.9 delays (testnet-measured, labelled); report stale-quote exposure time, races, hedge delay |
+| 2n Size | size_aware cap and participation cap at 1, 5 and 25 SOL: first-attempt fill, slippage against the decision touch, partials, unwinds |
+
+## L. What exists today and what does not (honest status at the time of writing, so "not covered" is decided now, not afterwards)
+
+* BUILT and tested at unit or OMS level, with a stage trace: 2a (quote validity), 2b (partly), 2d (late success, unit), 2e (feed gap, synthetic stream), 2f (rate limit), 2g (restart, OMS level), 2i (amend, OMS level), 2j, plus the alert payloads of 2k.
+* BUILT but not yet replayed on the capture window: all of the above; the replay-level versions are the work of this part.
+* NOT BUILT: sampled tail latency for 2m (p99 and p99.9); a maker-venue outage injection for 2l (hedge_fault_injection simulates a hedge-venue gateway outage only); a restart inside a replay for 2g; the fill-record field of 2h; the S0 requote strategy and profile v1_9s for 2i at replay level (no strategy calls amend yet); the EMS path coverage table of J1 and the matrix of section M; matched entry spread and lifecycle net P&L of J4.
+* A case that cannot be built without owner input is listed in the matrix as "not covered" with the reason.
+
+## M. The coverage matrix
+
+One file, `out/integration/ems_cases/coverage_matrix.md`: path or case, covering layer (OMS, execution layer, router, simulator, risk, session), count, PASS / FAIL against this file, evidence file. A path with no evidence is "not covered: <reason>". Scenario P&L is mechanics only; no profit claim anywhere.
+
