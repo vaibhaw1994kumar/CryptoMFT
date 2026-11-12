@@ -311,6 +311,7 @@ class TradingSession:
                 residual_policy=cfg.residual_policy, plan_store=plan_store,
                 order_timeout_policy=cfg.order_timeout_policy, dispatch_policy=dispatch_policy, hedge_policy=hedge_policy,
             )
+            self.risk.alert_context = self.alert_context            # owner 12 Nov: a kill-switch activation carries the alert fields
         finally:
             # Keep what the OMS registered (reservation consumption) after the
             # engines' listeners, which were held back during the rebuild.
@@ -321,6 +322,7 @@ class TradingSession:
         if layer_risk_mode == "enforce" and not self._intent_journal:
             raise ValueError("layer_risk_mode='enforce' needs the execution layer (intent_journal=True): refusing to run without the gate")
         self.layer_risk_mode = layer_risk_mode
+        self.quotes_withdrawn = 0
         if layer_route_mode not in ("count", "enforce"):
             raise ValueError("layer_route_mode must be count or enforce")
         if layer_route_mode == "enforce" and not self._intent_journal:
@@ -539,6 +541,7 @@ class TradingSession:
             return None
         wall_strategy = self.wall_ns()
         self.stage_timer.add("feed_to_strategy_ns", wall_strategy - wall_start)
+        self._withdraw_invalid_quotes(now)          # quote validity (default off: a strategy without `quotes_to_withdraw`, or with it switched off, returns nothing)
         last: Opportunity | None = None
         for strategy in self.strategies:
             if self.flattening and not hasattr(strategy, "force_exit"):
@@ -790,7 +793,7 @@ class TradingSession:
         if first:
             self._breaker_trip_handled = True
             trip = b.trips[-1] if b.trips else None
-            self.ledger.record("BREAKER_TRIP", now_ns, cause=trip.cause if trip else "", net_base=net, flatten_mode="net")
+            self.ledger.record("BREAKER_TRIP", now_ns, cause=trip.cause if trip else "", net_base=net, flatten_mode="net", **self.alert_context(now_ns))
         else:
             flatten_open = any(p.inherited_base and p.state != PlanState.CLOSED for p in self.oms.plans.values())
             if net <= 1e-10 or flatten_open or now_ns - self._breaker_last_attempt_ns < 1_000_000_000:
@@ -822,7 +825,7 @@ class TradingSession:
                 self._breaker_alarmed.add(step.reason)
                 alarm = {"ts_ns": now_ns, "reason": step.reason, "venue": step.venue, "quantity": step.qty}
                 self.breaker_alarms.append(alarm)
-                self.ledger.record("BREAKER_ALARM", now_ns, **{k: v for k, v in alarm.items() if k != "ts_ns"})
+                self.ledger.record("BREAKER_ALARM", now_ns, **{k: v for k, v in alarm.items() if k != "ts_ns"}, **self.alert_context(now_ns))
 
     def reset_breaker(self, now_ns: int, operator_id: str = "") -> None:
         """The manual reset, an operator action: the only way a TRIPPED breaker (or a persistent flatten alarm) is cleared."""
@@ -833,6 +836,24 @@ class TradingSession:
         self._breaker_state_logged = "OK"
         self._breaker_trip_handled, self._breaker_attempt = False, 0
         self._breaker_alarmed.clear()
+
+    def alert_context(self, now_ns: int) -> dict[str, object]:
+        """The OMS's alert context (confirmed residual, pending hedge quantity, oldest exposure age, why execution is blocked) with the session's own blockers put first: a tripped or paused breaker, the margin price pause."""
+        ctx = self.oms.alert_context(now_ns)
+        if getattr(self, "breaker", None) is not None and self.breaker.state() != "OK":
+            ctx["execution_blocked_reason"] = f"breaker:{self.breaker.state()}"
+        elif getattr(self, "margin_price_paused", False):
+            ctx["execution_blocked_reason"] = "margin_price_missing"
+        return ctx
+
+    def _withdraw_invalid_quotes(self, now_ns: int) -> None:
+        for strategy in self.strategies:
+            quotes = getattr(strategy, "quotes_to_withdraw", None)
+            if quotes is None:
+                continue
+            for q in quotes(self.books, now_ns):
+                if self.oms.withdraw_quote(q["order_id"], now_ns, q["reason"], q["net_bps"]):
+                    self.quotes_withdrawn += 1
 
     def _layer_limits(self):
         """The limits of the layer's reservation gate: the session's own gate limits, so the base ceiling is one rule (E0 step (c))."""
@@ -1066,7 +1087,8 @@ class TradingSession:
         if bool(missing) == self.margin_price_paused:
             return
         self.margin_price_paused = bool(missing)
-        self.ledger.record("MARGIN_PRICE_PAUSE" if missing else "MARGIN_PRICE_RESUME", now, venues=missing, mark_max_age_s=self.margin_config.mark_max_age_ns / 1e9)
+        self.ledger.record("MARGIN_PRICE_PAUSE" if missing else "MARGIN_PRICE_RESUME", now, venues=missing, mark_max_age_s=self.margin_config.mark_max_age_ns / 1e9,
+                           **(self.alert_context(now) if missing else {}))      # owner 12 Nov: the pause is an alert, the resume is not
 
     def _evaluate_margin(self, now: int) -> None:
         due = self._margin_due_ns is None or now >= self._margin_due_ns

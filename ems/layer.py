@@ -42,16 +42,43 @@ def touch_slack_bps(max_walk_bps: float, floor_bps: float) -> float:
 
 def hedge_slack_bps(hedge_cfg: dict, max_walk_bps: float) -> float | None:
     """The slack the OMS hedge policy carries, from the profile's `execution.hedge` block: the effective slack when the cap rule is `touch_slack`, else None (the cap is the opportunity's price)."""
-    if hedge_cfg.get("cap") != "touch_slack":
+    if hedge_cfg.get("cap") not in ("touch_slack", "size_aware"):
         return None
     return touch_slack_bps(max_walk_bps, hedge_cfg.get("slack_bps_floor", 5.0))
+
+
+def hedge_policy_fields(hedge_cfg: dict, max_walk_bps: float) -> dict:
+    """The cap fields of the OMS HedgePolicy, from the profile's `execution.hedge` block (one place, read by every session constructor). cap `size_aware` (owner 12 Nov) adds its three numbers;
+    max_slip_bps 15 and vol_k 0 are ASSUMED, latency_s is the hedge latency the volatility term scales with."""
+    out = {"touch_slack_bps": hedge_slack_bps(hedge_cfg, max_walk_bps), "cap_basis": str(hedge_cfg.get("cap_basis", "touch"))}
+    if hedge_cfg.get("cap") == "size_aware":
+        out.update(size_aware=True, max_slip_bps=float(hedge_cfg.get("max_slip_bps", 15.0)), vol_k=float(hedge_cfg.get("vol_k", 0.0)), latency_s=float(hedge_cfg.get("latency_s", 0.0)))
+    return out
+
+
+def limit_on_grid(side: str, price: Decimal, tick: Decimal) -> Decimal:
+    """A limit price moved onto the venue's grid WITHOUT loosening it: a buy limit rounds down, a sell limit rounds up (owner 12 Nov). The one rounding of every IOC, hedge and unwind limit."""
+    return (price / tick).to_integral_value(rounding="ROUND_FLOOR" if side.lower() == "buy" else "ROUND_CEILING") * tick
 
 
 def hedge_cap_on_grid(side: str, touch: Decimal, slack_bps, tick: Decimal) -> Decimal:
     """Cap rule `touch_slack` for one hedge attempt: the CURRENT hedge touch moved against us by `slack_bps`, on the venue's price grid, never inside the cap
     (a buy rounds down, a sell rounds up). Decimal throughout; re-taken from the touch at every attempt by the caller."""
-    raw = touch_slack_price(side, touch, Decimal(str(slack_bps)))
-    return (raw / tick).to_integral_value(rounding="ROUND_FLOOR" if side.lower() == "buy" else "ROUND_CEILING") * tick
+    return limit_on_grid(side, touch_slack_price(side, touch, Decimal(str(slack_bps))), tick)
+
+
+def hedge_cap_size_aware(side: str, touch: Decimal, deepest: Decimal, slack_bps, vol_bps, max_slip_bps, tick: Decimal) -> tuple[Decimal, bool]:
+    """Cap rule `size_aware` for one hedge attempt (owner 12 Nov). `deepest` is the price of the last level the hedge quantity reaches on the bot's VIEW of the hedge book (the touch itself when the
+    touch covers the size); the cap is that level moved against us by the allowance (the slack floor plus the volatility/latency term `vol_bps`), never beyond the touch by more than the absolute
+    limit max(max_slip_bps, slack_bps) (a floor on the limit keeps the touch-covers case equal to touch_slack), on the venue's grid without loosening (a buy rounds down, a sell rounds up).
+    Returns (cap, the absolute limit bound it)."""
+    buy = side.lower() == "buy"
+    raw = touch_slack_price(side, deepest, Decimal(str(slack_bps)) + Decimal(str(vol_bps)))
+    limit = touch_slack_price(side, touch, Decimal(str(max(float(max_slip_bps), float(slack_bps)))))
+    binds = raw > limit if buy else raw < limit
+    if binds:
+        raw = limit
+    return limit_on_grid(side, raw, tick), binds
 
 
 class HedgeRetry(NamedTuple):

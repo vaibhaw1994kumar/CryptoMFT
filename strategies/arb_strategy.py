@@ -76,6 +76,10 @@ class ArbConfig:
     # Edge thresholds
     min_net_edge_bps: float = 1.0        # after fees, before slippage
     safety_buffer_bps: float = 0.5       # extra cushion for in-flight drift
+    # Quote validity (owner 12 Nov, EMS note 09 Nov section 4; OFF by default, set by profile v1_8): on every book update a RESTING maker quote's net edge is recomputed against the current hedge-venue
+    # executable price for the quote's size (VWAP over the depth needed); below the entry threshold minus the hysteresis it is withdrawn (cancelled). Withdrawal only: no repricing (S0 stays off).
+    quote_withdraw: bool = False
+    quote_withdraw_hysteresis_bps: float = 0.5   # ASSUMED
 
     # Gates
     max_book_age_s: float = 0.50
@@ -476,6 +480,38 @@ class CrossVenueArbStrategy:
         if er.net_bps - cfg.safety_buffer_bps < cfg.min_net_edge_bps:
             return None, "no_edge"
         return px, "ok"
+
+    def quote_validity(self, maker_venue: str, side: str, price: float, qty: float, books: dict, now: float) -> tuple[bool, float | None, str]:
+        """Quote validity: is a RESTING maker quote (`side` "buy" or "sell", `price`, remaining `qty`) still worth resting? Its net edge is recomputed by the entry rule's own formula (edge.maker_taker_expected_edge_bps,
+        the one place an edge is computed) with the hedge priced at the VWAP the hedge venue's book gives for `qty` NOW, and compared with the entry threshold minus `quote_withdraw_hysteresis_bps`.
+        Returns (valid, net_bps, why). Valid with a reason when it cannot be measured (stale hedge touch, no price, not enough depth to price the size): an unmeasurable edge never withdraws a quote.
+        Pure apart from reading the books; it counts no rejects."""
+        cfg = self.config
+        if cfg.profile == "legacy_v0":
+            raise ValueError("quote_validity needs a non-legacy profile (conditional edge)")
+        taker_venue = next(v for v in books if v != maker_venue)
+        taker_book = books[taker_venue]
+        maker_fees, taker_fees = self.venues[maker_venue].fees, self.venues[taker_venue].fees
+        key = "bid" if side == "buy" else "ask"
+        hedge_side = "bid" if key == "bid" else "ask"          # a buy quote is hedged by SELLING into the hedge venue's bids; a sell quote by BUYING from its asks
+        if not taker_book.ready:
+            return True, None, "no_hedge_price"
+        if taker_book.touch_age_s(hedge_side, now) > cfg.max_touch_age_s:
+            return True, None, "stale_hedge_touch"
+        walk = taker_book.walk(hedge_side, qty)
+        if walk.exhausted or walk.filled_qty + 1e-12 < qty or walk.vwap <= 0:
+            return True, None, "hedge_depth_unknown"
+        vwap_book = _VwapTouch(walk.vwap)
+        er = edge_mod.maker_taker_expected_edge_bps(
+            price, key, vwap_book, qty, maker_fees.maker_bps, taker_fees.taker_bps,
+            expected_hedge_move_bps=self._hedge_move_bps(key, maker_venue, taker_venue, books, price, None),
+            expected_hedge_slippage_bps=cfg.expected_hedge_slippage_bps, funding_holding_bps=cfg.funding_holding_bps, p_fail=cfg.p_fail, loss_fail_bps=cfg.loss_fail_bps)
+        if er.net_bps is None:
+            return True, None, "no_hedge_price"
+        net = er.net_bps - cfg.safety_buffer_bps
+        if net < cfg.min_net_edge_bps - cfg.quote_withdraw_hysteresis_bps:
+            return False, net, "edge_below_threshold"
+        return True, net, "ok"
 
     def _quote_to_tick(self, venue: str, price: float, side: str) -> float:
         """The quote on the venue's price grid: bids round down, asks up (1e-9 of a tick of float slack)."""
@@ -1033,6 +1069,15 @@ class CrossVenueArbStrategy:
 
 
 _LIVE_CHILD_STATES = frozenset({OrderState.CREATED, OrderState.SENT, OrderState.CANCEL_PENDING, OrderState.ACKNOWLEDGED, OrderState.PARTIAL})
+_WITHDRAWABLE_STATES = frozenset({OrderState.ACKNOWLEDGED, OrderState.PARTIAL})       # a resting quote with no cancel in flight (CANCEL_PENDING is already on its way out)
+
+
+class _VwapTouch:
+    """A one-price stand-in for a hedge book: the VWAP the hedge size would get, in the shape `maker_taker_expected_edge_bps` reads (ready, best_bid, best_ask)."""
+    ready = True
+
+    def __init__(self, price: float) -> None:
+        self.best_bid = self.best_ask = price
 
 
 class ArbSessionStrategy:
@@ -1097,6 +1142,28 @@ class ArbSessionStrategy:
                 return None
             ts = book.last_receive_ts_ns / 1_000_000_000 if book.last_receive_ts_ns else now_s
             out[feed] = float_mirror(feed, self.strategy.pair, book.bids, book.asks, ts)
+        return out
+
+    def quotes_to_withdraw(self, books: dict, now_ns: int) -> list[dict]:
+        """Quote validity, session side: the resting maker orders whose edge no longer clears the threshold minus the hysteresis. Empty unless `quote_withdraw` is on. Reads the OMS plans and the view books;
+        it cancels nothing itself (the session asks the OMS to withdraw each one). An order that already has a cancel in flight is not offered again."""
+        if not self.strategy.config.quote_withdraw:
+            return []
+        floats = self.view_books() if self.view_books is not None else self.float_books(books, now_ns / 1_000_000_000)
+        if floats is None:
+            return []
+        now_s = now_ns / 1_000_000_000
+        out = []
+        for plan in self.oms.plans.values():
+            for child in plan.children:
+                if not child.post_only or child.order_role != "PRIMARY" or child.state not in _WITHDRAWABLE_STATES or child.venue not in self._feed_name:
+                    continue
+                remaining = float(child.quantity - child.filled_quantity)
+                if remaining <= 0:
+                    continue
+                valid, net, why = self.strategy.quote_validity(self._feed_name[child.venue], child.side.value.lower(), float(child.limit_price), remaining, floats, now_s)
+                if not valid:
+                    out.append({"order_id": child.order_id, "net_bps": net, "reason": why})
         return out
 
     # -- the session's call -------------------------------------------------------------------------------------------------

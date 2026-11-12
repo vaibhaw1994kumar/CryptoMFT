@@ -149,7 +149,8 @@ class QueueAwareVenueAdapter(DeterministicVenueAdapter):
             if fc.outage_policy == "ghost":
                 release_ns = int(round(outage.end_ts * _NS))
                 while (nxt := self._outage_at(release_ns)) is not None:        # back to back outages: reconnect after the last one
-                    release_ns = int(round(nxt.end_ts * _NS))
+                    later = int(round(nxt.end_ts * _NS))
+                    release_ns = later if later > release_ns else release_ns + 1     # always advance: float rounding can leave the rounded end inside its own window by a nanosecond
                 self._held_ordinal += 1
                 self._held.append((release_ns, self._held_ordinal, request, book))
                 return ()                                                    # no report of any kind: the strategy cannot tell this order from a lost one

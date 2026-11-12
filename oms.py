@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from decimal import Decimal, ROUND_CEILING, ROUND_FLOOR
+from decimal import Decimal
 import json
 from pathlib import Path
 from collections.abc import Callable
@@ -22,7 +22,7 @@ from .models import (
     stable_id,
 )
 from .orderbook import BookState, OrderBook
-from .ems.layer import hedge_cap_on_grid, hedge_retry_decision      # the hedge cap and retry rules live once, in the execution layer (E0 step b)
+from .ems.layer import hedge_cap_on_grid, hedge_cap_size_aware, hedge_retry_decision, limit_on_grid      # the hedge cap and retry rules live once, in the execution layer (E0 step b)
 from .hedge_lifecycle import HedgeLifecycle, HedgePolicy, HedgeState
 from .venue_semantics_perp import BINANCE as _MKT_BINANCE, BYBIT as _MKT_BYBIT, classify_reject
 from .risk import (
@@ -303,6 +303,7 @@ class OMS:
         self.expired_at_release: list[dict[str, Any]] = []
         self.route_mode = "count"             # E0 step (d): "count" counts a layer decision that differs from the order's venue and sends the order's own venue; "enforce" rejects the order back instead
         self.lot_residual_alarm: dict[str, Any] | None = None          # owner 12 Nov (a): a carried sub-lot residual that reaches one full hedge lot raises this PERSISTENT alarm (it stays set; there is no auto-clear)
+        self.hedge_short_vol_bps = None       # owner 12 Nov (cap size_aware): an optional callable(venue, ts_ns) -> the short-horizon volatility in bps per sqrt(second); None = no source (the volatility term is then 0, labelled in the cap event)
         self.hedge_gate = None                # E0 step (c): a callable(child, ts_ns) the session sets; it only OBSERVES the hedge child against the risk gate (count: what it would refuse); a hedge is never blocked, it reduces exposure
         self.observer = None                  # E0 step (a): an ems IntentObserver (observation only: the OMS never reads it back); None = off
         self._hedge_specs: dict[str, dict[str, Any]] = {}                  # FILL_TRIGGERED: the declared hedge leg of a plan (no ChildOrder until a maker fill)
@@ -347,6 +348,10 @@ class OMS:
             plan.state != PlanState.CLOSED for plan in self.plans.values()
         )
         self._recover_hedge_state()
+        # Owner 12 Nov (restart against the venue): the recovered plans that are still open are UNRECONCILED until reconcile_plan has put the venue's own account of their orders through the OMS (executions missed
+        # while down are booked once there, the hedge they trigger is sent there). With restart_reconcile_gate on (default off: no caller before the live runtime restarts anything) no NEW risk is taken while any is.
+        self.restart_reconcile_gate = False
+        self._restart_unreconciled: set[str] = {pid for pid, plan in self.plans.items() if plan.state != PlanState.CLOSED}
         # REJECT_AFTER_FILL_ALARM is once per order across restarts: the recovered reports show which were raised.
         self._reject_after_fill_alarmed.update(
             order.order_id for plan in self.plans.values() for order in plan.children
@@ -1269,16 +1274,9 @@ class OMS:
         # instrument-status change lands between plan creation and unwind.
         spec = self.instruments.get(venue, instrument_id, ts_ns)
         multiplier = self.residual_policy.unwind_price_slippage_bps / Decimal("10000")
-        if side == Side.BUY:
-            raw_price = book.best_ask * (Decimal("1") + multiplier)
-            rounding = ROUND_CEILING
-        else:
-            raw_price = book.best_bid * (Decimal("1") - multiplier)
-            rounding = ROUND_FLOOR
-        price = (
-            (raw_price / spec.tick_size).to_integral_value(rounding=rounding)
-            * spec.tick_size
-        )
+        # Owner 12 Nov: a rounding to the grid never loosens the cap (a buy limit rounds down, a sell limit rounds up), the same rule as the hedge cap (hedge_cap_on_grid).
+        raw_price = book.best_ask * (Decimal("1") + multiplier) if side == Side.BUY else book.best_bid * (Decimal("1") - multiplier)
+        price = limit_on_grid(side.value, raw_price, spec.tick_size)
         return price, OrderType.LIMIT, TimeInForce.IOC, False
 
     def _unwind_venues(self, plan: ParentPlan) -> tuple[str, ...]:
@@ -1359,11 +1357,37 @@ class OMS:
         payload: dict[str, object] = {
             "residual_base": str(plan.residual_base), "unwind_attempts": plan.unwind_attempts,
             "attempts_allowed": allowed, "max_residual_base": str(self.residual_policy.max_residual_base),
+            **{**self.alert_context(ts_ns), "execution_blocked_reason": self.alert_context(ts_ns)["execution_blocked_reason"] or "unwind_exhausted_alarm"},      # this alarm is itself what blocks new risk from here on
         }
         self.unwind_exhausted_alarms[plan.parent_id] = dict(payload, ts_ns=ts_ns)
         self.realism_counters["unwind_exhausted_alarms"] = self.realism_counters.get("unwind_exhausted_alarms", 0) + 1
         self.ledger.record("UNWIND_EXHAUSTED_ALARM", ts_ns, parent_id=plan.parent_id, **payload)
         self._persist(plan, ts_ns, "UNWIND_EXHAUSTED_ALARM", **payload)
+
+    def alert_context(self, now_ns: int) -> dict[str, object]:
+        """What every alert carries (owner 12 Nov): the confirmed residual, the hedge quantity still pending, the age of the oldest exposure, and why execution is blocked. Read-only.
+        confirmed_residual_base  the net unhedged base the OMS holds (open plans plus carried residual of closed ones)
+        pending_hedge_qty        hedge quantity of the open chains not yet hedged or unwound
+        oldest_exposure_age_s    seconds since the oldest still-open hedge chain opened or the oldest open residual formed (None when nothing is open)
+        execution_blocked_reason why new risk is refused now: kill switch (with its reason), an unwind-exhausted alarm, the one-lot residual alarm, or '' when nothing blocks"""
+        snap = self.residual_risk_snapshot()
+        pending, starts = Decimal("0"), []
+        for chains in self.hedge_chains.values():
+            for c in chains.values():
+                if c.state in self._CHAIN_OPEN and c.exposure_closed_ts is None:
+                    pending += Decimal(str(max(0.0, c.exposure_qty - c.hedged_qty - c.unwound_qty)))
+                    starts.append(c.opened_ts)
+        starts += [plan.residual_since_ts_ns / 1e9 for plan in self.plans.values() if plan.residual_since_ts_ns is not None and plan.state != PlanState.CLOSED]
+        if self.risk.kill_switch:
+            blocked = f"kill_switch:{self.risk.kill_switch_reason}"
+        elif self.unwind_exhausted_alarms:
+            blocked = "unwind_exhausted_alarm"
+        elif self.lot_residual_alarm is not None:
+            blocked = "lot_residual_alarm"
+        else:
+            blocked = ""
+        return {"confirmed_residual_base": snap["total_residual_base"], "pending_hedge_qty": str(pending),
+                "oldest_exposure_age_s": (now_ns / 1e9 - min(starts)) if starts else None, "execution_blocked_reason": blocked}
 
     def reset_unwind_exhausted_alarm(self, ts_ns: int, operator: str, parent_id: str | None = None) -> list[str]:
         """Operator action: clear the unwind-exhausted alarm of one plan (or all). The residual itself is not touched."""
@@ -2490,6 +2514,19 @@ class OMS:
                 source=update.source.value,
             )
             return plan
+        if plan.state == PlanState.CLOSED and any(
+            row.get("resolved_order_state") == ORDER_STATE_BY_EVENT[update.state].value
+            and Decimal(str(row.get("cumulative_filled_quantity"))) == update.cumulative_filled_quantity
+            for row in order.state_updates
+        ):
+            # Owner 12 Nov (EMS note): a venue repeats a message (Bybit's duplicate "Filled" in a cancel/fill race) after the plan closed. It says nothing new (same state, same cumulative fill as an update already
+            # applied): it is suppressed like any duplicate, not raised. Booked once, hedged once. An update that DOES say something new still takes the rejected path below.
+            self.ledger.record(
+                "ORDER_UPDATE_DUPLICATE_SUPPRESSED", update.observed_ts_ns,
+                parent_id=plan.parent_id, order_id=order.order_id,
+                update_id=update.update_id, source=update.source.value, same_content_as_applied=True, plan_closed=True,
+            )
+            return plan
         if plan.state == PlanState.CLOSED:
             self.ledger.record(
                 "CLOSED_PLAN_UPDATE_REJECTED", update.observed_ts_ns,
@@ -2688,6 +2725,21 @@ class OMS:
             event_ts_ns=ts_ns, observed_ts_ns=ts_ns,
         ))
 
+    def withdraw_quote(self, order_id: str, now_ns: int, reason: str, net_bps: float | None = None) -> bool:
+        """Quote validity (owner 12 Nov): cancel one resting maker quote whose edge no longer clears the threshold, through the same cancel path as the order lifetime (the cancel tier of the rate limiter).
+        Returns False when the order is not a live order with no cancel in flight. A fill that lands before the venue honours the cancel is booked by the normal fill path, once, and hedged."""
+        for plan in self.plans.values():
+            order = next((x for x in plan.children if x.order_id == order_id), None)
+            if order is None:
+                continue
+            if order.state not in LIVE_ORDER_STATES or order.state == OrderState.CANCEL_PENDING or self.router.has_pending_order(order_id):
+                return False
+            self.ledger.record("QUOTE_WITHDRAWN", now_ns, parent_id=plan.parent_id, order_id=order_id, venue=order.venue, reason=reason, net_edge_bps=net_bps)
+            self.note_cancel_requested(order_id, now_ns)
+            self._cancel_working_orders(plan, [order], now_ns)
+            return True
+        return False
+
     def note_cancel_requested(self, order_id: str, ts_ns: int) -> None:
         """Record that a cancel was sent for `order_id` (the same internal CANCEL_REQUESTED update the cancel path records):
         the order reads CANCEL_PENDING, stays live and can still fill until the venue answers."""
@@ -2782,6 +2834,12 @@ class OMS:
         self.plans[parent_id] = plan
         now = opportunity.observed_ts_ns
         self._transition(plan, PlanState.CREATED, now, event_type="PLAN_CREATED")
+        if self.restart_reconcile_gate and self._restart_unreconciled:
+            self.ledger.record(
+                "NEW_RISK_HELD_RESTART_RECONCILIATION", now,
+                parent_id=parent_id, opportunity_id=opportunity.opportunity_id, unreconciled_parent_ids=sorted(self._restart_unreconciled),
+            )
+            return self._close_without_exposure(plan, now, PlanState.REJECTED, "restart_reconciliation_pending")
         if self.residual_policy.hold_new_risk_on_breach and self._residual_breach_since:
             self.realism_counters["new_risk_held_residual_breach"] += 1
             self.ledger.record(
@@ -3332,6 +3390,33 @@ class OMS:
             return "hedge_book_stale"
         return None
 
+    def _size_aware_cap(self, plan, chain, spec, book, touch: Decimal, qty: Decimal, ts_ns: int, attempt: int) -> Decimal:
+        """Cap rule size_aware (owner 12 Nov, EMS note price-cap construction), re-taken on every attempt from the bot's VIEW of the hedge book (`self._books`, never the venue's own truth book).
+        Where the touch covers the size it is touch_slack exactly. Where the view book holds no level beyond the touch (best bid/ask only, as Binance in March 2024) and the touch cannot cover the
+        size, the rule falls back to touch_slack and says so (HEDGE_CAP_SIZE_AWARE, fallback). Every decision is a ledger event; the absolute limit binding is counted."""
+        policy, side = self.hedge_policy, spec["side"]
+        tick = self.instruments.get(spec["venue"], spec["instrument_id"]).tick_size
+        deepest, covered, n_levels = book.reach(side, qty) if qty > 0 else (touch, Decimal("0"), 0)
+        fallback = n_levels <= 1 and covered < qty
+        vol_bps = 0.0
+        if policy.vol_k > 0:
+            vol_bps = policy.vol_k * float(self.hedge_short_vol_bps(spec["venue"], ts_ns) if self.hedge_short_vol_bps is not None else 0.0) * policy.latency_s ** 0.5
+        if fallback or deepest is None:
+            cap, binds = hedge_cap_on_grid(side.value, touch, policy.touch_slack_bps, tick), False
+        else:
+            cap, binds = hedge_cap_size_aware(side.value, touch, deepest, policy.touch_slack_bps, vol_bps, policy.max_slip_bps, tick)
+        if binds:
+            self.realism_counters["hedge_cap_abs_limit_binds"] = self.realism_counters.get("hedge_cap_abs_limit_binds", 0) + 1
+        if fallback:
+            self.realism_counters["hedge_cap_depth_fallback"] = self.realism_counters.get("hedge_cap_depth_fallback", 0) + 1
+        self.ledger.record(
+            "HEDGE_CAP_SIZE_AWARE", ts_ns, parent_id=plan.parent_id, chain_id=chain.chain_id, attempt=attempt, side=side.value, qty=str(qty), touch=str(touch),
+            deepest=None if deepest is None else str(deepest), covered_qty=str(covered), touch_covers=bool(deepest == touch and covered >= qty), levels=n_levels,
+            cap=str(cap), abs_limit_binds=binds, vol_term_bps=vol_bps, vol_source="none" if vol_bps == 0.0 else "hedge_short_vol_bps",
+            fallback="touch_slack: the view book holds no depth beyond the touch" if fallback else "", book="view",
+        )
+        return cap
+
     def _hedge_try_dispatch(self, plan: ParentPlan, spec: dict[str, Any], chain: HedgeLifecycle, ts_ns: int) -> bool:
         reason = self._hedge_dispatch_refusal(spec, ts_ns)
         if reason is not None:
@@ -3348,8 +3433,18 @@ class OMS:
         qty = Decimal(str(chain.exposure_qty)) - done
         attempt = len(self._chain_children[chain.chain_id])
         cap = spec["limit_price"]
-        if self.hedge_policy.touch_slack_bps is not None:        # cap rule touch_slack: re-taken from the CURRENT hedge touch on every attempt, on the venue's price grid, never inside the cap
-            cap = hedge_cap_on_grid(spec["side"].value, touch, self.hedge_policy.touch_slack_bps, self.instruments.get(spec["venue"], spec["instrument_id"]).tick_size)
+        tick = self.instruments.get(spec["venue"], spec["instrument_id"]).tick_size
+        if cap % tick:                                            # a planned price off the grid is moved to the grid without loosening it (buy down, sell up), never sent as it is
+            cap = limit_on_grid(spec["side"].value, cap, tick)
+        if self.hedge_policy.size_aware and self.hedge_policy.touch_slack_bps is not None:
+            cap = self._size_aware_cap(plan, chain, spec, book, touch, qty, ts_ns, attempt)
+        elif self.hedge_policy.touch_slack_bps is not None:      # cap rule touch_slack: re-taken from the CURRENT hedge touch on every attempt, on the venue's price grid, never inside the cap
+            basis = touch
+            if self.hedge_policy.cap_basis == "size_vwap" and qty > 0:       # owner 12 Nov option: start from the executable VWAP of the hedge size (the touch when the book cannot cover it)
+                filled, vwap = book.walk(spec["side"], qty, Decimal("Infinity") if spec["side"] == Side.BUY else Decimal("0"))
+                if filled >= qty and vwap > 0:
+                    basis = vwap
+            cap = hedge_cap_on_grid(spec["side"].value, basis, self.hedge_policy.touch_slack_bps, self.instruments.get(spec["venue"], spec["instrument_id"]).tick_size)
         if touch_past_planned:
             # Track A (owner 11 Nov): the old name, HEDGE_CAP_BREACH_AT_DISPATCH, read like a breach of the order's price cap. It is not: the cap of the child that is sent (`child_cap`) is always taken from the CURRENT touch and
             # is never breached. What this records is that by dispatch time the market had moved past the hedge price the opportunity PLANNED (`planned_limit`). The hedge reduces exposure just taken, so it is still sent
@@ -3487,8 +3582,10 @@ class OMS:
         """H16, settled: when status queries keep failing the chain goes to FAILED (the persistent alarm, no new risk until an operator reset) AND the core's kill switch
         trips (the OMS does this on 'unconfirmed order state'). Both, not one: the exposure is of unknown size, so it can be neither hedged nor unwound blind, and
         resting maker orders must stop adding to it. The backtester raises only the alarm; that stays until Phase D."""
+        context = self.alert_context(ts_ns)           # taken BEFORE the chain is marked FAILED: the hedge that is still unconfirmed is the pending hedge quantity this alert reports
         self._hedge_move(plan, chain, HedgeState.FAILED, ts_ns, "status queries exhausted")
-        self.ledger.record("HEDGE_ALARM", ts_ns, parent_id=plan.parent_id, chain_id=chain.chain_id, reason="unknown_unresolved", kill_switch=self.risk.kill_switch)
+        self.ledger.record("HEDGE_ALARM", ts_ns, parent_id=plan.parent_id, chain_id=chain.chain_id, reason="unknown_unresolved", kill_switch=self.risk.kill_switch,
+                           **{**context, "execution_blocked_reason": context["execution_blocked_reason"] or "hedge_alarm:kill_switch_follows"})
         self.unwind_exhausted_alarms.setdefault(plan.parent_id, {"reason": "hedge_unknown_unresolved", "ts_ns": ts_ns, "chain_id": chain.chain_id})
         if not self.risk.kill_switch:
             self.risk.activate_kill_switch(now_ns=ts_ns, reason="hedge status unresolved", source="OMS_HEDGE_UNKNOWN", ledger=self.ledger)
@@ -3605,6 +3702,8 @@ class OMS:
                 self._price_fills(order, now_ns)
                 self.ledger.apply_fill(order, now_ns)
         self._recompute_plan_economics(plan, now_ns)
+        if plan.state == PlanState.CLOSED and all(o.state in TERMINAL_ORDER_STATES for o in plan.children if o.order_id in unresolved):
+            self._restart_unreconciled.discard(parent_id)          # the venue's account was applied and the fills it carried have already closed the plan (the hedge they triggered included: it is terminal here, the venue was not asked about it)
         if unresolved:
             self._persist(
                 plan, now_ns, "RECONCILIATION_PENDING", unresolved_order_ids=unresolved
@@ -3625,6 +3724,7 @@ class OMS:
             reconciled_order_ids=sorted(venue_orders),
         )
         result = self._finalize_plan(plan, now_ns, self._books)
+        self._restart_unreconciled.discard(parent_id)
         self.ledger.record(
             "PLAN_RECONCILED_FROM_VENUE",
             now_ns,

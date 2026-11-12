@@ -334,6 +334,19 @@ class OrderBook:
                 break
         return filled, (notional / filled if filled else Decimal("0"))
 
+    def reach(self, side: Side, quantity: Decimal) -> tuple[Decimal | None, Decimal, int]:
+        """What taking `quantity` on `side` reaches (a buy takes asks, a sell takes bids): the price of the last level it needs (None on an empty side), the quantity the whole side can give up to
+        `quantity`, and how many levels the side holds. The size-aware hedge cap reads it from the bot's view of the book."""
+        levels = self.asks if side == Side.BUY else self.bids
+        prices = sorted(levels) if side == Side.BUY else sorted(levels, reverse=True)
+        remaining, last = quantity, None
+        for price in prices:
+            last = price
+            remaining -= min(remaining, levels[price])
+            if remaining <= 0:
+                break
+        return last, quantity - max(remaining, Decimal("0")), len(prices)
+
     def snapshot_hash(self) -> str:
         return object_hash({
             "venue": self.venue,

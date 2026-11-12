@@ -92,6 +92,11 @@ class HedgePolicy:
     query_attempt_limit: int = 3              # venue status queries for an UNKNOWN hedge before the alarm (H16: alarm, see OMS._hedge_unknown_escalation)
     max_book_age_ns: int | None = None        # a hedge book older than this at dispatch counts as not valid; None = the book's own state decides
     touch_slack_bps: float | None = None      # cap rule touch_slack (profile execution.hedge.cap): each hedge attempt is capped at the hedge venue's CURRENT touch moved against us by this many bps; None = the cap is the opportunity's price
+    cap_basis: str = "touch"                  # owner 12 Nov: what the touch_slack cap starts from. "touch" (default, today's rule) = the hedge venue's touch; "size_vwap" = the VWAP the hedge size would get on that book now (touch when the book cannot cover the size), plus the same slack
+    size_aware: bool = False                  # owner 12 Nov: cap rule size_aware (touch_slack stays the default): the cap starts from the level the hedge size reaches on the view book (EMS note, price-cap construction)
+    max_slip_bps: float = 15.0                # size_aware: the absolute limit beyond the touch (ASSUMED)
+    vol_k: float = 0.0                        # size_aware: the volatility/latency term k * short_vol_bps * sqrt(latency_s); k = 0 (ASSUMED) switches it off
+    latency_s: float = 0.0                    # size_aware: the hedge latency the volatility term scales with
     calibration_label: str = "DECISION_PENDING_CALIBRATION"
 
 

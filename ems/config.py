@@ -21,7 +21,7 @@ _RENAMED = {"PASSIVE_TOUCH": "PASSIVE with placement: touch", "PASSIVE_IMPROVE":
 
 _SECTION_KEYS = {
     "primary": {"tactic", "placement", "deep_ticks", "max_age_s", "reprice", "price_rule"},
-    "hedge": {"tactic", "cap", "cap_buffer_bps", "deadline_s", "attempts", "urgency_phi", "flicker_model", "slack_bps_floor",
+    "hedge": {"tactic", "cap", "cap_buffer_bps", "deadline_s", "attempts", "urgency_phi", "flicker_model", "slack_bps_floor", "cap_basis", "max_slip_bps", "vol_k", "latency_s",
               "policy", "price_model", "flicker_set", "v0_bps", "max_attempts_cap", "min_p_at_cap", "policy_venues"},
     "maker_maker": set(),        # hedge.q, maker_maker.escalate_after_s, unwind.window_s and unwind.fallback were declared here and read by nothing; no profile sets them: removed (Phase C, 8 Nov)
     "unwind": {"tactic", "child", "band_bps"},
@@ -63,6 +63,15 @@ class ExecutionConfig:
                 raise ExecutionConfigError(f"execution.{name}.tactic {t!r} no longer exists: use {_RENAMED[t]}")
             if t != want:
                 raise ExecutionConfigError(f"execution.{name}.tactic must be {want!r} (the only tactics are PASSIVE, IOC_CAPPED, MARKET_BANDED), not {t!r}")
+        if self.hedge.get("cap_basis", "touch") not in ("touch", "size_vwap"):
+            raise ExecutionConfigError(f"execution.hedge.cap_basis must be touch or size_vwap, not {self.hedge.get('cap_basis')!r}")
+        if self.hedge.get("cap") == "size_aware":
+            for k in ("max_slip_bps", "vol_k", "latency_s"):
+                v = self.hedge.get(k, 0.0)
+                if isinstance(v, bool) or not isinstance(v, (int, float)) or v < 0:
+                    raise ExecutionConfigError(f"execution.hedge.{k} must be a number >= 0 (cap size_aware)")
+            if self.hedge.get("cap_basis", "touch") != "touch":
+                raise ExecutionConfigError("execution.hedge.cap size_aware builds its own base: cap_basis stays touch")
         pl = self.primary.get("placement", "deep")
         if pl not in PLACEMENTS:
             raise ExecutionConfigError(f"execution.primary.placement must be one of {PLACEMENTS}, not {pl!r}")

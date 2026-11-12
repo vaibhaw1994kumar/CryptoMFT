@@ -383,6 +383,7 @@ class RiskEngine:
         # held = opening balance + filled deltas (not a static snapshot).
         self.ledger: Any = None
         self.reserved_base: dict[str, Decimal] = {}
+        self.alert_context = None             # owner 12 Nov: an optional callable(now_ns) -> the alert fields (confirmed residual, pending hedge quantity, oldest exposure age, blocking reason) the kill-switch event carries
         self.kill_switch = False
         self.kill_switch_reason = ""
         self.kill_switch_source = ""
@@ -469,6 +470,7 @@ class RiskEngine:
             ledger.record(
                 "KILL_SWITCH_STATE_TRANSITION", now_ns,
                 **{key: value for key, value in event.items() if key != "ts_ns"},
+                **(self.alert_context(now_ns) if self.alert_context is not None and event["state"] == KillSwitchState.ACTIVE.value else {}),
             )
         return event
 

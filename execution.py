@@ -841,6 +841,7 @@ class StrategyDirectedRouter:
         self.trace: list[dict[str, Any]] = []
         # EMS02: per-scope venue limits (rate_limits.ScopedRateLimiter); None = per-venue budget only.
         self.scoped_limits: Any | None = None
+        self._risk_reducing_requests: set[str] = set()      # request ids whose routing instruction was risk-reducing (see _request_tier)
         # EMS01: called for every queued SUBMIT at release time; returns why it is no longer worth sending (it is then expired, not sent), or None. The OMS installs it.
         self.release_revalidator: Callable[[PendingRoute, int], str | None] | None = None
 
@@ -1113,6 +1114,8 @@ class StrategyDirectedRouter:
             ),
         )
         self._validate(request)
+        if instruction.risk_reducing:
+            self._risk_reducing_requests.add(request.request_id)
         if selected_action in {ThrottleAction.QUEUE, ThrottleAction.DELAY}:
             assert release_ts_ns is not None
             self._queue_ordinal += 1
@@ -1642,10 +1645,10 @@ class StrategyDirectedRouter:
         except ValueError:
             return "SPOT"
 
-    @staticmethod
-    def _request_tier(request: CanonicalOrderRequest) -> str:
-        """A request carries no risk flag of its own: a reduce-only order is risk-reducing."""
-        return "RISK_REDUCING" if request.reduce_only else "NEW_RISK"
+    def _request_tier(self, request: CanonicalOrderRequest) -> str:
+        """A request carries no risk flag of its own: a reduce-only order is risk-reducing, and so is a request the strategy's instruction marked risk-reducing (a hedge: it was admitted in the risk-reducing tier at routing and must be
+        sent in that tier too; owner 12 Nov, the rate-limit pressure test found a hedge refused at send time as new risk)."""
+        return "RISK_REDUCING" if (request.reduce_only or request.request_id in self._risk_reducing_requests) else "NEW_RISK"
 
     def _scoped_check(self, venue: str, instrument_id: str, action: str, tier: str, ts_ns: int):
         if self.scoped_limits is None:

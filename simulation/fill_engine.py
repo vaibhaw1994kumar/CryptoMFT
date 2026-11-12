@@ -373,6 +373,10 @@ class MakerConfig:
     # ahead and the same fills. Also counts netted prints / decreases that rest on the price+window association alone (diag ledger_netted_*_no_proof, kept apart from
     # ledger_ambiguous). Scalar queue only: the cohort queue has its own provisional ledger and ignores the movement rule (the counting still runs).
     depletion_ledger: bool = False
+    # E3 participation cap (owner 12 Nov), opt-in. False (default, bit-identical): the fill rules spend a print as each rule's own budget says. True: ONE budget per public print across EVERY own order and every rule that
+    # fills from it (ordinary, confirmed, through, cohort, cross-after-print): the own fills a print causes sum to at most the print's volume; each print is spent once. Either way, a fill that goes beyond the print's
+    # volume is counted (diag participation_cap_would_bind / _excess_qty, created only when it happens), so the cases where the cap binds can be listed from a run with it off. Fills from depth decreases are not prints.
+    participation_cap: bool = False
     # Queue model v2 (step 6), opt-in. "scalar" (default): one number, queue_ahead, per order (legacy). "cohort": the external size at our price is kept as cohorts by
     # arrival with our own orders interleaved (queue_v2/cohort.py); residual cancellations are removed by `cohort_age`; the cancel_model arithmetic is NOT used. The
     # initial displayed size is one cohort of unknown age (cohort_unknown_age_s, an assumption). Works with opposite_cross_fills (a cross clears the cohorts ahead of the order, _clear_ahead); not supported with amend.
@@ -545,6 +549,7 @@ class MakerExecutor:
         self._lq: dict[tuple, "LevelQueue"] = {}           # cohort mode: one level queue per (venue, side, price)
         self._cohort_ahead: dict[int, float] = {}          # cohort mode: queue ahead per own order after the current public event
         self.cohort_log: list[dict] = []                   # cohort mode: counterfactual projections (bounded)
+        self._print_left: float | None = None             # participation_cap: what the public print being processed has left for own fills (None outside on_trade)
         self.obs_enabled = False
         self._obs_trig: dict = {}
         self.queue_updates: dict[str, dict[str, int]] = {}         # observation only: see _count_queue_updates
@@ -570,6 +575,8 @@ class MakerExecutor:
             settings = dataclasses.asdict(self.config)
             if not settings.get("depletion_ledger"):
                 settings.pop("depletion_ledger", None)         # listed only when on: the settings hash of every earlier profile is unchanged
+            if not settings.get("participation_cap"):
+                settings.pop("participation_cap", None)
             self._settings_hash = hashlib.sha256(json.dumps(settings, sort_keys=True, default=str).encode()).hexdigest()
         return self._settings_hash
 
@@ -999,7 +1006,18 @@ class MakerExecutor:
         self, venue: str, price: float, volume: float, sign: int, now: float, fee_bps: float,
         is_synthetic: bool = False, event_ts: float | None = None,
     ) -> list[Fill]:
-        """A public trade crossed the book. Fill any resting order it reached.
+        """A public trade crossed the book. Fill any resting order it reached. The print is spent once across all own orders (see MakerConfig.participation_cap; the budget is only counted when it is off)."""
+        self._print_left = volume
+        try:
+            return self._on_trade(venue, price, volume, sign, now, fee_bps, is_synthetic, event_ts)
+        finally:
+            self._print_left = None
+
+    def _on_trade(
+        self, venue: str, price: float, volume: float, sign: int, now: float, fee_bps: float,
+        is_synthetic: bool = False, event_ts: float | None = None,
+    ) -> list[Fill]:
+        """The body of on_trade.
 
         `now` is when the trade reached us; `event_ts` (optional) is when it executed at the exchange, on the host clock.
         """
@@ -1674,6 +1692,16 @@ class MakerExecutor:
             qty = min(qty, qty_cap)
         if qty <= 1e-12:
             return None
+        if self._print_left is not None and source in ("trade", "cross"):
+            left = self._print_left
+            if qty > left + 1e-9:                                          # this fill would take more than the print holds (shared by every own order the print reaches)
+                self.diag["participation_cap_would_bind"] = self.diag.get("participation_cap_would_bind", 0.0) + 1.0
+                self.diag["participation_cap_excess_qty"] = self.diag.get("participation_cap_excess_qty", 0.0) + (qty - left)
+                if self.config.participation_cap:
+                    qty = max(0.0, left)
+                    if qty <= 1e-12:
+                        return None
+            self._print_left = max(0.0, left - qty)
 
         order.remaining -= qty
         order.filled_qty += qty
