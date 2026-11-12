@@ -301,6 +301,7 @@ class OMS:
         self._deferred_close: dict[str, tuple[str, tuple[str, ...]]] = {}
         self.hedge_policy = hedge_policy or HedgePolicy()
         self.expired_at_release: list[dict[str, Any]] = []
+        self.route_mode = "count"             # E0 step (d): "count" counts a layer decision that differs from the order's venue and sends the order's own venue; "enforce" rejects the order back instead
         self.lot_residual_alarm: dict[str, Any] | None = None          # owner 12 Nov (a): a carried sub-lot residual that reaches one full hedge lot raises this PERSISTENT alarm (it stays set; there is no auto-clear)
         self.hedge_gate = None                # E0 step (c): a callable(child, ts_ns) the session sets; it only OBSERVES the hedge child against the risk gate (count: what it would refuse); a hedge is never blocked, it reduces exposure
         self.observer = None                  # E0 step (a): an ems IntentObserver (observation only: the OMS never reads it back); None = off
@@ -1541,6 +1542,9 @@ class OMS:
                     callback_type=callback.event_type.value,
                 )
                 self.ingest_execution_callback(callback, callback_ts)
+            if routing.selected_venue is not None and routing.selected_venue != venue:      # E0 step (d) condition 2 for an unwind: its venue is the one that holds the position
+                self.ledger.record("ROUTE_VENUE_MISMATCH", attempt_ts, parent_id=plan.parent_id, order_id=order_id, decided_venue=venue, routed_venue=routing.selected_venue)
+                raise RuntimeError(f"the router selected {routing.selected_venue} but the unwind was decided for {venue}")
             if routing.selected_venue is None:
                 reason = ";".join(
                     reason for check in routing.checks for reason in check.reasons
@@ -2982,6 +2986,17 @@ class OMS:
         parent_id = plan.parent_id
         package_throttled = False
         dispatch_started_ts = self._next_execution_ts(dispatch_base)
+        venue = order.venue
+        if self.observer is not None:
+            venue = self.observer.route_venue(plan, order, maker_leg, dispatch_started_ts / 1e9)        # E0 step (d): the layer decides the venue; the router below only executes it
+            if venue != order.venue and self.route_mode == "enforce":
+                self.ledger.record("ROUTE_DECISION_MISMATCH", dispatch_started_ts, parent_id=parent_id, order_id=order.order_id, order_venue=order.venue, decided_venue=venue)
+                self.ingest_order_update(CanonicalOrderUpdate(
+                    update_id=stable_id("route-mismatch", order.order_id), source=OrderUpdateSource.INTERNAL, parent_order_id=parent_id, order_id=order.order_id,
+                    venue=order.venue, instrument_id=order.instrument_id, state=ExecutionEventType.REJECTED, event_ts_ns=dispatch_started_ts,
+                    observed_ts_ns=dispatch_started_ts, reason=f"layer_route_mismatch:{venue}"))
+                return False
+            venue = order.venue          # count mode: the order keeps its own venue (and the mismatch is counted); enforce already returned
         self.ledger.record(
             "CHILD_DISPATCH_STARTED",
             dispatch_started_ts,
@@ -3003,8 +3018,8 @@ class OMS:
         risk_reducing = self._order_reduces_residual(plan, order)
         instruction = RoutingInstruction(
             strategy_id=opportunity.strategy_id,
-            eligible_venues=(order.venue,),
-            route_priority=(order.venue,),
+            eligible_venues=(venue,),
+            route_priority=(venue,),
             order_id=order.order_id,
             parent_opportunity_id=order.opportunity_id,
             parent_order_id=order.parent_id,
@@ -3029,6 +3044,9 @@ class OMS:
             # order under the normal report-deadline recovery (venue query -> time out -> kill switch).
             self._note_ambiguous_dispatch(plan, order, instruction.idempotency_key, "SUBMIT", exc, dispatch_started_ts)
             raise
+        if routing.selected_venue is not None and routing.selected_venue != venue:       # E0 step (d) condition 2: the router never sends anywhere but the layer's decision
+            self.ledger.record("ROUTE_VENUE_MISMATCH", dispatch_started_ts, parent_id=parent_id, order_id=order.order_id, decided_venue=venue, routed_venue=routing.selected_venue)
+            raise RuntimeError(f"the router selected {routing.selected_venue} but the layer decided {venue}")
         if risk_reducing:
             self._record_legging_control_override(
                 plan, order, routing, dispatch_started_ts,
@@ -3099,6 +3117,9 @@ class OMS:
             rejection_reason = ";".join(
                 reason for check in routing.checks for reason in check.reasons
             ) or "no eligible route"
+            # E0 step (d) condition 1: a failed route check goes back to the layer, never to another venue
+            if self.observer is not None:
+                self.observer.route_rejected(plan, order, rejection_reason, dispatch_completed_ts / 1e9)
             self.ingest_order_update(CanonicalOrderUpdate(
                 update_id=stable_id("route-rejection", order.order_id),
                 source=OrderUpdateSource.INTERNAL,

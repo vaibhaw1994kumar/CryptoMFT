@@ -186,6 +186,7 @@ class TradingSession:
         risk_gate_mode: str = "off",
         gate_limits: GateLimits | None = None,
         layer_risk_mode: str = "count",
+        layer_route_mode: str = "count",
     ) -> None:
         execution_mode = ExecutionMode(execution_mode)
         assert_execution_mode(
@@ -320,6 +321,11 @@ class TradingSession:
         if layer_risk_mode == "enforce" and not self._intent_journal:
             raise ValueError("layer_risk_mode='enforce' needs the execution layer (intent_journal=True): refusing to run without the gate")
         self.layer_risk_mode = layer_risk_mode
+        if layer_route_mode not in ("count", "enforce"):
+            raise ValueError("layer_route_mode must be count or enforce")
+        if layer_route_mode == "enforce" and not self._intent_journal:
+            raise ValueError("layer_route_mode='enforce' needs the execution layer (intent_journal=True): refusing to run without it")
+        self.layer_route_mode = layer_route_mode
         if self._intent_journal:
             from .ems.config import ExecutionConfig
             from .ems.layer import ExecutionLayer, IntentObserver
@@ -328,6 +334,9 @@ class TradingSession:
                 ExecutionConfig(risk_reservation=layer_risk_mode), instrument=cfg.instrument_id,
                 dispatch_mode="fill_triggered" if self.oms.dispatch_policy == DispatchPolicy.FILL_TRIGGERED else "simultaneous"))
             self.oms.observer = self.intent_observer
+            self.oms.route_mode = layer_route_mode
+            if len(self.maker_venues) >= 1 and len(cfg.venues) == 2 and self.maker_venues[0] in cfg.venues:          # E0 step (d): fixed assignment, the first maker venue rests and the other venue hedges
+                self.intent_observer.layer.set_routing(self.maker_venues[0], next(v for v in cfg.venues if v != self.maker_venues[0]))
             self.intent_observer.layer.set_risk(self._layer_limits, self._base_by_venue)       # E0 step (c): the layer's reservation gate reads the session's own limits and positions (one rule, not a second mapping)
         self.ledger.journal = self.financing_journal
         # Margin is evaluated during the session, not only at the end (ECO04):
@@ -888,7 +897,7 @@ class TradingSession:
         return {"breaker": self.breaker.summary() if self.breaker is not None else None, "breaker_alarms": list(self.breaker_alarms), "signals_blocked_by_breaker": self.signals_blocked_by_breaker,
                 "margin_price_paused": self.margin_price_paused, "signals_blocked_by_margin_price": self.signals_blocked_by_margin_price,
                 "risk_gate_mode": self.risk_gate_mode, "risk_gate_refusals_by_reason": dict(sorted(self.gate_counts.items())),
-                "layer_risk_mode": self.layer_risk_mode, "hedge_gate_would_refuse_by_reason": dict(sorted(self.hedge_gate_would_refuse.items()))}
+                "layer_risk_mode": self.layer_risk_mode, "layer_route_mode": self.layer_route_mode, "hedge_gate_would_refuse_by_reason": dict(sorted(self.hedge_gate_would_refuse.items()))}
 
     def tick(self, now_ns: int) -> int:
         """Run due timers without a market event (live idle periods)."""

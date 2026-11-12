@@ -26,6 +26,7 @@ from .config import ExecutionConfig
 from .intent import ExecutionIntent, IntentError, IntentState, RiskRefused, Role
 from .risk import ReservationBook, RiskLimits
 from .tactics import get_tactic
+from .venue_selector import RestHedgeVenue, assign_rest_hedge
 
 JOURNAL_MAX = 200_000
 FILLS_MAX = 2_000_000
@@ -98,6 +99,7 @@ class ExecutionLayer:
         self.counts: Counter = Counter()
         self.violations: list[dict] = []
         self.refusals: list[dict] = []
+        self._routing: tuple[str, str] | None = None
         self.reservations = ReservationBook()
         self._limits_fn: Callable[[], RiskLimits] | None = None
         self._base_fn: Callable[[], dict[str, float]] | None = None
@@ -108,6 +110,28 @@ class ExecutionLayer:
             return None
         from .tactics.base import choose_tactic
         return choose_tactic(state, cfg, allow_market_banded=self.cfg.pairing == "maker_maker")      # MARKET_BANDED is for the market-making pairing only, and then only for its emergency reasons
+
+    # ── routing decision (E0 step (d), owner 12 Nov) ─────────────────────────
+    def set_routing(self, rest_venue: str, hedge_venue: str) -> None:
+        """The fixed assignment: `rest_venue` rests the passive leg, `hedge_venue` hedges it (the venue selector in `fixed` mode; `dynamic` would only be reported, and no cost inputs exist here, so it is not computed)."""
+        if rest_venue == hedge_venue:
+            raise ValueError("the resting venue and the hedge venue must differ")
+        decision = assign_rest_hedge([RestHedgeVenue(rest_venue, True, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0), RestHedgeVenue(hedge_venue, True, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0)], mode="fixed", fixed=(rest_venue, hedge_venue))
+        self._routing = (decision.chosen.rest, decision.chosen.hedge)
+
+    def decide_route(self, *, role: str, passive: bool, order_venue: str) -> "RouteDecision":
+        """The ONE place a child's venue is decided; the router (StrategyDirectedRouter) only executes it. Fixed mode: a passive primary leg goes to the resting venue, a hedge to the hedge venue; a taker primary leg
+        and an unwind or flatten keep the venue they were built for (a reduce-only order belongs to the venue that holds the position). With no assignment configured the decision is the order's own venue."""
+        if self._routing is None:
+            decision = RouteDecision(order_venue, "NO_ROUTING_RULE")
+        elif role == Role.PRIMARY and passive:
+            decision = RouteDecision(self._routing[0], "FIXED_REST")
+        elif role == Role.HEDGE:
+            decision = RouteDecision(self._routing[1], "FIXED_HEDGE")
+        else:
+            decision = RouteDecision(order_venue, "OWN_VENUE")
+        self.counts["route_decisions"] += 1
+        return decision
 
     # ── risk wiring ──────────────────────────────────────────────────────────
     def set_risk(self, limits_fn: Callable[[], RiskLimits], base_fn: Callable[[], dict[str, float]]) -> None:
@@ -409,6 +433,11 @@ class ExecutionLayer:
                 "reservations_leaked": self.leaked_reservations()}
 
 
+class RouteDecision(NamedTuple):
+    venue: str
+    reason: str                                 # FIXED_REST | FIXED_HEDGE | OWN_VENUE | NO_ROUTING_RULE
+
+
 class IntentObserver:
     """E0 step (a): the session runtime's orders, journaled as intents next to the OMS plan. OBSERVATION ONLY.
 
@@ -470,6 +499,24 @@ class IntentObserver:
             return str(exc)
         self._admitted.add(plan.parent_id)
         return None
+
+    def route_venue(self, plan, order, passive: bool, now: float) -> str:
+        """E0 step (d): the venue the layer decides for this order (the OMS builds the router's instruction from it, and the router may not send anywhere else)."""
+        it = self._by_order.get(order.order_id)
+        role = it.role if it is not None else (order.order_role or Role.PRIMARY)
+        role = {"PRIMARY": Role.PRIMARY, "HEDGE": Role.HEDGE, "UNWIND": Role.UNWIND, "FLATTEN": Role.FLATTEN}.get(str(role).upper(), role)
+        decision = self.layer.decide_route(role=role, passive=passive, order_venue=order.venue)
+        if decision.venue != order.venue:
+            self.layer.counts["route_decision_differs_from_order_venue"] += 1
+        if len(self.layer.journal) < JOURNAL_MAX and decision.venue != order.venue:
+            self.layer.journal.append({"seq": len(self.layer.journal), "event": "route_decision_differs", "order_id": order.order_id, "order_venue": order.venue, "decided": decision.venue, "reason": decision.reason, "ts": now})
+        return decision.venue
+
+    def route_rejected(self, plan, order, reason: str, now: float) -> None:
+        """A route check failed at the router: the order goes back to the layer as a rejection. It is never sent to another venue (one eligible venue, no reroute)."""
+        self.counts["route_rejected_back_to_layer"] += 1
+        if len(self.layer.journal) < JOURNAL_MAX:
+            self.layer.journal.append({"seq": len(self.layer.journal), "event": "route_rejected", "order_id": order.order_id, "venue": order.venue, "reason": reason, "ts": now})
 
     def plan_opened(self, plan, now: float) -> str | None:
         sid = self._signal.setdefault(plan.parent_id, len(self._signal) + 1)
