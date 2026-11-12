@@ -204,7 +204,7 @@ class SessionReplayEndToEnd(unittest.TestCase):
         src = (Path(__file__).resolve().parents[1] / "src" / "crypto_stat_arb" / "oms.py").read_text().splitlines()
         uses = [ln.strip() for ln in src if "observer" in ln]
         for ln in uses:
-            self.assertTrue(re.fullmatch(r"(self\.observer = None.*|if self\.observer is not None( and to in \(HedgeState\.ESCALATED, HedgeState\.UNWINDING\))?:|self\.observer\.\w+\(.*\)|refusal = self\.observer\.admit\(plan, now / 1e9\) .*|late_refusal = self\.observer\.plan_opened\(plan, now / 1e9\))", ln), ln)
+            self.assertTrue(re.fullmatch(r"(self\.observer = None.*|if self\.observer is not None( and to in \(HedgeState\.ESCALATED, HedgeState\.UNWINDING\))?:|self\.observer\.\w+\(.*\)|refusal = self\.observer\.admit\(plan, now / 1e9\) .*|late_refusal = self\.observer\.plan_opened\(plan, now / 1e9\)|venue = self\.observer\.route_venue\(plan, order, maker_leg, dispatch_started_ts / 1e9\) .*)", ln), ln)
 
 
 def _row_snapshot(eid, venue, seq, ts, bid, ask):
@@ -623,15 +623,14 @@ class Gate0MutationsOnTheSessionPath(unittest.TestCase):
         obs.chain_opened(plan, "c1", maker, spec, 1, 1.1)
         self.assertGreaterEqual(sum(obs.error_counts.values()), 1)
 
-    def test_an_own_fill_does_not_change_the_public_view_book(self):
+    def test_an_own_fill_does_not_change_any_level_of_either_public_view_book(self):
         rep = LayerRiskGateInTheReplay._replay(self)
         seen = []
         for adapter in rep.adapters.values():
             real = adapter._taker_fill
             def wrapped(request, book, adapter=adapter, real=real):
-                def snap():
-                    b = rep.views[adapter.feed_venue]
-                    return [(s, p, b.level_size(s, p)) for s in ("bid", "ask") for p in (b.best_bid if s == "bid" else b.best_ask,)]
+                def snap():                                                              # owner 12 Nov: EVERY level on BOTH venues, not only the touch of the venue that filled
+                    return {v: (dict(b._bids), dict(b._asks)) for v, b in rep.views.items()}
                 before = snap(); out = real(request, book); seen.append((before, snap()))
                 return out
             adapter._taker_fill = wrapped
@@ -663,3 +662,78 @@ class ResidualWarningAndLotAlarm(unittest.TestCase):
         self.assertIsNotNone(alarm); self.assertGreaterEqual(D(alarm["total_residual_base"]), D(alarm["lot"]))
         r = result["residual_at_end"]
         self.assertEqual(r["warning"], "NON_ZERO_RESIDUAL_AT_END_OF_DAY"); self.assertEqual(r["lot_residual_alarm"]["venue"], alarm["venue"])
+
+
+@unittest.skipUnless(SLICES.is_dir(), "March slices not available (the profile needs a data root)")
+class RouteDecisionInTheReplay(unittest.TestCase):
+    """E0 step (d), owner 12 Nov: the layer decides the venue (fixed: the first maker venue rests, the other hedges) and StrategyDirectedRouter only executes it. (1) a failed route check goes back to the layer
+    and never to another venue; (2) the venue the router sends to always equals the layer's decision; (3) the run is the same as without the decision (the identity runs check v1_5, v1_6, v1_7)."""
+
+    def _replay(self, **kw):
+        return LayerRiskGateInTheReplay._replay(self, **kw)
+
+    def test_the_decision_equals_the_order_venue_and_nothing_changes(self):
+        rep = self._replay(); result = rep.run()
+        layer = rep.session.intent_observer.layer
+        self.assertEqual(layer._routing, ("BYBIT", "BINANCE"))
+        self.assertGreaterEqual(layer.counts["route_decisions"], 2)
+        self.assertEqual(layer.counts["route_decision_differs_from_order_venue"], 0)
+        self.assertEqual([r for r in layer.journal if r["event"] == "route_decision_differs"], [])
+        sent = [o for o in result["orders"] if o["state"] != "CREATED"]
+        self.assertTrue(all(o["venue"] == "BYBIT" for o in sent if o["post_only"]))             # the maker rests on the resting venue, the hedge goes to the hedge venue
+        self.assertTrue(all(o["venue"] == "BINANCE" for o in sent if not o["post_only"]))
+        enforced = self._replay(layer_route_mode="enforce").run()
+        for key in ("orders", "fills", "signals", "positions", "ledger_event_counts"):
+            self.assertEqual(enforced[key], result[key], key)
+
+    def test_enforce_rejects_back_a_decision_that_differs_from_the_order_venue_and_count_does_not(self):
+        from crypto_stat_arb.ems.layer import ExecutionLayer, RouteDecision
+        wrong = lambda self, *, role, passive, order_venue: RouteDecision("BINANCE" if order_venue == "BYBIT" else "BYBIT", "MUTATED")
+        with mock.patch.object(ExecutionLayer, "decide_route", wrong):
+            rep = self._replay(layer_route_mode="enforce"); result = rep.run()
+            counted = self._replay(); base = counted.run()
+        ev = [e["event_type"] for e in rep.session.ledger.events]
+        self.assertGreater(ev.count("ROUTE_DECISION_MISMATCH"), 0)
+        self.assertEqual(ev.count("CHILD_DISPATCH_STARTED"), 0)                                   # nothing was sent anywhere
+        self.assertTrue(all(o["state"] in ("CREATED", "REJECTED") and o["filled_quantity"] == "0" for o in result["orders"]))
+        self.assertGreater(counted.session.intent_observer.layer.counts["route_decision_differs_from_order_venue"], 0)
+        self.assertGreater(len(base["fills"]), 0)                                                  # count mode counts the difference and still sends the order's own venue
+
+    def test_a_router_that_sends_to_another_venue_is_caught(self):
+        from dataclasses import replace
+        from crypto_stat_arb.execution import StrategyDirectedRouter
+        real = StrategyDirectedRouter.route_controlled
+        def rerouting(self, instruction, books):
+            res = real(self, instruction, books)
+            return replace(res, selected_venue="BINANCE" if res.selected_venue == "BYBIT" else "BYBIT") if res.selected_venue else res
+        with mock.patch.object(StrategyDirectedRouter, "route_controlled", rerouting):
+            with self.assertRaises(RuntimeError):
+                self._replay().run()
+
+    def test_a_failed_route_check_goes_back_to_the_layer_and_is_never_rerouted(self):
+        from crypto_stat_arb.execution import StrategyDirectedRouter
+        real = StrategyDirectedRouter.route_controlled
+        def closed_hedge_route(self, instruction, books):
+            if instruction.time_in_force.value == "IOC" and not instruction.reduce_only:         # the hedge venue's route check fails
+                self.route_status.setdefault("BINANCE", __import__("crypto_stat_arb.execution", fromlist=["VenueRouteStatus"]).VenueRouteStatus()).account_enabled = False
+                self.route_status["BINANCE"].allow_risk_reducing_when_disabled = False
+            return real(self, instruction, books)
+        with mock.patch.object(StrategyDirectedRouter, "route_controlled", closed_hedge_route):
+            rep = self._replay(); result = rep.run()
+        layer = rep.session.intent_observer.layer
+        self.assertGreater(rep.session.intent_observer.counts["route_rejected_back_to_layer"], 0)
+        self.assertGreater(len([r for r in layer.journal if r["event"] == "route_rejected"]), 0)
+        role = {r["intent_id"]: r["role"] for r in result["intent_journal"] if r["event"] == "intent"}
+        hedges = [o for o in result["orders"] if role.get(o["intent_id"]) == "hedge"]
+        self.assertGreater(len(hedges), 0)
+        self.assertTrue(all(o["venue"] == "BINANCE" and o["state"] == "REJECTED" and o["filled_quantity"] == "0" for o in hedges))      # rejected on its own venue: never sent to BYBIT instead
+        unwinds = [o for o in result["orders"] if role.get(o["intent_id"]) == "unwind"]
+        self.assertEqual([(o["venue"], o["state"]) for o in unwinds], [("BINANCE", "REJECTED"), ("BYBIT", "FILLED")])      # the first unwind is rejected on ITS venue (not rerouted); the second is a NEW intent, its venue chosen by the OMS residual policy's venue priority (not yet moved to the layer)
+
+    def test_a_bad_route_mode_or_enforce_without_the_layer_is_refused(self):
+        with self.assertRaises(ValueError):
+            self._replay(layer_route_mode="nope")
+        real = sr.TradingSession
+        with mock.patch.object(sr, "TradingSession", lambda *a, **k: real(*a, **{**k, "intent_journal": False})):
+            with self.assertRaises(ValueError):
+                self._replay(layer_route_mode="enforce")
