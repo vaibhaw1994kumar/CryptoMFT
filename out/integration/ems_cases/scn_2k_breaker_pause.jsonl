@@ -1,0 +1,24 @@
+{"event": "OPPORTUNITY", "stage": "decision", "ts": 1793272527.9642212}
+{"kind": "book", "stage": "market_event_received", "ts": 1793272527.9642212, "venue": "signal-trigger"}
+{"cumulative_filled_quantity": "0", "event": "ORDER_LIFECYCLE", "order_id": "93f276be-4e55-5026-9def-0499bacda8f6", "reason": "", "source": "INTERNAL", "stage": "request_sent", "ts": 1793272527.9642212, "venue": "BYBIT"}
+{"cumulative_filled_quantity": "0", "event": "ORDER_LIFECYCLE", "order_id": "93f276be-4e55-5026-9def-0499bacda8f6", "reason": "", "source": "ADAPTER_CALLBACK", "stage": "exchange_effective_notified", "ts": 1793272527.9720786, "venue": "BYBIT"}
+{"cumulative_filled_quantity": "0.087620191459", "event": "FILL", "fill_price": "100.57", "fill_quantity": "0.087620191459", "order_id": "93f276be-4e55-5026-9def-0499bacda8f6", "side": "BUY", "stage": "fill_booked", "ts": 1793272529.2921681, "venue": "BYBIT"}
+{"cumulative_filled_quantity": "0.087620191459", "event": "ORDER_LIFECYCLE", "order_id": "93f276be-4e55-5026-9def-0499bacda8f6", "reason": "", "source": "ADAPTER_CALLBACK", "stage": "fill_notified", "ts": 1793272529.2921681, "venue": "BYBIT"}
+{"cap": "100.52", "event": "HEDGE_CAP_SIZE_AWARE", "side": "SELL", "stage": "hedge_cap_decided", "touch": "100.5700", "touch_covers": true, "ts": 1793272529.2921681}
+{"event": "HEDGE_CHAIN_OPENED", "stage": "hedge_chain_opened", "ts": 1793272529.2921681}
+{"event": "HEDGE_SUBMIT", "stage": "hedge_sent", "ts": 1793272529.2921681}
+{"cumulative_filled_quantity": "0", "event": "ORDER_LIFECYCLE", "order_id": "e77186a5-df7e-5b28-8764-cfa57733c496", "reason": "", "source": "INTERNAL", "stage": "request_sent", "ts": 1793272529.2921681, "venue": "BINANCE"}
+{"cumulative_filled_quantity": "0", "event": "ORDER_LIFECYCLE", "order_id": "e77186a5-df7e-5b28-8764-cfa57733c496", "reason": "", "source": "ADAPTER_CALLBACK", "stage": "exchange_effective_notified", "ts": 1793272529.327168, "venue": "BINANCE"}
+{"cumulative_filled_quantity": "0.08", "event": "FILL", "fill_price": "100.5700", "fill_quantity": "0.08", "order_id": "e77186a5-df7e-5b28-8764-cfa57733c496", "side": "SELL", "stage": "fill_booked", "ts": 1793272529.327168, "venue": "BINANCE"}
+{"cumulative_filled_quantity": "0.08", "event": "ORDER_LIFECYCLE", "order_id": "e77186a5-df7e-5b28-8764-cfa57733c496", "reason": "", "source": "ADAPTER_CALLBACK", "stage": "fill_notified", "ts": 1793272529.327168, "venue": "BINANCE"}
+{"cumulative_filled_quantity": "1.0", "event": "FILL", "fill_price": "100.57", "fill_quantity": "0.912379808541", "order_id": "93f276be-4e55-5026-9def-0499bacda8f6", "side": "BUY", "stage": "fill_booked", "ts": 1793272530.1355863, "venue": "BYBIT"}
+{"cumulative_filled_quantity": "1.0", "event": "ORDER_LIFECYCLE", "order_id": "93f276be-4e55-5026-9def-0499bacda8f6", "reason": "", "source": "ADAPTER_CALLBACK", "stage": "fill_notified", "ts": 1793272530.1355863, "venue": "BYBIT"}
+{"cap": "100.52", "event": "HEDGE_CAP_SIZE_AWARE", "side": "SELL", "stage": "hedge_cap_decided", "touch": "100.5700", "touch_covers": true, "ts": 1793272530.1355863}
+{"event": "HEDGE_CHAIN_OPENED", "stage": "hedge_chain_opened", "ts": 1793272530.1355863}
+{"event": "HEDGE_SUBMIT", "stage": "hedge_sent", "ts": 1793272530.1355863}
+{"cumulative_filled_quantity": "0", "event": "ORDER_LIFECYCLE", "order_id": "8992fd08-601f-5f0f-8c4d-0a7a890b4542", "reason": "", "source": "INTERNAL", "stage": "request_sent", "ts": 1793272530.1355863, "venue": "BINANCE"}
+{"cumulative_filled_quantity": "0", "event": "ORDER_LIFECYCLE", "order_id": "8992fd08-601f-5f0f-8c4d-0a7a890b4542", "reason": "", "source": "ADAPTER_CALLBACK", "stage": "exchange_effective_notified", "ts": 1793272530.1754322, "venue": "BINANCE"}
+{"cumulative_filled_quantity": "0.92", "event": "FILL", "fill_price": "100.5700", "fill_quantity": "0.92", "order_id": "8992fd08-601f-5f0f-8c4d-0a7a890b4542", "side": "SELL", "stage": "fill_booked", "ts": 1793272530.1754322, "venue": "BINANCE"}
+{"cumulative_filled_quantity": "0.92", "event": "ORDER_LIFECYCLE", "order_id": "8992fd08-601f-5f0f-8c4d-0a7a890b4542", "reason": "", "source": "ADAPTER_CALLBACK", "stage": "fill_notified", "ts": 1793272530.1754322, "venue": "BINANCE"}
+{"confirmed_residual_base": "0.00", "event": "MARGIN_PRICE_PAUSE", "execution_blocked_reason": "margin_price_missing", "pending_hedge_qty": "0", "stage": "alert", "ts": 1793274013.0112417}
+{"confirmed_residual_base": "0.00", "event": "MARGIN_PRICE_PAUSE", "execution_blocked_reason": "margin_price_missing", "pending_hedge_qty": "0", "stage": "alert", "ts": 1793274022.338461}

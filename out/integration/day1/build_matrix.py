@@ -133,13 +133,42 @@ for sz in ("1", "5", "25"):
             f"hedge IOC full {full}, partial {part}, zero {zero}, unwind orders {r['cov']['paths']['unwind_orders']}, cap binds on the print {r['cov']['paths']['participation_cap_would_bind']}; size_aware decisions {r['cov']['paths']['hedge_cap_size_aware']} (touch did NOT cover the size in {len(spans)}, abs limit bound in {sum(1 for e in dec if e['abs_limit_binds'])}, fallback {sum(1 for e in dec if e['fallback'])}); hedge price vs the maker quote price (bps, n={len(slip)}; the decision touch itself is in the cap events): "
             + (f"max {max(slip):.2f}" if slip else "none"), str(r["trace"].name))
 
+def safety(case):
+    f = RUNS / f"scn_{case}" / "session_safety_events.jsonl"
+    return rows(f) if f.exists() else None
+
+
+ev = safety("2k_breaker_pause")
+if ev is not None:
+    states = [e["state"] for e in ev if e["event_type"] == "BREAKER_STATE_TRANSITION"]
+    kills = [e for e in ev if e["event_type"] == "KILL_SWITCH_STATE_TRANSITION"]
+    ok = states[:2] == ["PAUSED", "OK"] and "TRIPPED" not in states and not kills
+    add("2k Breaker pause: flat and both gateways silent 13 s, resumes by itself", "session breaker", len(states), ok, f"breaker states {states}; kill-switch events {len(kills)}; margin price pauses in the same run are the MARK_FROM_MID replay fallback", "scn_2k_breaker_pause.jsonl, runs/scn_2k_breaker_pause/session_safety_events.jsonl")
+ev = safety("2k_breaker_trip")
+if ev is not None:
+    trip = [e for e in ev if e["event_type"] == "BREAKER_TRIP"]
+    flat = [e for e in ev if e["event_type"] == "BREAKER_FLATTEN"]
+    reset = [e for e in ev if e["event_type"] == "BREAKER_RESET"]
+    fields = all(k in trip[0] for k in ("confirmed_residual_base", "pending_hedge_qty", "oldest_exposure_age_s", "execution_blocked_reason")) if trip else False
+    tactic = bool(flat) and all(f["tactic"] == "MARKET_BANDED" for f in flat)
+    band_ok = True
+    r = load("2k_breaker_trip")
+    quotes_after = []
+    if trip and reset:
+        t0, t1 = trip[0]["ts_ns"], reset[0]["ts_ns"]
+        sent = {t["order_id"]: t["ts"] for t in rows(r["trace"]) if t["stage"] == "request_sent" and t.get("order_id")}
+        quotes_after = [o["order_id"] for o in r["orders"] if o["post_only"] and o["order_id"] in sent and t0 / 1e9 < sent[o["order_id"]] < t1 / 1e9]
+    ok = bool(trip) and fields and tactic and bool(reset) and reset[0].get("operator_id") and not quotes_after and r["manifest"]["residual_at_end"]["flag"] == "FLAT_NET"
+    add("2k Breaker trip: exposure plus a hedge unknown 30 s: cancel quotes, flatten MARKET_BANDED at the touch band, stay tripped until a logged manual reset", "session breaker, OMS, router", len(flat), ok,
+        f"trip cause {trip[0]['cause'] if trip else None}; alarm fields present {fields}; flatten orders {[(f['venue'], f['side'], f['tactic'], round(f['worst_price'], 3)) for f in flat]}; maker quotes sent between the trip and the reset {len(quotes_after)}; "
+        f"manual reset logged by {reset[0].get('operator_id') if reset else None}; residual at end {r['manifest']['residual_at_end']['flag']}", "scn_2k_breaker_trip.jsonl, runs/scn_2k_breaker_trip/session_safety_events.jsonl")
+
 # ---- cases covered at unit / OMS level only, and the ones not covered
 unit = {
     "2c IOC partial and zero fill, only the true residual retried": ("OMS, hedge lifecycle", "covered at replay level only where the capture produced a partial (see 2n 25 SOL); no injected partial-fill fault exists in the simulator (hedge_fault_injection refuses partial_prob)", "NOT COVERED"),
     "2g Restart with open orders": ("OMS, plan store", "unit case: tests/test_restart_resilience.py (RestartAgainstTheVenueTests): missed execution booked once, hedged once, new risk held until reconciled; evidence case6_*.jsonl and case9_*.jsonl. A restart INSIDE a replay is not built", "NOT COVERED"),
     "2h New-level vs queued fills": ("simulator", "the fill record has no such field yet (the queue flags level_was_absent / queue_unknown exist on observation rows only); not built", "NOT COVERED"),
     "2i Amend paths (S0 profile v1_9s)": ("OMS amend lineage", "OMS level: tests/test_oms_amend.py (11 cases, evidence case7_amend_*.jsonl). No strategy calls request_amend and no S0 profile v1_9s exists, so no replay-level amend case", "NOT COVERED"),
-    "2k Breaker (pause, trip, manual reset)": ("session breaker", "unit level: tests/test_session_breaker.py; the circuit breaker is not switched on in the day-1 replays (no breaker_config is passed), so no replay-level case", "NOT COVERED"),
     "2l Maker-venue (Bybit) outage with quotes resting": ("session, simulator", "not built: hedge_fault_injection simulates a hedge-venue gateway outage only", "NOT COVERED"),
     "2m Latency at p99 and p99.9 delays": ("timing", "not built: the session timelines are lognormal with light tails; a sampled mode over the testnet quantile grids is the plan", "NOT COVERED"),
 }

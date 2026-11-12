@@ -15,6 +15,8 @@ if "--src" in argv:
     i = argv.index("--src"); src = argv[i + 1]; del argv[i:i + 2]
 sys.path.insert(0, src)
 from crypto_stat_arb.metrics import stage_trace
+from crypto_stat_arb.models import MarketEvent
+from crypto_stat_arb.orderbook import OrderBook
 from new_backtest.profiles import apply_profile, load_profile
 from new_backtest.session_replay import SessionReplay, dated_ticks, iter_recorded_events, write_result
 
@@ -34,6 +36,8 @@ CASES = {
     "2e_feed_gap": dict(profile="perp_perp_maker_taker_v1_9", window=B, gap=("20:20:00", "20:20:30")),   # an injected 30 s outage of both feeds inside 20:00-21:00
     "2f_rate_limit": dict(profile="perp_perp_maker_taker_v1_9", window=A, rate_limit=True),
     "2j_duplicate_filled": dict(profile="perp_perp_maker_taker_v1_9", window=A, duplicate_filled=True),
+    "2k_breaker_pause": dict(profile="perp_perp_maker_taker_v1_9", window=A, breaker=True, gap=("11:40:00", "11:40:13")),              # flat and both gateways silent 13 s (heartbeat limit 10 s): PAUSE, resumes by itself
+    "2k_breaker_trip": dict(profile="perp_perp_maker_taker_v1_9", window=A, breaker=True, ghost_s=30.0, reset_after_s=60.0),          # exposure + a hedge unknown for 30 s: TRIP, quotes cancelled, flatten, then a scripted manual reset 60 s after the trip
     "2m_processing": dict(profile="perp_perp_maker_taker_v1_9", window=A, processing_ms={"strategy": 5.0, "risk": 5.0}),
     "2n_size1": dict(profile="perp_perp_maker_taker_v1_9", window=A, size=1.0, gross=5.0, cap=True),
     "2n_size5": dict(profile="perp_perp_maker_taker_v1_9", window=A, size=5.0, gross=25.0, cap=True),
@@ -62,6 +66,13 @@ for venue, ms in (st.get("cancel_ms") or {}).items():
     venues[venue] = dataclasses.replace(vt, cancel=dataclasses.replace(vt.cancel, mean_ms=ms, min_ms=ms))
     cfg.timing = dataclasses.replace(cfg.timing, venues=venues)
 kw = {}
+if st.get("breaker"):
+    from crypto_stat_arb.circuit_breaker import CircuitBreakerConfig
+    b = profile["breaker"]          # the profile's breaker block (owner 1 Nov starting values)
+    kw["breaker_config"] = CircuitBreakerConfig(consecutive_failures=b["consecutive_failures"], failure_rate_window_n=b["failure_rate_window_n"], failure_rate_thresh=b["failure_rate_thresh"],
+                                                trip_on_failed_unwind=b["trip_on_failed_unwind"], net_exposure_s=b["net_exposure_s"], unknown_order_s=b["unknown_order_s"],
+                                                trip_on_gateway_down=b["trip_on_gateway_down"], heartbeat_timeout_s=b["heartbeat_timeout_s"], tripped_unwind_retries=b["tripped_unwind_retries"],
+                                                pause_on_gateway_down_when_flat=True)      # a gateway silent while flat PAUSES (resumes by itself); with exposure it TRIPS (manual reset)
 if st.get("ghost_s"):
     from crypto_stat_arb.simulation.hedge_faults import HedgeFaultConfig
     cfg.hedge_faults = HedgeFaultConfig(outage_on_fill_s=st["ghost_s"], outage_on_fill_venue="hedge", outage_policy="ghost", max_retries=2, retry_backoff_s=0.25)
@@ -99,16 +110,30 @@ replay.strategy.config.min_net_edge_bps = 1e9      # warm-up: the books are fed 
 
 
 def events():
-    armed = False
+    armed, reset_done, n, reconnected, shadow = False, False, 0, False, {}
     for ev in iter_recorded_events(SESSION):
         ts = ev.receive_ts_ns / 1e9
+        n += 1
+        if st.get("reset_after_s") and not reset_done and n % 200 == 0:                      # the operator's manual reset, scripted: once the breaker has tripped and the wait is over
+            trips = [e["ts_ns"] / 1e9 for e in replay.session.ledger.events if e["event_type"] == "BREAKER_TRIP"]
+            if trips and ts >= trips[0] + st["reset_after_s"]:
+                replay.session.reset_breaker(int(ts * 1e9), "operator-drill")
+                reset_done = True
         if ts >= t1:
             break
         if not armed and ts >= t0:
             replay.strategy.config.min_net_edge_bps = ARMED_EDGE
             armed = True
-        if gap is not None and gap[0] <= ts < gap[1]:
-            continue                           # the injected outage: neither feed delivers anything
+        if gap is not None:
+            if isinstance(ev, MarketEvent):
+                shadow.setdefault(ev.venue, OrderBook(ev.venue, ev.instrument_id)).apply(ev)         # the books as the exchange has them, outage or not
+            if gap[0] <= ts < gap[1]:
+                continue                       # the injected outage: neither feed delivers anything
+            if not reconnected and ts >= gap[1]:
+                reconnected = True             # the reconnect: each feed restarts with a SNAPSHOT of the book as it stands (the recorded capture has none after its first part, so without this a gap could never end)
+                for venue, book in shadow.items():
+                    yield MarketEvent.from_dict({"event_type": "BOOK_SNAPSHOT", "venue": venue, "instrument_id": book.instrument_id, "exchange_ts_ns": ev.exchange_ts_ns, "receive_ts_ns": ev.receive_ts_ns,
+                                                 "sequence": book.sequence, "bids": [[str(p), str(q)] for p, q in sorted(book.bids.items(), reverse=True)], "asks": [[str(p), str(q)] for p, q in sorted(book.asks.items())]})
         yield ev
 
 
@@ -117,6 +142,9 @@ result = replay.run_recorded(events())
 result["run"] = {"case": case, "settings": {k: v for k, v in st.items()}, "window_utc": st["window"], "wall_s": round(time.time() - t, 1), "labels": ["EXPLORATORY: mechanics only, no profit claim", "2-hour window of the 2026-10-29 capture; the books are warmed from the capture start (09:56 UTC) with quoting off until the window opens: counts of events and the regime samples include the warm-up",
                  "mark = mid, no funding", "regime boundaries IN-SAMPLE (the capture's own terciles)"]}
 write_result(result, out)
+safety = [e for e in replay.session.ledger.events if e["event_type"].startswith(("BREAKER_", "KILL_SWITCH", "UNWIND_", "HEDGE_ALARM", "MARGIN_PRICE", "NEW_RISK_HELD", "RECONCILIATION", "QUOTE_SKIPPED"))]
+if safety:                                   # the safety events of the run in full (payloads included), next to the standard outputs
+    (out / "session_safety_events.jsonl").write_text("".join(json.dumps({k: (str(v) if not isinstance(v, (int, float, bool, type(None), list, dict)) else v) for k, v in e.items()}, sort_keys=True, default=str) + "\n" for e in safety))
 sigs = result["signals"]
 trace = stage_trace(replay.session.ledger.events, [(s["ts"], "signal-trigger", "book") for s in sigs])
 cases_dir = Path("/Users/vaibhav/Documents/Newproject/out/integration/ems_cases")

@@ -91,7 +91,7 @@ class SessionReplay:
 
     def __init__(self, config, profile: dict, *, stream: Iterable | None = None, ticks: dict[str, float] | None = None, recorded: bool = False,
                  decompose_markouts: bool = False, mark_from_mid: bool = False, hedge_fault_injection: bool = False, layer_risk_mode: str = "count", reconcile_mode: str = "count", observations: bool = True, layer_route_mode: str = "count",
-                 lifecycle_report: bool = False, regime_boundaries=None) -> None:
+                 lifecycle_report: bool = False, regime_boundaries=None, breaker_config=None) -> None:
         if config.runtime != "session":
             raise ValueError("SessionReplay runs the session runtime only")
         self.config, self.profile = config, profile
@@ -210,7 +210,7 @@ class SessionReplay:
             resync_delay_ns=int(self.resync_delay_s * _NS), resync_source=self.feed.resync_snapshot,
             resync_silence_ns=None if config.timing is None else int(config.timing.dead_feed_s * _NS), latency_model=self.latency_model, hedge_policy=hedge_policy,
             gate_on_every_event=True,          # owner 9 Nov (D7d): the session runtime is v1_5 and later; the gate is evaluated on every event, as the live service does
-            layer_route_mode=layer_route_mode,
+            layer_route_mode=layer_route_mode, breaker_config=breaker_config,      # owner 12 Nov (2k): the circuit breaker on the replay, off unless a config is passed
             layer_risk_mode=layer_risk_mode,   # E0 step (c): count (default) = the layer's base-ceiling gate only counts; enforce = it refuses before the OMS reserves anything
             intent_journal=True,               # E0 step (a) (owner 10 Nov): the orders are journaled as layer intents next to the OMS plan; observation only
             markout_horizons_s=tuple(config.markout_horizons_s),          # owner 9 Nov: forward markouts per fill, by venue and role, as the backtester reports them (the core's MarkoutTracker)
