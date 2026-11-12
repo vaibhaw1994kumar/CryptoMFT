@@ -155,6 +155,8 @@ SWITCHES: tuple[Switch, ...] = (
     Switch("maker.through_print_volume_limited", "LEGACY_COMPAT", note="False in v1 / v1.1; v1.2 True: the through-print fill is limited by the print volume, one budget shared by every order the print went through"),
     Switch("maker.depletion_ledger", "LEGACY_COMPAT", note="False in v1 / v1.1 (a print netted against an earlier depth decrease drains nothing more: book-first leaves the queue ahead further back with size behind us, and trade_after_front uses the whole print); v1.2 sets True: the decrease records the head movement it applied, the print moves the queue only by the rest, and netted pairs with no other proof are counted"),
     Switch("maker.unknown_queue_dist", "CALIBRATED", note="floor in v1 (hand-set 25); v1.1: fitted on strictly earlier days, floor 0, flagged fallback 25 where the fit has no data (unknown_queue_fallback)"),
+    Switch("oms.maker_ack_deadline", "LEGACY_COMPAT", note="off in every profile up to v1_8 (a sent PostOnly quote with no answer stays SENT, unwatched); v1_9 (owner 13 Nov) ON: it is watched from the send and, unanswered, queried, TIMED_OUT, kill switch. REQUIRED for any profile used with real orders (crypto_stat_arb.config.REAL_ORDER_REQUIRED)"),
+    Switch("hedge_faults.silent_carry_bound", "LEGACY_COMPAT", note="position_size in every profile up to v1_8 (a residual under the position size is carried with no action); v1_9 (owner 13 Nov) below_one_lot: a failed hedge unwinds whatever its size, only a sub-lot remainder is carried. REQUIRED for any profile used with real orders"),
     Switch("execution.price_cap_required", "CALIBRATED", note="execution layer: every non-unwind intent carries a worst price and every child stays inside it; true in both profiles (today's behaviour), CALIBRATED until the cap decision (brief step 11) is made"),
     _mandatory("execution.one_hedge_child"),
     _mandatory("execution.risk_reservation"),
@@ -228,7 +230,7 @@ def apply_profile(doc: dict, dataset: str | None = None, **overrides):
         raise ProfileError(f"profile {doc.get('name')}: " + "; ".join(bad))
     body = {k: v for k, v in doc.items() if not k.startswith("_") and k not in ("name", "description", "classification", "decision_status",
                                                                                "product_fee_consistency", "timing", "breaker", "margin",
-                                                                               "fee_presets", "calibration", "execution", "hedge_move_calibration", "adverse_table", "do_not_quote", "dataset_settings")}
+                                                                               "fee_presets", "calibration", "execution", "hedge_move_calibration", "adverse_table", "do_not_quote", "dataset_settings", "oms")}
     ds_applied = None
     ds_cfg = ((doc.get("dataset_settings") or {}).get(dataset) if dataset else None)
     if ds_cfg:
@@ -269,7 +271,7 @@ def apply_profile(doc: dict, dataset: str | None = None, **overrides):
             raise ProfileError(f"profile {doc.get('name')}: execution block: {e}") from e
     hf = cfg_kw.pop("hedge_faults", None)
     if isinstance(hf, dict):
-        cfg_kw["hedge_faults"] = HedgeFaultConfig(**hf)
+        cfg_kw["hedge_faults"] = HedgeFaultConfig(**{k: v for k, v in hf.items() if k != "silent_carry_bound"})      # the session runtime's residual bound (core config); the backtester's own loop has no such rule
     cal = doc.get("calibration")
     if cal:
         path = resolve_calibration(doc, cal)

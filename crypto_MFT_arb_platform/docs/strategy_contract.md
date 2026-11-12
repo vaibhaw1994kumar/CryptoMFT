@@ -351,3 +351,19 @@ Only three tactics exist. There is no speculative-IOC and no scheduled tactic, a
   walked from the hedge venue's VIEW book until a feed update overwrites that level — a deliberate own-impact model, not a violation
   of the maker rule, and counted in `maker_observations.own_taker_book_consumption`.** Switching it off changes every replay's
   P&L slightly, so it is a decision for the user, not part of a no-behaviour-change phase.
+
+## Switches required for real orders (owner 13 Nov)
+
+Two tables, two jobs. `MANDATORY_CONTROLS` (`crypto_stat_arb/config.py`) lists what every non-legacy profile must have on. `REAL_ORDER_REQUIRED` (same file, checked by `check_real_order_profile`) lists the switches that are
+OFF in the older reference profiles, so they cannot be mandatory for those, but that a profile used with REAL orders (live, paper against a venue, testnet drills) must have ON. A replay writes the result of the
+check into its manifest (`config_notes.real_order_requirements`: `met`, or the list of what is missing). v1_9 meets both rows; v1_8 and earlier do not, and say so.
+
+| Key | Required | Why |
+|---|---|---|
+| `oms.maker_ack_deadline` | `true` | A sent PostOnly quote is watched from the send, not only from its ack. An unanswered submit is queried after the report timeout, never resent, and after `max_queries` is TIMED_OUT with the kill switch. Without it a lost submit sat SENT and unwatched for 565 s in the 2l replay. |
+| `hedge_faults.silent_carry_bound` | `below_one_lot` | A failed hedge always acts. When a hedge chain exhausts its retries the residual is unwound with MARKET_BANDED at the touch band (`unwind_band_bps`, 15) whatever its size; an unwind that cannot be done is the persistent alarm (`UNWIND_EXHAUSTED_ALARM`, no new risk until an operator reset). Only a remainder below one hedge-venue lot, which the venue cannot be sent, is carried silently, with the end-of-day warning. The key sets the residual bound (`oms.residual.max_residual_base` and `risk.max_residual_base`) to the hedge venue's lot; `position_size` (the older profiles) sets it to the position size, so a failed 0.0876 SOL hedge under a 1.0 SOL bound was carried with no action. |
+
+Exchange-side restart reconciliation (`OMS.reconcile_account_after_restart`, same date): after a restart the OMS asks every venue for its account (`account_snapshot(since_ns)`: orders open and closed, executions, positions),
+closes `restart_reconcile_gate` first, books what happened while it was down once (cumulative, executions de-duplicated by execution id and required to add up to the venue's order state), sends the hedge a missed maker fill
+triggers, and opens the gate only when every order, execution and position agrees. A venue order that is no plan's is flagged and holds new risk; it is never cancelled automatically. A venue whose account cannot be fetched stays
+unreconciled. Scripted-venue tests only (`tests/test_restart_resilience.py`, `ExchangeSideRestartReconciliationTests`); the live adapters' `account_snapshot` and a testnet restart drill are not built yet.

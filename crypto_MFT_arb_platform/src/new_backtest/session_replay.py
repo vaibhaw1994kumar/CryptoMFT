@@ -26,7 +26,7 @@ from decimal import Decimal
 from pathlib import Path
 from typing import Any, Iterable
 
-from crypto_stat_arb.config import config_from_raw, raw_config_from_profile
+from crypto_stat_arb.config import check_real_order_profile, config_from_raw, raw_config_from_profile
 from crypto_stat_arb.derivatives import DerivativeTicker
 from crypto_stat_arb.metrics import regime_sample
 from crypto_stat_arb.ems.layer import hedge_policy_fields
@@ -90,7 +90,7 @@ class SessionReplay:
     """One replay on the session. `stream` is any iterable of `TimedEvent` built with `decimal_numbers=True` (the real feed or a synthetic list); consumed lazily."""
 
     def __init__(self, config, profile: dict, *, stream: Iterable | None = None, ticks: dict[str, float] | None = None, recorded: bool = False,
-                 decompose_markouts: bool = False, mark_from_mid: bool = False, hedge_fault_injection: bool = False, layer_risk_mode: str = "count", reconcile_mode: str = "count", observations: bool = True, layer_route_mode: str = "count",
+                 decompose_markouts: bool = False, mark_from_mid: bool = False, hedge_fault_injection: bool = False, hedge_thin_book: tuple = (), layer_risk_mode: str = "count", reconcile_mode: str = "count", observations: bool = True, layer_route_mode: str = "count",
                  lifecycle_report: bool = False, regime_boundaries=None, breaker_config=None) -> None:
         if config.runtime != "session":
             raise ValueError("SessionReplay runs the session runtime only")
@@ -135,6 +135,7 @@ class SessionReplay:
         raw, self.config_notes = raw_config_from_profile(profile, pair=config.pair, venues=venues, ticks=self.ticks, quantity_steps={v: quantity_steps()[v] for v in venues}, size_base=size,
                                                          seed=config.seed, venue_cap_base=float(config.arb.max_venue_imbalance_base) or None)
         self.app_config, self.raw_config = config_from_raw(raw)
+        self.config_notes["real_order_requirements"] = check_real_order_profile(profile) or "met"     # owner 13 Nov: a profile used with real orders must meet crypto_stat_arb.config.REAL_ORDER_REQUIRED; a backtest of an older profile may not, and says so here
         self.instrument_id = self.app_config.instrument_id
         self.feed = CanonicalFeed(self.instrument_id, venue_names=self.names, delta_semantics={v: s.delta_semantics for v, s in self.venue_specs.items()},
                                   max_silence_s=None if config.timing is None else config.timing.dead_feed_s)
@@ -177,9 +178,19 @@ class SessionReplay:
             if unsupported:
                 raise ValueError(f"hedge_fault_injection does not simulate: {', '.join(unsupported)}")
             hedge_names = {self.names[v] for v in venues if v not in config.arb.maker_venues}
+            maker_outage = [o for o in hf_cfg.outages if o.venue.lower() in {n.lower() for n in self.adapters if n not in hedge_names}]
+            if maker_outage and hf_cfg.outage_policy != "blackhole":
+                raise ValueError("a static outage of a maker venue is simulated with outage_policy 'blackhole' only (order entry lost, fill reports held until the reconnect)")
             for name, adapter in self.adapters.items():
                 adapter._fault_config = hf_cfg
                 adapter.outage_on_fill_here = name in hedge_names
+                adapter.maker_outage_here = name not in hedge_names and any(o.venue.lower() == name.lower() for o in maker_outage)
+        # Case 2c (owner 12 Nov): attempt i of each hedge plan executes against a hedge-venue book thinned to (levels, quantity per level); (0, 0) is a zero fill. Opt-in, and only ever shows LESS depth than the capture.
+        self.hedge_thin_book = tuple((int(n), float(q)) for n, q in hedge_thin_book)
+        if self.hedge_thin_book:
+            for name, adapter in self.adapters.items():
+                if name in {self.names[v] for v in venues if v not in config.arb.maker_venues}:
+                    adapter.hedge_thin_attempts = self.hedge_thin_book
         self.resync_delay_s = float(getattr(config, "resync_delay_s", 5.0))
         # Timing is a RULE, the same on both runtimes (owner 9 Nov): the profile's timing block (latency preset, floors, jitter) drives the feed delay, the clock and every order delay.
         self.latency = LatencyBook({v: s.latency for v, s in self.venue_specs.items()}, seed=config.seed)
@@ -599,6 +610,19 @@ class SessionReplay:
 
     # -- result ------------------------------------------------------------------------------------------------------------
 
+    def _observation_rows(self) -> list[dict]:
+        """The observation rows for the file. Case 2h (owner 12 Nov): every maker_fill row also says how its order stood when it was placed (from the maker_place row of the same order): "new_level" (no displayed
+        size at its price: we created the level and were first in the queue), "queued" (behind displayed size) or "unknown" (the queue was not known). Observation only: the fills, orders and ledger are untouched."""
+        rows = list(self.obs.rows)
+        placed = {o["order_id"]: o for o in rows if o.get("obs") == "maker_place"}
+        out = []
+        for row in rows:
+            o = placed.get(row.get("order_id")) if row.get("obs") == "maker_fill" else None
+            if o is not None:
+                row = {**row, "queue_class": "unknown" if o.get("queue_unknown") else "new_level" if o.get("level_was_absent") else "queued", "queue_ahead_at_placement": o.get("queue_ahead")}
+            out.append(row)
+        return out
+
     def _residual_at_end(self) -> dict[str, Any]:
         """Owner 11 Nov (D1): what is still open when the run ends. The residual rule does not flatten a residual inside its approved bound (and a part-lot residual cannot be sent: it is below every venue's minimum), so it is
         reported here, not left to be found in the positions: the OMS's own residual snapshot, the net position over both venues, and a flag when that net is not zero (an unhedged leg or a carried residual)."""
@@ -650,7 +674,7 @@ class SessionReplay:
             "strategy_counters": {"evaluations": self.strategy.evaluations, "signals": self.strategy.signals, "best_edge_seen_bps": None if self.strategy.best_edge_seen_bps == float("-inf") else self.strategy.best_edge_seen_bps,
                                   "rejects": {k: v for k, v in self.strategy.rejects.items() if v}},
             "reject_trace": self.reject_trace,
-            "execution_layer": self._layer_report(), "intent_journal": list(s.intent_observer.layer.journal) if s.intent_observer is not None else None, "_maker_observations": list(self.obs.rows) if self.obs is not None else None, "_decision_events": [e for e in s.ledger.events if e["event_type"] in DECISION_EVENTS] or None, "intent_fills": list(s.intent_observer.layer.fills) if s.intent_observer is not None else None,
+            "execution_layer": self._layer_report(), "intent_journal": list(s.intent_observer.layer.journal) if s.intent_observer is not None else None, "_maker_observations": self._observation_rows() if self.obs is not None else None, "_decision_events": [e for e in s.ledger.events if e["event_type"] in DECISION_EVENTS] or None, "intent_fills": list(s.intent_observer.layer.fills) if s.intent_observer is not None else None,
             **({} if self.decomp is None else {"markout_decomposed": {
                 "label": "EXPLORATORY: decomposed markouts (captured C, adverse D, M = C + D, fee, net) per fill and horizon, bps of the mid at the fill, positive = good for us; mid at the fill = the mid before the event that caused it",
                 "by_venue_role": self.decomp.decomposed_summary(by=("venue", "role")), "excluded_counts": self.decomp.excluded_counts(), "fills_skipped_no_mid_before": self.decomp_skipped_no_mid,
@@ -671,8 +695,10 @@ class SessionReplay:
                 "model_choices": {"consume_liquidity_on_own_taker_fills": {**{n: a.consume_liquidity for n, a in self.adapters.items()}, "status": "DELIBERATE_MODEL_CHOICE (owner 12 Nov): an own hedge or unwind fill removes the walked quantity from the book it walked; the public view book is not changed by it (every level on both venues, tested)"}},
                 **({"hedge_fault_injection": {"faults": self.config.hedge_faults.as_dict(), "injected_by_venue": {n: dict(a.hedge_faults_injected) for n, a in self.adapters.items()},
                                               "ghost_hedges_held_at_end": {n: len(a._held) for n, a in self.adapters.items()}, "ghost_hedges_delivered": {n: len(a.ghost_delivered) for n, a in self.adapters.items()},
-                                              "not_simulated": "feed darkness (outage kind 'full'), the maker venue's outage, delay, partial_prob, lost ack, fast-move reject, restart, disconnects: refused, not ignored"}}
+                                              "not_simulated": "feed darkness (outage kind 'full'), delay, partial_prob, a lost ack on an order that reached the venue, fast-move reject, restart, disconnects: refused, not ignored. A static outage of the MAKER venue is simulated (blackhole policy: order entry lost, fill reports held until the reconnect)"}}
                    if self.hedge_fault_injection else {}),
+                **({"hedge_thin_book": {"attempts_levels_x_quantity": [list(a) for a in self.hedge_thin_book], "injected_by_venue": {n: dict(a.hedge_faults_injected) for n, a in self.adapters.items()},
+                                        "label": "the hedge venue's truth book shows LESS than the capture for those attempts (no depth is added)"}} if self.hedge_thin_book else {}),
                 **({} if not (self.mark_from_mid or self.mark_ticks["exchange_mark"]) else {"mark_source": {
                     "exchange_mark_ticks": self.mark_ticks["exchange_mark"], "MARK_FROM_MID_ticks": self.mark_ticks["MARK_FROM_MID"], "venues_with_exchange_marks": sorted(self._exchange_mark_venues),
                     "label": "the margin check marks a position with the venue's exchange mark when the recorded derivatives stream has one (age at most mark_max_age, 5 s ASSUMED), else with the last good mark or valid book mid (kept for up to 5 s; after that the price is missing and new risk is paused, not the kill switch); MARK_FROM_MID is the replay's "

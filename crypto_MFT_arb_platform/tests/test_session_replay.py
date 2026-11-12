@@ -1315,7 +1315,8 @@ class SizeAwareCapInTheReplay(unittest.TestCase):
         _, _, h7 = self._run("perp_perp_maker_taker_v1_7", full, thin_from=2.5)
         r9, _, h9 = self._run("perp_perp_maker_taker_v1_9", full, thin_from=2.5)
         self.assertTrue(h7 and h9)
-        self.assertEqual([o["limit_price"] for o in h7], [o["limit_price"] for o in h9])
+        # the hedge attempts price the same under both caps; v1_9 (13 Nov: a failed hedge always unwinds) then sends the unwind orders that v1_7 does not (its residual stays under the position-size bound)
+        self.assertEqual([o["limit_price"] for o in h7], [o["limit_price"] for o in h9][:len(h7)])
         ev = [e for e in r9["_decision_events"] if e["event_type"] == "HEDGE_CAP_SIZE_AWARE"]
         self.assertTrue(ev and all("touch_slack" in e["fallback"] for e in ev))
 

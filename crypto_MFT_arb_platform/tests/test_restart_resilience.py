@@ -382,6 +382,52 @@ def _maker_update(plan, maker, n, state, cum, ts):
     )
 
 
+class _SilentMakerVenue:
+    """A maker venue whose gateway lost the submit: nothing comes back, and a status query is not answered (None)."""
+    def __init__(self, venue):
+        self.venue, self.submits = venue, []
+
+    def handle(self, req, book):
+        self.submits.append(req)
+        return ()
+
+    def query_order(self, order_id):
+        return None
+
+
+class MakerAckDeadlineTests(unittest.TestCase):
+    """Case 2l finding: a post-only quote whose submit or ack is lost stayed SENT with no deadline (565 s in the replay). `oms.maker_ack_deadline` (off by default) watches it from the send: queried
+    after the report timeout, never resent, timed out and the kill switch once the queries go unanswered."""
+    def run_oms(self, enabled):
+        inst = _ft_instruments()
+        venue = _SilentMakerVenue("BYBIT")
+        oms = OMS(inst, risk(), Ledger(), router=StrategyDirectedRouter(inst, adapters={"BYBIT": venue, "BINANCE": ScriptedVenue("BINANCE", ["fill"], price="60000")}),
+                  dispatch_policy=DispatchPolicy.FILL_TRIGGERED, hedge_policy=HedgePolicy(retry_limit=1))
+        oms.maker_ack_deadline = enabled
+        plan = oms.execute(_ft_opportunity(), _ft_books(), maker_venue="BYBIT")
+        sent = max(e["ts_ns"] for e in oms.ledger.events)
+        return oms, plan, venue, sent
+
+    def test_off_by_default_a_lost_submit_is_not_watched(self):
+        oms, plan, venue, sent = self.run_oms(False)
+        self.assertEqual(plan.children[0].state, OrderState.SENT)
+        oms.advance_time(sent + 30_000 * MS, _ft_books())
+        self.assertEqual([e for e in oms.ledger.events if e["event_type"] == "VENUE_ORDER_QUERY"], [])
+        self.assertEqual(plan.children[0].state, OrderState.SENT)
+
+    def test_on_the_lost_submit_is_queried_never_resent_then_timed_out_with_the_kill_switch(self):
+        oms, plan, venue, sent = self.run_oms(True)
+        oms.advance_time(sent + 1_900 * MS, _ft_books())
+        self.assertEqual([e for e in oms.ledger.events if e["event_type"] == "VENUE_ORDER_QUERY"], [])          # inside the report timeout (2 s) nothing is asked
+        oms.advance_time(sent + 10_000 * MS, _ft_books())
+        queries = [e for e in oms.ledger.events if e["event_type"] == "VENUE_ORDER_QUERY"]
+        self.assertEqual(len(queries), 3)                                                                       # max_queries unanswered
+        self.assertTrue(all(q["answered"] is False for q in queries))
+        self.assertEqual(len(venue.submits), 1)                                                                 # never resent
+        self.assertEqual(plan.children[0].state, OrderState.TIMED_OUT)
+        self.assertTrue(oms.risk.kill_switch)
+
+
 class HedgeRecoveryAfterRestartTests(unittest.TestCase):
     """Track B Item 2 — Test A: open hedge at session death is recovered without duplicate dispatch."""
 
@@ -649,4 +695,120 @@ class RestartAgainstTheVenueTests(unittest.TestCase):
             self.assertFalse(oms.restart_reconcile_gate)
             oms.execute(_ft_opportunity("opp-new-4"), _ft_books(), maker_venue="BYBIT")
             self.assertEqual(len(bybit.submits), 1)                                              # every earlier caller behaves as before
+            store.close()
+
+
+class ScriptedAccount:
+    """A venue's account endpoints, scripted: `account_snapshot(since_ns)` returns the snapshot given, or fails."""
+
+    def __init__(self, snapshot=None, fail=False):
+        self.snapshot, self.fail, self.calls = snapshot, fail, []
+
+    def account_snapshot(self, since_ns):
+        self.calls.append(since_ns)
+        if self.fail:
+            raise ConnectionError("account endpoint down")
+        return self.snapshot
+
+
+class ExchangeSideRestartReconciliationTests(RestartAgainstTheVenueTests):
+    """Owner 13 Nov: after a restart the OMS fetches every venue's open orders, executions and positions, books what happened while it was down once, and takes no new maker exposure until they agree.
+    Scripted venues only; a testnet restart drill comes later."""
+
+    def _account(self, maker, state, filled, *, executions=None, positions=None, extra_orders=(), extra_executions=()):
+        from crypto_stat_arb.plan_store import VenueAccountSnapshot, VenueExecution
+        snap = self._snapshot(maker, state, filled)
+        rows = tuple(VenueExecution(eid, maker.order_id, "BYBIT", INSTR_FT, Decimal(q), Decimal("60060"), 400 * MS + i) for i, (eid, q) in enumerate(executions or [])) + tuple(extra_executions)
+        bybit = VenueAccountSnapshot("BYBIT", (snap, *extra_orders), rows, positions if positions is not None else {}, 550 * MS)
+        binance = VenueAccountSnapshot("BINANCE", (), (), {}, 550 * MS)
+        return ScriptedAccount(bybit), ScriptedAccount(binance)
+
+    def test_missed_fill_is_booked_once_hedged_once_and_the_gate_opens_only_when_everything_agrees(self):
+        from crypto_stat_arb.models import OrderState
+        with tempfile.TemporaryDirectory() as directory:
+            plan_path = Path(directory) / "oms.sqlite"
+            parent_id, maker = self._first_session(plan_path)
+            oms, store, bybit, binance = self._restart(plan_path, gate=False)
+            by_acct, bn_acct = self._account(maker, OrderState.FILLED, "0.010", executions=[("e1", "0.004"), ("e2", "0.006"), ("e2", "0.006")], positions={INSTR_FT: Decimal("-0.010")})    # e2 listed twice: one execution
+            report = oms.reconcile_account_after_restart({"BYBIT": by_acct, "BINANCE": bn_acct}, 600 * MS, books=_ft_books())
+            self.assertEqual(report["problems"], {}); self.assertTrue(report["gate_open"])
+            self.assertTrue(oms.restart_reconcile_gate)                                          # the call closes the gate itself, whatever the caller set
+            self.assertEqual(len([e for e in self._fills(oms) if e.get("order_id") == maker.order_id]), 1)    # booked once
+            self.assertEqual(len(binance.submits), 1)                                           # the hedge, sent once
+            self.assertEqual(oms.ledger.positions[("BYBIT", INSTR_FT)], Decimal("-0.010"))
+            self.assertEqual(oms.ledger.positions[("BINANCE", INSTR_FT)], Decimal("0.010"))     # flat net
+            # the same account fetched again (a second restart, a repeated call): nothing booked, nothing sent
+            again_by, again_bn = self._account(maker, OrderState.FILLED, "0.010", executions=[("e1", "0.004"), ("e2", "0.006")], positions={INSTR_FT: Decimal("-0.010")})
+            again_bn.snapshot = type(again_bn.snapshot)("BINANCE", (), (), {INSTR_FT: Decimal("0.010")}, 650 * MS)
+            report = oms.reconcile_account_after_restart({"BYBIT": again_by, "BINANCE": again_bn}, 700 * MS, books=_ft_books())
+            self.assertTrue(report["gate_open"], report)
+            self.assertEqual(len([e for e in self._fills(oms) if e.get("order_id") == maker.order_id]), 1)
+            self.assertEqual(len(binance.submits), 1)
+            oms.execute(_ft_opportunity("opp-new-1"), _ft_books(), maker_venue="BYBIT")          # agreed: new maker exposure may go out
+            self.assertEqual((len(bybit.submits), self._held(oms)), (1, []))
+            write_case("case10_exchange_side_restart_reconciliation_missed_fill", oms.ledger.events)
+            store.close()
+
+    def test_an_order_still_resting_at_the_venue_is_reconciled_without_being_finished(self):
+        from crypto_stat_arb.models import OrderState
+        with tempfile.TemporaryDirectory() as directory:
+            plan_path = Path(directory) / "oms.sqlite"
+            parent_id, maker = self._first_session(plan_path)
+            oms, store, bybit, binance = self._restart(plan_path, gate=False)
+            by_acct, bn_acct = self._account(maker, OrderState.ACKNOWLEDGED, "0", positions={INSTR_FT: Decimal("0")})
+            report = oms.reconcile_account_after_restart({"BYBIT": by_acct, "BINANCE": bn_acct}, 600 * MS, books=_ft_books())
+            self.assertTrue(report["gate_open"], report)
+            self.assertEqual(binance.submits, [])                                               # nothing filled, nothing to hedge
+            oms.execute(_ft_opportunity("opp-new-2"), _ft_books(), maker_venue="BYBIT")
+            self.assertEqual(len(bybit.submits), 1)
+            store.close()
+
+    def test_an_unknown_order_a_position_that_differs_or_a_failed_fetch_each_keep_new_risk_held(self):
+        from crypto_stat_arb.models import OrderState
+        from crypto_stat_arb.plan_store import VenueOrderSnapshot
+        stray = VenueOrderSnapshot(order_id="someone-elses-order", venue="BYBIT", instrument_id=INSTR_FT, state=OrderState.ACKNOWLEDGED, filled_quantity=Decimal("0"), average_price=Decimal("0"), venue_order_id="v-9")
+        cases = {
+            "unknown_venue_order": lambda m: self._account(m, OrderState.ACKNOWLEDGED, "0", positions={INSTR_FT: Decimal("0")}, extra_orders=(stray,)),
+            "venue_position_differs": lambda m: self._account(m, OrderState.ACKNOWLEDGED, "0", positions={INSTR_FT: Decimal("-0.010")}),
+            "account_fetch_failed": lambda m: (ScriptedAccount(fail=True), ScriptedAccount(self._account(m, OrderState.ACKNOWLEDGED, "0")[1].snapshot)),
+        }
+        for label, build in cases.items():
+            with tempfile.TemporaryDirectory() as directory:
+                plan_path = Path(directory) / "oms.sqlite"
+                parent_id, maker = self._first_session(plan_path)
+                oms, store, bybit, binance = self._restart(plan_path, gate=False)
+                by_acct, bn_acct = build(maker)
+                report = oms.reconcile_account_after_restart({"BYBIT": by_acct, "BINANCE": bn_acct}, 600 * MS, books=_ft_books())
+                self.assertFalse(report["gate_open"], label)
+                self.assertTrue(any(label in p for p in report["problems"]["BYBIT"]), (label, report))
+                oms.execute(_ft_opportunity("opp-held"), _ft_books(), maker_venue="BYBIT")
+                self.assertEqual((bybit.submits, self._held(oms)), ([], ["opp-held"]), label)          # no new maker exposure
+                self.assertFalse(any(e["event_type"] == "ORDER_CANCEL_REQUESTED" for e in oms.ledger.events), label)   # an order that may not be ours is flagged, never cancelled
+                store.close()
+
+    def test_a_failed_fetch_books_nothing_and_a_later_good_fetch_opens_the_gate(self):
+        from crypto_stat_arb.models import OrderState
+        with tempfile.TemporaryDirectory() as directory:
+            plan_path = Path(directory) / "oms.sqlite"
+            parent_id, maker = self._first_session(plan_path)
+            oms, store, bybit, binance = self._restart(plan_path, gate=False)
+            good_by, good_bn = self._account(maker, OrderState.FILLED, "0.010", executions=[("e1", "0.010")], positions={INSTR_FT: Decimal("-0.010")})
+            report = oms.reconcile_account_after_restart({"BYBIT": ScriptedAccount(fail=True), "BINANCE": good_bn}, 600 * MS, books=_ft_books())
+            self.assertFalse(report["gate_open"])
+            self.assertEqual((self._fills(oms), binance.submits), ([], []))
+            report = oms.reconcile_account_after_restart({"BYBIT": good_by, "BINANCE": good_bn}, 700 * MS, books=_ft_books())
+            self.assertTrue(report["gate_open"], report)
+            self.assertEqual(len(binance.submits), 1)
+            store.close()
+
+    def test_executions_that_do_not_add_up_to_the_order_state_keep_the_gate_closed(self):
+        from crypto_stat_arb.models import OrderState
+        with tempfile.TemporaryDirectory() as directory:
+            plan_path = Path(directory) / "oms.sqlite"
+            parent_id, maker = self._first_session(plan_path)
+            oms, store, bybit, binance = self._restart(plan_path, gate=False)
+            by_acct, bn_acct = self._account(maker, OrderState.FILLED, "0.010", executions=[("e1", "0.004")], positions={INSTR_FT: Decimal("-0.010")})
+            report = oms.reconcile_account_after_restart({"BYBIT": by_acct, "BINANCE": bn_acct}, 600 * MS, books=_ft_books())
+            self.assertFalse(report["gate_open"])
+            self.assertTrue(any(p.startswith("plan_unreconciled") for p in report["problems"]["BYBIT"]), report)
             store.close()

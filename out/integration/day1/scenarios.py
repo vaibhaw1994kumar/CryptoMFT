@@ -3,6 +3,7 @@ window, timing, injected faults, a lowered rate limit, an injected feed gap, an 
 timestamped stage trace to out/integration/ems_cases/scn_<case>.jsonl. READ ONLY on data/.
 usage: scenarios.py CASE [--src DIR]        CASE is one of CASES (see below)"""
 import dataclasses
+from decimal import Decimal
 import itertools
 import json
 import sys
@@ -38,7 +39,14 @@ CASES = {
     "2j_duplicate_filled": dict(profile="perp_perp_maker_taker_v1_9", window=A, duplicate_filled=True),
     "2k_breaker_pause": dict(profile="perp_perp_maker_taker_v1_9", window=A, breaker=True, gap=("11:40:00", "11:40:13")),              # flat and both gateways silent 13 s (heartbeat limit 10 s): PAUSE, resumes by itself
     "2k_breaker_trip": dict(profile="perp_perp_maker_taker_v1_9", window=A, breaker=True, ghost_s=30.0, reset_after_s=60.0),          # exposure + a hedge unknown for 30 s: TRIP, quotes cancelled, flatten, then a scripted manual reset 60 s after the trip
+    "2l_maker_outage": dict(profile="perp_perp_maker_taker_v1_9", window=A, maker_outage=[("11:15:28.5", "11:15:48.5"), ("12:30:05", "12:30:30")]),   # Bybit order entry and private stream down: a quote resting at the first outage fills inside it; a quote due inside the second never reaches the venue
+    "2c_zero_then_fill": dict(profile="perp_perp_maker_taker_v1_9", window=A, hedge_retries=2, thin=[(0, 0.0)]),                      # the first hedge IOC of every plan finds nothing; the retry sees the real book
+    "2c_partial_then_fill": dict(profile="perp_perp_maker_taker_v1_9", window=A, hedge_retries=2, thin=[(2, 0.4)]),                  # the first hedge IOC finds 2 levels of 0.4 SOL: a partial of 0.8 of 1.0; only the true residual 0.2 is retried
+    "2c_zero_exhausted": dict(profile="perp_perp_maker_taker_v1_9", window=A, hedge_retries=2, thin=[(0, 0.0)] * 3),                # every attempt finds nothing: retries run out, unwind, alarm
+    "2c_thin_top": dict(profile="perp_perp_maker_taker_v1_9", window=A, hedge_retries=2, thin=[(-1, 0.05)] * 3, thin_view_top=0.05),     # owner 13 Nov: the Binance TOUCH shows 0.05 SOL (to the bot and at the venue), every deeper level is the capture's: the hedge is larger than the touch, so the size_aware cap spans levels
     "2m_processing": dict(profile="perp_perp_maker_taker_v1_9", window=A, processing_ms={"strategy": 5.0, "risk": 5.0}),
+    "2m_p99": dict(profile="perp_perp_maker_taker_v1_9", window=A, latency_q=0.99),                 # every order delay fixed at the testnet p99 of its stage, both venues (feed unchanged)
+    "2m_p999": dict(profile="perp_perp_maker_taker_v1_9", window=A, latency_q=0.999),               # the same at the p99.9 (of n about 390: effectively the sample maximum)
     "2n_size1": dict(profile="perp_perp_maker_taker_v1_9", window=A, size=1.0, gross=5.0, cap=True),
     "2n_size5": dict(profile="perp_perp_maker_taker_v1_9", window=A, size=5.0, gross=25.0, cap=True),
     "2n_size25": dict(profile="perp_perp_maker_taker_v1_9", window=A, size=25.0, gross=125.0, cap=True),
@@ -46,7 +54,7 @@ CASES = {
 
 
 def hms(text):
-    parts = [int(x) for x in text.split(":")] + [0, 0]
+    parts = [float(x) for x in text.split(":")] + [0, 0]
     return DAY0 + parts[0] * 3600 + parts[1] * 60 + parts[2]
 
 
@@ -65,6 +73,24 @@ for venue, ms in (st.get("cancel_ms") or {}).items():
     venues = dict(cfg.timing.venues)
     venues[venue] = dataclasses.replace(vt, cancel=dataclasses.replace(vt.cancel, mean_ms=ms, min_ms=ms))
     cfg.timing = dataclasses.replace(cfg.timing, venues=venues)
+if st.get("latency_q"):
+    q = st["latency_q"]
+
+    def at(grid):            # linear interpolation on the testnet empirical quantile grid
+        qs, ms = grid["q"], grid["ms"]
+        return next(ms[i - 1] + (ms[i] - ms[i - 1]) * (q - qs[i - 1]) / (qs[i] - qs[i - 1]) for i in range(1, len(qs)) if qs[i] >= q)
+    venues = dict(cfg.timing.venues)
+    for venue in venues:
+        cal = json.loads(Path(f"/Users/vaibhav/Documents/Newproject/crypto_MFT_arb_platform/config/lifecycle_calibration_perp_{venue}.json").read_text())
+        grids, fill = cal["empirical_quantile_grids_by_network"]["testnet"], cal["networks"]["testnet"]["fill_report_delay"]["report_delay_fill_corrected_ms"]["max"]
+        label = f"MEASURED:TESTNET q={q} (indicative bound for mainnet, not a measurement of it); stage mapping ASSUMED"
+
+        def spec(ms, old):
+            return dataclasses.replace(old, mean_ms=float(ms), jitter_ms=0.0, max_ms=max(old.max_ms, float(ms) + 1.0), min_ms=0.0, source=label)
+        vt = venues[venue]
+        venues[venue] = dataclasses.replace(vt, entry=spec(at(grids["entry_offset_corrected_ms"]), vt.entry), ack_report=spec(at(grids["ack_rest_rtt_ms"]), vt.ack_report),
+                                            fill_report=spec(fill, vt.fill_report), cancel=spec(at(grids["cancel_rest_rtt_ms"]) / 2, vt.cancel), cancel_report=spec(at(grids["cancel_rest_rtt_ms"]) / 2, vt.cancel_report))
+    cfg.timing = dataclasses.replace(cfg.timing, venues=venues)
 kw = {}
 if st.get("breaker"):
     from crypto_stat_arb.circuit_breaker import CircuitBreakerConfig
@@ -77,8 +103,34 @@ if st.get("ghost_s"):
     from crypto_stat_arb.simulation.hedge_faults import HedgeFaultConfig
     cfg.hedge_faults = HedgeFaultConfig(outage_on_fill_s=st["ghost_s"], outage_on_fill_venue="hedge", outage_policy="ghost", max_retries=2, retry_backoff_s=0.25)
     kw["hedge_fault_injection"] = True
+if st.get("thin"):
+    from crypto_stat_arb.simulation.hedge_faults import HedgeFaultConfig
+    cfg.hedge_faults = HedgeFaultConfig(max_retries=st["hedge_retries"], retry_backoff_s=0.25)      # retries only; nothing is injected by this block (the thin book is the fault)
+    kw["hedge_thin_book"] = tuple(st["thin"])
+if st.get("maker_outage"):
+    from crypto_stat_arb.simulation.hedge_faults import HedgeFaultConfig, Outage
+    cfg.hedge_faults = HedgeFaultConfig(outages=tuple(Outage("BYBIT", hms(a), hms(b)) for a, b in st["maker_outage"]), outage_policy="blackhole", ack_timeout_s=2.0, max_retries=2, retry_backoff_s=0.25)
+    kw["hedge_fault_injection"] = True
 replay = SessionReplay(cfg, profile, ticks=dated_ticks("2026-10-29"), recorded=True, decompose_markouts=True, mark_from_mid=True, lifecycle_report=True, regime_boundaries=BND, **kw)
 
+if st.get("profile") == "perp_perp_maker_taker_v1_9":
+    assert replay.session.oms.maker_ack_deadline, "v1_9 carries oms.maker_ack_deadline (owner 13 Nov)"      # from the profile now, not set here
+if st.get("thin_view_top"):                   # the bot sees the same thin touch (the market's touch IS thin): the size_aware cap is taken from this view, every deeper level is the real one
+    import copy
+    from crypto_stat_arb.oms import OMS
+    _real_cap = OMS._size_aware_cap
+
+    def _thin_view_cap(self, plan, chain, spec, book, touch, qty, ts_ns, attempt):
+        view, buy = copy.copy(book), spec["side"].value == "BUY"
+        levels = dict(view.asks if buy else view.bids)
+        best = min(levels) if buy else max(levels)
+        levels[best] = min(levels[best], Decimal(str(st["thin_view_top"])))
+        if buy:
+            view.asks = levels
+        else:
+            view.bids = levels
+        return _real_cap(self, plan, chain, spec, view, touch, qty, ts_ns, attempt)
+    OMS._size_aware_cap = _thin_view_cap
 if st.get("rate_limit"):                      # a lowered limit: 6 requests per 10 s per bucket (ASSUMED test value), so new quotes are refused early while cancels (100% tier) and hedges (80% tier) keep room
     from crypto_stat_arb.rate_limits import ScopedRateLimiter
 

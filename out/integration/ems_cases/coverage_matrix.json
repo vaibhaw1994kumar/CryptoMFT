@@ -24,6 +24,38 @@
   "evidence": "runs/scn_2b_cancel_latency/session_ems_path_coverage.json"
  },
  {
+  "case": "J2/J3 checks, 2c_partial_then_fill",
+  "covering_layer": "execution layer, router",
+  "count": 16,
+  "result": "PASS",
+  "detail": "off_tick=0, tactic_violations=0",
+  "evidence": "runs/scn_2c_partial_then_fill/session_ems_path_coverage.json"
+ },
+ {
+  "case": "J2/J3 checks, 2c_thin_top",
+  "covering_layer": "execution layer, router",
+  "count": 13,
+  "result": "PASS",
+  "detail": "off_tick=0, tactic_violations=0",
+  "evidence": "runs/scn_2c_thin_top/session_ems_path_coverage.json"
+ },
+ {
+  "case": "J2/J3 checks, 2c_zero_exhausted",
+  "covering_layer": "execution layer, router",
+  "count": 27,
+  "result": "PASS",
+  "detail": "off_tick=0, tactic_violations=0",
+  "evidence": "runs/scn_2c_zero_exhausted/session_ems_path_coverage.json"
+ },
+ {
+  "case": "J2/J3 checks, 2c_zero_then_fill",
+  "covering_layer": "execution layer, router",
+  "count": 16,
+  "result": "PASS",
+  "detail": "off_tick=0, tactic_violations=0",
+  "evidence": "runs/scn_2c_zero_then_fill/session_ems_path_coverage.json"
+ },
+ {
   "case": "J2/J3 checks, 2d_ghost3",
   "covering_layer": "execution layer, router",
   "count": 11,
@@ -78,6 +110,30 @@
   "result": "PASS",
   "detail": "off_tick=0, tactic_violations=0",
   "evidence": "runs/scn_2k_breaker_trip/session_ems_path_coverage.json"
+ },
+ {
+  "case": "J2/J3 checks, 2l_maker_outage",
+  "covering_layer": "execution layer, router",
+  "count": 7,
+  "result": "PASS",
+  "detail": "off_tick=0, tactic_violations=0",
+  "evidence": "runs/scn_2l_maker_outage/session_ems_path_coverage.json"
+ },
+ {
+  "case": "J2/J3 checks, 2m_p99",
+  "covering_layer": "execution layer, router",
+  "count": 8,
+  "result": "PASS",
+  "detail": "off_tick=0, tactic_violations=0",
+  "evidence": "runs/scn_2m_p99/session_ems_path_coverage.json"
+ },
+ {
+  "case": "J2/J3 checks, 2m_p999",
+  "covering_layer": "execution layer, router",
+  "count": 8,
+  "result": "PASS",
+  "detail": "off_tick=0, tactic_violations=0",
+  "evidence": "runs/scn_2m_p999/session_ems_path_coverage.json"
  },
  {
   "case": "J2/J3 checks, 2m_processing",
@@ -164,7 +220,7 @@
   "covering_layer": "session, gate, OMS",
   "count": 13,
   "result": "PASS",
-  "detail": "RESUMPTION NOT DEMONSTRATED IN THIS WINDOW (no quote was due after the gap); demonstrated by the unit case case8_recovery_after_a_feed_gap_*.jsonl (a quote lifetime of 1 s forces re-quotes). maker quotes sent inside the gap 0; first quote after the gap None s after the feeds returned; orders 13; suspended seconds {'any_message_age (the rule), common hours only': {'2026-10-29': 2395.076244902}, 'book_change_age_only (older reading), common hours only': {'2026-10-29': 2409.740290887}, \"any_message_age, whole run (incl. the span after a venue's data ends: a data limitation, not a suspension)\": {'2026-10-29': 2395.412605625}}",
+  "detail": "RESUMPTION NOT DEMONSTRATED IN THIS WINDOW (no quote was due after the gap); demonstrated by the unit case case8_recovery_after_a_feed_gap_*.jsonl (a quote lifetime of 1 s forces re-quotes). maker quotes sent inside the gap 0; first quote after the gap None s after the feeds returned; orders 13; suspended seconds {'any_message_age (the rule), common hours only': {'2026-10-29': 1415.521717922}, 'book_change_age_only (older reading), common hours only': {'2026-10-29': 1460.195473036}, \"any_message_age, whole run (incl. the span after a venue's data ends: a data limitation, not a suspension)\": {'2026-10-29': 1415.848730816}}",
   "evidence": "scn_2e_feed_gap.jsonl"
  },
  {
@@ -188,8 +244,24 @@
   "covering_layer": "router, timing",
   "count": 5,
   "result": "PASS",
-  "detail": "unhedged interval p50 0.036130428314208984 -> 0.04500007629394531 s; races 0; the p99 and p99.9 runs need the sampled-latency mode (not built)",
+  "detail": "unhedged interval p50 0.036130428314208984 -> 0.04500007629394531 s; races 0; the p99 and p99.9 runs are the next two rows",
   "evidence": "scn_2m_processing.jsonl"
+ },
+ {
+  "case": "2m Latency: every order delay fixed at the testnet p99 of its stage, both venues (feed unchanged)",
+  "covering_layer": "router, timing, OMS, hedge lifecycle",
+  "count": 2,
+  "result": "PASS",
+  "detail": "unhedged interval (fill report to hedge fill) p50 0.036130428314208984 -> 0.4366629123687744 s, max 0.04419517517089844 -> 0.4366629123687744 s (baseline -> this run); fills during cancel pending 0, late fills after cancel 0, quotes placed 6 filled 2 (baseline 5 / 5); hedge retries 0, unwind orders 0, kill switch transitions 0; hedged quantity equals maker quantity True; residual at end FLAT_NET (0.0 SOL). Delays: TESTNET empirical quantile grids (entry offset-corrected one-way, ack REST RTT, cancel = half the cancel REST RTT each for effect and report, fill report = the sample maximum, n=28); the stage mapping is ASSUMED and the numbers are an indicative bound for mainnet, not a measurement of it. At p99.9 of n about 390 the value is effectively the sample maximum. A fixed delay at the quantile, not a sampled mixture (a sampled mode is not built)",
+  "evidence": "scn_2m_p99.jsonl"
+ },
+ {
+  "case": "2m Latency: every order delay fixed at the testnet p99.9 of its stage, both venues (feed unchanged)",
+  "covering_layer": "router, timing, OMS, hedge lifecycle",
+  "count": 2,
+  "result": "PASS",
+  "detail": "unhedged interval (fill report to hedge fill) p50 0.036130428314208984 -> 0.4450850486755371 s, max 0.04419517517089844 -> 0.4450850486755371 s (baseline -> this run); fills during cancel pending 0, late fills after cancel 0, quotes placed 6 filled 2 (baseline 5 / 5); hedge retries 0, unwind orders 0, kill switch transitions 0; hedged quantity equals maker quantity True; residual at end FLAT_NET (0.0 SOL). Delays: TESTNET empirical quantile grids (entry offset-corrected one-way, ack REST RTT, cancel = half the cancel REST RTT each for effect and report, fill report = the sample maximum, n=28); the stage mapping is ASSUMED and the numbers are an indicative bound for mainnet, not a measurement of it. At p99.9 of n about 390 the value is effectively the sample maximum. A fixed delay at the quantile, not a sampled mixture (a sampled mode is not built)",
+  "evidence": "scn_2m_p999.jsonl"
  },
  {
   "case": "2n Size 1 SOL (size_aware cap, participation cap on)",
@@ -232,27 +304,67 @@
   "evidence": "scn_2k_breaker_trip.jsonl, runs/scn_2k_breaker_trip/session_safety_events.jsonl"
  },
  {
-  "case": "2c IOC partial and zero fill, only the true residual retried",
-  "covering_layer": "OMS, hedge lifecycle",
-  "count": null,
-  "result": "NOT COVERED",
-  "detail": "covered at replay level only where the capture produced a partial (see 2n 25 SOL); no injected partial-fill fault exists in the simulator (hedge_fault_injection refuses partial_prob)",
-  "evidence": "see detail"
+  "case": "2l Maker-venue (Bybit) outage with quotes resting: a quote resting at the outage fills inside it; a quote due inside it never reaches the venue",
+  "covering_layer": "session, simulator, OMS",
+  "count": 2,
+  "result": "PASS",
+  "detail": "outages [(40528.5, 40548.5), (45005.0, 45030.0)] s of the day; fills inside the first window booked at the reconnect 0.0 s after it ended; hedge 35.0 ms after the booked fill; maker qty 2.0 = hedge qty 2.0; lost-submit quote ended TIMED_OUT after 3 unanswered queries (never resent): 1; kill switch 'unconfirmed order state' activated: 1 (stays on until a logged manual reset); residual at end FLAT_NET. Needs oms.maker_ack_deadline (off by default; without it the lost quote sat SENT 565 s, recorded). NOT simulated: a submit that reached the venue with only its ack lost, and the stream reconnect replaying events",
+  "evidence": "scn_2l_maker_outage.jsonl, runs/scn_2l_maker_outage/session_safety_events.jsonl"
  },
  {
-  "case": "2g Restart with open orders",
-  "covering_layer": "OMS, plan store",
-  "count": null,
-  "result": "NOT COVERED",
-  "detail": "unit case: tests/test_restart_resilience.py (RestartAgainstTheVenueTests): missed execution booked once, hedged once, new risk held until reconciled; evidence case6_*.jsonl and case9_*.jsonl. A restart INSIDE a replay is not built",
-  "evidence": "see detail"
+  "case": "2c Zero fill: the first hedge IOC of every plan finds nothing inside its limit, the retry fills",
+  "covering_layer": "hedge lifecycle, OMS, simulator (thinned hedge book, opt-in)",
+  "count": 5,
+  "result": "PASS",
+  "detail": "thinned attempts injected 5; hedge IOC full 6, partial 0, zero 5, retries 5; every unfilled remainder retried exactly once for its true residual True; hedged quantity equals maker quantity True; unwind orders 0, alarms 0; residual at end FLAT_NET. The OMS priced the hedge from ITS full view of the book; the venue-truth book had less (no depth is added)",
+  "evidence": "scn_2c_zero_then_fill.jsonl"
  },
  {
-  "case": "2h New-level vs queued fills",
-  "covering_layer": "simulator",
+  "case": "2c Partial fill: the first hedge IOC finds 0.8 of 1.0, only the true residual is retried",
+  "covering_layer": "hedge lifecycle, OMS, simulator (thinned hedge book, opt-in)",
+  "count": 3,
+  "result": "PASS",
+  "detail": "thinned attempts injected 5; hedge IOC full 8, partial 3, zero 0, retries 3; every unfilled remainder retried exactly once for its true residual True; hedged quantity equals maker quantity True; unwind orders 0, alarms 0; residual at end FLAT_NET. The OMS priced the hedge from ITS full view of the book; the venue-truth book had less (no depth is added)",
+  "evidence": "scn_2c_partial_then_fill.jsonl"
+ },
+ {
+  "case": "2c Zero fill on every attempt: retries run out, the residual is unwound at the 15 bps band whatever its size, only a sub-lot remainder is carried",
+  "covering_layer": "hedge lifecycle, OMS unwind, simulator (thinned hedge book, opt-in)",
+  "count": 15,
+  "result": "PASS",
+  "detail": "hedge IOC zero 15, retries 10, unwind intents 5, unwind orders 5, hedge alarms 0, unwind-exhausted alarms 0; plans whose hedge failed on all attempts and were unwound: [('sig1', 0.087620191459, 0.08, 0.0), ('sig2', 1.0, 1.0, 1.0), ('sig3', 1.0, 1.0, -1.99), ('sig4', 1.0, 1.0, 0.0), ('sig6', 1.0, 1.0, -1.99)] (plan, maker filled, unwind filled, loss against the maker price in bps); residual at end UNHEDGED_OR_CARRIED_RESIDUAL (0.007620191459 SOL carried, below one lot of 0.01; open plans 0); events RESIDUAL_WITHIN_APPROVED_BOUND 1 (the sub-lot remainder only), RESIDUAL_LIMIT_BREACH 5. Owner 13 Nov: a failed hedge always unwinds (MARKET_BANDED at the touch band) whatever its size; v1_9 sets the silent-carry bound to one lot. Before the change the 0.0876 SOL plan of this case was carried to the end of the day with no action",
+  "evidence": "scn_2c_zero_exhausted.jsonl"
+ },
+ {
+  "case": "2c Thin touch, deeper levels intact: the Binance touch shows 0.05 SOL (to the bot and at the venue), the hedge is larger, the size_aware cap spans levels",
+  "covering_layer": "OMS size_aware cap, simulator (thinned touch, opt-in)",
+  "count": 8,
+  "result": "PASS",
+  "detail": "hedge attempts 8; the touch did not cover the size in 8 cap decisions; attempts larger than the touch 8, of which filled 8 (full 8, partial 0); cap distance from the touch bps min/median/max 5.97/5.97/5.97 (limit 15; absolute limit bound in 0); fill slippage against the decision touch bps min/median/max 0.37/0.95/0.99; hedged quantity equals maker quantity True; zero fills 0, partial 0, every remainder retried for its true residual True; residual at end FLAT_NET. The touch is thinned for the bot's cap AND at the venue; deeper levels are the capture's, nothing is added",
+  "evidence": "scn_2c_thin_top.jsonl"
+ },
+ {
+  "case": "2h New-level vs queued fills: every maker fill carries queue_class",
+  "covering_layer": "simulator observation rows",
+  "count": 149,
+  "result": "PASS",
+  "detail": "maker fills with the field 149 in 20 runs (scn_2c_partial_then_fill, scn_2c_thin_top, scn_2c_zero_exhausted, scn_2c_zero_then_fill, scn_2d_ghost3, scn_2d_ghost30, scn_2e_feed_gap, scn_2f_rate_limit, scn_2j_duplicate_filled, scn_2k_breaker_pause, scn_2k_breaker_trip, scn_2l_maker_outage, scn_2m_p99, scn_2m_p999, scn_2m_processing, scn_2n_size1, scn_2n_size25, scn_2n_size5, scn_H1a, scn_H1b): {'queued': 149}. The class is read from the placement of the same order (new_level: no displayed size at our price when we placed, queued: behind displayed size, unknown: queue not known); it sits on the maker_fill rows of maker_observations.jsonl, an observation-only file, so no existing output changed. Agreement with real fills is a Track C result and is NOT claimed",
+  "evidence": "runs/scn_*/maker_observations.jsonl"
+ },
+ {
+  "case": "2g Restart: exchange-side reconciliation (open orders, executions, positions fetched from the venue; OMS level, scripted venue)",
+  "covering_layer": "OMS, plan store, restart gate",
+  "count": 16,
+  "result": "PASS",
+  "detail": "stage trace: the missed maker fill came from the venue's account (REST_QUERY) and was booked 1 time(s); hedges sent for it before any new quote 1; the new quote went out only after the reconciliation (a repeated account fetch books nothing). The unit cases also show an unknown venue order, a position that differs, a failed fetch and executions that do not add up each keeping new maker exposure held, and an order still resting at the venue reconciled without being finished. Scripted venues only: the live adapters' account_snapshot and a testnet restart drill are not built yet",
+  "evidence": "case10_exchange_side_restart_reconciliation_missed_fill.jsonl"
+ },
+ {
+  "case": "2g Restart with open orders, inside a replay",
+  "covering_layer": "session, OMS, plan store",
   "count": null,
   "result": "NOT COVERED",
-  "detail": "the fill record has no such field yet (the queue flags level_was_absent / queue_unknown exist on observation rows only); not built",
+  "detail": "NOT COVERED at replay level (owner 13 Nov: reason accepted): the replay driver holds about 30 references to one session object, and a faithful restart rebuilds the session from the plan store and re-subscribes the books. Covered instead at OMS level, against a scripted venue: see the next row",
   "evidence": "see detail"
  },
  {
@@ -260,23 +372,7 @@
   "covering_layer": "OMS amend lineage",
   "count": null,
   "result": "NOT COVERED",
-  "detail": "OMS level: tests/test_oms_amend.py (11 cases, evidence case7_amend_*.jsonl). No strategy calls request_amend and no S0 profile v1_9s exists, so no replay-level amend case",
-  "evidence": "see detail"
- },
- {
-  "case": "2l Maker-venue (Bybit) outage with quotes resting",
-  "covering_layer": "session, simulator",
-  "count": null,
-  "result": "NOT COVERED",
-  "detail": "not built: hedge_fault_injection simulates a hedge-venue gateway outage only",
-  "evidence": "see detail"
- },
- {
-  "case": "2m Latency at p99 and p99.9 delays",
-  "covering_layer": "timing",
-  "count": null,
-  "result": "NOT COVERED",
-  "detail": "not built: the session timelines are lognormal with light tails; a sampled mode over the testnet quantile grids is the plan",
+  "detail": "OMS level: tests/test_oms_amend.py (11 cases, evidence case7_amend_*.jsonl). No strategy in the arb replay calls request_amend. Owner 13 Nov: to be covered by the MM replays after CR-MQ part 2 (amend on real paths, MAKER_QUOTE plans); recorded here, not claimed",
   "evidence": "see detail"
  }
 ]

@@ -114,11 +114,45 @@ if r and base:
     same = [f["fill_id"] for f in r["fills"]] == [f["fill_id"] for f in base["fills"]]
     add("2j Duplicate Filled in a cancel/fill race (every fill report delivered twice)", "OMS reducer", r["cov"]["paths"]["duplicate_updates_suppressed"], same and r["cov"]["paths"]["duplicate_updates_suppressed"] > 0,
         f"suppressed duplicates {r['cov']['paths']['duplicate_updates_suppressed']}; fills identical to the baseline window: {same}", str(r["trace"].name))
+def hedge_chain_check(r):
+    """(retry_ok, total hedged == total maker qty, n zero, n partial): every unfilled or partly filled hedge IOC is followed, later, by an order on the same side for exactly its true residual."""
+    h = [o for o in r["orders"] if o["venue"] == "BINANCE" and o["state"] != "CREATED"]
+    ok, zero, part = True, 0, 0
+    for i, o in enumerate(h):
+        q, f = float(o["quantity"]), float(o["filled_quantity"])
+        if f >= q - 1e-9:
+            continue
+        zero += f == 0
+        part += f > 0
+        ok = ok and any(abs(float(n["quantity"]) - (q - f)) < 1e-9 and n["side"] == o["side"] for n in h[i + 1:])
+    qh, qm = sum(float(o["filled_quantity"]) for o in h), sum(float(o["filled_quantity"]) for o in r["orders"] if o["venue"] == "BYBIT")
+    return ok, abs(qh - qm) < 1e-9, zero, part
+
+
+def thin_injected(r):
+    inj = (r["manifest"].get("manifest") or {}).get("hedge_thin_book") or r["manifest"].get("hedge_thin_book") or {}
+    return sum(v for n, v in (inj.get("injected_by_venue") or {}).get("BINANCE", {}).items() if n.startswith("thin_book"))
+
+
 r = load("2m_processing")
 if r and base:
     ub = base["life"]["total"]["residual_exposure"]["unhedged_interval_s"]; ur = r["life"]["total"]["residual_exposure"]["unhedged_interval_s"]
     add("2m Latency: processing 5+5 ms on quote and hedge paths", "router, timing", ur.get("n", 0), ur.get("p50", 0) > ub.get("p50", 1e9),
-        f"unhedged interval p50 {ub.get('p50')} -> {ur.get('p50')} s; races {r['cov']['paths']['fills_during_cancel_pending']}; the p99 and p99.9 runs need the sampled-latency mode (not built)", str(r["trace"].name))
+        f"unhedged interval p50 {ub.get('p50')} -> {ur.get('p50')} s; races {r['cov']['paths']['fills_during_cancel_pending']}; the p99 and p99.9 runs are the next two rows", str(r["trace"].name))
+for case, q in (("2m_p99", "p99"), ("2m_p999", "p99.9")):
+    r = load(case)
+    if r and base:
+        u = r["life"]["total"]["residual_exposure"]["unhedged_interval_s"]; ub = base["life"]["total"]["residual_exposure"]["unhedged_interval_s"]
+        paths, res = r["cov"]["paths"], r["manifest"]["residual_at_end"]
+        retry_ok, balanced, zero, part = hedge_chain_check(r)
+        qm = r["life"]["total"]["quotes"]
+        tim = r["manifest"].get("manifest", {}).get("timing") or r["manifest"].get("timing") or {}
+        ok = paths["kill_switch_transitions"] == 0 and paths["hedge_alarm"] == 0 and paths["unwind_exhausted_alarm"] == 0 and r["cov"]["checks"]["pass"] and abs(float(res["net_position_base"])) < 1.0 and res["open_residual_plans"] == 0
+        add(f"2m Latency: every order delay fixed at the testnet {q} of its stage, both venues (feed unchanged)", "router, timing, OMS, hedge lifecycle", u.get("n", 0), ok,
+            f"unhedged interval (fill report to hedge fill) p50 {ub.get('p50')} -> {u.get('p50')} s, max {ub.get('max')} -> {u.get('max')} s (baseline -> this run); fills during cancel pending {paths['fills_during_cancel_pending']}, late fills after cancel {paths['late_fills_after_cancel']}, "
+            f"quotes placed {qm['quotes_placed']} filled {qm['quotes_filled']} (baseline {base['life']['total']['quotes']['quotes_placed']} / {base['life']['total']['quotes']['quotes_filled']}); hedge retries {paths['hedge_retry']}, unwind orders {paths['unwind_orders']}, kill switch transitions {paths['kill_switch_transitions']}; "
+            f"hedged quantity equals maker quantity {balanced}; residual at end {res['flag']} ({res['net_position_base']} SOL). Delays: TESTNET empirical quantile grids (entry offset-corrected one-way, ack REST RTT, cancel = half the cancel REST RTT each for effect and report, fill report = the sample maximum, n=28); "
+            f"the stage mapping is ASSUMED and the numbers are an indicative bound for mainnet, not a measurement of it. At p99.9 of n about 390 the value is effectively the sample maximum. A fixed delay at the quantile, not a sampled mixture (a sampled mode is not built)", str(r["trace"].name))
 for sz in ("1", "5", "25"):
     r = load(f"2n_size{sz}")
     if r:
@@ -163,15 +197,156 @@ if ev is not None:
         f"trip cause {trip[0]['cause'] if trip else None}; alarm fields present {fields}; flatten orders {[(f['venue'], f['side'], f['tactic'], round(f['worst_price'], 3)) for f in flat]}; maker quotes sent between the trip and the reset {len(quotes_after)}; "
         f"manual reset logged by {reset[0].get('operator_id') if reset else None}; residual at end {r['manifest']['residual_at_end']['flag']}", "scn_2k_breaker_trip.jsonl, runs/scn_2k_breaker_trip/session_safety_events.jsonl")
 
+ev = safety("2l_maker_outage")
+if ev is not None:
+    r = load("2l_maker_outage")
+    DAY0 = 1793232000
+    def hms(x):
+        a = [float(v) for v in x.split(":")] + [0, 0]
+        return DAY0 + a[0] * 3600 + a[1] * 60 + a[2]
+    wins = [(hms(a), hms(b)) for a, b in r["manifest"]["run"]["settings"]["maker_outage"]]
+    mf = maker_fills(r)
+    inside = [f for f in mf if any(a <= f["ts_ns"] / 1e9 - 1 and f["ts_ns"] / 1e9 <= b + 1 for a, b in wins)]
+    booked_after = [f for f in mf if f["ts_ns"] / 1e9 >= wins[0][1]]
+    hedges = [f for f in r["fills"] if f["venue"] == "BINANCE"]
+    first_maker, hedge_after = (booked_after[0]["ts_ns"] if booked_after else None), [h["ts_ns"] for h in hedges if booked_after and h["ts_ns"] >= booked_after[0]["ts_ns"]]
+    lag_ms = round((hedge_after[0] - first_maker) / 1e6, 1) if hedge_after else None
+    qty_m, qty_h = round(sum(float(f["fill_quantity"]) for f in mf), 6), round(sum(float(f["fill_quantity"]) for f in hedges), 6)
+    timed = [o for o in r["orders"] if o["state"] == "TIMED_OUT"]
+    kills = [e for e in ev if e["event_type"] == "KILL_SWITCH_STATE_TRANSITION" and e.get("action") == "ACTIVATED"]
+    queries = [x for x in rows(r["dir"] / "session_decision_events.jsonl") if False]
+    ok = bool(booked_after) and booked_after[0]["ts_ns"] / 1e9 >= wins[0][1] and lag_ms is not None and lag_ms < 1000 and qty_m == qty_h and len(timed) == 1 and bool(kills) and r["manifest"]["residual_at_end"]["flag"] == "FLAT_NET"
+    add("2l Maker-venue (Bybit) outage with quotes resting: a quote resting at the outage fills inside it; a quote due inside it never reaches the venue", "session, simulator, OMS",
+        len(wins), ok,
+        f"outages {[(a - DAY0, b - DAY0) for a, b in wins]} s of the day; fills inside the first window booked at the reconnect {round(booked_after[0]['ts_ns'] / 1e9 - wins[0][1], 3) if booked_after else None} s after it ended; hedge {lag_ms} ms after the booked fill; maker qty {qty_m} = hedge qty {qty_h}; "
+        f"lost-submit quote ended TIMED_OUT after 3 unanswered queries (never resent): {len(timed)}; kill switch 'unconfirmed order state' activated: {len(kills)} (stays on until a logged manual reset); residual at end {r['manifest']['residual_at_end']['flag']}. "
+        f"Needs oms.maker_ack_deadline (off by default; without it the lost quote sat SENT 565 s, recorded). NOT simulated: a submit that reached the venue with only its ack lost, and the stream reconnect replaying events",
+        "scn_2l_maker_outage.jsonl, runs/scn_2l_maker_outage/session_safety_events.jsonl")
+
+# ---- 2c: partial and zero IOC forced by a thinned hedge-venue book (opt-in, shows less than the capture)
+for case, title in (("2c_zero_then_fill", "2c Zero fill: the first hedge IOC of every plan finds nothing inside its limit, the retry fills"), ("2c_partial_then_fill", "2c Partial fill: the first hedge IOC finds 0.8 of 1.0, only the true residual is retried")):
+    d = RUNS / f"scn_{case}"
+    if d.exists():
+        r = load(case)
+        retry_ok, balanced, zero, part = hedge_chain_check(r)
+        paths = r["cov"]["paths"]
+        want = zero if "zero" in case else part
+        ok = retry_ok and balanced and want > 0 and paths["unwind_orders"] == 0 and paths["hedge_alarm"] == 0 and r["manifest"]["residual_at_end"]["flag"] == "FLAT_NET" and r["cov"]["checks"]["pass"]
+        add(title, "hedge lifecycle, OMS, simulator (thinned hedge book, opt-in)", want, ok,
+            f"thinned attempts injected {thin_injected(r)}; hedge IOC full {paths['hedge_ioc_full']}, partial {paths['hedge_ioc_partial']}, zero {paths['hedge_ioc_zero']}, retries {paths['hedge_retry']}; every unfilled remainder retried exactly once for its true residual {retry_ok}; "
+            f"hedged quantity equals maker quantity {balanced}; unwind orders {paths['unwind_orders']}, alarms {paths['hedge_alarm']}; residual at end {r['manifest']['residual_at_end']['flag']}. The OMS priced the hedge from ITS full view of the book; the venue-truth book had less (no depth is added)", f"scn_{case}.jsonl")
+LOT = 0.01                                              # the hedge venue's (Binance) SOLUSDT lot: the silent-carry bound of v1_9 (hedge_faults.silent_carry_bound: below_one_lot, owner 13 Nov)
+
+
+def plan_unwinds(r):
+    """Per plan (intent id sigN): the maker fill, the failed hedge attempts, and the unwinds that followed, with the unwind price against the maker price (loss in bps, positive = worse)."""
+    out = {}
+    for o in r["orders"]:
+        iid = str(o.get("intent_id") or "")
+        if not iid.startswith("sig"):
+            continue
+        sig, kind = iid.split("-")[0], iid.split("-")[1][:1]
+        out.setdefault(sig, {"P": [], "H": [], "U": []}).setdefault(kind, []).append(o)
+    rep = []
+    for sig, k in out.items():
+        if not k["U"]:
+            continue
+        mk = [o for o in k["P"] if float(o["filled_quantity"]) > 0]
+        mq = sum(float(o["filled_quantity"]) for o in mk)
+        mp = sum(float(o["filled_quantity"]) * float(o["average_price"]) for o in mk) / mq if mq else None
+        for u in k["U"]:
+            uq, up = float(u["filled_quantity"]), float(u["average_price"] or 0)
+            loss = None if not (mp and uq) else (((mp - up) if u["side"] == "SELL" else (up - mp)) / mp) * 1e4
+            rep.append({"plan": sig, "maker_filled": mq, "hedge_attempts": len(k["H"]), "hedged": sum(float(h["filled_quantity"]) for h in k["H"]), "unwind_qty": float(u["quantity"]), "unwind_filled": uq, "unwind_state": u["state"], "loss_bps": loss})
+    return rep
+
+
+d = RUNS / "scn_2c_zero_exhausted"
+if d.exists():
+    r = load("2c_zero_exhausted")
+    paths, ev3 = r["cov"]["paths"], safety("2c_zero_exhausted") or []
+    res, cn = r["manifest"]["residual_at_end"], r["manifest"].get("ledger_event_counts", {})
+    uw = plan_unwinds(r)
+    failed = [x for x in uw if x["hedge_attempts"] >= 3 and x["hedged"] == 0]
+    sub = [x for x in uw if x["unwind_filled"] < x["unwind_qty"]]
+    carried = float(res["total_residual_base"])
+    ok = (paths["hedge_ioc_zero"] > 0 and paths["hedge_retry"] > 0 and bool(failed) and all(x["unwind_filled"] >= x["unwind_qty"] - 1e-9 for x in failed) and carried < LOT
+          and res["open_residual_plans"] == 0 and cn.get("RESIDUAL_WITHIN_APPROVED_BOUND", 0) <= 1 and r["cov"]["checks"]["pass"])
+    losses = [round(x["loss_bps"], 2) for x in failed if x["loss_bps"] is not None]
+    add("2c Zero fill on every attempt: retries run out, the residual is unwound at the 15 bps band whatever its size, only a sub-lot remainder is carried", "hedge lifecycle, OMS unwind, simulator (thinned hedge book, opt-in)", paths["hedge_ioc_zero"], ok,
+        f"hedge IOC zero {paths['hedge_ioc_zero']}, retries {paths['hedge_retry']}, unwind intents {paths['unwind_intents']}, unwind orders {paths['unwind_orders']}, hedge alarms {paths['hedge_alarm']}, unwind-exhausted alarms {paths['unwind_exhausted_alarm']}; "
+        f"plans whose hedge failed on all attempts and were unwound: {[(x['plan'], x['maker_filled'], x['unwind_filled'], x['loss_bps'] if x['loss_bps'] is None else round(x['loss_bps'], 2)) for x in failed]} (plan, maker filled, unwind filled, loss against the maker price in bps); "
+        f"residual at end {res['flag']} ({res['total_residual_base']} SOL carried, below one lot of {LOT}; open plans {res['open_residual_plans']}); events RESIDUAL_WITHIN_APPROVED_BOUND {cn.get('RESIDUAL_WITHIN_APPROVED_BOUND', 0)} (the sub-lot remainder only), RESIDUAL_LIMIT_BREACH {cn.get('RESIDUAL_LIMIT_BREACH', 0)}. "
+        f"Owner 13 Nov: a failed hedge always unwinds (MARKET_BANDED at the touch band) whatever its size; v1_9 sets the silent-carry bound to one lot. Before the change the 0.0876 SOL plan of this case was carried to the end of the day with no action", "scn_2c_zero_exhausted.jsonl")
+
+# ---- 2c extra (owner 13 Nov): only the Binance TOUCH is thin, the hedge is larger than it, the size_aware cap spans levels
+d = RUNS / "scn_2c_thin_top"
+if d.exists():
+    r = load("2c_thin_top")
+    top = r["manifest"]["run"]["settings"]["thin_view_top"]
+    dec = rows(d / "session_decision_events.jsonl")
+    caps = [e for e in dec if e.get("event_type") == "HEDGE_CAP_SIZE_AWARE" or "cap" in e and "touch_covers" in e]
+    spans = [e for e in caps if not e["touch_covers"]]
+    used, ords = set(), [o for o in r["orders"] if o["venue"] == "BINANCE" and o["state"] != "CREATED" and "-U" not in str(o.get("intent_id"))]
+    rowsx = []
+    for o in ords:
+        for i, e in enumerate(caps):
+            if i not in used and e["cap"] == o["limit_price"] and float(e["qty"]) == float(o["quantity"]):
+                used.add(i)
+                touch, fq = float(e["touch"]), float(o["filled_quantity"])
+                if fq > 0:
+                    avg = float(o["average_price"])
+                    slip = ((avg - touch) if o["side"] == "BUY" else (touch - avg)) / touch * 1e4
+                else:
+                    slip = None
+                capbps = abs(float(e["cap"]) - touch) / touch * 1e4
+                rowsx.append({"qty": float(e["qty"]), "touch_shown": top, "cap": float(e["cap"]), "cap_bps_from_touch": capbps, "levels_to_reach": e.get("deepest"), "covered": float(e["covered_qty"]), "filled": fq, "slip_bps": slip, "binds": e.get("abs_limit_binds")})
+                break
+    sp = [x for x in rowsx if x["qty"] > top]
+    filled = [x for x in sp if x["filled"] > 0]
+    retry_ok, balanced, zero, part = hedge_chain_check(r)
+    ok = bool(spans) and bool(filled) and all(x["cap_bps_from_touch"] <= 15.0 + 1e-6 for x in rowsx) and balanced and retry_ok and r["cov"]["checks"]["pass"]
+    sl = [x["slip_bps"] for x in filled if x["slip_bps"] is not None]
+    cp = [x["cap_bps_from_touch"] for x in sp]
+    add(f"2c Thin touch, deeper levels intact: the Binance touch shows {top} SOL (to the bot and at the venue), the hedge is larger, the size_aware cap spans levels", "OMS size_aware cap, simulator (thinned touch, opt-in)", len(sp), ok,
+        f"hedge attempts {len(rowsx)}; the touch did not cover the size in {len(spans)} cap decisions; attempts larger than the touch {len(sp)}, of which filled {len(filled)} (full {sum(1 for x in filled if abs(x['filled'] - x['qty']) < 1e-9)}, partial {sum(1 for x in filled if abs(x['filled'] - x['qty']) >= 1e-9)}); "
+        f"cap distance from the touch bps min/median/max {min(cp):.2f}/{sorted(cp)[len(cp) // 2]:.2f}/{max(cp):.2f} (limit 15; absolute limit bound in {sum(1 for x in sp if x['binds'])}); fill slippage against the decision touch bps min/median/max {min(sl):.2f}/{sorted(sl)[len(sl) // 2]:.2f}/{max(sl):.2f}; "
+        f"hedged quantity equals maker quantity {balanced}; zero fills {zero}, partial {part}, every remainder retried for its true residual {retry_ok}; residual at end {r['manifest']['residual_at_end']['flag']}. "
+        f"The touch is thinned for the bot's cap AND at the venue; deeper levels are the capture's, nothing is added" if sl and cp else "no hedge larger than the touch in this window", f"scn_2c_thin_top.jsonl")
+
+# ---- 2h: the queue class of every maker fill (observation rows)
+cnt, tot, rows_seen = {}, 0, []
+for d in sorted(RUNS.glob("scn_*")):
+    f = d / "maker_observations.jsonl"
+    if f.exists():
+        mf = [x for x in rows(f) if x.get("obs") == "maker_fill" and "queue_class" in x]
+        if mf:
+            rows_seen.append(d.name)
+            for x in mf:
+                cnt[x["queue_class"]] = cnt.get(x["queue_class"], 0) + 1
+                tot += 1
+if tot:
+    add("2h New-level vs queued fills: every maker fill carries queue_class", "simulator observation rows", tot, True,
+        f"maker fills with the field {tot} in {len(rows_seen)} runs ({', '.join(rows_seen)}): {cnt}. The class is read from the placement of the same order (new_level: no displayed size at our price when we placed, queued: behind displayed size, unknown: queue not known); "
+        f"it sits on the maker_fill rows of maker_observations.jsonl, an observation-only file, so no existing output changed. Agreement with real fills is a Track C result and is NOT claimed", "runs/scn_*/maker_observations.jsonl")
+
 # ---- cases covered at unit / OMS level only, and the ones not covered
 unit = {
-    "2c IOC partial and zero fill, only the true residual retried": ("OMS, hedge lifecycle", "covered at replay level only where the capture produced a partial (see 2n 25 SOL); no injected partial-fill fault exists in the simulator (hedge_fault_injection refuses partial_prob)", "NOT COVERED"),
-    "2g Restart with open orders": ("OMS, plan store", "unit case: tests/test_restart_resilience.py (RestartAgainstTheVenueTests): missed execution booked once, hedged once, new risk held until reconciled; evidence case6_*.jsonl and case9_*.jsonl. A restart INSIDE a replay is not built", "NOT COVERED"),
-    "2h New-level vs queued fills": ("simulator", "the fill record has no such field yet (the queue flags level_was_absent / queue_unknown exist on observation rows only); not built", "NOT COVERED"),
-    "2i Amend paths (S0 profile v1_9s)": ("OMS amend lineage", "OMS level: tests/test_oms_amend.py (11 cases, evidence case7_amend_*.jsonl). No strategy calls request_amend and no S0 profile v1_9s exists, so no replay-level amend case", "NOT COVERED"),
-    "2l Maker-venue (Bybit) outage with quotes resting": ("session, simulator", "not built: hedge_fault_injection simulates a hedge-venue gateway outage only", "NOT COVERED"),
-    "2m Latency at p99 and p99.9 delays": ("timing", "not built: the session timelines are lognormal with light tails; a sampled mode over the testnet quantile grids is the plan", "NOT COVERED"),
+    "2g Restart with open orders, inside a replay": ("session, OMS, plan store", "NOT COVERED at replay level (owner 13 Nov: reason accepted): the replay driver holds about 30 references to one session object, and a faithful restart rebuilds the session from the plan store and re-subscribes the books. Covered instead at OMS level, against a scripted venue: see the next row", "NOT COVERED"),
+    **({} if tot else {"2h New-level vs queued fills": ("simulator", "field built (maker_observations.jsonl maker_fill rows) but no run has been made with it yet", "NOT COVERED")}),
+    "2i Amend paths (S0 profile v1_9s)": ("OMS amend lineage", "OMS level: tests/test_oms_amend.py (11 cases, evidence case7_amend_*.jsonl). No strategy in the arb replay calls request_amend. Owner 13 Nov: to be covered by the MM replays after CR-MQ part 2 (amend on real paths, MAKER_QUOTE plans); recorded here, not claimed", "NOT COVERED"),
 }
+ev10 = CASES / "case10_exchange_side_restart_reconciliation_missed_fill.jsonl"
+if ev10.exists():
+    e10 = rows(ev10)
+    first_fill = next((i for i, e in enumerate(e10) if e["stage"] == "fill_booked"), None)
+    nxt = next((i for i, e in enumerate(e10) if i > (first_fill or 0) and e["stage"] == "request_sent" and e.get("venue") == "BYBIT"), len(e10))
+    seg = e10[first_fill:nxt] if first_fill is not None else []
+    via_rest = [e for e in e10 if e["stage"] == "fill_notified" and e.get("source") == "REST_QUERY"]
+    hedges = [e for e in seg if e["stage"] == "hedge_sent"]
+    add("2g Restart: exchange-side reconciliation (open orders, executions, positions fetched from the venue; OMS level, scripted venue)", "OMS, plan store, restart gate", len(e10), len(via_rest) == 1 and len(hedges) == 1 and first_fill == 1,
+        f"stage trace: the missed maker fill came from the venue's account (REST_QUERY) and was booked {len(via_rest)} time(s); hedges sent for it before any new quote {len(hedges)}; the new quote went out only after the reconciliation (a repeated account fetch books nothing). The unit cases also show an unknown venue order, a position that differs, a failed fetch and executions that do not add up each keeping new maker exposure held, and an order still resting at the venue reconciled without being finished. "
+        f"Scripted venues only: the live adapters' account_snapshot and a testnet restart drill are not built yet", ev10.name)
 for case, (layer, why, res) in unit.items():
     matrix.append({"case": case, "covering_layer": layer, "count": None, "result": res, "detail": why, "evidence": "see detail"})
 

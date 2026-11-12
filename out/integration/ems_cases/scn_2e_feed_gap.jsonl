@@ -91,3 +91,5 @@
 {"cumulative_filled_quantity": "1.0", "event": "FILL", "fill_price": "98.8300", "fill_quantity": "1.0", "order_id": "f0a4b200-14bf-5513-af6b-d0b09c6d9566", "side": "SELL", "stage": "fill_booked", "ts": 1793304314.8894966, "venue": "BINANCE"}
 {"cumulative_filled_quantity": "1.0", "event": "ORDER_LIFECYCLE", "order_id": "f0a4b200-14bf-5513-af6b-d0b09c6d9566", "reason": "", "source": "ADAPTER_CALLBACK", "stage": "fill_notified", "ts": 1793304314.8894966, "venue": "BINANCE"}
 {"confirmed_residual_base": "0.0", "event": "MARGIN_PRICE_PAUSE", "execution_blocked_reason": "margin_price_missing", "pending_hedge_qty": "0", "stage": "alert", "ts": 1793305230.0190966}
+{"confirmed_residual_base": "0.0", "event": "MARGIN_PRICE_PAUSE", "execution_blocked_reason": "margin_price_missing", "pending_hedge_qty": "0", "stage": "alert", "ts": 1793305239.4186406}
+{"confirmed_residual_base": "0.0", "event": "MARGIN_PRICE_PAUSE", "execution_blocked_reason": "margin_price_missing", "pending_hedge_qty": "0", "stage": "alert", "ts": 1793306832.4659986}

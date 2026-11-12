@@ -188,5 +188,104 @@ class ArrivalTimeTests(unittest.TestCase):
         self.assertEqual(a.executor.live_orders("BYBIT"), [])
 
 
+class MakerGatewayOutageTests(unittest.TestCase):
+    """Case 2l (owner 12 Nov): the maker venue's order entry and private stream are down for a window. Requests arriving inside it are lost with no report; a resting order stays live at the venue,
+    fills from a real print, and its report waits for the reconnect. Synthetic books prove the wiring only."""
+    def faulty(self, start, end):
+        from crypto_stat_arb.simulation.hedge_faults import HedgeFaultConfig, Outage
+        a = adapter()
+        a._fault_config = HedgeFaultConfig(outages=(Outage(VENUE, start, end),), outage_policy="blackhole")
+        a.maker_outage_here = True
+        return a
+
+    def test_a_submit_inside_the_window_is_lost_and_one_after_it_is_placed(self):
+        a, book = self.faulty(3.0, 10.0), core_book(BIDS, ASKS)
+        self.assertEqual(a.handle_at(request("lost", Side.BUY, "100.00", "1", ts=4 * S), book, 4 * S), ())
+        self.assertEqual(a.executor.live_orders(VENUE), [])
+        self.assertEqual(a.hedge_faults_injected, {"maker_outage:submit": 1})
+        (ack,) = a.handle_at(request("later", Side.BUY, "100.00", "1", ts=11 * S), book, 11 * S)
+        self.assertEqual(ack.event_type, ExecutionEventType.ACKNOWLEDGED)
+
+    def test_a_cancel_inside_the_window_is_lost_and_the_order_stays_live_and_can_fill(self):
+        a, book = self.faulty(3.0, 10.0), core_book(BIDS, ASKS)
+        a.handle_at(request("m1", Side.BUY, "100.00", "10", ts=2 * S), book, 2 * S)
+        cancel = request("c1", Side.BUY, "100.00", "10", ts=4 * S, action=OrderAction.CANCEL, target="m1")
+        self.assertEqual(a.handle_at(cancel, book, 4 * S), ())
+        self.assertEqual(len(a.executor.live_orders(VENUE)), 1)                                   # still resting at the venue
+        self.assertEqual(a.hedge_faults_injected, {"maker_outage:cancel": 1})
+        a.on_trade(sell_print("100.00", "50", 5 * S))
+        (pair,) = a.on_trade(sell_print("100.00", "10", 6 * S, "2"))
+        self.assertEqual(pair[1].event_type, ExecutionEventType.FILLED)                          # the fill happens inside the outage, from a real print
+
+    def test_the_report_of_a_fill_inside_the_window_is_due_at_the_reconnect(self):
+        a = self.faulty(3.0, 10.0)
+        self.assertEqual(a.report_blackout_end_ns(5 * S), 10 * S)
+        self.assertIsNone(a.report_blackout_end_ns(2 * S))
+        self.assertIsNone(a.report_blackout_end_ns(10 * S))                                       # the window is half open: the gateway is back at its end
+        self.assertIsNone(adapter().report_blackout_end_ns(5 * S))                                # no injection: no blackout
+
+    def test_without_the_switch_a_static_outage_of_the_maker_venue_changes_nothing(self):
+        a, book = self.faulty(3.0, 10.0), core_book(BIDS, ASKS)
+        a.maker_outage_here = False
+        (ack,) = a.handle_at(request("m1", Side.BUY, "100.00", "1", ts=4 * S), book, 4 * S)
+        self.assertEqual(ack.event_type, ExecutionEventType.ACKNOWLEDGED)
+
+
+class ThinnedHedgeBookTests(unittest.TestCase):
+    """Case 2c (owner 12 Nov): attempt i of a hedge plan executes against a book showing `levels` levels with at most `quantity` each; later attempts see the real book. It only ever shows LESS."""
+    BOOK = ([["100.00", "50"], ["99.99", "100"], ["99.80", "100"]], [["100.02", "50"], ["100.03", "100"]])
+
+    def thin(self, *attempts):
+        a = adapter()
+        a.hedge_thin_attempts = tuple(attempts)
+        return a
+
+    def sell(self, a, order_id, book, qty="1.0", parent="parent"):
+        r = CanonicalOrderRequest.create(action=OrderAction.SUBMIT, order_id=order_id, parent_opportunity_id="op", parent_order_id=parent, instrument_id=INSTR, venue=VENUE, side=Side.SELL,
+                                         price=Decimal("99.90"), quantity=Decimal(qty), order_type=OrderType.LIMIT, time_in_force=TimeInForce.IOC, post_only=False, created_ts_ns=2 * S)
+        return a.handle(r, book)
+
+    def test_a_zero_book_gives_an_unfilled_ioc_and_the_retry_fills_on_the_real_book(self):
+        a, book = self.thin((0, 0.0)), core_book(*self.BOOK)
+        (first,) = self.sell(a, "h1", book)
+        self.assertEqual((first.event_type, first.cumulative_filled_quantity), (ExecutionEventType.CANCELLED, Decimal("0")))
+        second = self.sell(a, "h2", book)
+        self.assertEqual((second[-1].event_type, second[-1].cumulative_filled_quantity), (ExecutionEventType.FILLED, Decimal("1.0")))
+        self.assertEqual(a.hedge_faults_injected, {"thin_book:attempt0:0x0.0": 1})
+
+    def test_two_levels_of_a_fraction_give_a_partial_and_only_the_residual_is_left(self):
+        a, book = self.thin((2, 0.4)), core_book(*self.BOOK)
+        reports = self.sell(a, "h1", book)
+        self.assertEqual([r.event_type for r in reports], [ExecutionEventType.ACKNOWLEDGED, ExecutionEventType.PARTIAL, ExecutionEventType.CANCELLED])
+        self.assertEqual(reports[-1].cumulative_filled_quantity, Decimal("0.8"))                   # 0.4 at each of the 2 bid levels, the rest of the order cancelled by the IOC
+        second = self.sell(a, "h2", book, qty="0.2")
+        self.assertEqual(second[-1].cumulative_filled_quantity, Decimal("0.2"))
+
+    def test_the_attempt_count_is_per_parent_and_the_real_book_is_not_changed(self):
+        a, book = self.thin((0, 0.0)), core_book(*self.BOOK)
+        before = dict(book.bids)
+        self.sell(a, "h1", book, parent="p1")
+        (other,) = self.sell(a, "h3", book, parent="p2")                                           # another plan: its own first attempt, also thinned
+        self.assertEqual(other.event_type, ExecutionEventType.CANCELLED)
+        self.assertEqual(dict(book.bids), before)
+
+    def test_a_thin_touch_with_the_deeper_levels_intact_fills_the_touch_then_the_real_levels_inside_the_limit(self):
+        a, book = self.thin((-1, 0.3)), core_book(*self.BOOK)                                       # owner 13 Nov: only the touch is thinned
+        before = dict(book.bids)
+        reports = self.sell(a, "h1", book, qty="1.0")                                              # limit 99.90: the 100.00 level (0.3 shown) and the 99.99 level (100 real) are inside it, 99.80 is not
+        self.assertEqual(reports[-1].cumulative_filled_quantity, Decimal("1.0"))
+        self.assertEqual(reports[-1].average_price, (Decimal("0.3") * Decimal("100.00") + Decimal("0.7") * Decimal("99.99")) / Decimal("1.0"))      # the touch at 0.3, the real second level for the other 0.7
+        self.assertEqual(a.hedge_faults_injected, {"thin_book:attempt0:topx0.3": 1})
+        self.assertEqual(dict(book.bids), before)                                                  # no depth added, the real book untouched
+
+    def test_a_thin_touch_never_shows_more_than_the_real_touch(self):
+        a, book = self.thin((-1, 500.0)), core_book(*self.BOOK)                                    # asking for more than the touch holds changes nothing
+        self.assertEqual(self.sell(a, "h1", book, qty="40")[-1].average_price, Decimal("100.00"))
+
+    def test_nothing_is_thinned_by_default(self):
+        a, book = adapter(), core_book(*self.BOOK)
+        self.assertEqual(self.sell(a, "h1", book)[-1].event_type, ExecutionEventType.FILLED)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -412,6 +412,70 @@ class BadBook(Base):
         self.assertEqual(len(self.binance.submits), 0)                                # still nothing sent blind
 
 
+class FailedHedgeAlwaysActs(Base):
+    """Owner 13 Nov: a hedge chain that exhausts its retries is unwound with the banded market order whatever the size; a failed unwind is the persistent alarm; only a remainder below one hedge-venue lot may be
+    carried silently. The bound is ResidualPolicy.max_residual_base (v1_9: hedge_faults.silent_carry_bound below_one_lot sets it to the hedge venue's lot)."""
+
+    LOT = Decimal("0.001")
+
+    def build_cap(self, cap, hedge, qty="0.01", retries=1):
+        from crypto_stat_arb.execution import ResidualPolicy
+        self.ledger = Ledger()
+        self.bybit, self.binance = Venue("BYBIT", ("ack",) + ("ioc_nofill",) * 4, price="60060"), Venue("BINANCE", hedge, price="60000")      # the maker's ack, then Bybit refuses any unwind sent to it
+        self.books = books()
+        self.oms = OMS(instrument_master(), risk(), self.ledger, router=StrategyDirectedRouter(instrument_master(), adapters={"BYBIT": self.bybit, "BINANCE": self.binance}),
+                       dispatch_policy=DispatchPolicy.FILL_TRIGGERED, hedge_policy=HedgePolicy(retry_limit=retries, retry_backoff_ns=250 * MS),
+                       residual_policy=ResidualPolicy(max_residual_base=Decimal(cap), max_residual_age_ns=5 * S, hedge_venue_priority=("BINANCE", "BYBIT")))
+        self.plan = self.oms.execute(opportunity(qty), self.books, maker_venue="BYBIT")
+        self.maker = self.plan.children[0]
+        self.n = 0
+        return self
+
+    def run_failed(self):
+        self.fill("0.01", ExecutionEventType.FILLED, ts=1 * S)
+        for step in range(1, 30):
+            self.oms.advance_time(1 * S + step * 500 * MS)
+
+    def unwinds(self):
+        return [o for o in self.plan.children if o.order_role == "UNWIND"]
+
+    def test_a_residual_under_the_position_size_was_carried_silently_before(self):
+        self.build_cap("1", ["ioc_nofill", "ioc_nofill", "ioc_nofill"])
+        self.run_failed()
+        self.assertEqual(self.unwinds(), [])
+        self.assertEqual(self.oms.unwind_exhausted_alarms, {})
+        self.assertEqual(Decimal(self.oms.residual_risk_snapshot()["total_residual_base"]), Decimal("0.01"))      # carried, with nothing sent and no alarm
+
+    def test_with_the_bound_below_one_lot_an_exhausted_hedge_is_unwound_whatever_its_size(self):
+        self.build_cap(str(self.LOT), ["ioc_nofill", "ioc_nofill"])                    # the hedge and its retry find nothing; the unwind then fills in full (the script's default)
+        self.run_failed()
+        (chain,) = self.chains
+        self.assertEqual(len(self.binance.submits), 3)                                # the hedge, its retry, then the unwind
+        (unwind,) = self.unwinds()
+        self.assertEqual(unwind.quantity, Decimal("0.01"))
+        self.assertEqual(unwind.limit_price, Decimal("60000.00") * Decimal("1.0015"))   # the banded IOC at the touch band (15 bps), not an open-ended market order
+        self.assertEqual(self.oms.unwind_exhausted_alarms, {})
+        self.assertEqual(Decimal(self.oms.residual_risk_snapshot()["total_residual_base"]), 0)
+        self.assertEqual(chain.state, H.RECONCILED)
+
+    def test_a_failed_unwind_is_the_persistent_alarm_and_blocks_new_risk(self):
+        self.build_cap(str(self.LOT), ["ioc_nofill"] * 6)                              # the hedge, its retry and every unwind attempt find nothing
+        self.run_failed()
+        self.assertEqual(len(self.unwinds()), 3)                                       # three unwind attempts (Binance, Bybit, Binance), then it stops
+        self.assertIn(self.plan.parent_id, self.oms.unwind_exhausted_alarms)
+        (chain,) = self.chains
+        self.assertEqual(chain.state, H.FAILED)
+        self.assertEqual(self.oms.alert_context(10 * S)["execution_blocked_reason"], "unwind_exhausted_alarm")
+
+    def test_only_a_remainder_below_one_lot_is_carried_silently(self):
+        self.build_cap(str(self.LOT), [("fill", None)], qty="0.011")                   # the maker is part filled 0.0105; the hedge is 0.010 (a whole number of lots); 0.0005 is below one lot
+        self.fill("0.0105", ExecutionEventType.PARTIAL, ts=1 * S)
+        self.oms.advance_time(2 * S)
+        self.assertEqual(self.unwinds(), [])
+        self.assertEqual(self.oms.unwind_exhausted_alarms, {})
+        self.assertEqual(Decimal(self.oms.residual_risk_snapshot()["total_residual_base"]), Decimal("0.0005"))
+
+
 class RecoveryAfterRestart(Base):
     def test_a_restart_with_a_hedge_awaiting_its_answer_never_dispatches_a_second_hedge(self):
         with tempfile.TemporaryDirectory() as d:

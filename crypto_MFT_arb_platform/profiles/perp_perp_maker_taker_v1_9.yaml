@@ -1,3 +1,4 @@
+# Owner 13 Nov (E0 decisions, applied to v1_9 itself, not a new profile): oms.maker_ack_deadline ON; hedge_faults.silent_carry_bound below_one_lot (a failed hedge always unwinds, whatever its size). Both are safety rules, not strategy changes; results labelled v1_9 before this date carried neither.
 # perp_perp_maker_taker_v1_9 = perp_perp_maker_taker_v1_7 + ONE change (owner 12 Nov, EMS note section 1, price-cap construction): execution.hedge.cap size_aware. The hedge cap starts from the level the hedge quantity reaches on the bot's VIEW of the hedge book, plus the slack floor (5 bps) and an optional volatility/latency term (k = 0, ASSUMED), never beyond the touch by more than max_slip_bps (15, ASSUMED), on the venue's grid without loosening; where the view book has no depth beyond the touch it falls back to touch_slack and says so. Quote withdrawal (v1_8) is NOT in v1_9: one change at a time. EXPLORATORY. v1_5 to v1_8 are unchanged.
 # Owner 11 Nov (S1 label check): the 50 ms hedge-move horizon of the adverse table is below the data resolution for March 2024 (Bybit receive time constructed, Binance best bid/ask). Label only: no number, no switch and no table changed (decision_status.s1_label_resolution).
 # perp_perp_maker_taker_v1_7 = perp_perp_maker_taker_v1_6 + ONE switch (owner 10 Nov, S3 / the HOLDOUT gate score): arb.block_on_toxic false. EXPLORATORY. Evidence: out/integration/s3/study/s3_gate_holdout_report.json (sha256 e1db1d0cf6c847ec8162ef891f7c4b27dbcedb38f45d7c8de18814c2897b256f):
@@ -177,6 +178,8 @@ breaker:                                 # MANDATORY — DECISION_PENDING_CALIBR
   heartbeat_timeout_s: 10.0              # ASSUMED (not specified by the owner): the engine default
   tripped_unwind_retries: 10             # unwind sends still allowed while tripped (engine default)
 # Reset is MANUAL ONLY: nothing in the simulator or the strategy clears a tripped breaker (bt.reset_breaker() is an operator action).
+oms:
+  maker_ack_deadline: true               # owner 13 Nov: a sent PostOnly quote is watched from the send, not only from its ack (a submit or ack lost in a gateway outage ends TIMED_OUT with the kill switch instead of sitting SENT unwatched; 565 s in the 2l replay). Earlier profiles: off. REQUIRED for any profile used with real orders (config.REAL_ORDER_REQUIRED)
 hedge_faults:                            # the response policy (recovery), not injected faults
   response: retry_unwind                 # MANDATORY (not the legacy oracle)
   query_before_replace: true             # OMS03 (v1_2, Phase B): a hedge that gets no answer in an outage is queried before any retry or unwind is sent (the query waits for the gateway and for a ghost to land). v1.1: false
@@ -184,6 +187,7 @@ hedge_faults:                            # the response policy (recovery), not i
   retry_backoff_s: 0.25
   entry_guard: true
   unwind_band_bps: 15.0                  # price-banded unwind, 15 bps (DECISION_PENDING_CALIBRATION)
+  silent_carry_bound: below_one_lot      # owner 13 Nov: a failed hedge ALWAYS acts. When a hedge chain exhausts its retries the residual is unwound with MARKET_BANDED at the touch band (unwind_band_bps) whatever its size, and a failed unwind is the persistent alarm. Only a remainder below one hedge-venue lot (it cannot be sent) is carried silently, with the end-of-day warning. v1_7 and earlier: position_size (a residual under the position size, 1.0 SOL in the replay, was carried without any action)
   unwind_max_attempts: 3                 # 3 unwind sends per failed hedge chain, then the persistent ALARM (DECISION_PENDING_CALIBRATION)
   unknown_query_max_attempts: 3
 margin:                                  # MANDATORY in a perp profile; tiers ASSUMED, prefunded capital per venue
