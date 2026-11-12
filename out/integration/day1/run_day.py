@@ -2,7 +2,7 @@
 Profile v1_6 or v1_7, pair economics, the statistics and metadata block, the maker lifetime timer, lot rounding and the decomposed markouts on; 1 SOL clip with 5 SOL gross per venue (owner 11 Nov);
 margin marks from the recorded derivatives stream when the part has derivatives.jsonl, else the labelled MARK_FROM_MID fallback (a replay of 11 Nov before this change tripped the kill switch from a stale Binance book). EXPLORATORY: recorder quality REJECTED, host clock UNKNOWN, funding not included
 (no derivatives files locally), mark = mid, S1 table out-of-period (fitted March 2024), no own orders on the venues so the fills are simulated and show mechanics only.
-usage: run_day.py PROFILE OUT_DIR [MINUTES] [--size SOL] [--gross SOL] [--cap] [--src DIR]      (MINUTES limits the run to the first minutes of the capture, for a trial; --size is the clip and net ceiling (default 1), --gross the per-venue
+usage: run_day.py PROFILE OUT_DIR [MINUTES] [--size SOL] [--gross SOL] [--cap] [--src DIR] [--processing-strategy-ms X] [--processing-risk-ms Y] [--regime-boundaries FILE]      (MINUTES limits the run to the first minutes of the capture, for a trial; --size is the clip and net ceiling (default 1), --gross the per-venue
 limit (default 5 SOL; for a size sweep use at least 5 x size); --cap switches the E3 participation cap on (maker.participation_cap, default off). Owner 12 Nov: the sweep sizes are run settings, not a copy of this file)"""
 import itertools
 import json
@@ -22,6 +22,8 @@ def _opt(flag, default, cast=float):
         i = argv.index(flag); v = cast(argv[i + 1]); del argv[i:i + 2]; return v
     return default
 size, gross = _opt("--size", 1.0), _opt("--gross", 5.0)
+proc_strategy, proc_risk = _opt("--processing-strategy-ms", 0.0), _opt("--processing-risk-ms", 0.0)      # owner 12 Nov: the decision and risk processing time (default 0: nothing changes)
+boundaries = _opt("--regime-boundaries", None, str)                                                      # the training-day boundaries file: with it the lifecycle report is written (session_lifecycle_report.json)
 cap = "--cap" in argv
 if cap:
     argv.remove("--cap")
@@ -34,7 +36,10 @@ cfg = apply_profile(profile, dataset="mar2024", data_root="", pair="SOLUSDT", st
 cfg.arb.max_position_base = size                # the clip and the net ceiling (1 SOL by default, + the profile's fill headroom)
 cfg.arb.max_venue_imbalance_base = gross        # owner 11 Nov: 5 SOL gross per venue (the net stays at the ceiling above); the core's per-venue risk limit follows it
 cfg.maker.participation_cap = cap               # E3 (owner 12 Nov): off unless --cap
-replay = SessionReplay(cfg, profile, ticks=dated_ticks("2026-10-29"), recorded=True, decompose_markouts=True, mark_from_mid=True)
+if proc_strategy or proc_risk:
+    import dataclasses
+    cfg.timing = dataclasses.replace(cfg.timing, processing_ms={k: v for k, v in (("strategy", proc_strategy), ("risk", proc_risk)) if v})
+replay = SessionReplay(cfg, profile, ticks=dated_ticks("2026-10-29"), recorded=True, decompose_markouts=True, mark_from_mid=True, lifecycle_report=boundaries is not None, regime_boundaries=boundaries)
 events = iter_recorded_events(SESSION)
 if minutes is not None:
     first = next(events)
@@ -44,7 +49,7 @@ t = time.time()
 result = replay.run_recorded(events)
 result["run"] = {"profile": name, "minutes_limit": minutes, "wall_s": round(time.time() - t, 1), "session": SESSION.name,
                  "labels": ["EXPLORATORY", "recorder quality REJECTED; host clock UNKNOWN", "funding not included (no derivatives files locally); mark = mid", "S1 table out-of-period (SOL, fitted March 2024)",
-                            "no own orders on the venues: simulated fills show mechanics only", f"size {size} SOL clip, net ceiling {size} SOL + headroom, {gross} SOL gross per venue (owner 11 Nov; sweep settings), participation cap {'ON' if cap else 'off'}", "marks: the recorded derivatives stream when present, else MARK_FROM_MID (replay only)"]}
+                            "no own orders on the venues: simulated fills show mechanics only", f"size {size} SOL clip, net ceiling {size} SOL + headroom, {gross} SOL gross per venue (owner 11 Nov; sweep settings), participation cap {'ON' if cap else 'off'}", f"processing time strategy {proc_strategy} ms + risk {proc_risk} ms" + (" (ASSUMED sensitivity)" if proc_strategy or proc_risk else " (ASSUMED_ZERO)"), "marks: the recorded derivatives stream when present, else MARK_FROM_MID (replay only)"]}
 write_result(result, out)
 print(json.dumps({"profile": name, "wall_s": result["run"]["wall_s"], "events": result["events"], "signals": len(result["signals"]), "orders": len(result["orders"]), "fills": len(result["fills"]),
                   "positions": result["positions"], "ledger_events": sum(result["ledger_event_counts"].values())}, indent=1))

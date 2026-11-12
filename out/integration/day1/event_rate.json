@@ -1,0 +1,22 @@
+{
+ "seconds_with_events": 50589,
+ "all_kinds_per_second": {
+  "p50": 60,
+  "p99": 562,
+  "p999": 1238,
+  "max": 3089,
+  "mean": 97.32663227183775
+ },
+ "by_kind_per_second": {
+  "MarketEvent": {
+   "p50": 43,
+   "p99": 65,
+   "max": 383
+  },
+  "TradeEvent": {
+   "p50": 18,
+   "p99": 510,
+   "max": 3089
+  }
+ }
+}

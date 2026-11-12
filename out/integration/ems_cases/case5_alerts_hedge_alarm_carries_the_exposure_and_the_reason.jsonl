@@ -1,0 +1,14 @@
+{"event": "OPPORTUNITY", "stage": "decision", "ts": 1.002}
+{"cumulative_filled_quantity": "0", "event": "ORDER_LIFECYCLE", "order_id": "3a08e03a-6659-51ff-ae8a-360044cf5bf8", "reason": "", "source": "INTERNAL", "stage": "request_sent", "ts": 1.002000001, "venue": "BYBIT"}
+{"cumulative_filled_quantity": "0", "event": "ORDER_LIFECYCLE", "order_id": "3a08e03a-6659-51ff-ae8a-360044cf5bf8", "reason": "", "source": "ADAPTER_CALLBACK", "stage": "exchange_effective_notified", "ts": 1.009857328, "venue": "BYBIT"}
+{"cumulative_filled_quantity": "1.0", "event": "FILL", "fill_price": "100.247", "fill_quantity": "1.0", "order_id": "3a08e03a-6659-51ff-ae8a-360044cf5bf8", "side": "BUY", "stage": "fill_booked", "ts": 3.003093088, "venue": "BYBIT"}
+{"cumulative_filled_quantity": "1.0", "event": "ORDER_LIFECYCLE", "order_id": "3a08e03a-6659-51ff-ae8a-360044cf5bf8", "reason": "", "source": "ADAPTER_CALLBACK", "stage": "fill_notified", "ts": 3.003093088, "venue": "BYBIT"}
+{"event": "HEDGE_CHAIN_OPENED", "stage": "hedge_chain_opened", "ts": 3.003093088}
+{"event": "HEDGE_SUBMIT", "stage": "hedge_sent", "ts": 3.003093088}
+{"cumulative_filled_quantity": "0", "event": "ORDER_LIFECYCLE", "order_id": "90db34cf-e755-5833-a5f5-55ed3a428e17", "reason": "", "source": "INTERNAL", "stage": "request_sent", "ts": 3.003093089, "venue": "BINANCE"}
+{"event": "VENUE_ORDER_QUERY", "order_id": "90db34cf-e755-5833-a5f5-55ed3a428e17", "stage": "venue_queried", "ts": 5.003093088, "venue": "BINANCE"}
+{"event": "VENUE_ORDER_QUERY", "order_id": "90db34cf-e755-5833-a5f5-55ed3a428e17", "stage": "venue_queried", "ts": 5.503093088, "venue": "BINANCE"}
+{"event": "VENUE_ORDER_QUERY", "order_id": "90db34cf-e755-5833-a5f5-55ed3a428e17", "stage": "venue_queried", "ts": 6.003093088, "venue": "BINANCE"}
+{"confirmed_residual_base": "1.0", "event": "HEDGE_ALARM", "execution_blocked_reason": "hedge_alarm:kill_switch_follows", "oldest_exposure_age_s": 3.000000001, "pending_hedge_qty": "1.0", "reason": "unknown_unresolved", "stage": "alert", "ts": 6.003093089}
+{"confirmed_residual_base": "1.0", "event": "KILL_SWITCH_STATE_TRANSITION", "execution_blocked_reason": "kill_switch:hedge status unresolved", "oldest_exposure_age_s": 3.0, "pending_hedge_qty": "0", "reason": "hedge status unresolved", "source": "OMS_HEDGE_UNKNOWN", "stage": "alert", "ts": 6.003093089}
+{"cumulative_filled_quantity": "0", "event": "ORDER_LIFECYCLE", "order_id": "90db34cf-e755-5833-a5f5-55ed3a428e17", "reason": "venue report and queries unanswered", "source": "TIMER", "stage": "timeout", "ts": 6.003093089, "venue": "BINANCE"}

@@ -4,6 +4,7 @@ from pathlib import Path
 import tempfile
 import unittest
 
+from ems_evidence import write_case
 from crypto_stat_arb.execution import (
     CanonicalOrderUpdate, DispatchPolicy, ExecutionCallback, ExecutionEventType,
     OrderAction, OrderUpdateSource, ResidualPolicy, StrategyDirectedRouter,
@@ -595,7 +596,38 @@ class RestartAgainstTheVenueTests(unittest.TestCase):
             self.assertEqual(binance3.submits, [])
             self.assertEqual(len([e for e in self._fills(oms3) if e.get("order_id") == maker.order_id]), len(maker_fills))
             self.assertEqual(again.children[0].filled_quantity, Decimal("0.010"))
+            write_case("case6_restart_against_the_venue_missed_execution_booked_once_hedged_once", oms3.ledger.events + oms.ledger.events)
             store3.close()
+
+    def test_late_success_four_way_agreement_before_anything_new_is_sent(self):
+        """Owner 12 Nov: the venue executed while the OMS had lost the answer. The plan is released only when client order id, exchange order id, execution reports and venue position ALL agree."""
+        from crypto_stat_arb.models import OrderState
+        def attempt(executions, positions):
+            with tempfile.TemporaryDirectory() as directory:
+                plan_path = Path(directory) / "oms.sqlite"
+                parent_id, maker = self._first_session(plan_path)
+                oms, store, bybit, binance = self._restart(plan_path)
+                oms.execute(_ft_opportunity("opp-held"), _ft_books(), maker_venue="BYBIT")                 # books known to the OMS, as in a running session
+                snap = self._snapshot(maker, OrderState.FILLED, "0.010")
+                oms.reconcile_plan(parent_id, {maker.order_id: snap}, 600 * MS, venue_executions=executions(maker), venue_positions=positions)
+                oms.execute(_ft_opportunity("opp-after"), _ft_books(), maker_venue="BYBIT")
+                result = (self._held(oms), len(bybit.submits), [e["disagreements"] for e in oms.ledger.events if e["event_type"] == "RECONCILIATION_DISAGREEMENT"])
+                write_case("case9_late_success_reconciliation_" + ("agree" if not result[2] else "disagree"), oms.ledger.events)
+                store.close()
+                return result
+        good_pos = {("BYBIT", INSTR_FT): Decimal("-0.010"), ("BINANCE", INSTR_FT): Decimal("0.010")}
+        held, maker_submits, disagreements = attempt(lambda m: {m.order_id: Decimal("0.010")}, good_pos)
+        self.assertEqual((disagreements, maker_submits), ([], 1))                                    # all four agree: released, the new quote is sent
+        self.assertEqual(held, ["opp-held"])                                                          # (only the quote tried BEFORE the reconciliation was held)
+        held, maker_submits, disagreements = attempt(lambda m: {m.order_id: Decimal("0.010")}, {**good_pos, ("BYBIT", INSTR_FT): Decimal("0")})
+        self.assertEqual(maker_submits, 0)                                                            # the venue position disagrees: nothing new is sent
+        self.assertEqual(held, ["opp-held", "opp-after"]); self.assertEqual(disagreements[0], ["venue_position_differs:BYBIT"])
+        held, maker_submits, disagreements = attempt(lambda m: {m.order_id: Decimal("0.004")}, good_pos)
+        self.assertEqual(maker_submits, 0)                                                            # the execution reports do not add up to the order state
+        self.assertTrue(disagreements[0][0].startswith("executions_differ"))
+        held, maker_submits, disagreements = attempt(lambda m: {"someone-elses-order": Decimal("0.010")}, good_pos)
+        self.assertEqual(maker_submits, 0)
+        self.assertTrue(disagreements[0][0].startswith("execution_for_unknown_order"))
 
     def test_an_order_the_venue_does_not_know_keeps_new_risk_held(self):
         with tempfile.TemporaryDirectory() as directory:

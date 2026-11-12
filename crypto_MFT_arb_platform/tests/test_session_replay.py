@@ -1,5 +1,6 @@
 """Phase D, step D5: the session replay end to end on a synthetic stream (wiring only, never a profit figure). The strategy signals through the shim, the core router sends a PostOnly maker
 bid after its entry latency, a trade print through the bid fills it (queue adapter, evidence from a print), FILL_TRIGGERED hedges on the other venue, and the ledger carries both legs."""
+import json
 import sys
 import unittest
 from unittest import mock
@@ -9,6 +10,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
+from ems_evidence import write_case
 from new_backtest.cross_venue_feed import TimedEvent
 from new_backtest.event_loader import BOOK, TRADE
 from new_backtest.profiles import apply_profile, load_profile
@@ -789,6 +791,7 @@ class EmsNoteQuoteValidity(unittest.TestCase):
     def test_binance_moving_against_a_resting_quote_between_timer_ticks_cancels_it(self):
         rep = self._replay(moved_stream(1.6)); result = rep.run()
         (w, *_) = self._events(rep, "QUOTE_WITHDRAWN")
+        write_case("case1_quote_validity_binance_moves_against_a_resting_quote", rep.session.ledger.events, [(1.6, "binance", "book")])
         self.assertEqual(w["reason"], "edge_below_threshold"); self.assertLess(w["net_edge_bps"], 1.0 - 0.5)
         self.assertLess(w["ts_ns"] / 1e9 - 1.6e0 - 1_793_000_000 if False else 0, 1)       # (the time is checked against the order's own lifetime below)
         maker = [o for o in result["orders"] if o["post_only"]]
@@ -809,6 +812,7 @@ class EmsNoteQuoteValidity(unittest.TestCase):
     def test_a_fill_that_lands_before_the_cancel_takes_effect_is_booked_once_and_hedged(self):
         rep = self._replay(moved_stream(2.995, print_t=3.0)); result = rep.run()
         self.assertEqual(len(self._events(rep, "QUOTE_WITHDRAWN")), 1)                              # withdrawn on the move at 2.995 ...
+        write_case("case1b_quote_validity_fill_before_the_cancel_takes_effect", rep.session.ledger.events, [(2.995, "binance", "book"), (3.0, "bybit", "trade")])
         fills = result["fills"]
         self.assertEqual([f["venue"] for f in fills].count("BYBIT"), 1)                             # ... but the print at 3.0 filled it before the cancel arrived: booked ONCE
         self.assertEqual([f["venue"] for f in fills].count("BINANCE"), 1)                           # and hedged once
@@ -978,6 +982,162 @@ class EmsNoteNoOffTickPrice(unittest.TestCase):
                     self.assertEqual(D(o["limit_price"]) % D("0.001"), 0, (name, o))
 
 
+class ProcessingTimeSetting(unittest.TestCase):
+    """Owner 12 Nov (EMS note section 6): the decision and risk processing time is an explicit setting (TimingConfig.processing_ms, default empty = 0, nothing changes) that the router adds to every order it sends: the quote
+    and the hedge (fill notification -> hedge request) alike."""
+
+    def test_validation_and_default(self):
+        from crypto_stat_arb.simulation.timing import TimingConfig
+        cfg = apply_profile(load_profile("perp_perp_maker_taker_v1_5"), dataset="mar2024", data_root="", pair="SOLUSDT", start_date="2024-03-11", end_date="2024-03-11", output_dir="/tmp/x_pt")
+        self.assertEqual(cfg.timing.processing_ms, {})
+        self.assertNotIn("processing_ms", cfg.timing.describe())                                  # identity: nothing new in the record until it is set
+        import dataclasses
+        with self.assertRaises(ValueError):
+            dataclasses.replace(cfg.timing, processing_ms={"strategy": -1})
+        with self.assertRaises(ValueError):
+            dataclasses.replace(cfg.timing, processing_ms={"network": 1})
+
+    @unittest.skipUnless(SLICES.is_dir(), "March slices not available (the profile needs a data root)")
+    def test_every_order_is_sent_later_by_exactly_the_setting_quote_and_hedge(self):
+        import dataclasses
+        def run(ms):
+            profile = load_profile("perp_perp_maker_taker_v1_5")
+            cfg = apply_profile(profile, dataset="mar2024", data_root=str(SLICES), pair="SOLUSDT", start_date="2024-03-11", end_date="2024-03-11", output_dir="/tmp/x_pt")
+            cfg.arb.max_position_base = 1.0
+            if ms:
+                cfg.timing = dataclasses.replace(cfg.timing, processing_ms=ms)
+            rep = SessionReplay(cfg, profile, stream=stream())
+            return rep, rep.run()
+        base_rep, base = run(None)
+        slow_rep, slow = run({"strategy": 3.0, "risk": 2.0})
+        self.assertEqual(len(base["orders"]), len(slow["orders"]))
+        maker_b = next(o for o in base["orders"] if o["venue"] == "BYBIT"); maker_s = next(o for o in slow["orders"] if o["venue"] == "BYBIT")
+        hedge_b = next(o for o in base["orders"] if o["venue"] == "BINANCE" and o["state"] != "CREATED"); hedge_s = next(o for o in slow["orders"] if o["venue"] == "BINANCE" and o["state"] != "CREATED")
+        self.assertGreater(slow_rep.latency_model.processing_stages.get("strategy+risk", 0), 0)
+        lm = slow["manifest"]["timing"]["latency_model"]
+        self.assertEqual(lm["processing_ms"], {"strategy": 3.0, "risk": 2.0})
+        # the hedge request leaves 5 ms later, so the hedge order's terminal report is later by at least that
+        self.assertGreaterEqual(hedge_s["terminal_ts_ns"] - hedge_b["terminal_ts_ns"], 5_000_000 - 1)
+        self.assertNotIn("processing_ms", base["manifest"]["timing"]["latency_model"])
+
+
+class LifecycleReportByRegime(unittest.TestCase):
+    """Owner 12 Nov (EMS note section 6): fill rate = quotes with a fill / quotes placed, the cancel-to-fill races, message load per minute, residual exposure, hedge completion and the adverse tails, in full and split by
+    volatility, spread, liquidity (terciles from the TRAINING days) and UTC hour. Every split is a partition of the run."""
+
+    def _orders(self):
+        base = 1793272000.0
+        mk = lambda i, sent, fills=(), cancel_req=None, cancel_conf=None, ack=True, wd=False, cws=False: {
+            "order_id": f"o{i}", "sent_ts": sent, "ack_ts": sent + 0.04 if ack else None, "cancel_req_ts": cancel_req, "cancel_conf_ts": cancel_conf, "fills": [list(f) for f in fills],
+            "withdrawn": wd, "cancel_while_sent": cws, "amend_ts": []}
+        rows = []
+        for i in range(40):                                   # 40 quotes, 10 of them filled, spread over 2 hours and the three regimes
+            sent = base + i * 100.0
+            fills = [(sent + 1.0, 1.0)] if i % 4 == 0 else []
+            rows.append(mk(i, sent, fills))
+        rows.append(mk(100, base + 5.0, fills=[(base + 6.5, 0.5)], cancel_req=base + 6.0, cancel_conf=base + 7.0))                        # a fill while the cancel was pending
+        rows.append(mk(101, base + 9.0, fills=[(base + 12.0, 0.5)], cancel_req=base + 10.0, cancel_conf=base + 11.0))                      # a late fill after the cancel
+        rows.append(mk(102, base + 20.0, cancel_req=base + 20.01, cancel_conf=base + 20.1, ack=False, cws=True))                           # cancelled while still submitted
+        return base, rows
+
+    def test_fill_rate_races_load_partition_and_small_cells(self):
+        from crypto_stat_arb.metrics import lifecycle_report
+        base, orders = self._orders()
+        per_second = {int(base) + k: (float(k % 7), 1.0 + (k % 5), 50.0 + (k % 11) * 10) for k in range(0, 4200)}
+        cuts = {"volatility": [2.0, 4.0], "spread": [2.0, 4.0], "liquidity": [80.0, 120.0]}
+        pairs = [{"maker_fill_ts": o["fills"][0][0], "unhedged_interval_s": 0.04, "fully_hedged": True, "hedge_children": 1} for o in orders if o["fills"]]
+        marks = [{"ts": p["maker_fill_ts"], "horizon_s": 1.0, "role": "maker", "m_bps": float(i % 5) - 2.0} for i, p in enumerate(pairs)]
+        rep = lifecycle_report(orders, pairs, marks, [{"state": "RECONCILED"}] * len(pairs), per_second, cuts)
+        q = rep["total"]["quotes"]
+        self.assertEqual(q["quotes_placed"], 43)
+        self.assertEqual(q["quotes_filled"], 12)                                                              # 10 plain + the two raced quotes
+        self.assertAlmostEqual(q["fill_rate"], 12 / 43)
+        self.assertEqual((q["fills_during_cancel_pending"], q["late_fills_after_cancel"], q["cancel_while_submitted"]), (1, 1, 1))
+        self.assertTrue(rep["partition_ok"])                                                                   # every split adds up to the whole
+        for dim in ("volatility", "spread", "liquidity", "utc_hour"):
+            self.assertEqual(sum(c["quotes"]["quotes_placed"] for c in rep["by_regime"][dim].values()), 43, dim)
+            self.assertEqual(sum(c["hedge_completion"]["maker_fills"] for c in rep["by_regime"][dim].values()), len(pairs), dim)
+        small = [c["quotes"] for c in rep["by_regime"]["utc_hour"].values() if c["quotes"]["quotes_placed"] < 30]
+        self.assertTrue(small and all(c["fill_rate"] is None and "n < 30" in c["note"] for c in small))        # a small cell prints counts, never a rate
+        self.assertEqual(rep["hedge_chains_by_final_state"], {"RECONCILED": len(pairs)})
+        self.assertIn("1s", rep["total"]["adverse_tails_markout_bps"])
+
+    def test_without_boundaries_only_the_hour_split_exists_and_the_run_is_unbucketed(self):
+        from crypto_stat_arb.metrics import lifecycle_report
+        base, orders = self._orders()
+        rep = lifecycle_report(orders, [], [], [], {}, None)
+        self.assertEqual(list(rep["by_regime"]["volatility"]), ["unbucketed"])
+        self.assertTrue(rep["partition_ok"])
+        self.assertIsNone(rep["regime_boundaries"])
+
+    def test_tercile_cuts_and_buckets(self):
+        from crypto_stat_arb.metrics import regime_bucket, regime_sample, tercile_cuts
+        cuts = tercile_cuts([float(i) for i in range(1, 91)])
+        self.assertEqual([regime_bucket(v, cuts) for v in (1, 30, 31, 60, 61, 90)], ["low", "low", "mid", "mid", "high", "high"])
+        vol, spread, depth, mid = regime_sample(100.0, 100.0, 100.02, 3.0, 4.0)
+        self.assertAlmostEqual(vol, 1.0, places=3); self.assertAlmostEqual(spread, 2.0, places=2); self.assertEqual(depth, 7.0)
+
+    @unittest.skipUnless(SLICES.is_dir(), "March slices not available (the profile needs a data root)")
+    def test_a_replay_with_the_report_on_writes_it_and_off_changes_nothing(self):
+        import tempfile
+        from new_backtest.session_replay import write_result
+        profile = load_profile("perp_perp_maker_taker_v1_9")
+        def run(on):
+            cfg = apply_profile(profile, dataset="mar2024", data_root=str(SLICES), pair="SOLUSDT", start_date="2024-03-11", end_date="2024-03-11", output_dir="/tmp/x_lc")
+            cfg.arb.max_position_base = 1.0
+            return SessionReplay(cfg, profile, stream=stream(), decompose_markouts=True, lifecycle_report=on).run()
+        off, on = run(False), run(True)
+        self.assertNotIn("_lifecycle", off)
+        self.assertEqual(off["orders"], on["orders"]); self.assertEqual(off["fills"], on["fills"])               # observation only
+        rep = on["_lifecycle"]
+        self.assertTrue(rep["partition_ok"])
+        self.assertGreaterEqual(rep["total"]["quotes"]["quotes_placed"], 1)
+        with tempfile.TemporaryDirectory() as d:
+            write_result(on, Path(d))
+            self.assertTrue((Path(d) / "session_lifecycle_report.json").exists())
+            self.assertNotIn("_lifecycle", json.loads((Path(d) / "session_manifest.json").read_text()))
+
+
+@unittest.skipUnless(SLICES.is_dir(), "March slices not available (the profile needs a data root)")
+class RecoveryAfterAFeedGap(unittest.TestCase):
+    """Owner 12 Nov (EMS note section 6, case 8): after a feed gap or a stale book, quoting resumes only after a valid, fresh book; no order is priced from a stale book."""
+
+    def _run(self, gap):
+        profile = load_profile("perp_perp_maker_taker_v1_7")
+        cfg = apply_profile(profile, dataset="mar2024", data_root=str(SLICES), pair="SOLUSDT", start_date="2024-03-11", end_date="2024-03-11", output_dir="/tmp/x_gap")
+        cfg.arb.max_position_base = 1.0
+        cfg.arb.maker_max_age_s = 1.0                                               # a quote that nobody hits lives 1 s, so a new quote is due about once a second when quoting is allowed
+        ev, book_ts, t = [snap(1.0, "bybit", 100.00, 100.30), snap(1.0, "binance", 100.30, 100.31)], {"bybit": [1.0], "binance": [1.0]}, 1.1
+        while t < 14.0:
+            if not (gap[0] <= t < gap[1]):                                           # nothing arrives from either venue during the gap
+                ev += [snap(t, "binance", 100.30, 100.31), snap(t + 0.01, "bybit", 100.00, 100.30)]
+                book_ts["binance"].append(t); book_ts["bybit"].append(t + 0.01)
+            t += 0.1
+        rep = SessionReplay(cfg, profile, stream=sorted(ev, key=lambda e: (e.exchange_ts, e.venue)))
+        return rep, rep.run(), cfg, book_ts
+
+    def _sends(self, rep):
+        quotes = {c.order_id for p in rep.session.oms.plans.values() for c in p.children if c.post_only}
+        return sorted(e["ts_ns"] / 1e9 for e in rep.session.ledger.events if e["event_type"] == "ORDER_LIFECYCLE" and e.get("lifecycle_event") == "SENT" and e["order_id"] in quotes)
+
+    def test_no_order_is_priced_from_a_stale_book_and_quoting_resumes_after_a_fresh_book(self):
+        rep, result, cfg, book_ts = self._run(gap=(3.0, 9.0))
+        sends = self._sends(rep)
+        max_age = rep.session.cfg.max_book_age_ns / 1e9
+        self.assertTrue(any(t < 3.0 for t in sends) and any(t >= 9.0 for t in sends), sends)               # it quoted before the gap and quotes again after it
+        for ts in sends:
+            for venue, times in book_ts.items():
+                last = max(x for x in times if x <= ts + 0.011)                                              # the venue's latest book message at the time of the send
+                self.assertLessEqual(ts - last, max_age + 0.05, f"order sent at {ts} priced from a {venue} book {ts - last:.2f} s old")
+        inside = [t for t in sends if 3.0 + max_age < t < 9.0]
+        self.assertEqual(inside, [])                                                                          # none inside the gap
+        write_case("case8_recovery_after_a_feed_gap_no_order_priced_from_a_stale_book", rep.session.ledger.events, [(3.0, "both", "last_book_before_gap"), (9.0, "both", "first_book_after_gap")])
+
+    def test_the_same_stream_without_a_gap_quotes_through_the_window(self):
+        rep, result, cfg, book_ts = self._run(gap=(0.0, 0.0))
+        self.assertTrue(any(3.0 + 0.5 < t < 9.0 for t in self._sends(rep)))                                  # the gap is what stopped the quoting, not the stream
+
+
 def snap_levels(t, venue, bids, asks):
     return timed(t, venue, BOOK, {"timestamp": t, "bids": [[str(p), q] for p, q in bids], "asks": [[str(p), q] for p, q in asks]})
 
@@ -1140,6 +1300,7 @@ class SizeAwareCapInTheReplay(unittest.TestCase):
         self.assertTrue(seen and all(id(b) in view_books for b in seen))                                   # the OMS reads the bot's own book objects; the venue's truth is a different structure (the simulator's SimBook)
         ev = [e for e in r9["_decision_events"] if e["event_type"] == "HEDGE_CAP_SIZE_AWARE"]
         self.assertFalse(ev[0]["touch_covers"]); self.assertEqual(ev[0]["book"], "view")
+        write_case("case2_size_aware_hedge_cap_size_spans_levels_view_book", rep.session.ledger.events if hasattr(rep.session, "ledger") else r9["_decision_events"])
 
     def test_best_bid_ask_only_falls_back_to_touch_slack_and_says_so(self):
         full = [("100.30", "50")]
@@ -1171,6 +1332,7 @@ class EmsNoteDuplicateFilledRace(unittest.TestCase):
 
     def test_a_duplicate_filled_message_changes_nothing(self):
         rep, dup = self._run(True); _, base = self._run(False)
+        write_case("case3_duplicate_bybit_filled_in_a_cancel_fill_race", rep.session.ledger.events, [(3.0, "bybit", "trade")])
         self.assertEqual([f["venue"] for f in dup["fills"]], [f["venue"] for f in base["fills"]])      # one maker fill and one hedge fill, not two of each
         self.assertEqual(dup["positions"], base["positions"]); self.assertEqual(dup["cash_by_venue"], base["cash_by_venue"])
         self.assertEqual(len([o for o in dup["orders"] if o["venue"] == "BINANCE" and o["state"] != "CREATED"]), 1)       # the hedge was sent once
@@ -1241,6 +1403,7 @@ class EmsNoteRateLimitPressure(unittest.TestCase):
         with mock.patch.object(OMS, "_hedge_for_maker_fill", at_fill):
             result = rep.run()
         hedges = [o for o in result["orders"] if o["venue"] == "BINANCE"]
+        write_case("case4_rate_limit_90_percent_hedge_refused_visible_alarm", rep.session.ledger.events)
         self.assertTrue(hedges and all(o["cancel_reason"] == "scoped_rate_limited" for o in hedges))
         self.assertEqual(result["residual_at_end"]["flag"], "UNHEDGED_OR_CARRIED_RESIDUAL")
         alarm = next(e for e in rep.session.ledger.events if e["event_type"] == "UNWIND_EXHAUSTED_ALARM")
@@ -1256,6 +1419,7 @@ class EmsNoteAlertContext(unittest.TestCase):
         gh = GhostHedgeInTheReplay("test_the_hedge_is_held_during_the_outage_and_executed_at_the_reconnect")
         rep = gh._replay(gh._faults(30.0), hedge_fault_injection=True); rep.run()
         alarms = [e for e in rep.session.ledger.events if e["event_type"] == "HEDGE_ALARM"]
+        write_case("case5_alerts_hedge_alarm_carries_the_exposure_and_the_reason", rep.session.ledger.events)
         self.assertEqual(len(alarms), 1)
         a = alarms[0]
         for key in ("confirmed_residual_base", "pending_hedge_qty", "oldest_exposure_age_s", "execution_blocked_reason"):

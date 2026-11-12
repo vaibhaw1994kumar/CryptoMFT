@@ -28,6 +28,7 @@ from typing import Any, Iterable
 
 from crypto_stat_arb.config import config_from_raw, raw_config_from_profile
 from crypto_stat_arb.derivatives import DerivativeTicker
+from crypto_stat_arb.metrics import regime_sample
 from crypto_stat_arb.ems.layer import hedge_policy_fields
 from crypto_stat_arb.execution import DispatchPolicy
 from crypto_stat_arb.hedge_lifecycle import HedgePolicy
@@ -89,12 +90,22 @@ class SessionReplay:
     """One replay on the session. `stream` is any iterable of `TimedEvent` built with `decimal_numbers=True` (the real feed or a synthetic list); consumed lazily."""
 
     def __init__(self, config, profile: dict, *, stream: Iterable | None = None, ticks: dict[str, float] | None = None, recorded: bool = False,
-                 decompose_markouts: bool = False, mark_from_mid: bool = False, hedge_fault_injection: bool = False, layer_risk_mode: str = "count", reconcile_mode: str = "count", observations: bool = True, layer_route_mode: str = "count") -> None:
+                 decompose_markouts: bool = False, mark_from_mid: bool = False, hedge_fault_injection: bool = False, layer_risk_mode: str = "count", reconcile_mode: str = "count", observations: bool = True, layer_route_mode: str = "count",
+                 lifecycle_report: bool = False, regime_boundaries=None) -> None:
         if config.runtime != "session":
             raise ValueError("SessionReplay runs the session runtime only")
         self.config, self.profile = config, profile
         # Decomposed markouts (owner 11 Nov, the 09 Nov note): captured / adverse / M / fee / net per fill and horizon, from the replay's own fills, with the mid BEFORE the event that caused the fill
         # (m(t-)) and the mid in force at each horizon. Observation only; off by default, so no other run changes.
+        # Lifecycle report by regime (owner 12 Nov, v1_9_TOLERANCES.md section D): off unless asked; one sample per second of the maker venue's view book (volatility, spread, touch liquidity). regime_boundaries = a dict or the path of the
+        # training-day boundaries file; without it only the UTC-hour split exists.
+        self.lifecycle_report = lifecycle_report
+        self._regime_samples: dict[int, tuple[float, float, float]] = {}
+        self._regime_prev_mid: float | None = None
+        self._regime_last_sec: int | None = None
+        if isinstance(regime_boundaries, (str, Path)):
+            regime_boundaries = json.loads(Path(regime_boundaries).read_text())["boundaries"]
+        self.regime_boundaries = regime_boundaries
         self.decomp = None
         if decompose_markouts:
             from crypto_stat_arb.simulation.latency_model import MarkoutTracker
@@ -299,6 +310,8 @@ class SessionReplay:
                 self._book(event)
             if self.decomp is not None:
                 self._decomp_after(event)
+            if self.lifecycle_report:
+                self._regime_tick()
         self.session.drain()
         self.session.resolve_markouts(self.last_ns, finalize=True)
         if self.decomp is not None:
@@ -307,6 +320,58 @@ class SessionReplay:
             self.decomp.resolve_asof(end, self._mid_pre)
             self.decomp.resolve_asof(end, self._mid_pre, finalize=True)
         return self.result()
+
+    def _regime_tick(self) -> None:
+        """Once a second: the maker venue's view book as (volatility, spread, liquidity). Observation only."""
+        sec = self.last_ns // _NS
+        if sec == self._regime_last_sec:
+            return
+        book = self.views[self.config.arb.maker_venues[0]]
+        if not (book.best_bid > 0 and book.best_ask > 0):
+            return
+        self._regime_last_sec = sec
+        vol, spread, depth, mid = regime_sample(self._regime_prev_mid, book.best_bid, book.best_ask, book.best_bid_size, book.best_ask_size)
+        self._regime_prev_mid = mid
+        self._regime_samples[sec] = (vol, spread, depth)
+
+    def _lifecycle_orders(self) -> list[dict[str, Any]]:
+        """The maker quotes (post-only primary orders) as lifecycle rows, from the ledger's order events: when each was sent, acknowledged, asked to cancel, cancelled, and every fill (time, quantity)."""
+        events = [e for e in self.session.ledger.events if e["event_type"] in ("ORDER_LIFECYCLE", "QUOTE_WITHDRAWN", "AMEND_REQUESTED")]
+        quotes = {c.order_id: c for plan in self.session.oms.plans.values() for c in plan.children if c.post_only and c.order_role == "PRIMARY"}
+        rows = {oid: {"order_id": oid, "sent_ts": None, "ack_ts": None, "cancel_req_ts": None, "cancel_conf_ts": None, "fills": [], "withdrawn": False, "cancel_while_sent": False, "amend_ts": []} for oid in quotes}
+        cum: dict[str, Decimal] = {}
+        for e in events:
+            oid, ts = e.get("order_id"), e["ts_ns"] / _NS
+            if oid not in rows:
+                continue
+            r, kind = rows[oid], e["event_type"]
+            if kind == "QUOTE_WITHDRAWN":
+                r["withdrawn"] = True
+            elif kind == "AMEND_REQUESTED":
+                r["amend_ts"].append(ts)
+            else:
+                ev = e.get("lifecycle_event")
+                if ev == "SENT" and r["sent_ts"] is None:
+                    r["sent_ts"] = ts
+                elif ev == "ACKNOWLEDGED" and r["ack_ts"] is None:
+                    r["ack_ts"] = ts
+                elif ev == "CANCEL_REQUESTED" and r["cancel_req_ts"] is None:
+                    r["cancel_req_ts"] = ts
+                    r["cancel_while_sent"] = r["ack_ts"] is None and not r["fills"]
+                elif ev == "CANCELLED" and r["cancel_conf_ts"] is None:
+                    r["cancel_conf_ts"] = ts
+                filled = Decimal(str(e.get("cumulative_filled_quantity", 0)))
+                if filled > cum.get(oid, Decimal("0")):
+                    r["fills"].append([ts, float(filled - cum.get(oid, Decimal("0")))])
+                    cum[oid] = filled
+        return [r for r in rows.values() if r["sent_ts"] is not None]
+
+    def _lifecycle(self, fills_rows, markout_rows) -> dict[str, Any]:
+        from crypto_stat_arb.metrics import lifecycle_report, pair_economics
+        journal = list(self.session.intent_observer.layer.journal) if self.session.intent_observer is not None else []
+        pairs = pair_economics(fills_rows, journal)["rows"] if journal else []
+        chains = [dict(c.as_record(), parent_id=pid) for pid, group in self.session.oms.hedge_chains.items() for c in group.values()]
+        return lifecycle_report(self._lifecycle_orders(), pairs, markout_rows, chains, self._regime_samples, self.regime_boundaries)
 
     def _derivative(self, ticker: DerivativeTicker) -> None:
         """A recorded derivatives frame (mark, index, funding): the session keeps the venue's mark for the margin check (and settles funding when it is configured). Nothing else moves."""
@@ -555,6 +620,7 @@ class SessionReplay:
             "days": [self.config.start_date, self.config.end_date], "size_base": float(self.config.arb.max_position_base), "fee_presets": self.profile.get("fee_presets"),
             "events": dict(self.events), "signals": signals, "orders": orders, "fills": fills, "positions": positions, "cash_by_venue": cash, "equity_at_book_mids": str(equity),
             "residual_at_end": self._residual_at_end(),
+            **({"_lifecycle": self._lifecycle(fills, list(self.decomp.rows) if self.decomp is not None else [])} if self.lifecycle_report else {}),
             **({"participation": {"cap_on": bool(self.config.maker.participation_cap), "prints_it_binds_on": self.executor.diag.get("participation_cap_would_bind", 0.0), "excess_fill_qty": self.executor.diag.get("participation_cap_excess_qty", 0.0)}}
                if self.executor.diag.get("participation_cap_would_bind") or self.config.maker.participation_cap else {}),        # E3: only when the cap is on or something would have bound, so every earlier run's manifest is unchanged
             "ledger_event_counts": dict(Counter(e["event_type"] for e in s.ledger.events)),
@@ -622,6 +688,8 @@ def write_result(result: dict, out_dir: Path) -> None:
         with (out_dir / "maker_observations.jsonl").open("w") as fh:
             for row in result["_maker_observations"]:
                 fh.write(json.dumps(row, sort_keys=True, default=str) + "\n")
+    if result.get("_lifecycle") is not None:             # owner 12 Nov: the lifecycle report by regime, a new file next to the statistics block; only when the replay was asked for it
+        (out_dir / "session_lifecycle_report.json").write_text(json.dumps(result["_lifecycle"], indent=1, default=str))
     if result.get("_decision_events"):                    # owner 12 Nov: every size-aware hedge cap decision and every quote withdrawal, one line each; written only when the run produced any (every earlier profile writes nothing new)
         with (out_dir / "session_decision_events.jsonl").open("w") as fh:
             for row in result["_decision_events"]:
@@ -638,7 +706,7 @@ def write_result(result: dict, out_dir: Path) -> None:
             for row in pe["rows"]:
                 fh.write(json.dumps(row, default=str) + "\n")
         (out_dir / "session_pair_economics.json").write_text(json.dumps({"label": "EXPLORATORY: linked pair economics per maker fill, session runtime", "summary": pe["summary"], "metadata": pe["metadata"]}, indent=1, default=str))
-    (out_dir / "session_manifest.json").write_text(json.dumps({k: v for k, v in result.items() if k not in ("signals", "orders", "fills", "reject_trace", "intent_journal", "intent_fills", "_markout_rows", "_maker_observations", "_decision_events")}, indent=1, default=str))
+    (out_dir / "session_manifest.json").write_text(json.dumps({k: v for k, v in result.items() if k not in ("signals", "orders", "fills", "reject_trace", "intent_journal", "intent_fills", "_markout_rows", "_maker_observations", "_decision_events", "_lifecycle")}, indent=1, default=str))
 
 
 # ---- parity (D5): v1_5 on the session against v1_4 on the backtester's loop ----------------------------------------------------------------------------------------------------

@@ -19,6 +19,7 @@ from crypto_stat_arb.hedge_lifecycle import HedgePolicy
 from crypto_stat_arb.ledger import Ledger
 from crypto_stat_arb.models import OrderState, PlanState
 from crypto_stat_arb.oms import OMS
+from ems_evidence import write_case
 from test_restart_resilience import INSTR_FT, MS, ScriptedVenue, _cb, _ft_books, _ft_instruments, _ft_opportunity, risk
 
 
@@ -76,6 +77,15 @@ class AmendTests(unittest.TestCase):
         self.plan = self.oms.execute(_ft_opportunity(), _ft_books(), maker_venue="BYBIT")
         self.maker = self.plan.children[0]
         self.assertEqual(self.maker.state, OrderState.ACKNOWLEDGED)
+
+    def tearDown(self):
+        """Evidence (owner 12 Nov): the stage trace of every amend case, written when the case passed."""
+        outcome = getattr(self, "_outcome", None)
+        failed = bool(outcome and (getattr(outcome, "errors", None) or getattr(outcome, "failures", None))) if outcome is not None else False
+        result = getattr(self._outcome, "result", None) if hasattr(self, "_outcome") else None
+        problems = [t for t, _ in (getattr(result, "errors", []) + getattr(result, "failures", []))] if result is not None else []
+        if hasattr(self, "oms") and self not in problems:
+            write_case("case7_amend_" + self._testMethodName.removeprefix("test_")[:70], self.oms.ledger.events)
 
     def events(self, *names):
         return [e for e in self.oms.ledger.events if e["event_type"] in names]

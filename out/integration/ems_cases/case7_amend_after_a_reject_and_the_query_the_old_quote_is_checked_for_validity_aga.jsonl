@@ -1,0 +1,14 @@
+{"cumulative_filled_quantity": "0", "event": "ORDER_LIFECYCLE", "order_id": "4bc1350d-5b0d-54d0-ad95-3d88bacf09ef", "reason": "", "source": "INTERNAL", "stage": "request_sent", "ts": 2e-09, "venue": "BYBIT"}
+{"cumulative_filled_quantity": "0", "event": "ORDER_LIFECYCLE", "order_id": "4bc1350d-5b0d-54d0-ad95-3d88bacf09ef", "reason": "", "source": "ADAPTER_CALLBACK", "stage": "exchange_effective_notified", "ts": 3e-09, "venue": "BYBIT"}
+{"event": "AMEND_REJECTED", "order_id": "4bc1350d-5b0d-54d0-ad95-3d88bacf09ef", "reason": "amend rejected: order not modifiable", "replacement_order_id": "f26d313c-f1ea-5e01-9714-d42c4b5ce639", "stage": "amend_rejected", "ts": 0.1, "venue": "BYBIT"}
+{"event": "AMEND_REQUESTED", "order_id": "4bc1350d-5b0d-54d0-ad95-3d88bacf09ef", "reason": "requote", "replacement_order_id": "f26d313c-f1ea-5e01-9714-d42c4b5ce639", "stage": "amend_requested", "ts": 0.1, "venue": "BYBIT"}
+{"cumulative_filled_quantity": "0", "event": "ORDER_LIFECYCLE", "order_id": "4bc1350d-5b0d-54d0-ad95-3d88bacf09ef", "reason": "", "source": "INTERNAL", "stage": "amend_requested", "ts": 0.1, "venue": "BYBIT"}
+{"cumulative_filled_quantity": "0", "event": "ORDER_LIFECYCLE", "order_id": "f26d313c-f1ea-5e01-9714-d42c4b5ce639", "reason": "amend rejected: order not modifiable", "source": "ADAPTER_CALLBACK", "stage": "reject_notified", "ts": 0.1, "venue": "BYBIT"}
+{"cumulative_filled_quantity": "0", "event": "ORDER_LIFECYCLE", "order_id": "f26d313c-f1ea-5e01-9714-d42c4b5ce639", "reason": "", "source": "INTERNAL", "stage": "request_sent", "ts": 0.1, "venue": "BYBIT"}
+{"cumulative_filled_quantity": "0", "event": "ORDER_LIFECYCLE", "order_id": "4bc1350d-5b0d-54d0-ad95-3d88bacf09ef", "reason": "", "source": "REST_QUERY", "stage": "exchange_effective_notified", "ts": 0.101, "venue": "BYBIT"}
+{"event": "VENUE_ORDER_QUERY", "order_id": "4bc1350d-5b0d-54d0-ad95-3d88bacf09ef", "stage": "venue_queried", "ts": 0.101, "venue": "BYBIT"}
+{"cumulative_filled_quantity": "0", "event": "ORDER_LIFECYCLE", "order_id": "4bc1350d-5b0d-54d0-ad95-3d88bacf09ef", "reason": "", "source": "ADAPTER_CALLBACK", "stage": "cancel_notified", "ts": 0.102, "venue": "BYBIT"}
+{"cumulative_filled_quantity": "0", "event": "ORDER_LIFECYCLE", "order_id": "4bc1350d-5b0d-54d0-ad95-3d88bacf09ef", "reason": "", "source": "INTERNAL", "stage": "cancel_requested", "ts": 0.102, "venue": "BYBIT"}
+{"cumulative_filled_quantity": "0", "event": "ORDER_LIFECYCLE", "order_id": "4bc1350d-5b0d-54d0-ad95-3d88bacf09ef", "reason": "", "source": "INTERNAL", "stage": "cancel_requested", "ts": 0.102, "venue": "BYBIT"}
+{"event": "QUOTE_WITHDRAWN", "net_edge_bps": -0.4, "order_id": "4bc1350d-5b0d-54d0-ad95-3d88bacf09ef", "reason": "edge_below_threshold", "stage": "quote_withdrawn", "ts": 0.102, "venue": "BYBIT"}
+{"event": "QUOTE_URGENT_CANCEL", "order_id": "4bc1350d-5b0d-54d0-ad95-3d88bacf09ef", "reason": "edge_below_threshold", "stage": "urgent_cancel", "ts": 0.102}
