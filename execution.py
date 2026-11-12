@@ -1189,6 +1189,9 @@ class StrategyDirectedRouter:
         override_applied: bool, send_ts_ns: int, stage: str,
     ) -> PendingRoute:
         latency_ns = self.latency_model.draw(request.venue, stage)
+        processing = getattr(self.latency_model, "processing_ns", None)         # owner 12 Nov: decision + risk processing time, 0 unless the timing block sets it (the quote path and the hedge path both come through here)
+        if processing is not None:
+            latency_ns += processing()
         self._queue_ordinal += 1
         pending = PendingRoute(
             route_id=route_id, request=request, book=book, checks=checks,

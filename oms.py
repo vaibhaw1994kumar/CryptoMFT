@@ -3845,13 +3845,52 @@ class OMS:
             elif chain.state is HedgeState.HEDGED and plan.state == PlanState.CLOSED and plan.residual_base == 0:
                 self._hedge_move(plan, chain, HedgeState.RECONCILED, ts_ns, "positions and orders reconciled")
 
+    def _reconciliation_disagreements(
+        self, plan: ParentPlan, venue_orders: dict[str, VenueOrderSnapshot], venue_executions: dict[str, Decimal] | None,
+        venue_positions: dict[tuple[str, str], Decimal] | None,
+    ) -> list[str]:
+        """What the venue's account says that the OMS does not (owner 12 Nov, late success): empty when client order ids, exchange order ids, execution reports and the venue position all agree. Checked only for what was supplied."""
+        if venue_executions is None and venue_positions is None:
+            return []
+        out: list[str] = []
+        ours = {o.order_id: o for o in plan.children}
+        for oid, snap in venue_orders.items():
+            if oid not in ours and snap.venue_order_id and any(o.venue == snap.venue for o in ours.values()):
+                out.append(f"client_order_id_unknown:{oid}")
+        known_exchange_ids = {}
+        for o in plan.children:
+            for row in o.state_updates:
+                if row.get("venue_order_id"):
+                    known_exchange_ids.setdefault(o.order_id, set()).add(str(row["venue_order_id"]))
+        for oid, snap in venue_orders.items():
+            ids = known_exchange_ids.get(oid)
+            if ids and snap.venue_order_id and snap.venue_order_id not in ids:
+                out.append(f"exchange_order_id_differs:{oid}")
+        for oid, executed in (venue_executions or {}).items():
+            order, snap = ours.get(oid), venue_orders.get(oid)
+            if order is None:
+                out.append(f"execution_for_unknown_order:{oid}")
+            elif snap is not None and snap.filled_quantity != executed:
+                out.append(f"executions_differ_from_venue_order_state:{oid}")
+            elif order.filled_quantity != executed:
+                out.append(f"executions_differ_from_booked:{oid}")
+        for key, position in (venue_positions or {}).items():
+            if self.ledger.positions.get(key, Decimal("0")) != position:
+                out.append(f"venue_position_differs:{key[0]}")
+        return out
+
     def reconcile_plan(
         self,
         parent_id: str,
         venue_orders: dict[str, VenueOrderSnapshot],
         now_ns: int,
+        venue_executions: dict[str, Decimal] | None = None,
+        venue_positions: dict[tuple[str, str], Decimal] | None = None,
     ) -> ParentPlan:
-        """Converge a recovered local plan through canonical REST order updates."""
+        """Converge a recovered local plan through canonical REST order updates.
+        Owner 12 Nov (late success): when the venue's execution reports (`venue_executions`: client order id -> executed quantity) and its position (`venue_positions`: (venue, instrument) -> position) are given, the
+        recovered plan is released from `restart_reconcile_gate` only when FOUR things agree: the client order ids (every order the venue reports is one of the plan's), the exchange order ids (none contradicts the one
+        already known), the execution reports (their sum per order equals the venue's order state AND what the OMS booked) and the venue position (equals the ledger's). A disagreement keeps the gate closed."""
         try:
             plan = self.plans[parent_id]
         except KeyError as exc:
@@ -3899,7 +3938,11 @@ class OMS:
                 self._price_fills(order, now_ns)
                 self.ledger.apply_fill(order, now_ns)
         self._recompute_plan_economics(plan, now_ns)
-        if plan.state == PlanState.CLOSED and all(o.state in TERMINAL_ORDER_STATES for o in plan.children if o.order_id in unresolved):
+        disagreements = self._reconciliation_disagreements(plan, venue_orders, venue_executions, venue_positions)
+        if disagreements:
+            self.ledger.record("RECONCILIATION_DISAGREEMENT", now_ns, parent_id=parent_id, disagreements=disagreements, gate_stays_closed=True)
+            self._restart_unreconciled.add(parent_id)
+        if not disagreements and plan.state == PlanState.CLOSED and all(o.state in TERMINAL_ORDER_STATES for o in plan.children if o.order_id in unresolved):
             self._restart_unreconciled.discard(parent_id)          # the venue's account was applied and the fills it carried have already closed the plan (the hedge they triggered included: it is terminal here, the venue was not asked about it)
         if unresolved:
             self._persist(
@@ -3921,7 +3964,8 @@ class OMS:
             reconciled_order_ids=sorted(venue_orders),
         )
         result = self._finalize_plan(plan, now_ns, self._books)
-        self._restart_unreconciled.discard(parent_id)
+        if not disagreements:
+            self._restart_unreconciled.discard(parent_id)
         self.ledger.record(
             "PLAN_RECONCILED_FROM_VENUE",
             now_ns,

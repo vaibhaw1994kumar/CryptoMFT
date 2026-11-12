@@ -239,6 +239,160 @@ def metadata_block(*, denominator: str, total: int, kept: int, excluded: dict[st
             "dependence": dependence, "notes": notes}
 
 
+# ---- stage trace (owner 12 Nov, EMS note section 6): the evidence file of an acceptance case ----------------------------------------------------------------------------------------------------------------
+_STAGE_OF_LIFECYCLE = {"SENT": "request_sent", "ACKNOWLEDGED": "exchange_effective_notified", "REPLACED": "amend_confirmed_notified", "CANCEL_REQUESTED": "cancel_requested", "AMEND_REQUESTED": "amend_requested",
+                       "AMEND_ACCEPTED": "amend_accepted_not_confirmed", "CANCELLED": "cancel_notified", "PARTIAL": "fill_notified", "FILLED": "fill_notified", "REJECTED": "reject_notified", "TIMED_OUT": "timeout"}
+_STAGE_OF_EVENT = {"OPPORTUNITY": "decision", "FILL": "fill_booked", "HEDGE_SUBMIT": "hedge_sent", "HEDGE_CAP_SIZE_AWARE": "hedge_cap_decided", "QUOTE_WITHDRAWN": "quote_withdrawn", "QUOTE_URGENT_CANCEL": "urgent_cancel",
+                   "AMEND_REQUESTED": "amend_requested", "AMEND_ACCEPTED_NOT_CONFIRMED": "amend_accepted_not_confirmed", "AMEND_CONFIRMED": "amend_confirmed", "AMEND_REJECTED": "amend_rejected", "AMEND_TIMEOUT": "amend_timeout",
+                   "AMEND_FALLBACK_CANCEL": "amend_fallback_cancel", "AMEND_LINEAGE_COMPLETE_CANCEL": "lineage_complete_cancel", "ORDER_UPDATE_DUPLICATE_SUPPRESSED": "duplicate_report_suppressed",
+                   "NEW_RISK_HELD_RESTART_RECONCILIATION": "new_risk_held_restart", "HEDGE_ALARM": "alert", "UNWIND_EXHAUSTED_ALARM": "alert", "BREAKER_TRIP": "alert", "KILL_SWITCH_STATE_TRANSITION": "alert",
+                   "MARGIN_PRICE_PAUSE": "alert", "HEDGE_CHAIN_OPENED": "hedge_chain_opened", "VENUE_ORDER_QUERY": "venue_queried"}
+
+
+def stage_trace(events: Iterable[Mapping[str, Any]], market: Iterable[tuple[float, str, str]] = ()) -> list[dict[str, Any]]:
+    """The timestamped stages of a case, one row each, in time order: market event received (`market` rows: (ts_s, venue, kind), supplied by the case), decision, request sent, exchange-effective and notified,
+    fills in between, notification received, hedge sent, plus the alerts and the amend / withdrawal steps. Built from the ledger's events only: nothing is invented, a stage the run did not reach is simply absent."""
+    rows: list[dict[str, Any]] = [{"ts": float(ts), "stage": "market_event_received", "venue": venue, "kind": kind} for ts, venue, kind in market]
+    for e in events:
+        kind = e["event_type"]
+        stage = _STAGE_OF_LIFECYCLE.get(str(e.get("lifecycle_event"))) if kind == "ORDER_LIFECYCLE" else _STAGE_OF_EVENT.get(kind)
+        if stage is None:
+            continue
+        row = {"ts": e["ts_ns"] / 1e9, "stage": stage, "event": kind}
+        for k in ("order_id", "venue", "source", "side", "reason", "fill_quantity", "fill_price", "cumulative_filled_quantity", "replacement_order_id", "cap", "touch", "touch_covers", "net_edge_bps",
+                  "confirmed_residual_base", "pending_hedge_qty", "oldest_exposure_age_s", "execution_blocked_reason"):
+            if e.get(k) is not None:
+                row[k] = str(e[k]) if not isinstance(e[k], (int, float, bool)) else e[k]
+        rows.append(row)
+    return sorted(rows, key=lambda r: (r["ts"], r["stage"]))
+
+
+# ---- lifecycle report by regime (owner 12 Nov, EMS note section 6; definitions in out/integration/v1_9_TOLERANCES.md section D) ----------------------------------------------------------------------------
+REGIME_DIMS = ("volatility", "spread", "liquidity")
+_TERCILE = ("low", "mid", "high")
+
+
+def regime_sample(prev_mid: float | None, bid: float, ask: float, bid_size: float, ask_size: float) -> tuple[float, float, float, float]:
+    """One second of the maker venue's book as (volatility, spread, liquidity, mid): volatility = |mid change since the previous sample| in bps (0 for the first), spread = touch spread in bps, liquidity = bid plus ask size at the touch."""
+    mid = (bid + ask) / 2.0
+    vol = abs(mid - prev_mid) / prev_mid * 1e4 if prev_mid else 0.0
+    return vol, (ask - bid) / mid * 1e4, bid_size + ask_size, mid
+
+
+def tercile_cuts(values: list[float]) -> list[float]:
+    """The two cut points (33.3rd and 66.7th percentile) of the training-set values: a value at or below the first is "low", at or below the second "mid", else "high"."""
+    ordered = sorted(values)
+    return [quantile(ordered, 1 / 3), quantile(ordered, 2 / 3)]
+
+
+def regime_bucket(value: float | None, cuts: list[float] | None) -> str:
+    if value is None or cuts is None:
+        return "unbucketed"
+    return _TERCILE[0] if value <= cuts[0] else _TERCILE[1] if value <= cuts[1] else _TERCILE[2]
+
+
+def lifecycle_report(orders: list[Mapping[str, Any]], pairs: list[Mapping[str, Any]], markouts: list[Mapping[str, Any]], chains: list[Mapping[str, Any]], per_second: Mapping[int, tuple[float, float, float]],
+                     boundaries: Mapping[str, Any] | None, *, min_bucket: int = 30) -> dict[str, Any]:
+    """The lifecycle report, in full and split by regime. Every split is a PARTITION of the run (the cells add up to the totals; checked and reported in `partition_check`); a cell with fewer than `min_bucket`
+    quotes prints its counts and no rate.
+    orders      maker quotes: {order_id, sent_ts, ack_ts, cancel_req_ts, cancel_conf_ts, fills: [[ts, qty]...], withdrawn, cancel_while_sent, amends}
+    pairs       linked pair rows (pair_economics rows): maker_fill_ts, unhedged_interval_s, fully_hedged, hedge_children
+    markouts    decomposed markout rows (maker role): ts, horizon_s, m_bps
+    chains      hedge chain records (state at the end, retries)
+    per_second  second -> (volatility, spread, liquidity) of the maker venue's book
+    boundaries  {"volatility": [c1, c2], "spread": [...], "liquidity": [...]} from the TRAINING days only, or None (then only the hour split exists)"""
+    def regimes_at(ts: float | None) -> dict[str, str]:
+        out = {d: "unbucketed" for d in REGIME_DIMS}
+        if ts is None:
+            return {**out, "utc_hour": "unbucketed"}
+        sample = per_second.get(int(ts))
+        if sample is not None and boundaries:
+            for d, v in zip(REGIME_DIMS, sample):
+                out[d] = regime_bucket(v, boundaries.get(d))
+        hour = int(ts // 3600) % 24
+        return {**out, "utc_hour": f"{hour:02d}"}
+
+    def cell_of(rows: list[Mapping[str, Any]], ts_of) -> dict[str, dict[str, list]]:
+        cells: dict[str, dict[str, list]] = {d: {} for d in (*REGIME_DIMS, "utc_hour")}
+        for r in rows:
+            for d, b in regimes_at(ts_of(r)).items():
+                cells[d].setdefault(b, []).append(r)
+        return cells
+
+    def quote_stats(rows: list[Mapping[str, Any]]) -> dict[str, Any]:
+        n = len(rows)
+        filled = sum(1 for r in rows if r.get("fills"))
+        races_a = sum(1 for r in rows for f in r.get("fills", []) if r.get("cancel_req_ts") is not None and f[0] >= r["cancel_req_ts"] and (r.get("cancel_conf_ts") is None or f[0] < r["cancel_conf_ts"]))
+        races_c = sum(1 for r in rows for f in r.get("fills", []) if r.get("cancel_conf_ts") is not None and f[0] >= r["cancel_conf_ts"])
+        return {"quotes_placed": n, "quotes_filled": filled, "fill_rate": (filled / n) if n >= min_bucket else None, "withdrawn": sum(1 for r in rows if r.get("withdrawn")),
+                "fills_during_cancel_pending": races_a, "cancel_while_submitted": sum(1 for r in rows if r.get("cancel_while_sent")), "late_fills_after_cancel": races_c,
+                **({} if n >= min_bucket else {"note": f"n < {min_bucket}: counts only, no rate"})}
+
+    def dist(values: list[float]) -> dict[str, Any]:
+        if not values:
+            return {"n": 0}
+        o = sorted(values)
+        return {"n": len(o), "p50": quantile(o, 0.5), "p99": quantile(o, 0.99), "max": o[-1]}
+
+    # quotes and races, by the regime at placement
+    q_cells = cell_of(list(orders), lambda r: r.get("sent_ts"))
+    # residual exposure and hedge completion, by the regime at the maker fill
+    p_cells = cell_of(list(pairs), lambda r: r.get("maker_fill_ts"))
+    # adverse tails, by the regime at the fill
+    m_cells = cell_of([m for m in markouts if m.get("role", "maker") == "maker"], lambda r: r.get("ts"))
+    # message load per minute, the regime of a minute = the regime of its mean second
+    minute_events: dict[int, dict[str, int]] = {}
+    for r in orders:
+        if r.get("sent_ts") is not None:
+            minute_events.setdefault(int(r["sent_ts"] // 60), {"orders": 0, "cancels": 0, "amends": 0})["orders"] += 1
+        if r.get("cancel_req_ts") is not None:
+            minute_events.setdefault(int(r["cancel_req_ts"] // 60), {"orders": 0, "cancels": 0, "amends": 0})["cancels"] += 1
+        for a_ts in r.get("amend_ts", []):
+            minute_events.setdefault(int(a_ts // 60), {"orders": 0, "cancels": 0, "amends": 0})["amends"] += 1
+    minute_rows = [{"minute": m, "ts": m * 60.0, **v} for m, v in sorted(minute_events.items())]
+
+    def message_load(rows: list[Mapping[str, Any]]) -> dict[str, Any]:
+        return {k: dist([float(r[k]) for r in rows]) for k in ("orders", "cancels", "amends")}
+
+    def block(q_rows, p_rows, m_rows, load_rows) -> dict[str, Any]:
+        unhedged = [float(p["unhedged_interval_s"]) for p in p_rows if p.get("unhedged_interval_s") is not None]
+        by_h = {}
+        for h in sorted({float(m["horizon_s"]) for m in m_rows}):
+            vals = sorted(float(m["m_bps"]) for m in m_rows if float(m["horizon_s"]) == h and m.get("m_bps") is not None)
+            by_h[f"{h:g}s"] = {"n": len(vals), **({"p5": quantile(vals, 0.05), "p95": quantile(vals, 0.95)} if len(vals) >= 2 else {})}
+        return {"quotes": quote_stats(q_rows), "message_load_per_minute": message_load(load_rows),
+                "residual_exposure": {"unhedged_interval_s": dist(unhedged), "oldest_exposure_age_s": max(unhedged) if unhedged else None},
+                "hedge_completion": {"maker_fills": len(p_rows), "fully_hedged": sum(1 for p in p_rows if p.get("fully_hedged")), "with_retry_or_split": sum(1 for p in p_rows if int(p.get("hedge_children") or 0) > 1)},
+                "adverse_tails_markout_bps": by_h}
+
+    # minutes get the regime of their mean second
+    minute_cell: dict[str, dict[str, list]] = {d: {} for d in (*REGIME_DIMS, "utc_hour")}
+    for row in minute_rows:
+        secs = [per_second[s] for s in range(int(row["ts"]), int(row["ts"]) + 60) if s in per_second]
+        mean = tuple(sum(x[i] for x in secs) / len(secs) for i in range(3)) if secs else None
+        out = {d: "unbucketed" for d in REGIME_DIMS}
+        if mean is not None and boundaries:
+            for d, v in zip(REGIME_DIMS, mean):
+                out[d] = regime_bucket(v, boundaries.get(d))
+        out["utc_hour"] = f"{int(row['ts'] // 3600) % 24:02d}"
+        for d, b in out.items():
+            minute_cell[d].setdefault(b, []).append(row)
+    total = block(list(orders), list(pairs), [m for m in markouts if m.get("role", "maker") == "maker"], minute_rows)
+    by_regime: dict[str, dict[str, Any]] = {}
+    check: dict[str, Any] = {}
+    for d in (*REGIME_DIMS, "utc_hour"):
+        keys = sorted(set(q_cells[d]) | set(p_cells[d]) | set(m_cells[d]) | set(minute_cell[d]))
+        by_regime[d] = {k: block(q_cells[d].get(k, []), p_cells[d].get(k, []), m_cells[d].get(k, []), minute_cell[d].get(k, [])) for k in keys}
+        check[d] = {"quotes": sum(len(v) for v in q_cells[d].values()) == len(orders), "maker_fills": sum(len(v) for v in p_cells[d].values()) == len(pairs),
+                    "markouts": sum(len(v) for v in m_cells[d].values()) == sum(1 for m in markouts if m.get("role", "maker") == "maker"),
+                    "minutes": sum(len(v) for v in minute_cell[d].values()) == len(minute_rows)}
+    hedge_end = {}
+    for c in chains:
+        hedge_end[str(c.get("state"))] = hedge_end.get(str(c.get("state")), 0) + 1
+    return {"label": "EXPLORATORY: lifecycle report by regime (definitions: v1_9_TOLERANCES.md section D)", "total": total, "by_regime": by_regime, "hedge_chains_by_final_state": hedge_end,
+            "regime_boundaries": dict(boundaries) if boundaries else None, "partition_check": check, "partition_ok": all(all(v.values()) for v in check.values()), "min_bucket": min_bucket}
+
+
 def _fill_fee(fill: Mapping[str, Any]) -> Any:
     """The fee of THIS fill: the ledger row carries `fee` (cumulative on the order) and `fee_delta` (this fill); a row without fee_delta is taken as a single fill."""
     value = fill.get("fee_delta")

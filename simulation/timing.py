@@ -94,8 +94,14 @@ class TimingConfig:
     seed: int = 11
     timer_wheel: bool = True
     truth_books: bool = True
+    # Owner 12 Nov (EMS note section 6): the decision and risk processing time of the router's two stages "strategy" and "risk", in ms. Empty (default) = both zero, ASSUMED_ZERO as before, nothing changes. A
+    # constant per stage (a sensitivity setting, not a distribution); it applies to every order the router sends, the quote decision path and the hedge path (fill notification -> hedge request) alike.
+    processing_ms: dict = field(default_factory=dict)
 
     def __post_init__(self) -> None:
+        bad = sorted(set(self.processing_ms) - {"strategy", "risk"})
+        if bad or any(isinstance(v, bool) or not isinstance(v, (int, float)) or v < 0 for v in self.processing_ms.values()):
+            raise ValueError(f"processing_ms takes strategy and/or risk, each a number of ms >= 0 (got {self.processing_ms!r})")
         if self.equal_time_policy not in EQUAL_TIME_POLICIES:
             raise ValueError(f"equal_time_policy must be one of {EQUAL_TIME_POLICIES}")
         if not (self.dead_feed_s > 0.0):
@@ -125,6 +131,7 @@ class TimingConfig:
         return {"clock": {"host_offset_ns": self.clock.host_offset_ns, "uncertainty_ns": self.clock.uncertainty_ns, "source": self.clock.source},
                 "equal_time_policy": self.equal_time_policy, "dead_feed_s": self.dead_feed_s, "timer_wheel": self.timer_wheel,
                 "truth_books": self.truth_books, "seed": self.seed,
+                **({"processing_ms": dict(self.processing_ms)} if self.processing_ms else {}),
                 "venues": {v: {n: {"mean_ms": t.get(n).mean_ms, "jitter_ms": t.get(n).jitter_ms, "source": t.get(n).source,
                                    **({"min_ms": t.get(n).min_ms} if t.get(n).min_ms else {})} for n in TIMELINES}
                            for v, t in self.venues.items()}}
@@ -197,6 +204,7 @@ class TimelinesLatencyModel:
     def __init__(self, timelines: "Timelines") -> None:
         self.timelines = timelines
         self.zero_stages: dict[str, int] = {}
+        self.processing_stages: dict[str, int] = {}     # stages that carried the configured processing time (processing_ms), counted per draw
 
     @property
     def seed(self) -> int:
@@ -210,6 +218,13 @@ class TimelinesLatencyModel:
             return 0
         return self.timelines.sample_ns(venue.lower(), name)         # timelines are keyed by the feed's lower-case venue name
 
+    def processing_ns(self) -> int:
+        """Owner 12 Nov: the decision plus risk processing time (TimingConfig.processing_ms, both default 0) the router adds to every order it sends (quote, cancel and hedge alike), on top of the entry or cancel delay."""
+        ms = sum(float(v) for v in self.timelines.cfg.processing_ms.values())
+        if ms > 0.0:
+            self.processing_stages["strategy+risk"] = self.processing_stages.get("strategy+risk", 0) + 1
+        return int(round(ms * 1e6))
+
     def resting_fill_delivery_ns(self, venue: str, received_ns: int, exchange_ns: int) -> int:
         return max(received_ns, exchange_ns + self.timelines.sample_ns(venue.lower(), "fill_report"))
 
@@ -221,7 +236,8 @@ class TimelinesLatencyModel:
         return 0 if name is None else int(self.timelines.sampler(venue.lower(), name).spec.mean_ms * 1e6)
 
     def to_dict(self) -> dict:
-        return {"source": self.source, "stage_map": dict(self._MAP), "zero_stages": dict(self.zero_stages), "zero_stages_label": "ASSUMED_ZERO (owner 8 Nov: realistic values come later as a new profile version, once measured)"}
+        return {"source": self.source, "stage_map": dict(self._MAP), "zero_stages": dict(self.zero_stages), "zero_stages_label": "ASSUMED_ZERO (owner 8 Nov: realistic values come later as a new profile version, once measured)",
+                **({"processing_ms": dict(self.timelines.cfg.processing_ms), "processing_draws": dict(self.processing_stages), "processing_label": "ASSUMED sensitivity value (owner 12 Nov), a constant per stage"} if self.timelines.cfg.processing_ms else {})}
 
     def report(self) -> dict:
         return {**self.to_dict(), "timelines": self.timelines.report()}
