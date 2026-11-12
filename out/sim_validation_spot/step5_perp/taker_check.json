@@ -1,0 +1,217 @@
+{
+ "label": "8 orders: gross-error check only, not a calibration",
+ "day": "2026-04-29",
+ "method": "Spot simulator validation, step 5 (owner brief 10 Nov 2026): perp taker check, \"8 orders: gross-error check only, not a calibration\".\n\nOur real Bybit linear (USDT perp) Market IOC orders of one day are walked through the core taker book walk (crypto_stat_arb TakerExecutor, no limit, no own\nimpact) against the book rebuilt from the converted public archive (bybit_perp_archive.py output), as the book stood at the order's arrival: every book\nevent with exchange time at or before arrival is applied (event_order = delta_first, the order under which the day's rebuild check passes 100%). Arrival =\nthe real create time + the latency preset's Bybit entry latency (singapore: 6 ms); a 0 ms sensitivity is reported beside it. Compared per order with the real\nexecution: VWAP difference in bps (signed: + = the simulated price is worse for us) and filled quantity. Rows carry an index, never an order id.\n\nusage: python3.12 -m new_backtest.validation.perp_taker_check --orders DIR --data-root ROOT --day 2026-04-29 --out FILE.json  (ROOT/bybit/... = converted archive)\n",
+ "aggregate": {
+  "singapore_6ms": {
+   "orders": 8,
+   "compared": 8,
+   "vwap_diff_bps_mean": 0.0,
+   "vwap_diff_bps_max_abs": 0.0,
+   "exact_price": 8,
+   "qty_equal": 8
+  },
+  "zero_latency": {
+   "orders": 8,
+   "compared": 8,
+   "vwap_diff_bps_mean": 0.0,
+   "vwap_diff_bps_max_abs": 0.0,
+   "exact_price": 8,
+   "qty_equal": 8
+  }
+ },
+ "per_order": [
+  {
+   "pair": "ADAUSDT",
+   "latency": "singapore_6ms",
+   "side": "sell",
+   "qty": 100.0,
+   "real_execs": 2,
+   "sim_status": "filled",
+   "sim_levels": 1,
+   "qty_ratio_sim_to_real": 1.0,
+   "vwap_diff_bps": -0.0,
+   "i": 0
+  },
+  {
+   "pair": "ADAUSDT",
+   "latency": "singapore_6ms",
+   "side": "buy",
+   "qty": 100.0,
+   "real_execs": 1,
+   "sim_status": "filled",
+   "sim_levels": 1,
+   "qty_ratio_sim_to_real": 1.0,
+   "vwap_diff_bps": 0.0,
+   "i": 1
+  },
+  {
+   "pair": "ADAUSDT",
+   "latency": "singapore_6ms",
+   "side": "sell",
+   "qty": 100.0,
+   "real_execs": 1,
+   "sim_status": "filled",
+   "sim_levels": 1,
+   "qty_ratio_sim_to_real": 1.0,
+   "vwap_diff_bps": -0.0,
+   "i": 2
+  },
+  {
+   "pair": "ADAUSDT",
+   "latency": "singapore_6ms",
+   "side": "buy",
+   "qty": 100.0,
+   "real_execs": 1,
+   "sim_status": "filled",
+   "sim_levels": 1,
+   "qty_ratio_sim_to_real": 1.0,
+   "vwap_diff_bps": 0.0,
+   "i": 3
+  },
+  {
+   "pair": "ADAUSDT",
+   "latency": "singapore_6ms",
+   "side": "sell",
+   "qty": 98.0,
+   "real_execs": 1,
+   "sim_status": "filled",
+   "sim_levels": 1,
+   "qty_ratio_sim_to_real": 1.0,
+   "vwap_diff_bps": -0.0,
+   "i": 4
+  },
+  {
+   "pair": "ADAUSDT",
+   "latency": "singapore_6ms",
+   "side": "buy",
+   "qty": 98.0,
+   "real_execs": 1,
+   "sim_status": "filled",
+   "sim_levels": 1,
+   "qty_ratio_sim_to_real": 1.0,
+   "vwap_diff_bps": 0.0,
+   "i": 5
+  },
+  {
+   "pair": "MNTUSDT",
+   "latency": "singapore_6ms",
+   "side": "sell",
+   "qty": 66.0,
+   "real_execs": 1,
+   "sim_status": "filled",
+   "sim_levels": 1,
+   "qty_ratio_sim_to_real": 1.0,
+   "vwap_diff_bps": -0.0,
+   "i": 6
+  },
+  {
+   "pair": "MNTUSDT",
+   "latency": "singapore_6ms",
+   "side": "buy",
+   "qty": 66.0,
+   "real_execs": 1,
+   "sim_status": "filled",
+   "sim_levels": 1,
+   "qty_ratio_sim_to_real": 1.0,
+   "vwap_diff_bps": 0.0,
+   "i": 7
+  },
+  {
+   "pair": "ADAUSDT",
+   "latency": "zero_latency",
+   "side": "sell",
+   "qty": 100.0,
+   "real_execs": 2,
+   "sim_status": "filled",
+   "sim_levels": 1,
+   "qty_ratio_sim_to_real": 1.0,
+   "vwap_diff_bps": -0.0,
+   "i": 8
+  },
+  {
+   "pair": "ADAUSDT",
+   "latency": "zero_latency",
+   "side": "buy",
+   "qty": 100.0,
+   "real_execs": 1,
+   "sim_status": "filled",
+   "sim_levels": 1,
+   "qty_ratio_sim_to_real": 1.0,
+   "vwap_diff_bps": 0.0,
+   "i": 9
+  },
+  {
+   "pair": "ADAUSDT",
+   "latency": "zero_latency",
+   "side": "sell",
+   "qty": 100.0,
+   "real_execs": 1,
+   "sim_status": "filled",
+   "sim_levels": 1,
+   "qty_ratio_sim_to_real": 1.0,
+   "vwap_diff_bps": -0.0,
+   "i": 10
+  },
+  {
+   "pair": "ADAUSDT",
+   "latency": "zero_latency",
+   "side": "buy",
+   "qty": 100.0,
+   "real_execs": 1,
+   "sim_status": "filled",
+   "sim_levels": 1,
+   "qty_ratio_sim_to_real": 1.0,
+   "vwap_diff_bps": 0.0,
+   "i": 11
+  },
+  {
+   "pair": "ADAUSDT",
+   "latency": "zero_latency",
+   "side": "sell",
+   "qty": 98.0,
+   "real_execs": 1,
+   "sim_status": "filled",
+   "sim_levels": 1,
+   "qty_ratio_sim_to_real": 1.0,
+   "vwap_diff_bps": -0.0,
+   "i": 12
+  },
+  {
+   "pair": "ADAUSDT",
+   "latency": "zero_latency",
+   "side": "buy",
+   "qty": 98.0,
+   "real_execs": 1,
+   "sim_status": "filled",
+   "sim_levels": 1,
+   "qty_ratio_sim_to_real": 1.0,
+   "vwap_diff_bps": 0.0,
+   "i": 13
+  },
+  {
+   "pair": "MNTUSDT",
+   "latency": "zero_latency",
+   "side": "sell",
+   "qty": 66.0,
+   "real_execs": 1,
+   "sim_status": "filled",
+   "sim_levels": 1,
+   "qty_ratio_sim_to_real": 1.0,
+   "vwap_diff_bps": -0.0,
+   "i": 14
+  },
+  {
+   "pair": "MNTUSDT",
+   "latency": "zero_latency",
+   "side": "buy",
+   "qty": 66.0,
+   "real_execs": 1,
+   "sim_status": "filled",
+   "sim_levels": 1,
+   "qty_ratio_sim_to_real": 1.0,
+   "vwap_diff_bps": 0.0,
+   "i": 15
+  }
+ ]
+}

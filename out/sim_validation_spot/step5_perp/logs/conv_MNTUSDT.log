@@ -1,0 +1,20 @@
+MNTUSDT 2026-04-29 246981 msgs 0 gaps 1 comparisons
+       27.45 real        26.59 user         0.23 sys
+           133185536  maximum resident set size
+                   0  average shared memory size
+                   0  average unshared data size
+                   0  average unshared stack size
+               22399  page reclaims
+                  27  page faults
+                   0  swaps
+                   0  block input operations
+                   0  block output operations
+                   0  messages sent
+                   0  messages received
+                   0  signals received
+                 194  voluntary context switches
+                9998  involuntary context switches
+        359648322571  instructions retired
+         72794145526  cycles elapsed
+           114591360  peak memory footprint
+exit 0

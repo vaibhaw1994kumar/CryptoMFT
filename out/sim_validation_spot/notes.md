@@ -167,3 +167,159 @@ Merge order: core `4d65ef7` first, because the guard test imports `edge.cross_gr
 
 ### Commits for the T4 re-run (local, `sim-validation`, not pushed)
 See `git log sim-validation`: the `delta_first` loader option with its tests, then these notes and the `rebuild_acceptance_wt/` results.
+
+## Item 3 (owner 11 Nov): snapshot/update ties in the March 2024 Bybit SOLUSDT files and the recorder captures (read only, no code change)
+
+Method: `march_tie_check/bybit_SOLUSDT_ties.jsonl`, written by a read-only scratch script. For each day 2024-03-01..15 of `Newproject/data/bybit` SOLUSDT, it finds every book-update row whose exchange timestamp equals a snapshot's. For each such row it records:
+- its event type;
+- whether the snapshot already holds it (same size at that price, or for a delete, the price absent);
+- whether its price is inside the snapshot's top 10 levels.
+
+`legacy` and `delta_first` differ only in where these rows go relative to the snapshot, so a day without tied rows cannot change any book.
+
+| Day | Snapshots | Tied rows at the day-start snapshot | Tied rows at the day-end snapshot (next day 00:00:01) |
+|---|---|---|---|
+| 03-01 | 2 | 14 (12 update, 2 delete): **0** already in the snapshot, 1 in the top 10 | 0 |
+| 03-02 | 2 | 0 | 24 (22 update, 2 delete): **all 24** already in the snapshot, 3 in the top 10 |
+| 03-04 | 2 | 0 | 326 (283 update, 43 delete): **all 326** already in the snapshot, 19 in the top 10 |
+| 03-03, 03-05..03-15 | 2 (03-05: 3, one mid-day) | 0 | 0 |
+
+**What it means**
+- **12 of 15 days have no tie;** `legacy` and `delta_first` give identical books there.
+- **03-02 and 03-04, day end:** like the spot archive, the last rows of the day are already in the 00:00:01 snapshot. A rebuild check that compares at that snapshot under `legacy` compares before those rows, so its top-10 comparison would differ (3 and 19 levels). Under `delta_first` it matches.
+- **03-01, day start:** the opposite. The 14 rows come after the snapshot. `delta_first` would apply them before the snapshot, the snapshot would wipe them, and the book would be wrong at those 14 levels (1 in the top 10) until they next change.
+- **The arb's own replay is not affected under `legacy`** (the profiles' setting). Every tied row is an absolute update or a delete, with no decremental `cancel`. So re-applying rows already in the snapshot leaves the book unchanged, and the book after every tie is correct under `legacy`. `delta_first` would be wrong on 03-01.
+- **No arb profile change.** The ordering has to be chosen per dataset: `delta_first` for the Bybit spot archive (validation only), `legacy` for March 2024.
+
+**Recorder captures (`data/live_sessions/solusdt/2026-10-29`):** the reader (`session_replay.iter_recorded_events`) does not merge streams by timestamp. It replays the recorder's own arrival order (`trace.jsonl`), so `event_order` does not apply and there is no day-boundary tie rule. It is one continuous capture.
+
+**Spot recorder data (`data/bybit-spot`) was lost:** the 04-19..04-25 capture is no longer on this Mac. The folder now holds a rebuild from the public archive (200 levels, no gaps, the full trade tape; against the original's 50 levels, 59 gaps over 60 s on ADA 04-19 and about 22% of the prints). A live capture cannot be downloaded again. The owner decided on 12 Nov to use the public archive for 04-19..04-25 too. This replaces the 11 Nov "recorder books up to 25 April" decision. All 14 days are labelled "public ob200 archive, ~100 ms resolution".
+
+## Steps 1–3 (owner go 11 Nov; 04-19..04-25 from the archive, owner 12 Nov)
+
+**EXPLORATORY.**
+- **Market and data:** Bybit spot, ADAUSDT and MNTUSDT, 2026-04-19..05-02 (14 days, both coins), from the public ob200 archive (~100 ms resolution).
+- **Orders:** our real PostOnly limit orders, 1,976 of them.
+- **Profile:** `spot_spot_maker_taker_v1` (old backtester only, mechanics), `latency_preset` singapore, run in `maker_only` mode on the old loop. That is a known deviation from the session-runtime rule: it is the only engine path that takes scheduled orders.
+- **Run config overrides:**
+  - `event_order=delta_first`, because each archive day ends with a 00:00:01 snapshot that already holds its same-timestamp updates (T4 28/28 vs 26/28);
+  - `trust_local_ts=False` (the archive's `local_ts` is Bybit's send stamp);
+  - `maker_max_age_s=0`, `spot_requires_inventory=False`, risk limits lifted.
+- **Timing:** each order is released at its real create time plus the profile's sampled entry latency, and cancelled at exactly its real cancel time.
+- **Engine runs:** 84 (14 coin-days × 3 cancel models), all exit 0, no order skipped. Code: outer `2cbd9ea`, `98a2238`, `edaf768`.
+- **Exclusions and censoring:**
+  - The 04-23 exclusions caught nothing: no order was created between 05:00 and 07:30 UTC that day.
+  - 2 orders resting across midnight are censored.
+- **Files:** aggregates are in `steps_1_3/step2_evaluation.json` and `steps_1_3/step3_fill_model.json`. Per-order rows stay in the session scratchpad (no order ids).
+
+**Caveat on hit rates:** the public tape contains our own real fills. A really-filled order always has its print in the data, and a cancelled one never does. Hit rates on filled orders are therefore an upper bound. The false-fill rate on cancelled orders is the fairer test.
+
+### Step 2 results (scored 1,974)
+| | proportional (headline) | behind_first | ahead_first |
+|---|---|---|---|
+| a. False fills on real CANCELLED (n = 864) | **4 = 0.46%** [0.18, 1.18] | 3 = 0.35% [0.12, 1.02] | 7 = 0.81% [0.39, 1.66] |
+| — ADA / MNT | 0/721 / 4/143 (2.8%) | 0/721 / 3/143 | 0/721 / 7/143 (4.9%) |
+| b. Real FILLED (n = 1,071): hit within 1 s | **83.9%** [81.5, 85.9] | 72.8% | 78.7% |
+| — premature / late / unfilled / simulated PostOnly reject | 4.3 / 7.2 / 0.0 / 4.7% | 1.9 / 20.4 / 0.2 / 4.7% | 11.2 / 5.4 / 0.0 / 4.7% |
+
+**a. False fills**
+- By day, all false fills are on 05-01 (1/25) and 05-02 (3/839, proportional).
+- By book: fresh 4/702, stale 0/162.
+- By queue ahead at placement: ≥1000× the order size 0/572; 100–1000× 3/286; 10–100× 1/4.
+- About 97% of the cancels are on 05-02 (839 of 864).
+
+**b. First-fill timing (proportional)**
+- By coin: ADA 88% hit, MNT 80%.
+- By week: 04-19..04-25 86%, 04-26..05-02 79%.
+- By book: fresh 84%, stale 83%.
+- Orders placed inside the spread (n = 20): hit 70%, premature 30%. That is the weakest group.
+- Reference: the fill-evidence study had an 80.5% hit (proportional, 22 coins, collector data).
+- Proportional sits between the two bounds, as expected: behind_first is late 20%, ahead_first premature 11%.
+
+**c. PostOnly reject at arrival (the same in every model)**
+- The simulator rejects 37 of the 38 real PostOnly rejects.
+- It also rejects 52 of the 1,936 really accepted orders (2.7%).
+
+**PartiallyFilledCanceled (1 order, ADA 04-29):** simulated fill under proportional and ahead_first, none under behind_first.
+
+### Step 3: FillModelV2 on real outcomes (tag MEASURED_SPOT_2026; not approved as a quote filter)
+- **Inputs:** features are the engine's placement features from the proportional runs; labels and censoring are the REAL outcomes (`fill_model_fit.py`); IPCW as in fill_model_v1.
+- **Folds:** chronological, each fitted on all earlier days.
+- **Horizon 5 s:** the model's Brier score is below the base rate's on 11 of 13 test days. It is worse on 04-23 (+0.019, n = 37) and 04-26 (+0.046, n = 34).
+- **Headline fold: fit 04-19..05-01 (991 orders), test 05-02 (895 orders, 640 censored at 5 s).**
+
+| Horizon | Base rate (fit days) | Observed on 05-02 | Brier model / base rate | Difference [95%] |
+|---|---|---|---|---|
+| 1 s | 6.9% | 0.0% | 0.0021 / 0.0047 | −0.0026 [−0.0030, −0.0022] |
+| 5 s | 20.0% | 0.7% | 0.0361 / 0.0440 | −0.0079 [−0.0109, −0.0050] |
+| 15 s | 41.9% | 3.1% | 0.152 / 0.181 | −0.028 [−0.038, −0.019] |
+
+**What step 3 shows**
+- **05-02 is a different quoting regime,** as flagged. Its 5 s fill rate is 0.7%, against 20% on the fit days.
+- **The model is not calibrated there.** It beats the base rate only by predicting lower. It still predicts about 8–26% in reliability bins where 0–2% is observed.
+- **The censoring check could not run.** The engine's `price_moved_through` is false on every row, so the IPCW assumption (non-informative cancels) is untested here.
+
+### What this does NOT establish
+- Spot, not perp.
+- Two coins.
+- About 97% of the cancels are on one day (05-02), and that day is a different regime.
+- All books are the public archive: the recorder capture was lost, so there is no second book source.
+- Hit rates are an upper bound, because our own fills are in the tape.
+
+## Steps 4 and 5 (owner go 12 Nov)
+
+**Rescoring (`f00918b`)**
+- `TOLERANCES.md` (10 Nov, before any number) fixes its own stale-book definition (last book message older than 1.0 s at placement) and queue buckets (quote currency). The first scoring used other definitions; both are now applied as written.
+- The pass rules don't use those definitions, so no verdict depends on the switch. The earlier breakdowns are kept, labelled supplementary.
+
+**Pre-registered verdicts**
+
+| Check | Verdict | Result |
+|---|---|---|
+| 2a | PASS (all three models) | |
+| 2b | PASS | hit 83.9% vs 80.5% ± 5; premature 4.3% |
+| 2c | **FAIL** | false rejects 52/1,936 = 2.7% [2.1, 3.5] against ≤ 2%; sensitivity 37/38 |
+| 3 | **NO IMPROVEMENT** | Brier −18% and 11/13 days not worse pass; calibration slope 2.11 is outside 0.8–1.2 |
+
+**Step 5, perp taker check (`19450ae`):** "8 orders: gross-error check only, not a calibration".
+- **Data:** ADA and MNT linear perp 2026-04-29, converted with `bybit_perp_archive.py`. 0 gaps, converter rebuild 100%, core T4 pass under both orders (`delta_first` 100% on all metrics). Raw sha256 are in `step5_perp/stats`.
+- **Result:** the 8 real Market IOC orders through the core `TakerExecutor` at create + 6 ms match the real executions exactly: 8/8 price and 8/8 quantity, at 6 ms and at 0 ms.
+- **What it tests:** only that the touch price is right. Every order was 66–100 units against a touch of 262 to 434k units with a 1-tick spread.
+
+**Step 4, report:** `report.html`, built by `new_backtest/validation/build_report.py` from the committed aggregates only.
+
+## 2c cause: amended orders (12 Nov, post hoc)
+
+**What the 52 false rejects look like**
+- All 52 cross the archive book's opposite touch at their real create time, and stay through from 1 s before to 1 s after.
+- The book is sound there.
+- 50 of them filled later as makers at exactly the recorded price.
+
+**Cause:** our MM amends live quotes (`FAST_MM/bybit_order_manager.py` `amend_order`). Bybit's history keeps the final price with the original create time. `bybit_30d.zip` carries no amend flag or amend history, so the real price path cannot be replayed (owner option b is not possible).
+
+**Post hoc sensitivity (owner option a), not the verdict**
+- Rule: exclude probable amendments, i.e. accepted orders whose price crosses at create (fill-evidence rule (e)). 58 orders are removed.
+- 2a stays PASS.
+- 2c becomes PASS: 0/1,878 false rejects.
+- 2b becomes FAIL, because the hit rate is 88.2%, above the two-sided 80.5% ± 5 band.
+- Amended orders that never crossed stay in and cannot be detected.
+
+## Why FillModelV2 failed (step 3)
+- **The slope condition failed** (2.11 on 05-02).
+- **Level:** the model predicts a mean 5 s fill probability of 17% on 05-02, where 0.7% happened. The fit days filled at 20%; that is a regime shift, with 640 of 895 orders censored at 5 s.
+- **The slope rests on about 2 real fills** among 255 uncensored test rows. It cannot be measured with any precision. Both fills are in the two highest-probability bins.
+- **The other folds are unstable too** (slope −0.05 to 8.2, on small samples). On 04-20 (89 fills) it is 0.40: the probabilities are too spread out.
+
+## Owner answers (pasted, 12 Nov) and the re-run on the current core
+- **TOLERANCES.md:** T4 and T5 acceptance noted in Addendum 3. The file was copied unchanged from `simval_wt` (sha256 `50924c31…`) before the addendum.
+- **Exclusion window:** now 06:00–06:20 UTC on 04-23 (was 06:04). No order of ours fell in it.
+- **Re-run on the current core:** both main branches were merged into the track branches (outer `c468a9a`, core fast-forward to `f7b7cc3`). Cut short at the owner's request:
+  - T4: 16 of 28 coin-days (33 runs) identical to 11 Nov, including both legacy failures;
+  - step 1: 59 of 84 replays (4,848 order rows) identical field by field;
+  - step 5: identical.
+  - The scores use the full earlier set.
+- **New outputs** (`fills_and_markouts` in `step2_evaluation.json`), under proportional:
+  - fill rate over the 1,936 accepted orders: real 55.4%, sim 53.0%;
+  - both filled 1,022, real only 50 (mostly the amended orders the sim PostOnly-rejects), sim only 4, neither 860.
+  - Maker markouts: real +5 s −0.04 bps, +30 s +0.21 bps; sim +0.01 and +0.13 bps; on the 1,022 orders filled in both, sim minus real is +0.07 (5 s) and −0.08 bps (30 s).
+- **Order by order:** `local_only/orders_by_order.csv` (5,928 rows = 1,976 orders × 3 models; schedule index, no order ids). It is git-ignored and kept off the report and the artifact.

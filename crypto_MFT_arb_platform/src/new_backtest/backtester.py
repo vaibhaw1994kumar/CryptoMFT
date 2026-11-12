@@ -100,7 +100,9 @@ class ArbBacktestConfig:
     #                     of that price level; the reconstructed public book is never mutated by an own fill. "legacy": consume_liquidity mutates it.
     # Queue model v2: maker-only analysis mode. "maker_only": the strategy and the hedge are switched off and the orders in `scheduled_orders` are injected through the SAME path
     # a strategy order takes (_fire -> PASSIVE intent -> risk group -> _send_leg -> latency -> maker.place -> the fill model). Each item is (release_ts, side, price, qty); price is a
-    # number (an exact limit price) or "touch" | "improve" | "second", taken from the maker venue's book when the order is released. The order is sent with release_ts as its arrival
+    # number (an exact limit price) or "touch" | "improve" | "second", taken from the maker venue's book when the order is released. An optional fifth item, cancel_ts (exchange-clock
+    # seconds, or None), cancels the order at exactly that exchange time (no cancel latency is added: it is a cancel time already observed at the venue), applied as
+    # cancel_time_basis says; a real order replay (validation) sets it from the venue's own record. Four-item orders behave as before. The order is sent with release_ts as its arrival
     # time (zero flight) unless analysis_entry_s is set. max_event_ts stops the replay at the end of the real book window; gate_class labels the run in its result.
     analysis_mode: str = ""
     scheduled_orders: tuple = ()
@@ -1543,6 +1545,8 @@ class CrossVenueArbBacktester:
         )
         self._maker_to_signal[maker_order.order_id] = order.signal_id
         self._maker_to_intent[maker_order.order_id] = order.intent_id
+        if self._sched is not None and order.signal_id in self._sched_out:
+            self._sched_placed(order, maker_order, now)
         if self._obs_on:
             self._obs_place(order, maker_order, book, now, placement_extra)
         self.maker.lc_accept(order.order_id, maker_order, now, "modelled")
@@ -1578,6 +1582,8 @@ class CrossVenueArbBacktester:
     def _maker_rejected(self, order: InFlightOrder, reason: str, decision_ts: float, *, injected: bool) -> None:
         """A passive order was refused: no fill, no queue position, no conversion. The slot stays occupied until the notice."""
         notice_at = decision_ts + self._notice_s(order.venue)
+        if self._sched is not None and order.signal_id in self._sched_out:
+            self._sched_out[order.signal_id].update(rejected=reason, arrival_ts=order.release_ts)
         self.maker.lc_submit(order.order_id, order.venue, order.sent_ts, "modelled")
         self.maker.lc_reject(order.order_id, decision_ts, reason, "injected" if injected else "modelled", order.venue)
         self._order_ids += 1
@@ -1651,6 +1657,12 @@ class CrossVenueArbBacktester:
     def _on_fill(self, fill: Fill, tracker: _SignalTracker | None = None, chain: int = 0, intent_id: str = "", child_id: int = 0) -> None:
         if tracker is None:
             tracker = self._trackers.get(fill.signal_id)
+        if self._sched is not None and not fill.is_taker and fill.signal_id in self._sched_out:
+            rec = self._sched_out[fill.signal_id]
+            if "first_fill_ts" not in rec:
+                ev = self._cur_ev
+                rec.update(first_fill_ts=fill.ts, first_fill_exchange_ts=getattr(ev, "exchange_ts", None), first_fill_cause=fill.cause)
+            rec["filled_qty"] = rec.get("filled_qty", 0.0) + fill.qty
         # Every fill the backtester produces is derived from market data and assumptions: "modelled". `chain` names the injected
         # fault that made the strategy send this order (a retry, an unwind, a ghost), so such fills can be summed separately.
         self.events.emit(fill.ts, "fill", fill.venue, source="modelled", order_id=fill.order_id, signal_id=fill.signal_id, chain_id=chain,
@@ -2662,6 +2674,10 @@ class CrossVenueArbBacktester:
         cancelled = self.maker.cancel(order.order_id, effective)
         if cancelled is None:
             return
+        if self._sched is not None:
+            rec = self._sched_out.get(self._maker_to_signal.get(cancelled.order_id, 0))
+            if rec is not None:
+                rec["cancel_applied_ts"] = effective
         self._cancel_watch.pop(cancelled.order_id, None)
         self.lifetime["cancels_applied"] += 1
         self.lifetime["age_at_cancel_sum_s"] += effective - cancelled.placed_ts
@@ -2782,19 +2798,39 @@ class CrossVenueArbBacktester:
         self._sched = sorted(cfg.scheduled_orders, key=lambda o: o[0])
         self._sched_i = 0
         self._sched_n = 0
-        self.analysis = {"mode": cfg.analysis_mode, "gate_class": cfg.gate_class, "scheduled": len(self._sched), "fired": 0, "skipped": {}}
+        self._sched_out: dict[int, dict] = {}                    # signal id -> outcome of that scheduled order (analysis["orders"])
+        self.analysis = {"mode": cfg.analysis_mode, "gate_class": cfg.gate_class, "scheduled": len(self._sched), "fired": 0, "skipped": {}, "orders": []}
+
+    def _sched_placed(self, order: InFlightOrder, mo, now: float) -> None:
+        """Maker-only analysis: record where a scheduled order joined the book and, when it carries a cancel time, set that cancel (effective at exactly that exchange
+        time, no latency added; _apply_due_cancels / _expire_maker_orders apply it)."""
+        rec = self._sched_out[order.signal_id]
+        rec.update(arrival_ts=order.release_ts, placed_ts=now, queue_ahead=mo.queue_ahead, level_size=mo.observed_level_size, queue_unknown=mo.queue_unknown,
+                   level_was_absent=mo.level_was_absent, relative_to_touch_ticks=mo.relative_to_touch_ticks, price=order.limit_price)
+        cancel_ts = rec.get("cancel_ts")
+        if cancel_ts is not None and mo.cancel_requested_ts is None:
+            mo.cancel_requested_ts = cancel_ts
+            mo.cancel_effective_ts = cancel_ts
+            mo.cancel_reason = "scheduled"
+            mo.filled_at_cancel_request = mo.filled_qty
+            self._cancel_watch[mo.order_id] = mo
 
     def _fire_scheduled(self, now: float) -> None:
         """Release every scheduled order whose release time has been reached, at its OWN release time (before the engine lands in-flight orders for `now`)."""
         venue = self.config.venues[0]
         while self._sched_i < len(self._sched) and self._sched[self._sched_i][0] <= now:
-            ts, side, price, qty = self._sched[self._sched_i]
+            item = self._sched[self._sched_i]
+            ts, side, price, qty = item[:4]
+            cancel_ts = item[4] if len(item) > 4 else None
             self._sched_i += 1
             book = self.books[venue]
             tick = self.tick_size[venue]
+            rec = {"schedule_index": self._sched_i - 1, "release_ts": ts, "cancel_ts": cancel_ts}
+            self.analysis["orders"].append(rec)
 
             def skip(why: str) -> None:
                 self.analysis["skipped"][why] = self.analysis["skipped"].get(why, 0) + 1
+                rec["skipped"] = why
             if not book.ready:
                 skip("book_not_ready"); continue
             if isinstance(price, str):
@@ -2814,6 +2850,8 @@ class CrossVenueArbBacktester:
                     raise ValueError(f"unknown scheduled price rule {price!r}")
             leg = ArbLeg(venue=venue, side=side, qty=qty, limit_price=price, is_taker=False, expected_price=price, fee_bps=0.0)
             self._sched_n += 1
+            rec["signal_id"] = self._sched_n
+            self._sched_out[self._sched_n] = rec
             sig = ArbSignal(signal_id=self._sched_n, ts=ts, buy_venue=venue, sell_venue=venue, qty=qty, gross_edge_bps=0.0, fee_bps=0.0, net_edge_bps=0.0, legs=[leg],
                             mode=MAKER_TAKER, buy_price=price, sell_price=price)
             self.strategy.signals += 1

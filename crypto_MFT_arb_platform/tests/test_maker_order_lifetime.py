@@ -377,6 +377,50 @@ class CountsAndLimitsTests(unittest.TestCase):
         h.assert_ledger_reconciles(self)
 
 
+def scheduled(orders):
+    """Maker-only analysis harness (no lifetime): both books up, the schedule released at t=0 with zero flight."""
+    h = Harness(ttl=0.0, queue=0.5, cfg_kw=dict(analysis_mode="maker_only", scheduled_orders=tuple(orders)))
+    h.bt._setup_maker_only()
+    h.book(0.0, BYBIT)
+    h.book(0.0, BINANCE)
+    h.bt._fire_scheduled(0.0)
+    h.advance(0.0)
+    return h
+
+
+class ScheduledCancelTests(unittest.TestCase):
+    """analysis_mode="maker_only": an optional fifth item of a scheduled order is its cancel time, effective at exactly that time (no cancel latency added)."""
+
+    def test_the_cancel_lands_at_exactly_the_scheduled_time_no_latency_added(self):
+        for dt, expect_fill in ((-1e-6, 1.0), (0.0, 0.0), (+1e-6, 0.0)):
+            with self.subTest(dt=dt):
+                h = scheduled([(0.0, "buy", 100.0, 2.0, 5.0)])
+                self.assertEqual(h.order().cancel_effective_ts, 5.0)
+                h.sell_trade(5.0 + dt, BYBIT, volume=1.5)
+                self.assertAlmostEqual(h.bt.inventory.base[BYBIT], expect_fill, places=9)
+                h.advance(6.0)
+                self.assertEqual(h.resting, [])
+
+    def test_four_item_orders_carry_no_cancel_and_keep_resting(self):
+        h = scheduled([(0.0, "buy", 100.0, 2.0)])
+        self.assertIsNone(h.order().cancel_requested_ts)
+        h.advance(1000.0)
+        self.assertEqual(len(h.resting), 1)
+        self.assertIsNone(h.bt.analysis["orders"][0]["cancel_ts"])
+
+    def test_each_scheduled_order_records_its_outcome(self):
+        h = scheduled([(0.0, "buy", 100.0, 2.0, 5.0), (0.0, "buy", 100.0, 2.0, None)])
+        h.sell_trade(1.0, BYBIT, volume=1.5)
+        h.advance(6.0)
+        first, second = h.bt.analysis["orders"]
+        self.assertEqual(h.bt.analysis["fired"], 2)
+        self.assertEqual((first["arrival_ts"], first["placed_ts"], first["queue_ahead"]), (0.0, 0.0, 0.5))
+        self.assertEqual((first["first_fill_ts"], first["first_fill_cause"]), (1.0, "trade"))
+        self.assertAlmostEqual(first["filled_qty"], 1.0, places=9)
+        self.assertEqual(first["cancel_applied_ts"], 5.0)
+        self.assertNotIn("cancel_applied_ts", second)
+
+
 class EndOfRunTests(unittest.TestCase):
     def test_close_out_reports_open_and_late_landing_orders_without_inventing_cancels_or_fills(self):
         h = Harness(ttl=10.0, max_live=3, entry={BYBIT: 0.003, BINANCE: 20.0})

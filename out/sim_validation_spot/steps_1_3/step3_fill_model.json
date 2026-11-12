@@ -1,0 +1,3301 @@
+{
+ "tag": "MEASURED_SPOT_2026",
+ "label": "EXPLORATORY; not approved as a quote filter",
+ "method": "Spot simulator validation, step 3: FillModelV2 fitted on REAL outcomes (owner brief 10 Nov 2026). Output tag MEASURED_SPOT_2026; not approved as a quote filter.\n\nFeatures: the placement features the engine computed for each replayed order (fill_events.jsonl of the proportional run: queue ahead, depth, spread, short vol,\ntrade count and sign, regime, ticks from touch), i.e. the replayed book at the real create time. LABELS ARE REAL, never the simulator's fills: filled within h\n= the real first execution within h seconds of the real create time; censored = the real order was cancelled before h without a fill (IPCW as in\nfill_model_v1, weights from fill_label.compute_ipcw_weights). price_moved_through (used only by the adverse model) is the market's, from the replayed book.\nSplit: chronological. Fit on the days before the test day, test on that day; the headline test day is 2026-05-02 (flagged: possibly a different quoting regime,\nwith most of the cancels). Brier score and reliability against the base rate of the fit days (fill_model_v1.calibration_report).\nExcluded as in evaluate.py (04-23 restart window and orders resting across the resync); orders the simulator PostOnly-rejected keep their real label (the\nfeatures exist only for orders the engine placed, so those orders are dropped and counted).",
+ "counts": {
+  "ADAUSDT 2026-04-19": {
+   "orders": 33,
+   "used": 33
+  },
+  "ADAUSDT 2026-04-20": {
+   "orders": 191,
+   "used": 186,
+   "no_features_sim_rejected_or_skipped": 5
+  },
+  "ADAUSDT 2026-04-21": {
+   "orders": 103,
+   "used": 99,
+   "no_features_sim_rejected_or_skipped": 4
+  },
+  "ADAUSDT 2026-04-22": {
+   "orders": 8,
+   "used": 8
+  },
+  "ADAUSDT 2026-04-23": {
+   "orders": 6,
+   "used": 6
+  },
+  "ADAUSDT 2026-04-24": {
+   "orders": 34,
+   "used": 32,
+   "no_features_sim_rejected_or_skipped": 2
+  },
+  "ADAUSDT 2026-04-25": {
+   "orders": 2,
+   "used": 2
+  },
+  "ADAUSDT 2026-04-26": {
+   "orders": 5,
+   "used": 5
+  },
+  "ADAUSDT 2026-04-27": {
+   "orders": 2,
+   "used": 2
+  },
+  "ADAUSDT 2026-04-28": {
+   "orders": 19,
+   "used": 17,
+   "no_features_sim_rejected_or_skipped": 2
+  },
+  "ADAUSDT 2026-04-29": {
+   "orders": 48,
+   "used": 46,
+   "no_features_sim_rejected_or_skipped": 2
+  },
+  "ADAUSDT 2026-04-30": {
+   "orders": 34,
+   "used": 31,
+   "no_features_sim_rejected_or_skipped": 3
+  },
+  "ADAUSDT 2026-05-01": {
+   "orders": 14,
+   "used": 13,
+   "real_rejected_not_modelled": 1
+  },
+  "ADAUSDT 2026-05-02": {
+   "orders": 745,
+   "used": 724,
+   "real_rejected_not_modelled": 21
+  },
+  "MNTUSDT 2026-04-19": {
+   "orders": 33,
+   "used": 31,
+   "no_features_sim_rejected_or_skipped": 2
+  },
+  "MNTUSDT 2026-04-20": {
+   "orders": 127,
+   "used": 120,
+   "no_features_sim_rejected_or_skipped": 7
+  },
+  "MNTUSDT 2026-04-21": {
+   "orders": 83,
+   "used": 80,
+   "no_features_sim_rejected_or_skipped": 3
+  },
+  "MNTUSDT 2026-04-22": {
+   "orders": 63,
+   "used": 60,
+   "no_features_sim_rejected_or_skipped": 3
+  },
+  "MNTUSDT 2026-04-23": {
+   "orders": 34,
+   "used": 31,
+   "no_features_sim_rejected_or_skipped": 3
+  },
+  "MNTUSDT 2026-04-24": {
+   "orders": 48,
+   "used": 43,
+   "no_features_sim_rejected_or_skipped": 5
+  },
+  "MNTUSDT 2026-04-25": {
+   "orders": 9,
+   "used": 7,
+   "no_features_sim_rejected_or_skipped": 2
+  },
+  "MNTUSDT 2026-04-26": {
+   "orders": 32,
+   "used": 29,
+   "no_features_sim_rejected_or_skipped": 3
+  },
+  "MNTUSDT 2026-04-27": {
+   "orders": 13,
+   "used": 13
+  },
+  "MNTUSDT 2026-04-28": {
+   "orders": 27,
+   "used": 26,
+   "no_features_sim_rejected_or_skipped": 1
+  },
+  "MNTUSDT 2026-04-29": {
+   "orders": 58,
+   "used": 56,
+   "no_features_sim_rejected_or_skipped": 2
+  },
+  "MNTUSDT 2026-04-30": {
+   "orders": 1,
+   "used": 1
+  },
+  "MNTUSDT 2026-05-01": {
+   "orders": 20,
+   "real_rejected_not_modelled": 5,
+   "used": 14,
+   "no_features_sim_rejected_or_skipped": 1
+  },
+  "MNTUSDT 2026-05-02": {
+   "orders": 184,
+   "used": 171,
+   "real_rejected_not_modelled": 11,
+   "no_features_sim_rejected_or_skipped": 2
+  }
+ },
+ "folds": {
+  "2026-04-20": {
+   "fit_days": [
+    "2026-04-19"
+   ],
+   "n_fit_orders": 64,
+   "headline": false,
+   "by_horizon": {
+    "1": {
+     "base_rate_fit": 0.125,
+     "n_rows": 306,
+     "n_uncensored": 306,
+     "censored": 0,
+     "calibration_slope": 0.43661768913644305,
+     "n": 306,
+     "weighted": true,
+     "observed_rate": 0.12745098039215685,
+     "brier": 0.10635284656599156,
+     "brier_ci95": [
+      0.0753009343265581,
+      0.13776658022840113
+     ],
+     "baseline_brier": 0.11121323529411764,
+     "baseline_brier_ci95": [
+      0.0818014705882353,
+      0.140625
+     ],
+     "brier_model_minus_baseline": -0.0048603887281260805,
+     "brier_model_minus_baseline_ci95": [
+      -0.020555853854180912,
+      0.011378724379212163
+     ],
+     "reliability": [
+      {
+       "n": 62,
+       "mean_predicted": 0.012679860484995793,
+       "observed_rate": 0.12903225806451613,
+       "observed_wilson95": [
+        0.06685798258498754,
+        0.23449556896904517
+       ]
+      },
+      {
+       "n": 61,
+       "mean_predicted": 0.026877877619869633,
+       "observed_rate": 0.04918032786885246,
+       "observed_wilson95": [
+        0.016865676835230686,
+        0.1349134279370143
+       ]
+      },
+      {
+       "n": 61,
+       "mean_predicted": 0.04300508345931617,
+       "observed_rate": 0.09836065573770492,
+       "observed_wilson95": [
+        0.045863951367309724,
+        0.1984483419752358
+       ]
+      },
+      {
+       "n": 61,
+       "mean_predicted": 0.07311788478090726,
+       "observed_rate": 0.09836065573770492,
+       "observed_wilson95": [
+        0.045863951367309724,
+        0.1984483419752358
+       ]
+      },
+      {
+       "n": 61,
+       "mean_predicted": 0.2691461644827609,
+       "observed_rate": 0.26229508196721313,
+       "observed_wilson95": [
+        0.16838645195913188,
+        0.38436980328441556
+       ]
+      }
+     ]
+    },
+    "5": {
+     "base_rate_fit": 0.2969,
+     "n_rows": 306,
+     "n_uncensored": 306,
+     "censored": 0,
+     "calibration_slope": 0.3993956805902473,
+     "n": 306,
+     "weighted": true,
+     "observed_rate": 0.2908496732026144,
+     "brier": 0.20029693742311314,
+     "brier_ci95": [
+      0.17007325009216911,
+      0.2351563551523732
+     ],
+     "baseline_brier": 0.2062924453635621,
+     "baseline_brier_ci95": [
+      0.1863782296772876,
+      0.22753427542892157
+     ],
+     "brier_model_minus_baseline": -0.005995507940448952,
+     "brier_model_minus_baseline_ci95": [
+      -0.027782558461565618,
+      0.016120354973076297
+     ],
+     "reliability": [
+      {
+       "n": 62,
+       "mean_predicted": 0.029086572582132753,
+       "observed_rate": 0.14516129032258066,
+       "observed_wilson95": [
+        0.07829323056347005,
+        0.2534362535316917
+       ]
+      },
+      {
+       "n": 61,
+       "mean_predicted": 0.07061189022012669,
+       "observed_rate": 0.18032786885245902,
+       "observed_wilson95": [
+        0.10379034061426573,
+        0.2947439336787807
+       ]
+      },
+      {
+       "n": 61,
+       "mean_predicted": 0.1366686315404553,
+       "observed_rate": 0.22950819672131148,
+       "observed_wilson95": [
+        0.141931023788832,
+        0.34913643907451497
+       ]
+      },
+      {
+       "n": 61,
+       "mean_predicted": 0.2543077184578079,
+       "observed_rate": 0.39344262295081966,
+       "observed_wilson95": [
+        0.28068166862043625,
+        0.5188297561439126
+       ]
+      },
+      {
+       "n": 61,
+       "mean_predicted": 0.5506260523212498,
+       "observed_rate": 0.5081967213114754,
+       "observed_wilson95": [
+        0.386024064532302,
+        0.6293981335627482
+       ]
+      }
+     ]
+    },
+    "15": {
+     "base_rate_fit": 0.625,
+     "n_rows": 306,
+     "n_uncensored": 306,
+     "censored": 0,
+     "calibration_slope": 0.37815524752197627,
+     "n": 306,
+     "weighted": true,
+     "observed_rate": 0.5326797385620915,
+     "brier": 0.24016253391573888,
+     "brier_ci95": [
+      0.22113929076560887,
+      0.2593452179637714
+     ],
+     "baseline_brier": 0.2574550653594771,
+     "baseline_brier_ci95": [
+      0.24356617647058823,
+      0.271343954248366
+     ],
+     "brier_model_minus_baseline": -0.017292531443738213,
+     "brier_model_minus_baseline_ci95": [
+      -0.035698067785441524,
+      0.002808444076537233
+     ],
+     "reliability": [
+      {
+       "n": 62,
+       "mean_predicted": 0.33419226240031535,
+       "observed_rate": 0.3870967741935484,
+       "observed_wilson95": [
+        0.2758446342699068,
+        0.5115238379421901
+       ]
+      },
+      {
+       "n": 61,
+       "mean_predicted": 0.4535154080233732,
+       "observed_rate": 0.4262295081967213,
+       "observed_wilson95": [
+        0.3101502855796743,
+        0.5510499315648748
+       ]
+      },
+      {
+       "n": 61,
+       "mean_predicted": 0.5524665074648639,
+       "observed_rate": 0.5245901639344263,
+       "observed_wilson95": [
+        0.4015694171531101,
+        0.6446971771320402
+       ]
+      },
+      {
+       "n": 61,
+       "mean_predicted": 0.6633901987120374,
+       "observed_rate": 0.5901639344262295,
+       "observed_wilson95": [
+        0.46499566253828867,
+        0.7046485165072622
+       ]
+      },
+      {
+       "n": 61,
+       "mean_predicted": 0.8267920280829727,
+       "observed_rate": 0.7377049180327869,
+       "observed_wilson95": [
+        0.6156301967155846,
+        0.8316135480408682
+       ]
+      }
+     ]
+    }
+   },
+   "censoring_check_fit": {
+    "horizon_s": 5,
+    "n": 64,
+    "n_moved_through": 0,
+    "n_not_moved": 64,
+    "censor_rate_moved_through": null,
+    "censor_rate_not_moved": 0.0,
+    "gap": null,
+    "informative_flag": false,
+    "assumption": "IPCW is consistent only under non-informative censoring (cancel independent of fill time given covariates)"
+   }
+  },
+  "2026-04-21": {
+   "fit_days": [
+    "2026-04-19",
+    "2026-04-20"
+   ],
+   "n_fit_orders": 370,
+   "headline": false,
+   "by_horizon": {
+    "1": {
+     "base_rate_fit": 0.127,
+     "n_rows": 179,
+     "n_uncensored": 179,
+     "censored": 0,
+     "calibration_slope": 0.965498706097734,
+     "n": 179,
+     "weighted": true,
+     "observed_rate": 0.05027932960893855,
+     "brier": 0.048019167835140035,
+     "brier_ci95": [
+      0.027991415936411915,
+      0.07275796210754239
+     ],
+     "baseline_brier": 0.05364152768199274,
+     "baseline_brier_ci95": [
+      0.032805048744955136,
+      0.07864530240643786
+     ],
+     "brier_model_minus_baseline": -0.005622359846852706,
+     "brier_model_minus_baseline_ci95": [
+      -0.020003655028545755,
+      0.009170635466145598
+     ],
+     "reliability": [
+      {
+       "n": 36,
+       "mean_predicted": 0.03548762521998208,
+       "observed_rate": 0.0,
+       "observed_wilson95": [
+        0.0,
+        0.09642183044857634
+       ]
+      },
+      {
+       "n": 36,
+       "mean_predicted": 0.056330933827947086,
+       "observed_rate": 0.0,
+       "observed_wilson95": [
+        0.0,
+        0.09642183044857634
+       ]
+      },
+      {
+       "n": 36,
+       "mean_predicted": 0.07937457971921974,
+       "observed_rate": 0.027777777777777776,
+       "observed_wilson95": [
+        0.004920280295569679,
+        0.141700337350308
+       ]
+      },
+      {
+       "n": 36,
+       "mean_predicted": 0.12056774419808537,
+       "observed_rate": 0.08333333333333333,
+       "observed_wilson95": [
+        0.0287480892712918,
+        0.21827010276918848
+       ]
+      },
+      {
+       "n": 35,
+       "mean_predicted": 0.2617961561723224,
+       "observed_rate": 0.14285714285714285,
+       "observed_wilson95": [
+        0.06260138804853496,
+        0.2937588030867426
+       ]
+      }
+     ]
+    },
+    "5": {
+     "base_rate_fit": 0.2919,
+     "n_rows": 179,
+     "n_uncensored": 179,
+     "censored": 0,
+     "calibration_slope": 0.5438119482653503,
+     "n": 179,
+     "weighted": true,
+     "observed_rate": 0.16201117318435754,
+     "brier": 0.14423561399069032,
+     "brier_ci95": [
+      0.11645921336435777,
+      0.17750238299133264
+     ],
+     "baseline_brier": 0.15263255403977133,
+     "baseline_brier_ci95": [
+      0.12938025145785978,
+      0.17821008687987397
+     ],
+     "brier_model_minus_baseline": -0.008396940049081009,
+     "brier_model_minus_baseline_ci95": [
+      -0.02588387481822664,
+      0.010807439792646348
+     ],
+     "reliability": [
+      {
+       "n": 36,
+       "mean_predicted": 0.11543328751127244,
+       "observed_rate": 0.08333333333333333,
+       "observed_wilson95": [
+        0.0287480892712918,
+        0.21827010276918848
+       ]
+      },
+      {
+       "n": 36,
+       "mean_predicted": 0.17060449795203947,
+       "observed_rate": 0.08333333333333333,
+       "observed_wilson95": [
+        0.0287480892712918,
+        0.21827010276918848
+       ]
+      },
+      {
+       "n": 36,
+       "mean_predicted": 0.2243876981358913,
+       "observed_rate": 0.1111111111111111,
+       "observed_wilson95": [
+        0.04406568908741834,
+        0.2531512901503632
+       ]
+      },
+      {
+       "n": 36,
+       "mean_predicted": 0.3131064130088095,
+       "observed_rate": 0.2777777777777778,
+       "observed_wilson95": [
+        0.15848170025813796,
+        0.43992800216345146
+       ]
+      },
+      {
+       "n": 35,
+       "mean_predicted": 0.46865430387655505,
+       "observed_rate": 0.2571428571428571,
+       "observed_wilson95": [
+        0.1416286872655014,
+        0.4206962427064873
+       ]
+      }
+     ]
+    },
+    "15": {
+     "base_rate_fit": 0.5486,
+     "n_rows": 179,
+     "n_uncensored": 179,
+     "censored": 0,
+     "calibration_slope": 0.9754681092169201,
+     "n": 179,
+     "weighted": true,
+     "observed_rate": 0.4022346368715084,
+     "brier": 0.22619929771998043,
+     "brier_ci95": [
+      0.2074149501615317,
+      0.24686003464676334
+     ],
+     "baseline_brier": 0.2618789966170307,
+     "baseline_brier_ci95": [
+      0.25426915213567786,
+      0.2689452807782869
+     ],
+     "brier_model_minus_baseline": -0.03567969889705025,
+     "brier_model_minus_baseline_ci95": [
+      -0.055096242258246435,
+      -0.014991546665233259
+     ],
+     "reliability": [
+      {
+       "n": 36,
+       "mean_predicted": 0.36578740265640447,
+       "observed_rate": 0.19444444444444445,
+       "observed_wilson95": [
+        0.09752972019453349,
+        0.350283620635152
+       ]
+      },
+      {
+       "n": 36,
+       "mean_predicted": 0.4192057692956058,
+       "observed_rate": 0.25,
+       "observed_wilson95": [
+        0.13750323839225387,
+        0.41070767683203424
+       ]
+      },
+      {
+       "n": 36,
+       "mean_predicted": 0.4975780019124205,
+       "observed_rate": 0.25,
+       "observed_wilson95": [
+        0.13750323839225387,
+        0.41070767683203424
+       ]
+      },
+      {
+       "n": 36,
+       "mean_predicted": 0.5955912598668514,
+       "observed_rate": 0.6666666666666666,
+       "observed_wilson95": [
+        0.5033369709296683,
+        0.7978557522541395
+       ]
+      },
+      {
+       "n": 35,
+       "mean_predicted": 0.7176188285948537,
+       "observed_rate": 0.6571428571428571,
+       "observed_wilson95": [
+        0.4915164687273671,
+        0.7916850471731106
+       ]
+      }
+     ]
+    }
+   },
+   "censoring_check_fit": {
+    "horizon_s": 5,
+    "n": 370,
+    "n_moved_through": 0,
+    "n_not_moved": 370,
+    "censor_rate_moved_through": null,
+    "censor_rate_not_moved": 0.0,
+    "gap": null,
+    "informative_flag": false,
+    "assumption": "IPCW is consistent only under non-informative censoring (cancel independent of fill time given covariates)"
+   }
+  },
+  "2026-04-22": {
+   "fit_days": [
+    "2026-04-19",
+    "2026-04-20",
+    "2026-04-21"
+   ],
+   "n_fit_orders": 549,
+   "headline": false,
+   "by_horizon": {
+    "1": {
+     "base_rate_fit": 0.102,
+     "n_rows": 68,
+     "n_uncensored": 68,
+     "censored": 0,
+     "calibration_slope": 1.0281936179896218,
+     "n": 68,
+     "weighted": true,
+     "observed_rate": 0.07352941176470588,
+     "brier": 0.07232941709764651,
+     "brier_ci95": [
+      0.0384199393926924,
+      0.11428170090831782
+     ],
+     "baseline_brier": 0.0689336192139571,
+     "baseline_brier_ci95": [
+      0.022110518388927636,
+      0.12746249524524395
+     ],
+     "brier_model_minus_baseline": 0.0033957978836894054,
+     "brier_model_minus_baseline_ci95": [
+      -0.02082379757909074,
+      0.026568120792319065
+     ],
+     "reliability": [
+      {
+       "n": 14,
+       "mean_predicted": 0.0462710448762752,
+       "observed_rate": 0.0,
+       "observed_wilson95": [
+        0.0,
+        0.21531701192718142
+       ]
+      },
+      {
+       "n": 14,
+       "mean_predicted": 0.08530423722828642,
+       "observed_rate": 0.07142857142857142,
+       "observed_wilson95": [
+        0.012721886112291636,
+        0.3146926955395781
+       ]
+      },
+      {
+       "n": 14,
+       "mean_predicted": 0.12111105229412404,
+       "observed_rate": 0.0,
+       "observed_wilson95": [
+        0.0,
+        0.21531701192718142
+       ]
+      },
+      {
+       "n": 13,
+       "mean_predicted": 0.1719492982168388,
+       "observed_rate": 0.07692307692307693,
+       "observed_wilson95": [
+        0.013710066379696323,
+        0.3331453392824736
+       ]
+      },
+      {
+       "n": 13,
+       "mean_predicted": 0.3176131748356837,
+       "observed_rate": 0.23076923076923078,
+       "observed_wilson95": [
+        0.08179379092465713,
+        0.5025687399512693
+       ]
+      }
+     ]
+    },
+    "5": {
+     "base_rate_fit": 0.2495,
+     "n_rows": 68,
+     "n_uncensored": 68,
+     "censored": 0,
+     "calibration_slope": 0.88429917742354,
+     "n": 68,
+     "weighted": true,
+     "observed_rate": 0.3235294117647059,
+     "brier": 0.20681532171849049,
+     "brier_ci95": [
+      0.16863566804850544,
+      0.24676601299388418
+     ],
+     "baseline_brier": 0.22433187992467332,
+     "baseline_brier_ci95": [
+      0.17276753834104533,
+      0.2832625560202482
+     ],
+     "brier_model_minus_baseline": -0.017516558206182836,
+     "brier_model_minus_baseline_ci95": [
+      -0.05588339825499101,
+      0.020665376797031756
+     ],
+     "reliability": [
+      {
+       "n": 14,
+       "mean_predicted": 0.1956601310543816,
+       "observed_rate": 0.14285714285714285,
+       "observed_wilson95": [
+        0.040093073737921175,
+        0.39941907763863693
+       ]
+      },
+      {
+       "n": 14,
+       "mean_predicted": 0.285896346751371,
+       "observed_rate": 0.2857142857142857,
+       "observed_wilson95": [
+        0.11721187910109099,
+        0.5464954117248438
+       ]
+      },
+      {
+       "n": 14,
+       "mean_predicted": 0.3340678140361258,
+       "observed_rate": 0.42857142857142855,
+       "observed_wilson95": [
+        0.21380509930400526,
+        0.6740973309713064
+       ]
+      },
+      {
+       "n": 13,
+       "mean_predicted": 0.383571428690333,
+       "observed_rate": 0.23076923076923078,
+       "observed_wilson95": [
+        0.08179379092465713,
+        0.5025687399512693
+       ]
+      },
+      {
+       "n": 13,
+       "mean_predicted": 0.5231206230436843,
+       "observed_rate": 0.5384615384615384,
+       "observed_wilson95": [
+        0.2914343243183205,
+        0.7679424569851186
+       ]
+      }
+     ]
+    },
+    "15": {
+     "base_rate_fit": 0.5009,
+     "n_rows": 68,
+     "n_uncensored": 68,
+     "censored": 0,
+     "calibration_slope": 0.8636965526046703,
+     "n": 68,
+     "weighted": true,
+     "observed_rate": 0.5147058823529411,
+     "brier": 0.24802870941961253,
+     "brier_ci95": [
+      0.21326837173310967,
+      0.27970575572984013
+     ],
+     "baseline_brier": 0.24997404278880375,
+     "baseline_brier_ci95": [
+      0.24975974942118348,
+      0.25018833615642394
+     ],
+     "brier_model_minus_baseline": -0.0019453333691912267,
+     "brier_model_minus_baseline_ci95": [
+      -0.0365703983673837,
+      0.029700238602667222
+     ],
+     "reliability": [
+      {
+       "n": 14,
+       "mean_predicted": 0.4427642173150315,
+       "observed_rate": 0.35714285714285715,
+       "observed_wilson95": [
+        0.16344490737202735,
+        0.6123599531785959
+       ]
+      },
+      {
+       "n": 14,
+       "mean_predicted": 0.5634094223659606,
+       "observed_rate": 0.5,
+       "observed_wilson95": [
+        0.2679886791947528,
+        0.7320113208052472
+       ]
+      },
+      {
+       "n": 14,
+       "mean_predicted": 0.622743109788604,
+       "observed_rate": 0.6428571428571429,
+       "observed_wilson95": [
+        0.3876400468214042,
+        0.8365550926279727
+       ]
+      },
+      {
+       "n": 13,
+       "mean_predicted": 0.6721951243902845,
+       "observed_rate": 0.38461538461538464,
+       "observed_wilson95": [
+        0.17709446581236818,
+        0.6447751902773146
+       ]
+      },
+      {
+       "n": 13,
+       "mean_predicted": 0.7760902210715994,
+       "observed_rate": 0.6923076923076923,
+       "observed_wilson95": [
+        0.4236888781333764,
+        0.8731950283838191
+       ]
+      }
+     ]
+    }
+   },
+   "censoring_check_fit": {
+    "horizon_s": 5,
+    "n": 549,
+    "n_moved_through": 0,
+    "n_not_moved": 549,
+    "censor_rate_moved_through": null,
+    "censor_rate_not_moved": 0.0,
+    "gap": null,
+    "informative_flag": false,
+    "assumption": "IPCW is consistent only under non-informative censoring (cancel independent of fill time given covariates)"
+   }
+  },
+  "2026-04-23": {
+   "fit_days": [
+    "2026-04-19",
+    "2026-04-20",
+    "2026-04-21",
+    "2026-04-22"
+   ],
+   "n_fit_orders": 617,
+   "headline": false,
+   "by_horizon": {
+    "1": {
+     "base_rate_fit": 0.0989,
+     "n_rows": 37,
+     "n_uncensored": 37,
+     "censored": 0,
+     "calibration_slope": null,
+     "n": 37,
+     "weighted": true,
+     "observed_rate": 0.0,
+     "brier": 0.01265760964858204,
+     "brier_ci95": [
+      0.007961277448282964,
+      0.019868687489474096
+     ],
+     "baseline_brier": 0.009774382763883377,
+     "baseline_brier_ci95": [
+      0.009774382763883377,
+      0.009774382763883377
+     ],
+     "brier_model_minus_baseline": 0.002883226884698664,
+     "brier_model_minus_baseline_ci95": [
+      -0.0018131053156004125,
+      0.01009430472559072
+     ],
+     "reliability": [
+      {
+       "n": 8,
+       "mean_predicted": 0.03705538186046686,
+       "observed_rate": 0.0,
+       "observed_wilson95": [
+        0.0,
+        0.3244156195108769
+       ]
+      },
+      {
+       "n": 8,
+       "mean_predicted": 0.06597954515408863,
+       "observed_rate": 0.0,
+       "observed_wilson95": [
+        0.0,
+        0.3244156195108769
+       ]
+      },
+      {
+       "n": 7,
+       "mean_predicted": 0.0908726874058499,
+       "observed_rate": 0.0,
+       "observed_wilson95": [
+        0.0,
+        0.35433884297520657
+       ]
+      },
+      {
+       "n": 7,
+       "mean_predicted": 0.12159724835377309,
+       "observed_rate": 0.0,
+       "observed_wilson95": [
+        0.0,
+        0.35433884297520657
+       ]
+      },
+      {
+       "n": 7,
+       "mean_predicted": 0.17974711620399866,
+       "observed_rate": 0.0,
+       "observed_wilson95": [
+        0.0,
+        0.35433884297520657
+       ]
+      }
+     ]
+    },
+    "5": {
+     "base_rate_fit": 0.2577,
+     "n_rows": 37,
+     "n_uncensored": 37,
+     "censored": 0,
+     "calibration_slope": 2.8750215470399865,
+     "n": 37,
+     "weighted": true,
+     "observed_rate": 0.02702702702702703,
+     "brier": 0.0985473467066339,
+     "brier_ci95": [
+      0.07801686941139953,
+      0.12297041922678822
+     ],
+     "baseline_brier": 0.07950591434747793,
+     "baseline_brier_ci95": [
+      0.06640853820310018,
+      0.10570066663623348
+     ],
+     "brier_model_minus_baseline": 0.019041432359155966,
+     "brier_model_minus_baseline_ci95": [
+      0.0001527359438755536,
+      0.03950297183972558
+     ],
+     "reliability": [
+      {
+       "n": 8,
+       "mean_predicted": 0.16399836560281433,
+       "observed_rate": 0.0,
+       "observed_wilson95": [
+        0.0,
+        0.3244156195108769
+       ]
+      },
+      {
+       "n": 8,
+       "mean_predicted": 0.2477020673838881,
+       "observed_rate": 0.0,
+       "observed_wilson95": [
+        0.0,
+        0.3244156195108769
+       ]
+      },
+      {
+       "n": 7,
+       "mean_predicted": 0.3085611990157261,
+       "observed_rate": 0.0,
+       "observed_wilson95": [
+        0.0,
+        0.35433884297520657
+       ]
+      },
+      {
+       "n": 7,
+       "mean_predicted": 0.33540343895377045,
+       "observed_rate": 0.0,
+       "observed_wilson95": [
+        0.0,
+        0.35433884297520657
+       ]
+      },
+      {
+       "n": 7,
+       "mean_predicted": 0.41724249112094686,
+       "observed_rate": 0.14285714285714285,
+       "observed_wilson95": [
+        0.02567895594897479,
+        0.51313450331903
+       ]
+      }
+     ]
+    },
+    "15": {
+     "base_rate_fit": 0.5024,
+     "n_rows": 37,
+     "n_uncensored": 37,
+     "censored": 0,
+     "calibration_slope": 1.9430159338039783,
+     "n": 37,
+     "weighted": true,
+     "observed_rate": 0.21621621621621623,
+     "brier": 0.26209230847001674,
+     "brier_ci95": [
+      0.22328842182968567,
+      0.30164879222098
+     ],
+     "baseline_brier": 0.2513857342444457,
+     "baseline_brier_ci95": [
+      0.2505972634397675,
+      0.25204279324834433
+     ],
+     "brier_model_minus_baseline": 0.01070657422557103,
+     "brier_model_minus_baseline_ci95": [
+      -0.027751987289629975,
+      0.050055262891169926
+     ],
+     "reliability": [
+      {
+       "n": 8,
+       "mean_predicted": 0.3775023963872793,
+       "observed_rate": 0.0,
+       "observed_wilson95": [
+        0.0,
+        0.3244156195108769
+       ]
+      },
+      {
+       "n": 8,
+       "mean_predicted": 0.5153261303446515,
+       "observed_rate": 0.125,
+       "observed_wilson95": [
+        0.02241690886329617,
+        0.4708948057698615
+       ]
+      },
+      {
+       "n": 7,
+       "mean_predicted": 0.5770720256277325,
+       "observed_rate": 0.2857142857142857,
+       "observed_wilson95": [
+        0.0822171657090155,
+        0.6410709098517873
+       ]
+      },
+      {
+       "n": 7,
+       "mean_predicted": 0.6031925683998985,
+       "observed_rate": 0.2857142857142857,
+       "observed_wilson95": [
+        0.0822171657090155,
+        0.6410709098517873
+       ]
+      },
+      {
+       "n": 7,
+       "mean_predicted": 0.6846189065421476,
+       "observed_rate": 0.42857142857142855,
+       "observed_wilson95": [
+        0.15821692226262685,
+        0.7495457695909742
+       ]
+      }
+     ]
+    }
+   },
+   "censoring_check_fit": {
+    "horizon_s": 5,
+    "n": 617,
+    "n_moved_through": 0,
+    "n_not_moved": 617,
+    "censor_rate_moved_through": null,
+    "censor_rate_not_moved": 0.0,
+    "gap": null,
+    "informative_flag": false,
+    "assumption": "IPCW is consistent only under non-informative censoring (cancel independent of fill time given covariates)"
+   }
+  },
+  "2026-04-24": {
+   "fit_days": [
+    "2026-04-19",
+    "2026-04-20",
+    "2026-04-21",
+    "2026-04-22",
+    "2026-04-23"
+   ],
+   "n_fit_orders": 654,
+   "headline": false,
+   "by_horizon": {
+    "1": {
+     "base_rate_fit": 0.0933,
+     "n_rows": 75,
+     "n_uncensored": 75,
+     "censored": 0,
+     "calibration_slope": 0.9712125610400811,
+     "n": 75,
+     "weighted": true,
+     "observed_rate": 0.013333333333333334,
+     "brier": 0.01968758647542089,
+     "brier_ci95": [
+      0.005348274754183974,
+      0.043865613194624585
+     ],
+     "baseline_brier": 0.019545773363633813,
+     "baseline_brier_ci95": [
+      0.008699697930402414,
+      0.041237924230096604
+     ],
+     "brier_model_minus_baseline": 0.00014181311178707717,
+     "brier_model_minus_baseline_ci95": [
+      -0.003977405941334861,
+      0.007230958913579748
+     ],
+     "reliability": [
+      {
+       "n": 15,
+       "mean_predicted": 0.029395817618801477,
+       "observed_rate": 0.0,
+       "observed_wilson95": [
+        0.0,
+        0.20388926630434784
+       ]
+      },
+      {
+       "n": 15,
+       "mean_predicted": 0.04678438614965174,
+       "observed_rate": 0.0,
+       "observed_wilson95": [
+        0.0,
+        0.20388926630434784
+       ]
+      },
+      {
+       "n": 15,
+       "mean_predicted": 0.065987860205019,
+       "observed_rate": 0.0,
+       "observed_wilson95": [
+        0.0,
+        0.20388926630434784
+       ]
+      },
+      {
+       "n": 15,
+       "mean_predicted": 0.08447566131813175,
+       "observed_rate": 0.0,
+       "observed_wilson95": [
+        0.0,
+        0.20388926630434784
+       ]
+      },
+      {
+       "n": 15,
+       "mean_predicted": 0.14929029356009943,
+       "observed_rate": 0.06666666666666667,
+       "observed_wilson95": [
+        0.011866588606194856,
+        0.2981707755242399
+       ]
+      }
+     ]
+    },
+    "5": {
+     "base_rate_fit": 0.2446,
+     "n_rows": 75,
+     "n_uncensored": 75,
+     "censored": 0,
+     "calibration_slope": 1.0109756694749663,
+     "n": 75,
+     "weighted": true,
+     "observed_rate": 0.09333333333333334,
+     "brier": 0.10401699732278492,
+     "brier_ci95": [
+      0.07168317062061608,
+      0.14045558986333154
+     ],
+     "baseline_brier": 0.10751844681985243,
+     "baseline_brier_ci95": [
+      0.07347155589222756,
+      0.14156533774747732
+     ],
+     "brier_model_minus_baseline": -0.003501449497067502,
+     "brier_model_minus_baseline_ci95": [
+      -0.021305939703106336,
+      0.019228107811105764
+     ],
+     "reliability": [
+      {
+       "n": 15,
+       "mean_predicted": 0.1169973846897641,
+       "observed_rate": 0.0,
+       "observed_wilson95": [
+        0.0,
+        0.20388926630434784
+       ]
+      },
+      {
+       "n": 15,
+       "mean_predicted": 0.1650467104796104,
+       "observed_rate": 0.06666666666666667,
+       "observed_wilson95": [
+        0.011866588606194856,
+        0.2981707755242399
+       ]
+      },
+      {
+       "n": 15,
+       "mean_predicted": 0.23099038932747584,
+       "observed_rate": 0.2,
+       "observed_wilson95": [
+        0.07047420643610414,
+        0.4518593533465045
+       ]
+      },
+      {
+       "n": 15,
+       "mean_predicted": 0.2816958057725039,
+       "observed_rate": 0.0,
+       "observed_wilson95": [
+        0.0,
+        0.20388926630434784
+       ]
+      },
+      {
+       "n": 15,
+       "mean_predicted": 0.38545628685424344,
+       "observed_rate": 0.2,
+       "observed_wilson95": [
+        0.07047420643610414,
+        0.4518593533465045
+       ]
+      }
+     ]
+    },
+    "15": {
+     "base_rate_fit": 0.4862,
+     "n_rows": 75,
+     "n_uncensored": 75,
+     "censored": 0,
+     "calibration_slope": 0.6085414988356534,
+     "n": 75,
+     "weighted": true,
+     "observed_rate": 0.28,
+     "brier": 0.23544938026000825,
+     "brier_ci95": [
+      0.20645686188578963,
+      0.2673030491393995
+     ],
+     "baseline_brier": 0.2441343321269254,
+     "baseline_brier_ci95": [
+      0.24155635047554916,
+      0.24707011194343906
+     ],
+     "brier_model_minus_baseline": -0.008684951866917145,
+     "brier_model_minus_baseline_ci95": [
+      -0.037374319292627065,
+      0.023456491092534754
+     ],
+     "reliability": [
+      {
+       "n": 15,
+       "mean_predicted": 0.3133032116267669,
+       "observed_rate": 0.13333333333333333,
+       "observed_wilson95": [
+        0.0373604698913593,
+        0.3788249920651624
+       ]
+      },
+      {
+       "n": 15,
+       "mean_predicted": 0.37849260312750543,
+       "observed_rate": 0.2,
+       "observed_wilson95": [
+        0.07047420643610414,
+        0.4518593533465045
+       ]
+      },
+      {
+       "n": 15,
+       "mean_predicted": 0.4834042367964846,
+       "observed_rate": 0.3333333333333333,
+       "observed_wilson95": [
+        0.15176100694691236,
+        0.5828687484878701
+       ]
+      },
+      {
+       "n": 15,
+       "mean_predicted": 0.5456942239486857,
+       "observed_rate": 0.4666666666666667,
+       "observed_wilson95": [
+        0.24809225259746442,
+        0.6988336984894921
+       ]
+      },
+      {
+       "n": 15,
+       "mean_predicted": 0.6428492491983389,
+       "observed_rate": 0.26666666666666666,
+       "observed_wilson95": [
+        0.1089727610318281,
+        0.5195088965768675
+       ]
+      }
+     ]
+    }
+   },
+   "censoring_check_fit": {
+    "horizon_s": 5,
+    "n": 654,
+    "n_moved_through": 0,
+    "n_not_moved": 654,
+    "censor_rate_moved_through": null,
+    "censor_rate_not_moved": 0.0,
+    "gap": null,
+    "informative_flag": false,
+    "assumption": "IPCW is consistent only under non-informative censoring (cancel independent of fill time given covariates)"
+   }
+  },
+  "2026-04-25": {
+   "fit_days": [
+    "2026-04-19",
+    "2026-04-20",
+    "2026-04-21",
+    "2026-04-22",
+    "2026-04-23",
+    "2026-04-24"
+   ],
+   "n_fit_orders": 729,
+   "headline": false,
+   "by_horizon": {
+    "1": {
+     "base_rate_fit": 0.085,
+     "n_rows": 9,
+     "n_uncensored": 9,
+     "censored": 0,
+     "calibration_slope": null,
+     "n": 9,
+     "weighted": true,
+     "observed_rate": 0.0,
+     "brier": 0.002435925601450784,
+     "brier_ci95": [
+      0.001568051778187034,
+      0.0033979884433638727
+     ],
+     "baseline_brier": 0.007233164170622891,
+     "baseline_brier_ci95": [
+      0.007233164170622891,
+      0.007233164170622891
+     ],
+     "brier_model_minus_baseline": -0.0047972385691721076,
+     "brier_model_minus_baseline_ci95": [
+      -0.005665112392435857,
+      -0.0038351757272590183
+     ],
+     "reliability": [
+      {
+       "n": 2,
+       "mean_predicted": 0.028845956163917826,
+       "observed_rate": 0.0,
+       "observed_wilson95": [
+        0.0,
+        0.6576280471103807
+       ]
+      },
+      {
+       "n": 2,
+       "mean_predicted": 0.0418254263106831,
+       "observed_rate": 0.0,
+       "observed_wilson95": [
+        0.0,
+        0.6576280471103807
+       ]
+      },
+      {
+       "n": 2,
+       "mean_predicted": 0.04622179315443616,
+       "observed_rate": 0.0,
+       "observed_wilson95": [
+        0.0,
+        0.6576280471103807
+       ]
+      },
+      {
+       "n": 2,
+       "mean_predicted": 0.059306500084981145,
+       "observed_rate": 0.0,
+       "observed_wilson95": [
+        0.0,
+        0.6576280471103807
+       ]
+      },
+      {
+       "n": 1,
+       "mean_predicted": 0.0735554574711016,
+       "observed_rate": 0.0,
+       "observed_wilson95": [
+        0.0,
+        0.7934567085261071
+       ]
+      }
+     ]
+    },
+    "5": {
+     "base_rate_fit": 0.2291,
+     "n_rows": 9,
+     "n_uncensored": 9,
+     "censored": 0,
+     "calibration_slope": 4.0380270095155355,
+     "n": 9,
+     "weighted": true,
+     "observed_rate": 0.1111111111111111,
+     "brier": 0.10321049385186457,
+     "brier_ci95": [
+      0.0330089583398481,
+      0.2316487952856874
+     ],
+     "baseline_brier": 0.1126823109244488,
+     "baseline_brier_ci95": [
+      0.05247807376547914,
+      0.23309078524238813
+     ],
+     "brier_model_minus_baseline": -0.009471817072584238,
+     "brier_model_minus_baseline_ci95": [
+      -0.02034370812874901,
+      0.00030736673356314783
+     ],
+     "reliability": [
+      {
+       "n": 2,
+       "mean_predicted": 0.13741120175394478,
+       "observed_rate": 0.0,
+       "observed_wilson95": [
+        0.0,
+        0.6576280471103807
+       ]
+      },
+      {
+       "n": 2,
+       "mean_predicted": 0.19555323158655927,
+       "observed_rate": 0.0,
+       "observed_wilson95": [
+        0.0,
+        0.6576280471103807
+       ]
+      },
+      {
+       "n": 2,
+       "mean_predicted": 0.21086965271237454,
+       "observed_rate": 0.0,
+       "observed_wilson95": [
+        0.0,
+        0.6576280471103807
+       ]
+      },
+      {
+       "n": 2,
+       "mean_predicted": 0.22891820012910213,
+       "observed_rate": 0.5,
+       "observed_wilson95": [
+        0.09452865480086614,
+        0.9054713451991339
+       ]
+      },
+      {
+       "n": 1,
+       "mean_predicted": 0.2498073683232308,
+       "observed_rate": 0.0,
+       "observed_wilson95": [
+        0.0,
+        0.7934567085261071
+       ]
+      }
+     ]
+    },
+    "15": {
+     "base_rate_fit": 0.465,
+     "n_rows": 9,
+     "n_uncensored": 9,
+     "censored": 0,
+     "calibration_slope": 2.516904637543839,
+     "n": 9,
+     "weighted": true,
+     "observed_rate": 0.4444444444444444,
+     "brier": 0.23525551656208105,
+     "brier_ci95": [
+      0.18357262252708745,
+      0.28124218340136686
+     ],
+     "baseline_brier": 0.24733695744212433,
+     "baseline_brier_ci95": [
+      0.22401734152991581,
+      0.27065657335433285
+     ],
+     "brier_model_minus_baseline": -0.012081440880043287,
+     "brier_model_minus_baseline_ci95": [
+      -0.048180982016535825,
+      0.01973078314021065
+     ],
+     "reliability": [
+      {
+       "n": 2,
+       "mean_predicted": 0.34227756907479134,
+       "observed_rate": 0.0,
+       "observed_wilson95": [
+        0.0,
+        0.6576280471103807
+       ]
+      },
+      {
+       "n": 2,
+       "mean_predicted": 0.42646079268419823,
+       "observed_rate": 1.0,
+       "observed_wilson95": [
+        0.34237195288961925,
+        1.0
+       ]
+      },
+      {
+       "n": 2,
+       "mean_predicted": 0.4635625188142787,
+       "observed_rate": 0.5,
+       "observed_wilson95": [
+        0.09452865480086614,
+        0.9054713451991339
+       ]
+      },
+      {
+       "n": 2,
+       "mean_predicted": 0.48206946376188553,
+       "observed_rate": 0.5,
+       "observed_wilson95": [
+        0.09452865480086614,
+        0.9054713451991339
+       ]
+      },
+      {
+       "n": 1,
+       "mean_predicted": 0.5073099770959054,
+       "observed_rate": 0.0,
+       "observed_wilson95": [
+        0.0,
+        0.7934567085261071
+       ]
+      }
+     ]
+    }
+   },
+   "censoring_check_fit": {
+    "horizon_s": 5,
+    "n": 729,
+    "n_moved_through": 0,
+    "n_not_moved": 729,
+    "censor_rate_moved_through": null,
+    "censor_rate_not_moved": 0.0,
+    "gap": null,
+    "informative_flag": false,
+    "assumption": "IPCW is consistent only under non-informative censoring (cancel independent of fill time given covariates)"
+   }
+  },
+  "2026-04-26": {
+   "fit_days": [
+    "2026-04-19",
+    "2026-04-20",
+    "2026-04-21",
+    "2026-04-22",
+    "2026-04-23",
+    "2026-04-24",
+    "2026-04-25"
+   ],
+   "n_fit_orders": 738,
+   "headline": false,
+   "by_horizon": {
+    "1": {
+     "base_rate_fit": 0.084,
+     "n_rows": 34,
+     "n_uncensored": 34,
+     "censored": 0,
+     "calibration_slope": -0.5833659969803086,
+     "n": 34,
+     "weighted": true,
+     "observed_rate": 0.029411764705882353,
+     "brier": 0.06842974714367836,
+     "brier_ci95": [
+      0.013534132683088573,
+      0.14444437341771488
+     ],
+     "baseline_brier": 0.031527771837578086,
+     "baseline_brier_ci95": [
+      0.007057821255719332,
+      0.0804676730012956
+     ],
+     "brier_model_minus_baseline": 0.036901975306100274,
+     "brier_model_minus_baseline_ci95": [
+      0.0017484497906762977,
+      0.08597569301365007
+     ],
+     "reliability": [
+      {
+       "n": 7,
+       "mean_predicted": 0.029771000422866234,
+       "observed_rate": 0.0,
+       "observed_wilson95": [
+        0.0,
+        0.35433884297520657
+       ]
+      },
+      {
+       "n": 7,
+       "mean_predicted": 0.05230718476321704,
+       "observed_rate": 0.14285714285714285,
+       "observed_wilson95": [
+        0.02567895594897479,
+        0.51313450331903
+       ]
+      },
+      {
+       "n": 7,
+       "mean_predicted": 0.06573929287951921,
+       "observed_rate": 0.0,
+       "observed_wilson95": [
+        0.0,
+        0.35433884297520657
+       ]
+      },
+      {
+       "n": 7,
+       "mean_predicted": 0.08781760273519121,
+       "observed_rate": 0.0,
+       "observed_wilson95": [
+        0.0,
+        0.35433884297520657
+       ]
+      },
+      {
+       "n": 6,
+       "mean_predicted": 0.3871529547967205,
+       "observed_rate": 0.0,
+       "observed_wilson95": [
+        0.0,
+        0.3903430336530645
+       ]
+      }
+     ]
+    },
+    "5": {
+     "base_rate_fit": 0.2276,
+     "n_rows": 34,
+     "n_uncensored": 34,
+     "censored": 0,
+     "calibration_slope": -0.0500194195461106,
+     "n": 34,
+     "weighted": true,
+     "observed_rate": 0.14705882352941177,
+     "brier": 0.17828046074175075,
+     "brier_ci95": [
+      0.10530818406386311,
+      0.2549523603720209
+     ],
+     "baseline_brier": 0.13192621883177225,
+     "baseline_brier_ci95": [
+      0.067842048578305,
+      0.19641091514932332
+     ],
+     "brier_model_minus_baseline": 0.0463542419099785,
+     "brier_model_minus_baseline_ci95": [
+      -0.005244853902933069,
+      0.10696872655556851
+     ],
+     "reliability": [
+      {
+       "n": 7,
+       "mean_predicted": 0.13999091405821878,
+       "observed_rate": 0.0,
+       "observed_wilson95": [
+        0.0,
+        0.35433884297520657
+       ]
+      },
+      {
+       "n": 7,
+       "mean_predicted": 0.21617972018384587,
+       "observed_rate": 0.2857142857142857,
+       "observed_wilson95": [
+        0.0822171657090155,
+        0.6410709098517873
+       ]
+      },
+      {
+       "n": 7,
+       "mean_predicted": 0.24173469722225474,
+       "observed_rate": 0.0,
+       "observed_wilson95": [
+        0.0,
+        0.35433884297520657
+       ]
+      },
+      {
+       "n": 7,
+       "mean_predicted": 0.27994570257992674,
+       "observed_rate": 0.2857142857142857,
+       "observed_wilson95": [
+        0.0822171657090155,
+        0.6410709098517873
+       ]
+      },
+      {
+       "n": 6,
+       "mean_predicted": 0.5860214578880129,
+       "observed_rate": 0.16666666666666666,
+       "observed_wilson95": [
+        0.03005258587173032,
+        0.563509436563646
+       ]
+      }
+     ]
+    },
+    "15": {
+     "base_rate_fit": 0.4648,
+     "n_rows": 34,
+     "n_uncensored": 34,
+     "censored": 0,
+     "calibration_slope": 0.06519498587952446,
+     "n": 34,
+     "weighted": true,
+     "observed_rate": 0.35294117647058826,
+     "brier": 0.2641629852237922,
+     "brier_ci95": [
+      0.2085164426282025,
+      0.3281753557383309
+     ],
+     "baseline_brier": 0.24087930939886473,
+     "baseline_brier_ci95": [
+      0.23051744107429914,
+      0.2533135513883435
+     ],
+     "brier_model_minus_baseline": 0.02328367582492749,
+     "brier_model_minus_baseline_ci95": [
+      -0.03538158093014195,
+      0.08980765157772706
+     ],
+     "reliability": [
+      {
+       "n": 7,
+       "mean_predicted": 0.3577448489372883,
+       "observed_rate": 0.14285714285714285,
+       "observed_wilson95": [
+        0.02567895594897479,
+        0.51313450331903
+       ]
+      },
+      {
+       "n": 7,
+       "mean_predicted": 0.46252598240362813,
+       "observed_rate": 0.42857142857142855,
+       "observed_wilson95": [
+        0.15821692226262685,
+        0.7495457695909742
+       ]
+      },
+      {
+       "n": 7,
+       "mean_predicted": 0.4930953621538248,
+       "observed_rate": 0.14285714285714285,
+       "observed_wilson95": [
+        0.02567895594897479,
+        0.51313450331903
+       ]
+      },
+      {
+       "n": 7,
+       "mean_predicted": 0.5403008347426007,
+       "observed_rate": 0.5714285714285714,
+       "observed_wilson95": [
+        0.2504542304090258,
+        0.8417830777373732
+       ]
+      },
+      {
+       "n": 6,
+       "mean_predicted": 0.7716734725553032,
+       "observed_rate": 0.5,
+       "observed_wilson95": [
+        0.18761280689940868,
+        0.8123871931005913
+       ]
+      }
+     ]
+    }
+   },
+   "censoring_check_fit": {
+    "horizon_s": 5,
+    "n": 738,
+    "n_moved_through": 0,
+    "n_not_moved": 738,
+    "censor_rate_moved_through": null,
+    "censor_rate_not_moved": 0.0,
+    "gap": null,
+    "informative_flag": false,
+    "assumption": "IPCW is consistent only under non-informative censoring (cancel independent of fill time given covariates)"
+   }
+  },
+  "2026-04-27": {
+   "fit_days": [
+    "2026-04-19",
+    "2026-04-20",
+    "2026-04-21",
+    "2026-04-22",
+    "2026-04-23",
+    "2026-04-24",
+    "2026-04-25",
+    "2026-04-26"
+   ],
+   "n_fit_orders": 772,
+   "headline": false,
+   "by_horizon": {
+    "1": {
+     "base_rate_fit": 0.0816,
+     "n_rows": 15,
+     "n_uncensored": 15,
+     "censored": 0,
+     "calibration_slope": 1.4846596909846954,
+     "n": 15,
+     "weighted": true,
+     "observed_rate": 0.13333333333333333,
+     "brier": 0.11948400193734673,
+     "brier_ci95": [
+      0.0033347404225052336,
+      0.2922693535803296
+     ],
+     "baseline_brier": 0.11823125005592991,
+     "baseline_brier_ci95": [
+      0.00665957475368466,
+      0.2855887630092978
+     ],
+     "brier_model_minus_baseline": 0.0012527518814168248,
+     "brier_model_minus_baseline_ci95": [
+      -0.003361888293542353,
+      0.008773615585877756
+     ],
+     "reliability": [
+      {
+       "n": 3,
+       "mean_predicted": 0.03330303325183348,
+       "observed_rate": 0.0,
+       "observed_wilson95": [
+        0.0,
+        0.5615060804490177
+       ]
+      },
+      {
+       "n": 3,
+       "mean_predicted": 0.049691740847662445,
+       "observed_rate": 0.0,
+       "observed_wilson95": [
+        0.0,
+        0.5615060804490177
+       ]
+      },
+      {
+       "n": 3,
+       "mean_predicted": 0.05453965584669468,
+       "observed_rate": 0.3333333333333333,
+       "observed_wilson95": [
+        0.0614903152761605,
+        0.7923450448735121
+       ]
+      },
+      {
+       "n": 3,
+       "mean_predicted": 0.0658647228855953,
+       "observed_rate": 0.3333333333333333,
+       "observed_wilson95": [
+        0.0614903152761605,
+        0.7923450448735121
+       ]
+      },
+      {
+       "n": 3,
+       "mean_predicted": 0.09402616600331792,
+       "observed_rate": 0.0,
+       "observed_wilson95": [
+        0.0,
+        0.5615060804490177
+       ]
+      }
+     ]
+    },
+    "5": {
+     "base_rate_fit": 0.2241,
+     "n_rows": 15,
+     "n_uncensored": 15,
+     "censored": 0,
+     "calibration_slope": 2.2765880341255538,
+     "n": 15,
+     "weighted": true,
+     "observed_rate": 0.2,
+     "brier": 0.15466866272842428,
+     "brier_ci95": [
+      0.045372125941403205,
+      0.273365588162539
+     ],
+     "baseline_brier": 0.1605804853821579,
+     "baseline_brier_ci95": [
+      0.05021779108163979,
+      0.27094317968267606
+     ],
+     "brier_model_minus_baseline": -0.005911822653733634,
+     "brier_model_minus_baseline_ci95": [
+      -0.019120340071270968,
+      0.005610957746321449
+     ],
+     "reliability": [
+      {
+       "n": 3,
+       "mean_predicted": 0.14061669930528617,
+       "observed_rate": 0.0,
+       "observed_wilson95": [
+        0.0,
+        0.5615060804490177
+       ]
+      },
+      {
+       "n": 3,
+       "mean_predicted": 0.19027048077170683,
+       "observed_rate": 0.0,
+       "observed_wilson95": [
+        0.0,
+        0.5615060804490177
+       ]
+      },
+      {
+       "n": 3,
+       "mean_predicted": 0.20242339516715777,
+       "observed_rate": 0.3333333333333333,
+       "observed_wilson95": [
+        0.0614903152761605,
+        0.7923450448735121
+       ]
+      },
+      {
+       "n": 3,
+       "mean_predicted": 0.2287391758731984,
+       "observed_rate": 0.3333333333333333,
+       "observed_wilson95": [
+        0.0614903152761605,
+        0.7923450448735121
+       ]
+      },
+      {
+       "n": 3,
+       "mean_predicted": 0.26870777033846155,
+       "observed_rate": 0.3333333333333333,
+       "observed_wilson95": [
+        0.0614903152761605,
+        0.7923450448735121
+       ]
+      }
+     ]
+    },
+    "15": {
+     "base_rate_fit": 0.4598,
+     "n_rows": 15,
+     "n_uncensored": 15,
+     "censored": 0,
+     "calibration_slope": 2.2495935419721573,
+     "n": 15,
+     "weighted": true,
+     "observed_rate": 0.2,
+     "brier": 0.21959403419090096,
+     "brier_ci95": [
+      0.19321303977771173,
+      0.24724429565857414
+     ],
+     "baseline_brier": 0.22751919514617838,
+     "baseline_brier_ci95": [
+      0.2114570189803753,
+      0.2435813713119815
+     ],
+     "brier_model_minus_baseline": -0.007925160955277427,
+     "brier_model_minus_baseline_ci95": [
+      -0.031333739777605854,
+      0.016063221944103163
+     ],
+     "reliability": [
+      {
+       "n": 3,
+       "mean_predicted": 0.3671034649916747,
+       "observed_rate": 0.0,
+       "observed_wilson95": [
+        0.0,
+        0.5615060804490177
+       ]
+      },
+      {
+       "n": 3,
+       "mean_predicted": 0.44809782822212574,
+       "observed_rate": 0.0,
+       "observed_wilson95": [
+        0.0,
+        0.5615060804490177
+       ]
+      },
+      {
+       "n": 3,
+       "mean_predicted": 0.4516332056185728,
+       "observed_rate": 0.0,
+       "observed_wilson95": [
+        0.0,
+        0.5615060804490177
+       ]
+      },
+      {
+       "n": 3,
+       "mean_predicted": 0.47351345368018755,
+       "observed_rate": 1.0,
+       "observed_wilson95": [
+        0.43849391955098227,
+        1.0
+       ]
+      },
+      {
+       "n": 3,
+       "mean_predicted": 0.5295076030202889,
+       "observed_rate": 0.0,
+       "observed_wilson95": [
+        0.0,
+        0.5615060804490177
+       ]
+      }
+     ]
+    }
+   },
+   "censoring_check_fit": {
+    "horizon_s": 5,
+    "n": 772,
+    "n_moved_through": 0,
+    "n_not_moved": 772,
+    "censor_rate_moved_through": null,
+    "censor_rate_not_moved": 0.0,
+    "gap": null,
+    "informative_flag": false,
+    "assumption": "IPCW is consistent only under non-informative censoring (cancel independent of fill time given covariates)"
+   }
+  },
+  "2026-04-28": {
+   "fit_days": [
+    "2026-04-19",
+    "2026-04-20",
+    "2026-04-21",
+    "2026-04-22",
+    "2026-04-23",
+    "2026-04-24",
+    "2026-04-25",
+    "2026-04-26",
+    "2026-04-27"
+   ],
+   "n_fit_orders": 787,
+   "headline": false,
+   "by_horizon": {
+    "1": {
+     "base_rate_fit": 0.0826,
+     "n_rows": 43,
+     "n_uncensored": 43,
+     "censored": 0,
+     "calibration_slope": null,
+     "n": 43,
+     "weighted": true,
+     "observed_rate": 0.0,
+     "brier": 0.004265627928258312,
+     "brier_ci95": [
+      0.0030387085618874617,
+      0.005742200820920949
+     ],
+     "baseline_brier": 0.006821458613524409,
+     "baseline_brier_ci95": [
+      0.006821458613524409,
+      0.006821458613524409
+     ],
+     "brier_model_minus_baseline": -0.0025558306852660967,
+     "brier_model_minus_baseline_ci95": [
+      -0.0037827500516369474,
+      -0.0010792577926034609
+     ],
+     "reliability": [
+      {
+       "n": 9,
+       "mean_predicted": 0.027011957895594955,
+       "observed_rate": 0.0,
+       "observed_wilson95": [
+        0.0,
+        0.2991527535509594
+       ]
+      },
+      {
+       "n": 9,
+       "mean_predicted": 0.04234101100042514,
+       "observed_rate": 0.0,
+       "observed_wilson95": [
+        0.0,
+        0.2991527535509594
+       ]
+      },
+      {
+       "n": 9,
+       "mean_predicted": 0.058131257354732124,
+       "observed_rate": 0.0,
+       "observed_wilson95": [
+        0.0,
+        0.2991527535509594
+       ]
+      },
+      {
+       "n": 8,
+       "mean_predicted": 0.0699140604135361,
+       "observed_rate": 0.0,
+       "observed_wilson95": [
+        0.0,
+        0.3244156195108769
+       ]
+      },
+      {
+       "n": 8,
+       "mean_predicted": 0.10193914256804593,
+       "observed_rate": 0.0,
+       "observed_wilson95": [
+        0.0,
+        0.3244156195108769
+       ]
+      }
+     ]
+    },
+    "5": {
+     "base_rate_fit": 0.2236,
+     "n_rows": 43,
+     "n_uncensored": 43,
+     "censored": 0,
+     "calibration_slope": 1.260717033338262,
+     "n": 43,
+     "weighted": true,
+     "observed_rate": 0.046511627906976744,
+     "brier": 0.066958386414359,
+     "brier_ci95": [
+      0.0361497867408939,
+      0.10890376702440153
+     ],
+     "baseline_brier": 0.07572064997733817,
+     "baseline_brier_ci95": [
+      0.0500121898254514,
+      0.1142833402051683
+     ],
+     "brier_model_minus_baseline": -0.00876226356297917,
+     "brier_model_minus_baseline_ci95": [
+      -0.0170818451134497,
+      -0.0005640844139838369
+     ],
+     "reliability": [
+      {
+       "n": 9,
+       "mean_predicted": 0.10819080634423045,
+       "observed_rate": 0.0,
+       "observed_wilson95": [
+        0.0,
+        0.2991527535509594
+       ]
+      },
+      {
+       "n": 9,
+       "mean_predicted": 0.14302792975906098,
+       "observed_rate": 0.0,
+       "observed_wilson95": [
+        0.0,
+        0.2991527535509594
+       ]
+      },
+      {
+       "n": 9,
+       "mean_predicted": 0.20443720768074092,
+       "observed_rate": 0.2222222222222222,
+       "observed_wilson95": [
+        0.06322376231222723,
+        0.5474166563271946
+       ]
+      },
+      {
+       "n": 8,
+       "mean_predicted": 0.2338809213501233,
+       "observed_rate": 0.0,
+       "observed_wilson95": [
+        0.0,
+        0.3244156195108769
+       ]
+      },
+      {
+       "n": 8,
+       "mean_predicted": 0.2779947418698527,
+       "observed_rate": 0.0,
+       "observed_wilson95": [
+        0.0,
+        0.3244156195108769
+       ]
+      }
+     ]
+    },
+    "15": {
+     "base_rate_fit": 0.4549,
+     "n_rows": 43,
+     "n_uncensored": 43,
+     "censored": 0,
+     "calibration_slope": 1.451341527240859,
+     "n": 43,
+     "weighted": true,
+     "observed_rate": 0.11627906976744186,
+     "brier": 0.1900263502572538,
+     "brier_ci95": [
+      0.1622042181329307,
+      0.21659483775591368
+     ],
+     "baseline_brier": 0.21741696078007675,
+     "baseline_brier_ci95": [
+      0.20902477378796655,
+      0.22790719452021443
+     ],
+     "brier_model_minus_baseline": -0.027390610522822934,
+     "brier_model_minus_baseline_ci95": [
+      -0.05229075415369648,
+      -0.003077480821844409
+     ],
+     "reliability": [
+      {
+       "n": 9,
+       "mean_predicted": 0.2975141637017231,
+       "observed_rate": 0.1111111111111111,
+       "observed_wilson95": [
+        0.019890371327130535,
+        0.4350062147680601
+       ]
+      },
+      {
+       "n": 9,
+       "mean_predicted": 0.35385340052087544,
+       "observed_rate": 0.0,
+       "observed_wilson95": [
+        0.0,
+        0.2991527535509594
+       ]
+      },
+      {
+       "n": 9,
+       "mean_predicted": 0.44023253999153766,
+       "observed_rate": 0.2222222222222222,
+       "observed_wilson95": [
+        0.06322376231222723,
+        0.5474166563271946
+       ]
+      },
+      {
+       "n": 8,
+       "mean_predicted": 0.47382713145994004,
+       "observed_rate": 0.0,
+       "observed_wilson95": [
+        0.0,
+        0.3244156195108769
+       ]
+      },
+      {
+       "n": 8,
+       "mean_predicted": 0.5359762490112094,
+       "observed_rate": 0.25,
+       "observed_wilson95": [
+        0.07147768885802763,
+        0.5907301208974108
+       ]
+      }
+     ]
+    }
+   },
+   "censoring_check_fit": {
+    "horizon_s": 5,
+    "n": 787,
+    "n_moved_through": 0,
+    "n_not_moved": 787,
+    "censor_rate_moved_through": null,
+    "censor_rate_not_moved": 0.0,
+    "gap": null,
+    "informative_flag": false,
+    "assumption": "IPCW is consistent only under non-informative censoring (cancel independent of fill time given covariates)"
+   }
+  },
+  "2026-04-29": {
+   "fit_days": [
+    "2026-04-19",
+    "2026-04-20",
+    "2026-04-21",
+    "2026-04-22",
+    "2026-04-23",
+    "2026-04-24",
+    "2026-04-25",
+    "2026-04-26",
+    "2026-04-27",
+    "2026-04-28"
+   ],
+   "n_fit_orders": 830,
+   "headline": false,
+   "by_horizon": {
+    "1": {
+     "base_rate_fit": 0.0783,
+     "n_rows": 102,
+     "n_uncensored": 102,
+     "censored": 0,
+     "calibration_slope": 0.0039059549316446405,
+     "n": 102,
+     "weighted": true,
+     "observed_rate": 0.0196078431372549,
+     "brier": 0.021992251656200626,
+     "brier_ci95": [
+      0.003902563380336921,
+      0.047852056637542696
+     ],
+     "baseline_brier": 0.022669700773327195,
+     "baseline_brier_ci95": [
+      0.006132965597329079,
+      0.04747480353732437
+     ],
+     "brier_model_minus_baseline": -0.000677449117126569,
+     "brier_model_minus_baseline_ci95": [
+      -0.002266637804675591,
+      0.0012014647301502618
+     ],
+     "reliability": [
+      {
+       "n": 21,
+       "mean_predicted": 0.02644047923940685,
+       "observed_rate": 0.0,
+       "observed_wilson95": [
+        0.0,
+        0.15464382326420195
+       ]
+      },
+      {
+       "n": 21,
+       "mean_predicted": 0.0414593415051106,
+       "observed_rate": 0.047619047619047616,
+       "observed_wilson95": [
+        0.008455769471923294,
+        0.22669816586235464
+       ]
+      },
+      {
+       "n": 20,
+       "mean_predicted": 0.05373176651015617,
+       "observed_rate": 0.0,
+       "observed_wilson95": [
+        0.0,
+        0.16113012549493322
+       ]
+      },
+      {
+       "n": 20,
+       "mean_predicted": 0.06659453334167394,
+       "observed_rate": 0.05,
+       "observed_wilson95": [
+        0.008881219432873136,
+        0.23613589351256675
+       ]
+      },
+      {
+       "n": 20,
+       "mean_predicted": 0.10891488872181683,
+       "observed_rate": 0.0,
+       "observed_wilson95": [
+        0.0,
+        0.16113012549493322
+       ]
+      }
+     ]
+    },
+    "5": {
+     "base_rate_fit": 0.2145,
+     "n_rows": 102,
+     "n_uncensored": 102,
+     "censored": 0,
+     "calibration_slope": 1.255302259510045,
+     "n": 102,
+     "weighted": true,
+     "observed_rate": 0.1568627450980392,
+     "brier": 0.12542430370250818,
+     "brier_ci95": [
+      0.08305222761272121,
+      0.16888117796511445
+     ],
+     "baseline_brier": 0.1355740182558726,
+     "baseline_brier_ci95": [
+      0.09638195588875705,
+      0.17476608062298815
+     ],
+     "brier_model_minus_baseline": -0.010149714553364414,
+     "brier_model_minus_baseline_ci95": [
+      -0.023129273541565843,
+      0.0023036876635089292
+     ],
+     "reliability": [
+      {
+       "n": 21,
+       "mean_predicted": 0.10549853182981342,
+       "observed_rate": 0.14285714285714285,
+       "observed_wilson95": [
+        0.04980921798213492,
+        0.346364941492295
+       ]
+      },
+      {
+       "n": 21,
+       "mean_predicted": 0.14717034488572953,
+       "observed_rate": 0.14285714285714285,
+       "observed_wilson95": [
+        0.04980921798213492,
+        0.346364941492295
+       ]
+      },
+      {
+       "n": 20,
+       "mean_predicted": 0.18952540993323225,
+       "observed_rate": 0.05,
+       "observed_wilson95": [
+        0.008881219432873136,
+        0.23613589351256675
+       ]
+      },
+      {
+       "n": 20,
+       "mean_predicted": 0.22112445337587922,
+       "observed_rate": 0.15,
+       "observed_wilson95": [
+        0.05236779195949584,
+        0.36042329588695743
+       ]
+      },
+      {
+       "n": 20,
+       "mean_predicted": 0.29113634796732,
+       "observed_rate": 0.3,
+       "observed_wilson95": [
+        0.14547527396899385,
+        0.5189767762289793
+       ]
+      }
+     ]
+    },
+    "15": {
+     "base_rate_fit": 0.4373,
+     "n_rows": 102,
+     "n_uncensored": 102,
+     "censored": 0,
+     "calibration_slope": 1.275755803645475,
+     "n": 102,
+     "weighted": true,
+     "observed_rate": 0.4019607843137255,
+     "brier": 0.22845850953884442,
+     "brier_ci95": [
+      0.2061677631642626,
+      0.2514568075372251
+     ],
+     "baseline_brier": 0.24164066613726348,
+     "baseline_brier_ci95": [
+      0.2293562342922363,
+      0.2539250979822906
+     ],
+     "brier_model_minus_baseline": -0.013182156598419065,
+     "brier_model_minus_baseline_ci95": [
+      -0.02948710911010302,
+      0.003978769174669113
+     ],
+     "reliability": [
+      {
+       "n": 21,
+       "mean_predicted": 0.2901390462244025,
+       "observed_rate": 0.2857142857142857,
+       "observed_wilson95": [
+        0.13813675745628204,
+        0.49956773822837586
+       ]
+      },
+      {
+       "n": 21,
+       "mean_predicted": 0.35323569116114634,
+       "observed_rate": 0.42857142857142855,
+       "observed_wilson95": [
+        0.24469699486521043,
+        0.6345378370296754
+       ]
+      },
+      {
+       "n": 20,
+       "mean_predicted": 0.4172308078889719,
+       "observed_rate": 0.25,
+       "observed_wilson95": [
+        0.11186005278940309,
+        0.4687050099580636
+       ]
+      },
+      {
+       "n": 20,
+       "mean_predicted": 0.45329137443795864,
+       "observed_rate": 0.45,
+       "observed_wilson95": [
+        0.25819502085709295,
+        0.6579179916924003
+       ]
+      },
+      {
+       "n": 20,
+       "mean_predicted": 0.5346926594553515,
+       "observed_rate": 0.6,
+       "observed_wilson95": [
+        0.3865779423152061,
+        0.7811960325858074
+       ]
+      }
+     ]
+    }
+   },
+   "censoring_check_fit": {
+    "horizon_s": 5,
+    "n": 830,
+    "n_moved_through": 0,
+    "n_not_moved": 830,
+    "censor_rate_moved_through": null,
+    "censor_rate_not_moved": 0.0,
+    "gap": null,
+    "informative_flag": false,
+    "assumption": "IPCW is consistent only under non-informative censoring (cancel independent of fill time given covariates)"
+   }
+  },
+  "2026-04-30": {
+   "fit_days": [
+    "2026-04-19",
+    "2026-04-20",
+    "2026-04-21",
+    "2026-04-22",
+    "2026-04-23",
+    "2026-04-24",
+    "2026-04-25",
+    "2026-04-26",
+    "2026-04-27",
+    "2026-04-28",
+    "2026-04-29"
+   ],
+   "n_fit_orders": 932,
+   "headline": false,
+   "by_horizon": {
+    "1": {
+     "base_rate_fit": 0.0719,
+     "n_rows": 32,
+     "n_uncensored": 32,
+     "censored": 0,
+     "calibration_slope": 3.7173012694465974,
+     "n": 32,
+     "weighted": true,
+     "observed_rate": 0.03125,
+     "brier": 0.028518170542755444,
+     "brier_ci95": [
+      0.0014791587947440695,
+      0.08191712751585935
+     ],
+     "baseline_brier": 0.031924918031277054,
+     "baseline_brier_ci95": [
+      0.005167943782350015,
+      0.08543886652913114
+     ],
+     "brier_model_minus_baseline": -0.0034067474885216102,
+     "brier_model_minus_baseline_ci95": [
+      -0.004601117730887945,
+      -0.002328943464171439
+     ],
+     "reliability": [
+      {
+       "n": 7,
+       "mean_predicted": 0.018964420864506927,
+       "observed_rate": 0.0,
+       "observed_wilson95": [
+        0.0,
+        0.35433884297520657
+       ]
+      },
+      {
+       "n": 7,
+       "mean_predicted": 0.03036649943516356,
+       "observed_rate": 0.0,
+       "observed_wilson95": [
+        0.0,
+        0.35433884297520657
+       ]
+      },
+      {
+       "n": 6,
+       "mean_predicted": 0.038860366732360214,
+       "observed_rate": 0.0,
+       "observed_wilson95": [
+        0.0,
+        0.3903430336530645
+       ]
+      },
+      {
+       "n": 6,
+       "mean_predicted": 0.04574108519030736,
+       "observed_rate": 0.0,
+       "observed_wilson95": [
+        0.0,
+        0.3903430336530645
+       ]
+      },
+      {
+       "n": 6,
+       "mean_predicted": 0.0816468561288294,
+       "observed_rate": 0.16666666666666666,
+       "observed_wilson95": [
+        0.03005258587173032,
+        0.563509436563646
+       ]
+      }
+     ]
+    },
+    "5": {
+     "base_rate_fit": 0.2082,
+     "n_rows": 32,
+     "n_uncensored": 32,
+     "censored": 0,
+     "calibration_slope": 8.187910792469154,
+     "n": 32,
+     "weighted": true,
+     "observed_rate": 0.09375,
+     "brier": 0.07602989548453593,
+     "brier_ci95": [
+      0.017715991504256703,
+      0.15224999625601704
+     ],
+     "baseline_brier": 0.09804932859326937,
+     "baseline_brier_ci95": [
+      0.04332829855035089,
+      0.17101070198382728
+     ],
+     "brier_model_minus_baseline": -0.022019433108733444,
+     "brier_model_minus_baseline_ci95": [
+      -0.02832689092266221,
+      -0.011175788724124109
+     ],
+     "reliability": [
+      {
+       "n": 7,
+       "mean_predicted": 0.09120890227608827,
+       "observed_rate": 0.0,
+       "observed_wilson95": [
+        0.0,
+        0.35433884297520657
+       ]
+      },
+      {
+       "n": 7,
+       "mean_predicted": 0.11047227211133534,
+       "observed_rate": 0.0,
+       "observed_wilson95": [
+        0.0,
+        0.35433884297520657
+       ]
+      },
+      {
+       "n": 6,
+       "mean_predicted": 0.13815395406663772,
+       "observed_rate": 0.16666666666666666,
+       "observed_wilson95": [
+        0.03005258587173032,
+        0.563509436563646
+       ]
+      },
+      {
+       "n": 6,
+       "mean_predicted": 0.1542895187321091,
+       "observed_rate": 0.0,
+       "observed_wilson95": [
+        0.0,
+        0.3903430336530645
+       ]
+      },
+      {
+       "n": 6,
+       "mean_predicted": 0.18868940790928276,
+       "observed_rate": 0.3333333333333333,
+       "observed_wilson95": [
+        0.09676933255921683,
+        0.7000116786584712
+       ]
+      }
+     ]
+    },
+    "15": {
+     "base_rate_fit": 0.4335,
+     "n_rows": 32,
+     "n_uncensored": 32,
+     "censored": 0,
+     "calibration_slope": 4.06438318307504,
+     "n": 32,
+     "weighted": true,
+     "observed_rate": 0.3125,
+     "brier": 0.19254768501260752,
+     "brier_ci95": [
+      0.14250848044574763,
+      0.24594927802793812
+     ],
+     "baseline_brier": 0.22947903811085119,
+     "baseline_brier_ci95": [
+      0.2086904115014091,
+      0.25026766472029327
+     ],
+     "brier_model_minus_baseline": -0.03693135309824366,
+     "brier_model_minus_baseline_ci95": [
+      -0.06617839905261455,
+      -0.0034483988507830504
+     ],
+     "reliability": [
+      {
+       "n": 7,
+       "mean_predicted": 0.26481269845453975,
+       "observed_rate": 0.2857142857142857,
+       "observed_wilson95": [
+        0.0822171657090155,
+        0.6410709098517873
+       ]
+      },
+      {
+       "n": 7,
+       "mean_predicted": 0.302157383208427,
+       "observed_rate": 0.0,
+       "observed_wilson95": [
+        0.0,
+        0.35433884297520657
+       ]
+      },
+      {
+       "n": 6,
+       "mean_predicted": 0.34522862901339274,
+       "observed_rate": 0.0,
+       "observed_wilson95": [
+        0.0,
+        0.3903430336530645
+       ]
+      },
+      {
+       "n": 6,
+       "mean_predicted": 0.37904600656937726,
+       "observed_rate": 0.5,
+       "observed_wilson95": [
+        0.18761280689940868,
+        0.8123871931005913
+       ]
+      },
+      {
+       "n": 6,
+       "mean_predicted": 0.43653602450655055,
+       "observed_rate": 0.8333333333333334,
+       "observed_wilson95": [
+        0.43649056343635395,
+        0.9699474141282697
+       ]
+      }
+     ]
+    }
+   },
+   "censoring_check_fit": {
+    "horizon_s": 5,
+    "n": 932,
+    "n_moved_through": 0,
+    "n_not_moved": 932,
+    "censor_rate_moved_through": null,
+    "censor_rate_not_moved": 0.0,
+    "gap": null,
+    "informative_flag": false,
+    "assumption": "IPCW is consistent only under non-informative censoring (cancel independent of fill time given covariates)"
+   }
+  },
+  "2026-05-01": {
+   "fit_days": [
+    "2026-04-19",
+    "2026-04-20",
+    "2026-04-21",
+    "2026-04-22",
+    "2026-04-23",
+    "2026-04-24",
+    "2026-04-25",
+    "2026-04-26",
+    "2026-04-27",
+    "2026-04-28",
+    "2026-04-29",
+    "2026-04-30"
+   ],
+   "n_fit_orders": 964,
+   "headline": false,
+   "by_horizon": {
+    "1": {
+     "base_rate_fit": 0.0705,
+     "n_rows": 27,
+     "n_uncensored": 27,
+     "censored": 0,
+     "calibration_slope": null,
+     "n": 27,
+     "weighted": true,
+     "observed_rate": 0.0,
+     "brier": 0.0020182581831529886,
+     "brier_ci95": [
+      0.00138753538219079,
+      0.0027609853864394534
+     ],
+     "baseline_brier": 0.004975809645150738,
+     "baseline_brier_ci95": [
+      0.004975809645150738,
+      0.004975809645150738
+     ],
+     "brier_model_minus_baseline": -0.002957551461997749,
+     "brier_model_minus_baseline_ci95": [
+      -0.003588274262959948,
+      -0.0022148242587112844
+     ],
+     "reliability": [
+      {
+       "n": 6,
+       "mean_predicted": 0.01901524319023932,
+       "observed_rate": 0.0,
+       "observed_wilson95": [
+        0.0,
+        0.3903430336530645
+       ]
+      },
+      {
+       "n": 6,
+       "mean_predicted": 0.02685909267848686,
+       "observed_rate": 0.0,
+       "observed_wilson95": [
+        0.0,
+        0.3903430336530645
+       ]
+      },
+      {
+       "n": 5,
+       "mean_predicted": 0.041061772665751575,
+       "observed_rate": 0.0,
+       "observed_wilson95": [
+        0.0,
+        0.43449149475208104
+       ]
+      },
+      {
+       "n": 5,
+       "mean_predicted": 0.05423124762203563,
+       "observed_rate": 0.0,
+       "observed_wilson95": [
+        0.0,
+        0.43449149475208104
+       ]
+      },
+      {
+       "n": 5,
+       "mean_predicted": 0.06899992841275088,
+       "observed_rate": 0.0,
+       "observed_wilson95": [
+        0.0,
+        0.43449149475208104
+       ]
+      }
+     ]
+    },
+    "5": {
+     "base_rate_fit": 0.2044,
+     "n_rows": 27,
+     "n_uncensored": 26,
+     "censored": 1,
+     "calibration_slope": 5.088081287729424,
+     "n": 26,
+     "weighted": true,
+     "observed_rate": 0.037037037037037035,
+     "brier": 0.04825340672837339,
+     "brier_ci95": [
+      0.021774453978914973,
+      0.0942466357675882
+     ],
+     "baseline_brier": 0.06366121355425086,
+     "baseline_brier_ci95": [
+      0.041761720700401156,
+      0.10765543991146453
+     ],
+     "brier_model_minus_baseline": -0.015407806825877474,
+     "brier_model_minus_baseline_ci95": [
+      -0.021559409318251364,
+      -0.008654376511421397
+     ],
+     "reliability": [
+      {
+       "n": 6,
+       "mean_predicted": 0.09769463695698813,
+       "observed_rate": 0.0,
+       "observed_wilson95": [
+        0.0,
+        0.3903430336530645
+       ]
+      },
+      {
+       "n": 5,
+       "mean_predicted": 0.11839938472251343,
+       "observed_rate": 0.0,
+       "observed_wilson95": [
+        0.0,
+        0.43449149475208104
+       ]
+      },
+      {
+       "n": 5,
+       "mean_predicted": 0.15441462826794666,
+       "observed_rate": 0.0,
+       "observed_wilson95": [
+        0.0,
+        0.43449149475208104
+       ]
+      },
+      {
+       "n": 5,
+       "mean_predicted": 0.19743119608268817,
+       "observed_rate": 0.0,
+       "observed_wilson95": [
+        0.0,
+        0.43449149475208104
+       ]
+      },
+      {
+       "n": 5,
+       "mean_predicted": 0.23327549095322228,
+       "observed_rate": 0.19379844961240308,
+       "observed_wilson95": [
+        0.03622316096978745,
+        0.6244717358814613
+       ]
+      }
+     ]
+    },
+    "15": {
+     "base_rate_fit": 0.4295,
+     "n_rows": 27,
+     "n_uncensored": 26,
+     "censored": 1,
+     "calibration_slope": 3.859263786286962,
+     "n": 26,
+     "weighted": true,
+     "observed_rate": 0.037037037037037035,
+     "brier": 0.1481916091767435,
+     "brier_ci95": [
+      0.12360187059963197,
+      0.1732786616085644
+     ],
+     "baseline_brier": 0.18966153271261652,
+     "baseline_brier_ci95": [
+      0.1844363905580138,
+      0.20015840075574115
+     ],
+     "brier_model_minus_baseline": -0.041469923535873005,
+     "brier_model_minus_baseline_ci95": [
+      -0.06378364984535619,
+      -0.019350862303524917
+     ],
+     "reliability": [
+      {
+       "n": 6,
+       "mean_predicted": 0.26951630138851795,
+       "observed_rate": 0.0,
+       "observed_wilson95": [
+        0.0,
+        0.3903430336530645
+       ]
+      },
+      {
+       "n": 5,
+       "mean_predicted": 0.3164639833679767,
+       "observed_rate": 0.0,
+       "observed_wilson95": [
+        0.0,
+        0.43449149475208104
+       ]
+      },
+      {
+       "n": 5,
+       "mean_predicted": 0.37320712644258563,
+       "observed_rate": 0.0,
+       "observed_wilson95": [
+        0.0,
+        0.43449149475208104
+       ]
+      },
+      {
+       "n": 5,
+       "mean_predicted": 0.44380545161391527,
+       "observed_rate": 0.19379844961240308,
+       "observed_wilson95": [
+        0.03622316096978745,
+        0.6244717358814613
+       ]
+      },
+      {
+       "n": 5,
+       "mean_predicted": 0.4745522234928652,
+       "observed_rate": 0.0,
+       "observed_wilson95": [
+        0.0,
+        0.43449149475208104
+       ]
+      }
+     ]
+    }
+   },
+   "censoring_check_fit": {
+    "horizon_s": 5,
+    "n": 964,
+    "n_moved_through": 0,
+    "n_not_moved": 964,
+    "censor_rate_moved_through": null,
+    "censor_rate_not_moved": 0.0,
+    "gap": null,
+    "informative_flag": false,
+    "assumption": "IPCW is consistent only under non-informative censoring (cancel independent of fill time given covariates)"
+   }
+  },
+  "2026-05-02": {
+   "fit_days": [
+    "2026-04-19",
+    "2026-04-20",
+    "2026-04-21",
+    "2026-04-22",
+    "2026-04-23",
+    "2026-04-24",
+    "2026-04-25",
+    "2026-04-26",
+    "2026-04-27",
+    "2026-04-28",
+    "2026-04-29",
+    "2026-04-30",
+    "2026-05-01"
+   ],
+   "n_fit_orders": 991,
+   "headline": true,
+   "by_horizon": {
+    "1": {
+     "base_rate_fit": 0.0686,
+     "n_rows": 895,
+     "n_uncensored": 349,
+     "censored": 546,
+     "calibration_slope": null,
+     "n": 349,
+     "weighted": true,
+     "observed_rate": 0.0,
+     "brier": 0.0020800583786860297,
+     "brier_ci95": [
+      0.0017523251425595526,
+      0.0024743799660701966
+     ],
+     "baseline_brier": 0.004708369268929956,
+     "baseline_brier_ci95": [
+      0.004708369268929956,
+      0.004708369268929956
+     ],
+     "brier_model_minus_baseline": -0.0026283108902439263,
+     "brier_model_minus_baseline_ci95": [
+      -0.0029560441263704034,
+      -0.0022339893028597594
+     ],
+     "reliability": [
+      {
+       "n": 70,
+       "mean_predicted": 0.015405340381910352,
+       "observed_rate": 0.0,
+       "observed_wilson95": [
+        0.0,
+        0.05202487486728348
+       ]
+      },
+      {
+       "n": 70,
+       "mean_predicted": 0.021008966388231683,
+       "observed_rate": 0.0,
+       "observed_wilson95": [
+        0.0,
+        0.05202487486728348
+       ]
+      },
+      {
+       "n": 70,
+       "mean_predicted": 0.028514814160605913,
+       "observed_rate": 0.0,
+       "observed_wilson95": [
+        0.0,
+        0.05202487486728348
+       ]
+      },
+      {
+       "n": 70,
+       "mean_predicted": 0.04621321294144252,
+       "observed_rate": 0.0,
+       "observed_wilson95": [
+        0.0,
+        0.05202487486728348
+       ]
+      },
+      {
+       "n": 69,
+       "mean_predicted": 0.07805726203652653,
+       "observed_rate": 0.0,
+       "observed_wilson95": [
+        0.0,
+        0.05273909414400562
+       ]
+      }
+     ]
+    },
+    "5": {
+     "base_rate_fit": 0.1998,
+     "n_rows": 895,
+     "n_uncensored": 255,
+     "censored": 640,
+     "calibration_slope": 2.1059766140547653,
+     "n": 255,
+     "weighted": true,
+     "observed_rate": 0.0067828122848092535,
+     "brier": 0.03606272760329096,
+     "brier_ci95": [
+      0.03046584994627247,
+      0.0424373667437486
+     ],
+     "baseline_brier": 0.04399898013519119,
+     "baseline_brier_ci95": [
+      0.039926809438616075,
+      0.050269405503788646
+     ],
+     "brier_model_minus_baseline": -0.00793625253190023,
+     "brier_model_minus_baseline_ci95": [
+      -0.010885420787414975,
+      -0.004999430246664146
+     ],
+     "reliability": [
+      {
+       "n": 51,
+       "mean_predicted": 0.08108441555042535,
+       "observed_rate": 0.0,
+       "observed_wilson95": [
+        0.0,
+        0.07004901388726806
+       ]
+      },
+      {
+       "n": 51,
+       "mean_predicted": 0.12110872242791315,
+       "observed_rate": 0.0,
+       "observed_wilson95": [
+        0.0,
+        0.07004901388726806
+       ]
+      },
+      {
+       "n": 51,
+       "mean_predicted": 0.16706820139105732,
+       "observed_rate": 0.0,
+       "observed_wilson95": [
+        0.0,
+        0.07004901388726806
+       ]
+      },
+      {
+       "n": 51,
+       "mean_predicted": 0.2086501650443592,
+       "observed_rate": 0.018197511328490245,
+       "observed_wilson95": [
+        0.003469603253442241,
+        0.10304807675589372
+       ]
+      },
+      {
+       "n": 51,
+       "mean_predicted": 0.25912160167136017,
+       "observed_rate": 0.0157680014339096,
+       "observed_wilson95": [
+        0.003469603253442241,
+        0.10304807675589372
+       ]
+      }
+     ]
+    },
+    "15": {
+     "base_rate_fit": 0.4191,
+     "n_rows": 895,
+     "n_uncensored": 246,
+     "censored": 649,
+     "calibration_slope": 1.5898604199346928,
+     "n": 246,
+     "weighted": true,
+     "observed_rate": 0.030962402454907226,
+     "brier": 0.15238153596928936,
+     "brier_ci95": [
+      0.14296245597022436,
+      0.1627805284351891
+     ],
+     "baseline_brier": 0.18062271326371226,
+     "baseline_brier_ci95": [
+      0.17755261725037144,
+      0.18435948820441997
+     ],
+     "brier_model_minus_baseline": -0.02824117729442291,
+     "brier_model_minus_baseline_ci95": [
+      -0.03764199068829433,
+      -0.019043498508171264
+     ],
+     "reliability": [
+      {
+       "n": 50,
+       "mean_predicted": 0.24616146435254588,
+       "observed_rate": 0.0,
+       "observed_wilson95": [
+        0.0,
+        0.07135003417431873
+       ]
+      },
+      {
+       "n": 49,
+       "mean_predicted": 0.3084402098717976,
+       "observed_rate": 0.02024257065429974,
+       "observed_wilson95": [
+        0.003611579538530696,
+        0.10693768467754147
+       ]
+      },
+      {
+       "n": 49,
+       "mean_predicted": 0.37907794276257334,
+       "observed_rate": 0.058789274209533546,
+       "observed_wilson95": [
+        0.021039764955529186,
+        0.16520743422087725
+       ]
+      },
+      {
+       "n": 49,
+       "mean_predicted": 0.43161744312708106,
+       "observed_rate": 0.02024257065429974,
+       "observed_wilson95": [
+        0.003611579538530696,
+        0.10693768467754147
+       ]
+      },
+      {
+       "n": 49,
+       "mean_predicted": 0.5046671055885295,
+       "observed_rate": 0.056368595393903966,
+       "observed_wilson95": [
+        0.021039764955529186,
+        0.16520743422087725
+       ]
+      }
+     ]
+    }
+   },
+   "censoring_check_fit": {
+    "horizon_s": 5,
+    "n": 991,
+    "n_moved_through": 0,
+    "n_not_moved": 991,
+    "censor_rate_moved_through": null,
+    "censor_rate_not_moved": 0.0010090817356205853,
+    "gap": null,
+    "informative_flag": false,
+    "assumption": "IPCW is consistent only under non-informative censoring (cancel independent of fill time given covariates)"
+   }
+  }
+ },
+ "verdict": {
+  "horizon_s": 5,
+  "test_day": "2026-05-02",
+  "brier_reduction_vs_base_rate": 0.18037355655779552,
+  "brier_reduction_ok": true,
+  "folds_not_worse": "11/13",
+  "folds_not_worse_ok": true,
+  "calibration_slope": 2.1059766140547653,
+  "calibration_slope_ok": false,
+  "rule": "TOLERANCES.md: Brier on the test day >= 5 % below the base rate AND no worse than the base rate on >= 70 % of test days AND calibration slope 0.8-1.2",
+  "verdict": "NO IMPROVEMENT"
+ }
+}

@@ -1,0 +1,410 @@
+{
+ "day": "2026-05-02",
+ "snapshots_compared": 1,
+ "variants": {
+  "exact_message": {
+   "snapshots": 1,
+   "touch_price_match_pct": 0.0,
+   "touch_size_match_pct": 0.0,
+   "top10_level_match_pct": 0.0,
+   "extra": {
+    "crossed_events": 8415
+   },
+   "mismatch_examples": [
+    {
+     "ts": 1777766401.899,
+     "ref_touch": [
+      [
+       [
+        0.2503,
+        6079.49
+       ]
+      ],
+      [
+       [
+        0.2504,
+        47043.33
+       ]
+      ]
+     ],
+     "variant_touch": [
+      [
+       [
+        25020000,
+        1019195000000
+       ]
+      ],
+      [
+       [
+        25030000,
+        29999000000
+       ]
+      ]
+     ],
+     "last_messages": [
+      {
+       "ts": 1777766401.799,
+       "side": "bid",
+       "price": 0.2498,
+       "size": 215566.95,
+       "type": "modify"
+      },
+      {
+       "ts": 1777766401.799,
+       "side": "ask",
+       "price": 0.2504,
+       "size": 47772.38,
+       "type": "modify"
+      },
+      {
+       "ts": 1777766401.799,
+       "side": "ask",
+       "price": 0.2509,
+       "size": 24581.85,
+       "type": "modify"
+      }
+     ]
+    }
+   ]
+  },
+  "exact_frame": {
+   "snapshots": 1,
+   "touch_price_match_pct": 0.0,
+   "touch_size_match_pct": 0.0,
+   "top10_level_match_pct": 0.0,
+   "extra": {
+    "crossed_events": 0
+   },
+   "mismatch_examples": [
+    {
+     "ts": 1777766401.899,
+     "ref_touch": [
+      [
+       [
+        0.2503,
+        6079.49
+       ]
+      ],
+      [
+       [
+        0.2504,
+        47043.33
+       ]
+      ]
+     ],
+     "variant_touch": [
+      [
+       [
+        25020000,
+        1019195000000
+       ]
+      ],
+      [
+       [
+        25030000,
+        29999000000
+       ]
+      ]
+     ],
+     "last_messages": [
+      {
+       "ts": 1777766401.799,
+       "side": "bid",
+       "price": 0.2498,
+       "size": 215566.95,
+       "type": "modify"
+      },
+      {
+       "ts": 1777766401.799,
+       "side": "ask",
+       "price": 0.2504,
+       "size": 47772.38,
+       "type": "modify"
+      },
+      {
+       "ts": 1777766401.799,
+       "side": "ask",
+       "price": 0.2509,
+       "size": 24581.85,
+       "type": "modify"
+      }
+     ]
+    }
+   ]
+  },
+  "engine_tape_repair_on": {
+   "snapshots": 1,
+   "touch_price_match_pct": 0.0,
+   "touch_size_match_pct": 0.0,
+   "top10_level_match_pct": 0.0,
+   "extra": {
+    "trade_repairs": 120,
+    "crossed_events": 585,
+    "tape_repair": true
+   },
+   "mismatch_examples": [
+    {
+     "ts": 1777766401.899,
+     "ref_touch": [
+      [
+       [
+        0.2503,
+        6079.49
+       ]
+      ],
+      [
+       [
+        0.2504,
+        47043.33
+       ]
+      ]
+     ],
+     "variant_touch": [
+      [
+       [
+        25020000,
+        1019195000000
+       ]
+      ],
+      [
+       [
+        25030000,
+        29999000000
+       ]
+      ]
+     ],
+     "last_messages": [
+      {
+       "ts": 1777766401.799,
+       "side": "bid",
+       "price": 0.2498,
+       "size": 215566.95,
+       "type": "modify"
+      },
+      {
+       "ts": 1777766401.799,
+       "side": "ask",
+       "price": 0.2504,
+       "size": 47772.38,
+       "type": "modify"
+      },
+      {
+       "ts": 1777766401.799,
+       "side": "ask",
+       "price": 0.2509,
+       "size": 24581.85,
+       "type": "modify"
+      }
+     ]
+    }
+   ]
+  },
+  "engine_tape_repair_off": {
+   "snapshots": 1,
+   "touch_price_match_pct": 0.0,
+   "touch_size_match_pct": 0.0,
+   "top10_level_match_pct": 0.0,
+   "extra": {
+    "trade_repairs": 0,
+    "crossed_events": 859,
+    "tape_repair": false
+   },
+   "mismatch_examples": [
+    {
+     "ts": 1777766401.899,
+     "ref_touch": [
+      [
+       [
+        0.2503,
+        6079.49
+       ]
+      ],
+      [
+       [
+        0.2504,
+        47043.33
+       ]
+      ]
+     ],
+     "variant_touch": [
+      [
+       [
+        25020000,
+        1019195000000
+       ]
+      ],
+      [
+       [
+        25030000,
+        29999000000
+       ]
+      ]
+     ],
+     "last_messages": [
+      {
+       "ts": 1777766401.799,
+       "side": "bid",
+       "price": 0.2498,
+       "size": 215566.95,
+       "type": "modify"
+      },
+      {
+       "ts": 1777766401.799,
+       "side": "ask",
+       "price": 0.2504,
+       "size": 47772.38,
+       "type": "modify"
+      },
+      {
+       "ts": 1777766401.799,
+       "side": "ask",
+       "price": 0.2509,
+       "size": 24581.85,
+       "type": "modify"
+      }
+     ]
+    }
+   ]
+  },
+  "engine_frame_tape_repair_on": {
+   "snapshots": 1,
+   "touch_price_match_pct": 0.0,
+   "touch_size_match_pct": 0.0,
+   "top10_level_match_pct": 0.0,
+   "extra": {
+    "trade_repairs": 120,
+    "crossed_events": 0,
+    "tape_repair": true
+   },
+   "mismatch_examples": [
+    {
+     "ts": 1777766401.899,
+     "ref_touch": [
+      [
+       [
+        0.2503,
+        6079.49
+       ]
+      ],
+      [
+       [
+        0.2504,
+        47043.33
+       ]
+      ]
+     ],
+     "variant_touch": [
+      [
+       [
+        25020000,
+        1019195000000
+       ]
+      ],
+      [
+       [
+        25030000,
+        29999000000
+       ]
+      ]
+     ],
+     "last_messages": [
+      {
+       "ts": 1777766401.799,
+       "side": "bid",
+       "price": 0.2498,
+       "size": 215566.95,
+       "type": "modify"
+      },
+      {
+       "ts": 1777766401.799,
+       "side": "ask",
+       "price": 0.2504,
+       "size": 47772.38,
+       "type": "modify"
+      },
+      {
+       "ts": 1777766401.799,
+       "side": "ask",
+       "price": 0.2509,
+       "size": 24581.85,
+       "type": "modify"
+      }
+     ]
+    }
+   ]
+  },
+  "engine_frame_tape_repair_off": {
+   "snapshots": 1,
+   "touch_price_match_pct": 0.0,
+   "touch_size_match_pct": 0.0,
+   "top10_level_match_pct": 0.0,
+   "extra": {
+    "trade_repairs": 0,
+    "crossed_events": 0,
+    "tape_repair": false
+   },
+   "mismatch_examples": [
+    {
+     "ts": 1777766401.899,
+     "ref_touch": [
+      [
+       [
+        0.2503,
+        6079.49
+       ]
+      ],
+      [
+       [
+        0.2504,
+        47043.33
+       ]
+      ]
+     ],
+     "variant_touch": [
+      [
+       [
+        25020000,
+        1019195000000
+       ]
+      ],
+      [
+       [
+        25030000,
+        29999000000
+       ]
+      ]
+     ],
+     "last_messages": [
+      {
+       "ts": 1777766401.799,
+       "side": "bid",
+       "price": 0.2498,
+       "size": 215566.95,
+       "type": "modify"
+      },
+      {
+       "ts": 1777766401.799,
+       "side": "ask",
+       "price": 0.2504,
+       "size": 47772.38,
+       "type": "modify"
+      },
+      {
+       "ts": 1777766401.799,
+       "side": "ask",
+       "price": 0.2509,
+       "size": 24581.85,
+       "type": "modify"
+      }
+     ]
+    }
+   ]
+  }
+ },
+ "venue": "spot",
+ "pair": "ADAUSDT",
+ "event_order": "legacy",
+ "wall_s": 7.0,
+ "flag_below_99": true,
+ "flag_note": "touch price match of the engine book (tape repair on, the legacy default) is below 99%"
+}
