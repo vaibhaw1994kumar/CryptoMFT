@@ -3516,6 +3516,8 @@ class OMS:
     def _hedge_move(self, plan: ParentPlan, chain: HedgeLifecycle, to: HedgeState, ts_ns: int, reason: str, **kw: Any) -> None:
         frm = chain.state
         chain.move(to, ts_ns / 1e9, reason, **kw)
+        if to is not HedgeState.RETRYING:
+            self._hedge_retry_due.pop(chain.chain_id, None)      # a retry that was waiting is cancelled by whatever ended the wait (a late success included): no stale timer, no second hedge
         if self.observer is not None and to in (HedgeState.ESCALATED, HedgeState.UNWINDING):
             self.observer.chain_escalated(chain.chain_id, ts_ns / 1e9, reason or to.value)
         self.ledger.record("HEDGE_STATE", ts_ns, parent_id=plan.parent_id, chain_id=chain.chain_id, from_state=frm.value, to_state=to.value, reason=reason,

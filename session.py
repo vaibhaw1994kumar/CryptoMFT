@@ -275,8 +275,8 @@ class TradingSession:
 
             self.router.scoped_limits = scoped_rate_limiter(
                 {venue: cfg.instruments.get(venue, cfg.instrument_id).product_type for venue in cfg.venues},
-                cancel_reserve=float(rate_settings.get("cancel_reserve", 0.2)),
-                risk_reducing_reserve=float(rate_settings.get("risk_reducing_reserve", 0.1)),
+                quote_share=float(rate_settings.get("quote_share", 0.8)),
+                quote_min_free=int(rate_settings.get("quote_min_free", 2)),
             )
         # Financing engines and their journal come before the OMS: on a restart
         # the OMS re-reserves risk for open plans, and a sell leg financed by a
@@ -322,6 +322,7 @@ class TradingSession:
         if layer_risk_mode == "enforce" and not self._intent_journal:
             raise ValueError("layer_risk_mode='enforce' needs the execution layer (intent_journal=True): refusing to run without the gate")
         self.layer_risk_mode = layer_risk_mode
+        self.quotes_skipped_rate_limit = 0
         self.quotes_withdrawn = 0
         if layer_route_mode not in ("count", "enforce"):
             raise ValueError("layer_route_mode must be count or enforce")
@@ -669,6 +670,11 @@ class TradingSession:
             if maker_venue is None:
                 raise ValueError(f"FILL_TRIGGERED needs a maker venue: none of maker_venues {self.maker_venues} is a venue of the opportunity ({opportunity.buy_venue}, {opportunity.sell_venue})")
         if self.risk_gate_mode != "off" and not self._risk_gate_allows(opportunity, maker_venue, now):
+            return None
+        if maker_venue is not None and not self.oms.router.quote_has_room(maker_venue, opportunity.instrument_id, now):
+            self.quotes_skipped_rate_limit += 1          # owner 12 Nov (the 2f finding): the quote share of the rate-limit window is used up: this quote is SKIPPED (no plan, nothing queued, nothing retried); hedges, unwinds, flattens and cancels keep the whole window
+            if self.quotes_skipped_rate_limit <= 200:
+                self.ledger.record("QUOTE_SKIPPED_RATE_LIMIT", now, opportunity_id=opportunity.opportunity_id, venue=maker_venue)
             return None
         plan = self.oms.execute(opportunity, self.books, dispatch_ts_ns=dispatch_ts, maker_venue=maker_venue)
         if hasattr(strategy, "on_plan_closed"):

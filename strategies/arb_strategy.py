@@ -354,6 +354,7 @@ class CrossVenueArbStrategy:
         self._last_signal_ts = 0.0
         self.fill_model_v1 = fill_model_v1
 
+        self.clip_binding: dict[str, int] = {"depth": 0, "inventory": 0, "clip": 0}
         self.rejects: dict[str, int] = {
             "not_ready": 0, "stale": 0, "crossed": 0, "wide_spread": 0,
             "toxic": 0, "no_edge": 0, "stale_touch": 0, "no_depth": 0,
@@ -740,6 +741,8 @@ class CrossVenueArbStrategy:
         if qty * buy_px < cfg.min_clip_notional:
             self.rejects["clip_too_small"] += 1
             return None
+        which = "depth" if depth_cap < min(inv_cap, clip_cap) else "inventory" if inv_cap < min(depth_cap, clip_cap) else "clip"      # which cap sized this signal (owner 12 Nov, the EMS path coverage table); a counter read by nothing else
+        self.clip_binding[which] = self.clip_binding.get(which, 0) + 1
 
         # Limit prices bound how far the book may move during flight before we
         # decline the fill. Without them the sim would fill at any price and

@@ -267,6 +267,75 @@ def stage_trace(events: Iterable[Mapping[str, Any]], market: Iterable[tuple[floa
     return sorted(rows, key=lambda r: (r["ts"], r["stage"]))
 
 
+# ---- EMS path coverage (owner 12 Nov, v1_9_TOLERANCES.md section J) -----------------------------------------------------------------------------------------------------------------------------------------
+def ems_path_coverage(events: list[Mapping[str, Any]], journal: list[Mapping[str, Any]], children: list[Any], hedge_order_ids: set[str], executor_diag: Mapping[str, float], clip_binding: Mapping[str, int],
+                      ticks: Mapping[str, Any], lifecycle_rows: list[Mapping[str, Any]], layer_config: Mapping[str, Any] | None) -> dict[str, Any]:
+    """The count of every EMS path that occurred in a run, from the ledger, the layer journal and the orders themselves, plus the per-order checks (tactic and placement J2, tick and non-loosening rounding J3).
+    Every path is listed; a path that did not occur has count 0 and the note "not exercised in this run" (never omitted). `children` are the plans' ChildOrder objects."""
+    from collections import Counter
+    from decimal import Decimal
+    ev = Counter(e["event_type"] for e in events)
+    states = Counter(r["to"] for r in journal if r.get("event") == "state")
+    hedge_to = Counter(e.get("to_state") for e in events if e["event_type"] == "HEDGE_STATE")
+    makers = [c for c in children if c.post_only and c.order_role == "PRIMARY"]
+    hedges = [c for c in children if c.order_id in hedge_order_ids]
+    unwinds = [c for c in children if c.order_role == "UNWIND"]
+    full = sum(1 for h in hedges if h.filled_quantity >= h.quantity > 0)
+    zero = sum(1 for h in hedges if h.filled_quantity == 0)
+    cap_events = ev.get("HEDGE_CAP_SIZE_AWARE", 0)
+    paths: dict[str, Any] = {
+        "intent_states": {s: states.get(s, 0) for s in ("accepted", "working", "partially_done", "done", "escalated", "failed", "unknown")},
+        "maker_placed": len(makers), "maker_clipped_by_hedge_depth": clip_binding.get("depth", 0), "maker_sized_by_inventory": clip_binding.get("inventory", 0), "maker_sized_by_clip": clip_binding.get("clip", 0),
+        "maker_withdrawn_on_event": ev.get("QUOTE_WITHDRAWN", 0), "maker_expired_at_lifetime": ev.get("ORDER_LIFETIME_EXPIRED", 0),
+        "maker_cancel_while_submitted": sum(1 for r in lifecycle_rows if r.get("cancel_while_sent")),
+        "hedge_ioc_full": full, "hedge_ioc_partial": len(hedges) - full - zero, "hedge_ioc_zero": zero, "hedge_retry": hedge_to.get("RETRYING", 0),
+        "query_before_replace": ev.get("VENUE_ORDER_QUERY", 0), "unwind_intents": ev.get("UNWIND_INTENT", 0), "unwind_orders": len(unwinds), "flatten_market_banded": ev.get("BREAKER_FLATTEN", 0),
+        "gate_refused_or_would_refuse": ev.get("RISK_GATE_REFUSED", 0) + ev.get("RISK_GATE_WOULD_REFUSE", 0), "breaker_trip": ev.get("BREAKER_TRIP", 0), "breaker_alarm": ev.get("BREAKER_ALARM", 0),
+        "margin_pause": ev.get("MARGIN_PRICE_PAUSE", 0), "margin_resume": ev.get("MARGIN_PRICE_RESUME", 0), "lot_residual": ev.get("HEDGE_LOT_RESIDUAL", 0), "lot_residual_alarm": ev.get("HEDGE_LOT_RESIDUAL_ALARM", 0),
+        "rate_limit_deferral": ev.get("CHILD_DISPATCH_THROTTLED", 0) + ev.get("PACKAGE_DISPATCH_THROTTLED", 0), "quote_skipped_rate_limit": ev.get("QUOTE_SKIPPED_RATE_LIMIT", 0), "duplicate_updates_suppressed": ev.get("ORDER_UPDATE_DUPLICATE_SUPPRESSED", 0),
+        "late_fills_after_cancel": sum(1 for r in lifecycle_rows for f in r.get("fills", []) if r.get("cancel_conf_ts") is not None and f[0] >= r["cancel_conf_ts"]),
+        "fills_during_cancel_pending": sum(1 for r in lifecycle_rows for f in r.get("fills", []) if r.get("cancel_req_ts") is not None and f[0] >= r["cancel_req_ts"] and (r.get("cancel_conf_ts") is None or f[0] < r["cancel_conf_ts"])),
+        "participation_cap_would_bind": int(executor_diag.get("participation_cap_would_bind", 0)), "hedge_cap_size_aware": cap_events, "hedge_cap_touch_slack": max(0, ev.get("HEDGE_SUBMIT", 0) - cap_events),
+        "amend_requested": ev.get("AMEND_REQUESTED", 0), "restart_gate_held": ev.get("NEW_RISK_HELD_RESTART_RECONCILIATION", 0), "reconciliation_disagreement": ev.get("RECONCILIATION_DISAGREEMENT", 0),
+        "kill_switch_transitions": ev.get("KILL_SWITCH_STATE_TRANSITION", 0), "hedge_alarm": ev.get("HEDGE_ALARM", 0), "unwind_exhausted_alarm": ev.get("UNWIND_EXHAUSTED_ALARM", 0),
+    }
+    out = {"paths": paths, "not_exercised": sorted(k for k, v in paths.items() if v == 0 or (isinstance(v, dict) and not any(v.values()))), "note_zero": "count 0 = not exercised in this run (listed, never omitted)"}
+    # J2: tactic and placement of every order
+    tactic_rows, tactic_violations = [], []
+    for c in children:
+        if c.order_id in hedge_order_ids:
+            tactic = "IOC_CAPPED"; ok = c.time_in_force == "IOC" and c.order_type == "LIMIT"
+        elif c.order_role == "UNWIND":
+            tactic = "MARKET_BANDED"; ok = True
+        elif c.post_only and c.order_role == "PRIMARY":
+            tactic = "PASSIVE"; ok = c.time_in_force == "GTC"
+        else:
+            tactic, ok = "OTHER", c.order_role != "PRIMARY"
+        tactic_rows.append(tactic)
+        if not ok:
+            tactic_violations.append({"order_id": c.order_id, "tactic": tactic, "role": c.order_role, "tif": c.time_in_force, "type": c.order_type})
+    out["tactic_by_order"] = dict(Counter(tactic_rows))
+    out["tactic_violations"] = tactic_violations
+    out["placement"] = (layer_config or {}).get("primary", {}).get("placement")
+    out["tactic_choice"] = "refused for the arb pairing maker_taker (ExecutionConfig: tactic_choice is never set with maker_taker)"
+    # J3: no off-tick price; the size-aware caps equal the non-loosening grid rule
+    off_tick = []
+    for c in children:
+        if c.limit_price is None:
+            continue
+        tick = Decimal(str(ticks.get(c.venue.lower(), ticks.get(c.venue, 0)) or 0))
+        if tick > 0 and Decimal(str(c.limit_price)) % tick != 0:
+            off_tick.append({"order_id": c.order_id, "venue": c.venue, "price": str(c.limit_price), "tick": str(tick)})
+    loosened = []
+    for e in events:
+        if e["event_type"] == "HEDGE_CAP_SIZE_AWARE" and e.get("cap") is not None and e.get("touch") is not None:
+            cap, touch = Decimal(str(e["cap"])), Decimal(str(e["touch"]))
+            if (e["side"] == "BUY" and cap < touch) or (e["side"] == "SELL" and cap > touch):
+                loosened.append({"event": "cap on the wrong side of the touch", "cap": str(cap), "touch": str(touch)})
+    out["checks"] = {"orders_checked": len(children), "off_tick": off_tick, "cap_on_the_wrong_side_of_touch": loosened, "pass": not off_tick and not loosened and not tactic_violations}
+    return out
+
+
 # ---- lifecycle report by regime (owner 12 Nov, EMS note section 6; definitions in out/integration/v1_9_TOLERANCES.md section D) ----------------------------------------------------------------------------
 REGIME_DIMS = ("volatility", "spread", "liquidity")
 _TERCILE = ("low", "mid", "high")
@@ -324,7 +393,11 @@ def lifecycle_report(orders: list[Mapping[str, Any]], pairs: list[Mapping[str, A
         filled = sum(1 for r in rows if r.get("fills"))
         races_a = sum(1 for r in rows for f in r.get("fills", []) if r.get("cancel_req_ts") is not None and f[0] >= r["cancel_req_ts"] and (r.get("cancel_conf_ts") is None or f[0] < r["cancel_conf_ts"]))
         races_c = sum(1 for r in rows for f in r.get("fills", []) if r.get("cancel_conf_ts") is not None and f[0] >= r["cancel_conf_ts"])
-        return {"quotes_placed": n, "quotes_filled": filled, "fill_rate": (filled / n) if n >= min_bucket else None, "withdrawn": sum(1 for r in rows if r.get("withdrawn")),
+        spreads = sorted(float(r["entry_spread_bps"]) for r in rows if r.get("entry_spread_bps") is not None)
+        pnl = [float(r["net_pnl_usdt"]) for r in rows if r.get("net_pnl_usdt") is not None]
+        extra = {"matched_entry_spread_bps": ({"n": len(spreads), "p50": quantile(spreads, 0.5), "min": spreads[0], "max": spreads[-1]} if spreads else {"n": 0}),
+                 "lifecycle_net_pnl_usdt": {"n_quotes_with_pnl": len(pnl), "sum": sum(pnl) if pnl else None}, "label_pnl": "EXPLORATORY, mechanics only: mark = mid, no funding"}
+        return {**extra, "quotes_placed": n, "quotes_filled": filled, "fill_rate": (filled / n) if n >= min_bucket else None, "withdrawn": sum(1 for r in rows if r.get("withdrawn")),
                 "fills_during_cancel_pending": races_a, "cancel_while_submitted": sum(1 for r in rows if r.get("cancel_while_sent")), "late_fills_after_cancel": races_c,
                 **({} if n >= min_bucket else {"note": f"n < {min_bucket}: counts only, no rate"})}
 

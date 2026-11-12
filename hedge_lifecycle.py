@@ -44,7 +44,7 @@ TRANSITIONS: dict[HedgeState, frozenset[HedgeState]] = {
     _H.SUBMITTED: frozenset({_H.PARTIALLY_FILLED, _H.HEDGED, _H.REJECTED, _H.UNKNOWN, _H.ESCALATED}),
     _H.PARTIALLY_FILLED: frozenset({_H.PARTIALLY_FILLED, _H.HEDGED, _H.RETRYING, _H.UNWINDING, _H.UNKNOWN, _H.ESCALATED}),
     _H.REJECTED: frozenset({_H.RETRYING, _H.UNWINDING, _H.ESCALATED}),
-    _H.RETRYING: frozenset({_H.SUBMITTED, _H.UNKNOWN, _H.UNWINDING, _H.ESCALATED}),
+    _H.RETRYING: frozenset({_H.SUBMITTED, _H.UNKNOWN, _H.UNWINDING, _H.ESCALATED, _H.PARTIALLY_FILLED, _H.HEDGED}),     # a late success of an earlier child (a ghost hedge executed after the reject or the timeout that decided the retry) covers the exposure while the retry is still waiting: found by the 2d scenario replay (owner 12 Nov)
     _H.UNKNOWN: frozenset({_H.SUBMITTED, _H.PARTIALLY_FILLED, _H.HEDGED, _H.REJECTED, _H.RETRYING, _H.UNWINDING, _H.ESCALATED, _H.FAILED}),
     _H.UNWINDING: frozenset({_H.UNWINDING, _H.UNKNOWN, _H.ESCALATED, _H.RECONCILED, _H.FAILED}),
     _H.ESCALATED: frozenset({_H.UNWINDING, _H.UNKNOWN, _H.FAILED}),

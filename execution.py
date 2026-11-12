@@ -993,11 +993,15 @@ class StrategyDirectedRouter:
                 "RISK_REDUCING" if instruction.risk_reducing else "NEW_RISK", instruction.created_ts_ns,
             )
             if scoped is not None and not scoped.admitted:
-                # No override: even a risk-reducing order cannot exceed a venue limit.
+                # No override: even a risk-reducing order cannot exceed a venue limit. Owner 12 Nov (the 2f finding): our own limiter never REFUSES a risk-reducing order (a hedge, an unwind, a flatten): it queues it with priority
+                # until the window allows; a NEW quote that does not fit its share is refused and skipped (never queued, never retried by the router).
                 limit_bound = True
                 reasons.append("scoped_rate_limited")
                 self.scoped_limits.note_throttle(scoped)
-                if status.rate_limit_policy == RateLimitPolicy.REJECT or action == ThrottleAction.REJECT:
+                if instruction.risk_reducing:
+                    action = ThrottleAction.QUEUE
+                    candidate_release_ts = max(candidate_release_ts or 0, scoped.next_free_ns)
+                elif status.rate_limit_policy == RateLimitPolicy.REJECT or action == ThrottleAction.REJECT or not instruction.reduce_only:
                     action = ThrottleAction.REJECT
                     candidate_release_ts = None
                 else:
@@ -1310,7 +1314,7 @@ class StrategyDirectedRouter:
         self._pending = []
         for pending in sorted(
             current,
-            key=lambda item: (item.release_ts_ns, item.queue_ordinal, item.route_id),
+            key=lambda item: (item.release_ts_ns, 0 if self._request_tier(item.request) != "NEW_RISK" else 1, item.queue_ordinal, item.route_id),      # urgent requests (hedge, unwind, flatten, cancel) go first at the same release time
         ):
             if pending.release_ts_ns > now_ns:
                 self._pending.append(pending)
@@ -1654,6 +1658,12 @@ class StrategyDirectedRouter:
         """A request carries no risk flag of its own: a reduce-only order is risk-reducing, and so is a request the strategy's instruction marked risk-reducing (a hedge: it was admitted in the risk-reducing tier at routing and must be
         sent in that tier too; owner 12 Nov, the rate-limit pressure test found a hedge refused at send time as new risk)."""
         return "RISK_REDUCING" if (request.reduce_only or request.request_id in self._risk_reducing_requests) else "NEW_RISK"
+
+    def quote_has_room(self, venue: str, instrument_id: str, ts_ns: int) -> bool:
+        """Owner 12 Nov: does a NEW quote fit its share of the rate-limit windows right now (at most `quote_share` of each window and `quote_min_free` requests left free)? Read-only, charges nothing. True when there is no scoped
+        limiter. The session asks it BEFORE a quote is built: a quote that does not fit is skipped, never queued and never retried by the router."""
+        decision = self._scoped_check(venue, instrument_id, "SUBMIT", "NEW_RISK", ts_ns)
+        return decision is None or decision.admitted
 
     def _scoped_check(self, venue: str, instrument_id: str, action: str, tier: str, ts_ns: int):
         if self.scoped_limits is None:

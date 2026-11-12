@@ -7,9 +7,12 @@ whether every bucket it touches has room.
 
 Priority tiers, per bucket (a request may use up to its tier's share of capacity):
 
-    NEW_RISK        capacity x (1 - cancel_reserve - risk_reducing_reserve)
-    RISK_REDUCING   capacity x (1 - cancel_reserve)
+    NEW_RISK        capacity x quote_share (0.8), and at least quote_min_free (2) requests left free
+    RISK_REDUCING   capacity            (hedges, unwinds, flattens)
     CANCEL          capacity            (cancels and order queries: recovery traffic)
+
+(Owner 12 Nov, the 2f finding: urgent actions have the whole window, new quotes have 80% of it and always leave room for two requests; the router queues a risk-reducing request with priority
+instead of refusing it, and skips a quote that does not fit its share.)
 
 Nothing may exceed full capacity, not even a risk-reducing order: the venue would
 answer with 429s or a ban. A request is admitted only if every bucket it touches
@@ -71,14 +74,14 @@ class Bucket:
         while self._spent and self._spent[0][0] <= now_ns - self.interval_ns:
             self.used -= self._spent.popleft()[1]
 
-    def room(self, now_ns: int, cost: int, share: float) -> bool:
+    def room(self, now_ns: int, cost: int, share: float, min_free: int = 0) -> bool:
         self._expire(now_ns)
-        return self.used + cost <= int(self.limit * share)
+        return self.used + cost <= int(self.limit * share) and self.used + cost + min_free <= self.limit
 
-    def next_free_ns(self, now_ns: int, cost: int, share: float) -> int:
-        """Earliest time ``cost`` fits within ``share`` of the limit."""
+    def next_free_ns(self, now_ns: int, cost: int, share: float, min_free: int = 0) -> int:
+        """Earliest time ``cost`` fits within ``share`` of the limit (and leaves ``min_free`` requests free)."""
         self._expire(now_ns)
-        allowed, used = int(self.limit * share), self.used
+        allowed, used = min(int(self.limit * share), self.limit - min_free), self.used
         if used + cost <= allowed:
             return now_ns
         for ts, spent in self._spent:
@@ -101,13 +104,14 @@ class Decision:
 
 
 class ScopedRateLimiter:
-    def __init__(self, limits: dict[tuple[str, str], Iterable], *, cancel_reserve: float = 0.2,
-                 risk_reducing_reserve: float = 0.1) -> None:
-        if not 0 <= cancel_reserve < 1 or not 0 <= risk_reducing_reserve or cancel_reserve + risk_reducing_reserve >= 1:
-            raise ValueError("reserves must be fractions with cancel_reserve + risk_reducing_reserve < 1")
-        self.shares = {NEW_RISK: 1 - cancel_reserve - risk_reducing_reserve,
-                       RISK_REDUCING: 1 - cancel_reserve, CANCEL: 1.0}
-        self.cancel_reserve, self.risk_reducing_reserve = cancel_reserve, risk_reducing_reserve
+    def __init__(self, limits: dict[tuple[str, str], Iterable], *, quote_share: float = 0.8, quote_min_free: int = 2) -> None:
+        """Owner 12 Nov (the 2f finding): new quotes may use at most `quote_share` of each window and must leave at least `quote_min_free` requests free, so urgent actions always have room. Hedges, unwinds, flattens and cancels
+        have the whole window (tiers RISK_REDUCING and CANCEL: share 1.0, nothing held back): the router never refuses them, it queues them with priority until the window allows (see StrategyDirectedRouter)."""
+        if not 0 < quote_share <= 1 or quote_min_free < 0:
+            raise ValueError("quote_share is a fraction in (0, 1] and quote_min_free is a count >= 0")
+        self.shares = {NEW_RISK: quote_share, RISK_REDUCING: 1.0, CANCEL: 1.0}
+        self.min_free = {NEW_RISK: quote_min_free, RISK_REDUCING: 0, CANCEL: 0}
+        self.quote_share, self.quote_min_free = quote_share, quote_min_free
         self.buckets: dict[tuple[str, ...], Bucket] = {}
         self._by_route: dict[tuple[str, str], list[tuple[Bucket, dict[str, int]]]] = {}
         self.throttled: dict[str, int] = {"DOCUMENTED": 0, "ASSUMED": 0}
@@ -136,12 +140,12 @@ class ScopedRateLimiter:
                 if costs.get(action)]
 
     def check(self, venue: str, product: str, action: str, tier: str, now_ns: int) -> Decision:
-        share = self.shares[tier]
+        share, min_free = self.shares[tier], self.min_free[tier]
         touched = self._touched(venue, product, action)
-        binding = next((bucket for bucket, cost in touched if not bucket.room(now_ns, cost, share)), None)
+        binding = next((bucket for bucket, cost in touched if not bucket.room(now_ns, cost, share, min_free)), None)
         if binding is None:
             return Decision(True, tier)
-        free = max(bucket.next_free_ns(now_ns, cost, share) for bucket, cost in touched)
+        free = max(bucket.next_free_ns(now_ns, cost, share, min_free) for bucket, cost in touched)
         return Decision(False, tier, binding, free)
 
     def charge(self, venue: str, product: str, action: str, now_ns: int) -> None:
@@ -160,7 +164,7 @@ class ScopedRateLimiter:
             rows.append({"key": "|".join(key), "scope": bucket.scope, "name": bucket.name, "limit": bucket.limit,
                          "interval_ns": bucket.interval_ns, "used": bucket.used, "status": bucket.status,
                          "utilization": bucket.used / bucket.limit if bucket.limit else 1.0})
-        return {"cancel_reserve": self.cancel_reserve, "risk_reducing_reserve": self.risk_reducing_reserve,
+        return {"quote_share": self.quote_share, "quote_min_free": self.quote_min_free,
                 "buckets": rows, "throttled_by_status": dict(self.throttled),
                 "cancels_delayed": self.cancels_delayed, "over_limit_sent": self.over_limit_sent,
                 "max_utilization": max((row["utilization"] for row in rows), default=0.0)}

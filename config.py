@@ -44,8 +44,8 @@ class AppConfig:
     execution_mode: str = "INTERNAL_SIMULATION"
     # Where the config came from: 'profile:<name>' (raw_config_from_profile, which applies the safe-config checks) or 'config_file'. Real orders (VENUE_TESTNET) are refused for anything but a profile.
     origin: str = "config_file"
-    # oms.rate_limits: scoped venue rate limits (EMS02): enabled, cancel_reserve,
-    # risk_reducing_reserve. Empty = defaults (enabled, 0.2, 0.1).
+    # oms.rate_limits: scoped venue rate limits (EMS02): enabled, quote_share, quote_min_free (owner 12 Nov: new quotes use at most quote_share of each window and leave quote_min_free requests free;
+    # hedges, unwinds, flattens and cancels have the whole window). Empty = defaults (enabled, 0.8, 2).
     rate_limits: dict[str, Any] = field(default_factory=dict)
     strategies: dict[str, Any] = field(default_factory=dict)
     inventory_policy: InventoryPolicy = field(default_factory=InventoryPolicy)
