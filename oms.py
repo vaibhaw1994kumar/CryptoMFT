@@ -3,7 +3,8 @@ from __future__ import annotations
 from decimal import Decimal
 import json
 from pathlib import Path
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
+from dataclasses import replace
 from typing import Any
 
 from .economics import EconomicEventType
@@ -29,7 +30,7 @@ from .risk import (
     PreTradeDecision, ReconciliationReport, RiskEngine, VenueRiskSnapshot,
 )
 from .alignment import CrossVenueEligibilityPolicy
-from .plan_store import ParentPlanStore, VenueOrderSnapshot
+from .plan_store import ParentPlanStore, VenueAccountSnapshot, VenueOrderSnapshot
 from .execution import (
     CanonicalOrderUpdate,
     CanonicalOrderRequest,
@@ -350,6 +351,9 @@ class OMS:
         # Resting-order lifetime (Phase D, D5c; profile arb.maker_max_age_s, MANDATORY there): a post-only order is cancelled this long after the venue accepted it. None = no lifetime (every other caller).
         self.order_lifetime_ns: int | None = None
         self._lifetime_deadlines: dict[str, int] = {}
+        # Report deadline for a sent post-only quote (case 2l, the maker gateway outage): off, a quote whose submit or ack is lost stays SENT with no deadline until some other event looks at it (565 s in the
+        # 2l replay); on, it is watched from the moment it is sent, like any order whose state is unknown: queried after the report timeout, never resent, timed out and the kill switch after max_queries.
+        self.maker_ack_deadline = self.order_timeout_policy.maker_ack_deadline      # owner 13 Nov: from the policy (config oms.timeouts.maker_ack_deadline); tests and scenarios may still set the attribute
         self.alignment_rejections = 0
         self.plans: dict[str, ParentPlan] = (
             self.plan_store.load_all() if self.plan_store is not None else {}
@@ -362,6 +366,7 @@ class OMS:
         # while down are booked once there, the hedge they trigger is sent there). With restart_reconcile_gate on (default off: no caller before the live runtime restarts anything) no NEW risk is taken while any is.
         self.restart_reconcile_gate = False
         self._restart_unreconciled: set[str] = {pid for pid, plan in self.plans.items() if plan.state != PlanState.CLOSED}
+        self._restart_account_problems: dict[str, list[str]] = {}          # owner 13 Nov: venue -> what its account snapshot did not settle (fetch failed, unknown order, position or execution mismatch); non-empty keeps the gate closed
         # REJECT_AFTER_FILL_ALARM is once per order across restarts: the recovered reports show which were raised.
         self._reject_after_fill_alarmed.update(
             order.order_id for plan in self.plans.values() for order in plan.children
@@ -527,6 +532,8 @@ class OMS:
         if order in plan.children:
             if action == "SUBMIT" and status in ("DISPATCHED", "RELEASED"):
                 self._record_internal_update(plan, order, ExecutionEventType.SENT, ts_ns, request.request_id)
+                if self.maker_ack_deadline and order.post_only and order.state == OrderState.SENT:
+                    self._watch_order(order, ts_ns, count_unknown=False)
             elif action == "CANCEL" and status == "DISPATCHED":
                 if order.state == OrderState.SENT:
                     # 11 Nov (owner, R5): a cancel that leaves while the venue has not yet answered the submit. Counted and logged so its frequency can be read from any run's ledger;
@@ -3029,10 +3036,11 @@ class OMS:
         self.plans[parent_id] = plan
         now = opportunity.observed_ts_ns
         self._transition(plan, PlanState.CREATED, now, event_type="PLAN_CREATED")
-        if self.restart_reconcile_gate and self._restart_unreconciled:
+        if self.restart_reconcile_gate and (self._restart_unreconciled or self._restart_account_problems):
             self.ledger.record(
                 "NEW_RISK_HELD_RESTART_RECONCILIATION", now,
                 parent_id=parent_id, opportunity_id=opportunity.opportunity_id, unreconciled_parent_ids=sorted(self._restart_unreconciled),
+                account_problems=sorted(self._restart_account_problems),
             )
             return self._close_without_exposure(plan, now, PlanState.REJECTED, "restart_reconciliation_pending")
         if self.residual_policy.hold_new_risk_on_breach and self._residual_breach_since:
@@ -3846,6 +3854,85 @@ class OMS:
                     self._hedge_move(plan, chain, HedgeState.RECONCILED, ts_ns, "unwound and reconciled", unwound_qty=chain.exposure_qty - chain.hedged_qty)
             elif chain.state is HedgeState.HEDGED and plan.state == PlanState.CLOSED and plan.residual_base == 0:
                 self._hedge_move(plan, chain, HedgeState.RECONCILED, ts_ns, "positions and orders reconciled")
+
+    def reconcile_account_after_restart(self, venues: Mapping[str, Any], now_ns: int, books: dict[tuple[str, str], OrderBook] | None = None) -> dict[str, Any]:
+        """Owner 13 Nov (exchange-side restart reconciliation). After a restart the OMS asks every venue for its account (`venues[name].account_snapshot(since_ns)` -> VenueAccountSnapshot: orders open and
+        closed, executions, positions), books what happened while it was down ONCE, and takes no new risk until the venue and the OMS agree. Closes the restart_reconcile_gate first, so a quote cannot go out
+        while the fetch is under way.
+        For each recovered open plan the venue's order state is put through reconcile_plan (cumulative, so a fill is booked once however often this runs; the hedge a missed maker fill triggers is sent there).
+        Executions are de-duplicated by execution id and must add up, per order, to the venue's own order state. A venue order whose client id is no plan's is NOT cancelled (it may not be ours): it is flagged and
+        holds new risk. A venue whose snapshot cannot be fetched stays unreconciled. The venue position is compared with the ledger last, less what this call itself sent. `books` are the live books (the hedge of a missed maker fill is priced on them). Returns what was found and done; every
+        step is a ledger event."""
+        self.restart_reconcile_gate = True
+        self._restart_account_problems = {}
+        if books:
+            self._books.update(books)                                      # the hedge of a missed maker fill needs the hedge venue's book (a running session already has them)
+        open_plans = [p for p in self.plans.values() if p.state != PlanState.CLOSED]
+        since_ns = min((p.opportunity.observed_ts_ns for p in open_plans), default=self._last_execution_ts_ns)
+        snapshots: dict[str, VenueAccountSnapshot] = {}
+        for name, venue in venues.items():
+            try:
+                snap = venue.account_snapshot(since_ns)
+            except Exception as exc:                                     # noqa: BLE001 - any fetch failure keeps the gate closed
+                snap = None
+                self._restart_account_problems.setdefault(name, []).append(f"account_fetch_failed:{type(exc).__name__}")
+            if snap is None:
+                self._restart_account_problems.setdefault(name, ["account_fetch_failed:none"])
+                continue
+            snapshots[name] = snap
+        known_orders = {o.order_id for p in self.plans.values() for o in p.children}
+        booked_before = {o.order_id: o.filled_quantity for p in open_plans for o in p.children}
+        children_before = {o.order_id for p in self.plans.values() for o in p.children}
+        venue_orders = {o.order_id: o for snap in snapshots.values() for o in snap.orders}
+        executions: dict[str, dict[str, Any]] = {}
+        for snap in snapshots.values():
+            for ex in snap.executions:
+                executions.setdefault(ex.order_id, {})[ex.execution_id] = ex          # a repeated execution id is the same execution
+        executed = {oid: sum((e.quantity for e in rows.values()), Decimal("0")) for oid, rows in executions.items()}
+        for name, snap in snapshots.items():
+            for oid, order in ((o.order_id, o) for o in snap.orders):
+                if oid not in known_orders:
+                    self._restart_account_problems.setdefault(name, []).append(f"unknown_venue_order:{oid}")
+            for oid in {e.order_id for e in snap.executions} - known_orders:
+                self._restart_account_problems.setdefault(name, []).append(f"execution_for_unknown_order:{oid}")
+        booked_executions = 0
+        for plan in open_plans:
+            mine = {o.order_id for o in plan.children}                           # before reconcile_plan: a hedge it sends is not part of what the venue could have reported
+            plan_orders = {}
+            for oid in mine & set(venue_orders):
+                snap = venue_orders[oid]
+                if snap.filled_quantity > 0 and snap.average_price == 0 and oid in executions:          # a venue that gives no average: the volume-weighted price of its executions
+                    rows = executions[oid].values()
+                    snap = replace(snap, average_price=sum((e.quantity * e.price for e in rows), Decimal("0")) / sum((e.quantity for e in rows), Decimal("1")))
+                plan_orders[oid] = snap
+            plan_executed = {oid: executed.get(oid, Decimal("0")) for oid in mine & set(venue_orders)} if executions else None
+            self.reconcile_plan(plan.parent_id, plan_orders, now_ns, venue_executions=plan_executed)
+            if (plan.parent_id in self._restart_unreconciled and set(plan_orders) >= mine                    # a plan whose every order the venue reported and whose account agrees (an order still resting, say) is reconciled: it need not be finished
+                    and not self._reconciliation_disagreements(plan, plan_orders, plan_executed, None)):
+                self._restart_unreconciled.discard(plan.parent_id)
+                self.ledger.record("RESTART_PLAN_RECONCILED_LIVE", now_ns, parent_id=plan.parent_id, plan_state=plan.state.value)
+            booked_executions += sum(1 for oid in plan_orders if plan_orders[oid].filled_quantity > booked_before.get(oid, Decimal("0")))
+        # what this call itself sent (a hedge for a missed maker fill) is not in the venue's position as fetched
+        sent_here: dict[tuple[str, str], Decimal] = {}
+        for plan in self.plans.values():
+            for o in plan.children:
+                if o.order_id not in children_before and o.filled_quantity:
+                    key = (o.venue, o.instrument_id)
+                    sent_here[key] = sent_here.get(key, Decimal("0")) + (o.filled_quantity if o.side == Side.BUY else -o.filled_quantity)
+        for name, snap in snapshots.items():
+            for instrument_id, position in snap.positions.items():
+                key = (name, instrument_id)
+                expected = self.ledger.positions.get(key, Decimal("0")) - sent_here.get(key, Decimal("0"))
+                if expected != position:
+                    self._restart_account_problems.setdefault(name, []).append(f"venue_position_differs:{instrument_id}")
+        for plan in open_plans:                                           # a plan the venue's account did not settle stays unreconciled
+            if plan.parent_id in self._restart_unreconciled:
+                for name in {o.venue for o in plan.children}:
+                    self._restart_account_problems.setdefault(name, []).append(f"plan_unreconciled:{plan.parent_id}")
+        report = {"venues_fetched": sorted(snapshots), "since_ns": since_ns, "recovered_open_plans": len(open_plans), "orders_with_a_booked_fill_here": booked_executions,
+                  "problems": {k: sorted(set(v)) for k, v in self._restart_account_problems.items()}, "gate_open": not (self._restart_unreconciled or self._restart_account_problems)}
+        self.ledger.record("RESTART_ACCOUNT_RECONCILIATION", now_ns, **{k: v for k, v in report.items() if k != "since_ns"}, since_ns=since_ns)
+        return report
 
     def _reconciliation_disagreements(
         self, plan: ParentPlan, venue_orders: dict[str, VenueOrderSnapshot], venue_executions: dict[str, Decimal] | None,

@@ -404,6 +404,7 @@ def config_from_raw(raw: dict) -> tuple[AppConfig, dict]:
             query_interval_ns=int(timeout_config.get("query_interval_ms", 500)) * 1_000_000,
             max_queries=int(timeout_config.get("max_queries", 3)),
             kill_on_unresolved=bool(timeout_config.get("kill_on_unresolved", True)),
+            maker_ack_deadline=bool(timeout_config.get("maker_ack_deadline", False)),
         ),
         book_sanity=BookSanityPolicy(
             max_mid_jump_bps=_optional_decimal(
@@ -470,6 +471,27 @@ MANDATORY_CONTROLS: tuple[MandatoryControl, ...] = (
     MandatoryControl('execution.risk_reservation', ('off',), 'execution layer: primary exposure is checked and reserved in one call and released at the terminal state (counted, or refused in enforce mode)'),
 )
 MANDATORY_BY_KEY = {c.key: c for c in MANDATORY_CONTROLS}
+
+
+@dataclass(frozen=True)
+class RealOrderRequirement:
+    key: str                  # dotted path into the profile document
+    required: tuple           # the values a profile used with real orders may have
+    note: str = ""
+
+
+# Owner 13 Nov: switches that are OFF in the older reference profiles (so they cannot sit in MANDATORY_CONTROLS, which every non-legacy profile must pass) but that any profile used with
+# REAL orders (live, paper against a venue, testnet drills) must have ON. Backtests of the older profiles are unaffected; v1_9 and every later profile meet them.
+REAL_ORDER_REQUIRED: tuple[RealOrderRequirement, ...] = (
+    RealOrderRequirement('oms.maker_ack_deadline', (True,), 'a sent PostOnly quote is watched from the send: an unanswered submit is queried, timed out and the kill switch trips (case 2l)'),
+    RealOrderRequirement('hedge_faults.silent_carry_bound', ('below_one_lot',), 'a failed hedge always unwinds whatever its size; only a remainder below one hedge-venue lot is carried silently'),
+)
+
+
+def check_real_order_profile(doc: dict) -> list[str]:
+    """What a profile intended for real orders is missing (empty when it meets every REAL_ORDER_REQUIRED row)."""
+    return [f"{r.key}={_profile_get(doc, r.key, None)!r} is not allowed with real orders (needs {r.required}): {r.note}"
+            for r in REAL_ORDER_REQUIRED if _profile_get(doc, r.key, None) not in r.required]
 # Latency presets that cannot exist in production (nobody is co-located with both venues): refused unless the run is labelled a sensitivity run.
 SENSITIVITY_ONLY_LATENCY = ("colocated_both",)
 
@@ -543,6 +565,13 @@ def raw_config_from_profile(
     fee_rows = tier_rows(tiers, instrument_id)
     taker = {row["venue"]: row["taker_fee_bps"] for row in fee_rows}
     size = str(size_base)
+    # Owner 13 Nov: the bound a residual may be carried under without an unwind. 'position_size' (v1_9's predecessors): the position size. 'below_one_lot': one hedge-venue lot, so
+    # anything the venue can still be sent is unwound and only a remainder below one lot (which cannot be sent) is carried, with the end-of-day warning.
+    carry = str(hedge.get("silent_carry_bound", "position_size"))
+    if carry not in ("position_size", "below_one_lot"):
+        raise ValueError(f"hedge_faults.silent_carry_bound must be position_size or below_one_lot, got {carry!r}")
+    residual_cap = str(quantity_steps[venues[-1]]) if carry == "below_one_lot" else size
+    notes["silent_carry_bound"] = f"{carry}: residual bound {residual_cap} base (risk.max_residual_base and oms.residual.max_residual_base)"
     ceiling = float(arb.get("net_ceiling_multiple", 1.0)) * size_base + float(arb.get("fill_headroom_base", 0.0)) * size_base
     capital = {v.upper(): str((margin.get("venues") or {}).get(v, {}).get("initial_capital", 1000.0)) for v in venues}
     margin_venues = {}
@@ -566,13 +595,14 @@ def raw_config_from_profile(
         "time": {"correct_host_offset": True},          # owner 8 Nov (Q-G4): the time-integrity monitor stays, with host-offset correction
         "fees": fee_rows,
         "risk": {
-            "initial_capital_by_venue": capital, "max_order_notional": "1000000000", "max_gross_notional": "1000000000", "max_residual_base": size,
+            "initial_capital_by_venue": capital, "max_order_notional": "1000000000", "max_gross_notional": "1000000000", "max_residual_base": residual_cap,
             "max_position_base": str(ceiling if venue_cap_base is None else max(ceiling, venue_cap_base)), "inventory": {"model": "unconstrained"},
             "margin": {"evaluate_interval_ms": int(float(margin.get("check_every_s", 1.0)) * 1000), "flatten_after_liquidation": bool(margin.get("flatten_other_venue", True)), "venues": margin_venues,
                        "mark_max_age_s": float(margin.get("mark_max_age_s", 5.0)), "missing_price_action": str(margin.get("missing_price_action", "pause"))},   # owner 11 Nov: a missing price pauses new risk, it never trips the kill switch
             "margin_accounts": {v: {"margin_enabled": True} for v in margin_venues},
         },
-        "oms": {"residual": {"max_residual_base": size, "max_residual_age_ms": 5_000, "hedge_venue_priority": [names[-1], names[0]], "unwind_price_slippage_bps": str(hedge.get("unwind_band_bps", 15.0)),
+        "oms": {"timeouts": {"maker_ack_deadline": bool((profile.get("oms") or {}).get("maker_ack_deadline", False))},
+                "residual": {"max_residual_base": residual_cap, "max_residual_age_ms": 5_000, "hedge_venue_priority": [names[-1], names[0]], "unwind_price_slippage_bps": str(hedge.get("unwind_band_bps", 15.0)),
                              "max_unwind_attempts": int(hedge.get("unwind_max_attempts", 3)), "hold_new_risk_on_breach": True, "kill_after_ms": 30_000}},
         "instruments": [{"instrument_id": instrument_id, "venue": n, "symbol": pair, "base": base, "quote": quote, "tick_size": str(ticks[v]), "quantity_step": str(quantity_steps[v]),
                          "min_quantity": str(quantity_steps[v]), "min_notional": "1", "taker_fee_bps": str(taker[n]), "product_type": "PERP", "leverage": "10", "contract_type": "LINEAR",

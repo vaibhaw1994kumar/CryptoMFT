@@ -452,6 +452,9 @@ class OrderTimeoutPolicy:
     query_interval_ns: int = 500_000_000
     max_queries: int = 3
     kill_on_unresolved: bool = True
+    # Owner 13 Nov: a PostOnly maker order is watched from the moment it is SENT, not only from its ACK, so a submit that never gets an answer is queried and, unresolved, TIMED_OUT with the kill switch.
+    # Off by default (the older profiles); ON in v1_9 and REQUIRED for any profile used with real orders (config.REAL_ORDER_REQUIRED).
+    maker_ack_deadline: bool = False
 
     def __post_init__(self) -> None:
         if self.report_timeout_ns < 0 or self.query_interval_ns <= 0:
@@ -1485,10 +1488,13 @@ class StrategyDirectedRouter:
                 "callback": callback.to_dict(),
             })
             delivery = getattr(self.latency_model, "resting_fill_delivery_ns", None)
+            blackout = getattr(self.adapters.get(venue), "report_blackout_end_ns", None)
+            blackout_end = blackout(now_ns) if blackout is not None else None      # the venue's private stream is down: the report waits for the reconnect (the fill itself stays at the match time)
             if delivery is not None and exchange_ts_ns is not None:       # a timeline model: the fill is known at max(print received, exchange time + the fill-report timeline)
-                self._schedule(stable_id("resting-fill", callback.callback_id), request, (callback,), delivery(venue, now_ns, exchange_ts_ns), fixed_latency_ns=0)
+                deliver_ns = delivery(venue, now_ns, exchange_ts_ns)
+                self._schedule(stable_id("resting-fill", callback.callback_id), request, (callback,), deliver_ns if blackout_end is None else max(deliver_ns, blackout_end), fixed_latency_ns=0)
             else:
-                self._schedule(stable_id("resting-fill", callback.callback_id), request, (callback,), now_ns)
+                self._schedule(stable_id("resting-fill", callback.callback_id), request, (callback,), now_ns if blackout_end is None else blackout_end)
         return len(produced)
 
     def query_order(

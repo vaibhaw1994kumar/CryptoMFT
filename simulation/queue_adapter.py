@@ -23,7 +23,7 @@ from decimal import Decimal
 from ..execution import (
     CanonicalOrderRequest, DeterministicVenueAdapter, ExecutionCallback, ExecutionEventType, OrderAction, OrderType, TimeInForce,
 )
-from ..models import EventType
+from ..models import EventType, Level, stable_id
 from ..models import MarketEvent, Side as CoreSide
 from ..models import TradeEvent
 from ..orderbook import OrderBook as CoreBook
@@ -79,6 +79,16 @@ class QueueAwareVenueAdapter(DeterministicVenueAdapter):
         # outage_on_fill_s (the fault presets' conditional outage): the hedge venue's gateway goes down for that long from the first hedge order of every plan, one window per plan. The driver sets
         # `outage_on_fill_here` on the hedge venue's adapter only (the maker venue is not simulated: see the replay's check). "gateway" kind only: the feed is not darkened here.
         self.outage_on_fill_here = False
+        # A MAKER venue's gateway outage (owner 12 Nov, case 2l; the replay sets it on a maker-venue adapter that a static outage names): order entry and the private stream are down, the public feed is not.
+        # A submit, cancel or amend that arrives inside the window is lost (no report of any kind: policy "blackhole" only); a resting order stays live at the venue and can fill, and the report of such a
+        # fill is delivered when the gateway is back (`report_blackout_end_ns`); the fill happens, and is stamped, at the venue's time, and is booked when the report arrives.
+        self.maker_outage_here = False
+        # A thinned hedge book (owner 12 Nov, case 2c): attempt i of each hedge plan (the i-th IOC sent for one parent order) executes against a venue-truth book that shows only `levels` of the levels its limit could
+        # take, with at most `quantity` at each (levels beyond its limit stay as they are); attempts beyond the list see the book as it is. (0, 0) leaves nothing to take: the IOC ends unfilled. The OMS decided the price and size from ITS view (the full book), so the walk fills part or none.
+        # No depth is invented: the thinned book only ever shows LESS than the real one. levels = -1 (owner 13 Nov): only the TOUCH is capped at `quantity`, every deeper level stays as captured, so a hedge larger than
+        # the touch takes the rest from the real deeper levels, inside its own limit.
+        self.hedge_thin_attempts: tuple[tuple[int, float], ...] = ()
+        self._hedge_attempts: dict[str, int] = {}
         self._windows: dict[str, "Outage"] = {}
         self._held: list[tuple[int, int, CanonicalOrderRequest, CoreBook | None]] = []
         self._held_ordinal = 0
@@ -103,6 +113,19 @@ class QueueAwareVenueAdapter(DeterministicVenueAdapter):
     def query_unanswered(self, now_ns: int) -> bool:
         """A status query sent while the gateway is down gets no answer (the router counts it as failed)."""
         return self._outage_at(now_ns) is not None
+
+    def report_blackout_end_ns(self, now_ns: int) -> int | None:
+        """When the maker venue's private stream is down at `now_ns`: the reconnect time (the end of the outage, and of any outage that follows it directly), else None."""
+        if not self.maker_outage_here:
+            return None
+        outage = self._outage_at(now_ns)
+        if outage is None:
+            return None
+        end_ns = int(round(outage.end_ts * _NS))
+        while (nxt := self._outage_at(end_ns)) is not None:
+            later = int(round(nxt.end_ts * _NS))
+            end_ns = later if later > end_ns else end_ns + 1
+        return end_ns
 
     def next_held_ts(self) -> int | None:
         return min((item[0] for item in self._held), default=None)
@@ -205,6 +228,12 @@ class QueueAwareVenueAdapter(DeterministicVenueAdapter):
             request.action == OrderAction.SUBMIT and request.time_in_force == TimeInForce.GTC
             and request.order_type == OrderType.LIMIT
         )
+        if self.maker_outage_here and (mine or replace_mine or resting):
+            ts_ns = self._arrival_ns if self._arrival_ns is not None else request.created_ts_ns
+            if self._outage_at(ts_ns) is not None:                             # the gateway is down: the request never reaches the venue and nothing comes back
+                reason = f"maker_outage:{request.action.value.lower()}"
+                self.hedge_faults_injected[reason] = self.hedge_faults_injected.get(reason, 0) + 1
+                return ()
         if not (mine or replace_mine or resting):
             # Fault injection for IOC limit orders (hedge orders): checked before the fill walk so the OMS sees REJECTED and
             # triggers its own retry/unwind machinery.  Only IOC LIMIT is a hedge; FOK and market orders are not injected.
@@ -244,7 +273,38 @@ class QueueAwareVenueAdapter(DeterministicVenueAdapter):
             self._remember(callbacks)
         return callbacks
 
+    def _thinned(self, request: CanonicalOrderRequest, book: CoreBook | None) -> CoreBook | None:
+        """The book a hedge attempt executes against when `hedge_thin_attempts` thins it (see the attribute), else the book it was given."""
+        if not self.hedge_thin_attempts or book is None or request.action != OrderAction.SUBMIT or request.time_in_force != TimeInForce.IOC or request.order_type != OrderType.LIMIT:
+            return book
+        attempt = self._hedge_attempts.get(request.parent_order_id, 0)
+        self._hedge_attempts[request.parent_order_id] = attempt + 1
+        if attempt >= len(self.hedge_thin_attempts):
+            return book
+        levels, quantity = self.hedge_thin_attempts[attempt]
+        reason = f"thin_book:attempt{attempt}:{'top' if levels < 0 else levels}x{quantity}"
+        self.hedge_faults_injected[reason] = self.hedge_faults_injected.get(reason, 0) + 1
+        cap = Decimal(repr(quantity))
+        sell = request.side == CoreSide.SELL                                                      # a sell hits the bids, a buy the asks
+        hit = book.bids if sell else book.asks
+        best_first = sorted(hit, reverse=sell)
+        if levels < 0:                                                                            # owner 13 Nov: the TOUCH only shows at most `quantity`; every deeper level is the real one
+            kept = tuple(Level(price, min(hit[price], cap) if price == best_first[0] else hit[price]) for price in best_first if price != best_first[0] or min(hit[price], cap) > 0)
+        else:
+            executable = [price for price in best_first if (price >= request.price if sell else price <= request.price)]      # the levels this IOC could take at its limit
+            shown = {price: min(hit[price], cap) for price in executable[:levels] if min(hit[price], cap) > 0}
+            kept = tuple(Level(price, shown[price] if price in shown else hit[price]) for price in best_first if price not in executable or price in shown)      # levels beyond the limit stay as they are
+        thin = CoreBook(book.venue, book.instrument_id)
+        ts_ns = request.created_ts_ns if self._arrival_ns is None else self._arrival_ns
+        sides = {"bids": kept, "asks": tuple(Level(p, q) for p, q in book.asks.items())} if sell else {"bids": tuple(Level(p, q) for p, q in book.bids.items()), "asks": kept}
+        thin.apply(MarketEvent(event_id=stable_id("thin-book", book.venue, request.order_id), event_type=EventType.BOOK_SNAPSHOT, venue=book.venue, instrument_id=book.instrument_id, exchange_ts_ns=ts_ns,
+                               receive_ts_ns=ts_ns, sequence=1, source_ts_ns=ts_ns, sequence_start=1, raw_ref="thin-book", adapter_version="thin-book-v1", quality_flags=("THINNED_HEDGE_BOOK",), **sides))
+        return thin
+
     def _taker_book(self, request: CanonicalOrderRequest, book: CoreBook | None) -> CoreBook | None:
+        return self._thinned(request, self._truth_book(request, book))
+
+    def _truth_book(self, request: CanonicalOrderRequest, book: CoreBook | None) -> CoreBook | None:
         """A taker arrival executes against the venue-truth book at its arrival's exchange time (hedge_arrival_book 'truth'); the view when the truth book is not ready."""
         if self.truth is None or self._arrival_ns is None or book is None or request.action != OrderAction.SUBMIT:
             return book

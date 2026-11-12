@@ -35,6 +35,30 @@ class VenueOrderSnapshot:
     observed_ts_ns: int = 0
 
 
+@dataclass(frozen=True)
+class VenueExecution:
+    """One execution (trade) the venue reports for an account order. `execution_id` is the venue's own, so a repeated or overlapping page of executions is counted once."""
+    execution_id: str
+    order_id: str                       # the client order id
+    venue: str
+    instrument_id: str
+    quantity: Decimal
+    price: Decimal
+    ts_ns: int
+    fee: Decimal = Decimal("0")
+
+
+@dataclass(frozen=True)
+class VenueAccountSnapshot:
+    """What one venue's account says after a restart (owner 13 Nov): its orders since the cutoff (open AND closed, so a missed fill and a cancel while down are both visible), its executions since the cutoff,
+    and its positions by instrument. Fetched by the live adapter (`account_snapshot(since_ns)`); scripted in tests."""
+    venue: str
+    orders: tuple[VenueOrderSnapshot, ...]
+    executions: tuple[VenueExecution, ...]
+    positions: dict[str, Decimal]
+    fetched_ts_ns: int = 0
+
+
 def _plan_json(plan: ParentPlan) -> str:
     return json.dumps(
         asdict(plan), default=json_default, sort_keys=True, separators=(",", ":")
