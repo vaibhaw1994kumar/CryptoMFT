@@ -137,7 +137,9 @@ class ObservationOnly(unittest.TestCase):
         import re
         src = pathlib.Path(__file__).resolve().parents[1] / "src" / "new_backtest"
         allowed = (r"self\.obs = ObservationLog\(\)", r"self\.obs\.add\(", r"self\.obs\.summary\(", r"self\.obs\.write_jsonl\(",
-                   r"dict\(fill\.obs or \{\}\)", r"fill\.obs = \{", r"fill\.obs = ")
+                   r"dict\(fill\.obs or \{\}\)", r"fill\.obs = \{", r"fill\.obs = ",
+                   # E0 step (g), the session replay's own use: construct / test for it, hand it to the sink, export the rows to the output file (never read by the engine; see test_session_replay.MakerObservationsOnTheSession)
+                   r"self\.obs = None", r"self\.obs is not None", r"SessionObservations\(self\.obs", r"list\(self\.obs\.rows\)", r"adapter\.executor\.obs_enabled = True")
         for f in src.rglob("*.py"):
             for n, line in enumerate(f.read_text().splitlines(), 1):
                 code = line.split("#", 1)[0]

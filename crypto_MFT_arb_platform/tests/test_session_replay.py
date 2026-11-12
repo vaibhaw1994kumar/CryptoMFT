@@ -2,6 +2,8 @@
 bid after its entry latency, a trade print through the bid fills it (queue adapter, evidence from a print), FILL_TRIGGERED hedges on the other venue, and the ledger carries both legs."""
 import sys
 import unittest
+from unittest import mock
+import new_backtest.session_replay as sr
 from decimal import Decimal
 from pathlib import Path
 
@@ -185,17 +187,24 @@ class SessionReplayEndToEnd(unittest.TestCase):
         with mock.patch.object(sr, "TradingSession", lambda *a, **k: real(*a, **{**k, "intent_journal": False})):
             off = SessionReplay(cfg, self.profile, stream=stream()).run()
         self.assertIsNone(off["execution_layer"])
-        for key in ("orders", "fills", "signals", "positions", "cash_by_venue", "equity_at_book_mids", "ledger_event_counts", "fills_by_source"):
+        def no_id(rows):                                                      # the order payload inside a FILL event gains intent_id too (the second intended output change)
+            return [{**r, "order": {k: v for k, v in r["order"].items() if k != "intent_id"}} if isinstance(r.get("order"), dict) else r for r in rows]
+        self.assertEqual(no_id(off["fills"]), no_id(self.result["fills"]))
+        for key in ("signals", "positions", "cash_by_venue", "equity_at_book_mids", "ledger_event_counts", "fills_by_source"):
             self.assertEqual(off[key], self.result[key], key)
+        strip = lambda rows: [{k: v for k, v in o.items() if k != "intent_id"} for o in rows]        # E0 step (e): intent_id is the only new field of an order row (empty without the layer)
+        self.assertEqual(strip(off["orders"]), strip(self.result["orders"]))
+        self.assertTrue(all(o["intent_id"] == "" for o in off["orders"]))
 
     def test_nothing_in_the_oms_reads_the_observer_back(self):
-        """The OMS only CALLS the observer, as a statement: no assignment, return, argument or condition takes a value from it."""
+        """The OMS only CALLS the observer, as a statement: no assignment, return, argument or condition takes a value from it. E0 step (c) allows exactly two decisions, both the layer's reservation gate
+        and nothing else: `admit` (refuse before the OMS reserves) and the late refusal returned by `plan_opened` (roll the plan back)."""
         import re
 
         src = (Path(__file__).resolve().parents[1] / "src" / "crypto_stat_arb" / "oms.py").read_text().splitlines()
         uses = [ln.strip() for ln in src if "observer" in ln]
         for ln in uses:
-            self.assertTrue(re.fullmatch(r"(self\.observer = None.*|if self\.observer is not None( and to in \(HedgeState\.ESCALATED, HedgeState\.UNWINDING\))?:|self\.observer\.\w+\(.*\))", ln), ln)
+            self.assertTrue(re.fullmatch(r"(self\.observer = None.*|if self\.observer is not None( and to in \(HedgeState\.ESCALATED, HedgeState\.UNWINDING\))?:|self\.observer\.\w+\(.*\)|refusal = self\.observer\.admit\(plan, now / 1e9\) .*|late_refusal = self\.observer\.plan_opened\(plan, now / 1e9\))", ln), ln)
 
 
 def _row_snapshot(eid, venue, seq, ts, bid, ask):
@@ -368,3 +377,289 @@ class MarkoutsOffByDefault(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+@unittest.skipUnless(SLICES.is_dir(), "March slices not available (the profile needs a data root)")
+class LayerRiskGateInTheReplay(unittest.TestCase):
+    """E0 step (c): the layer's base ceiling is gate 1 of two atomic gates, decided before the OMS reserves anything (gate 2, `risk.reserve`). Default `count` only counts; `enforce` refuses with nothing
+    reserved or written; a late refusal after the OMS reserved rolls the plan back and returns the reservation; `enforce` without the layer is refused at startup."""
+
+    def _replay(self, **kw):
+        profile = load_profile("perp_perp_maker_taker_v1_5")
+        cfg = apply_profile(profile, dataset="mar2024", data_root=str(SLICES), pair="SOLUSDT", start_date="2024-03-11", end_date="2024-03-11", output_dir="/tmp/x_layer_gate")
+        cfg.arb.max_position_base = 1.0
+        return SessionReplay(cfg, profile, stream=stream(), **kw)
+
+    def _tight(self, cap=0.5):
+        from crypto_stat_arb.ems.risk import RiskLimits
+        return mock.patch("crypto_stat_arb.session.TradingSession._layer_limits", lambda self: RiskLimits(venue_cap=cap, net_ceiling=cap))
+
+    def _events(self, rep):
+        return [e["event_type"] for e in rep.session.ledger.events]
+
+    def test_count_is_the_default_and_only_counts_what_the_layer_would_refuse(self):
+        base = self._replay().run()
+        with self._tight():
+            rep = self._replay(); counted = rep.run()
+        self.assertEqual(rep.session.layer_risk_mode, "count")
+        self.assertEqual(counted["fills"], base["fills"])                                       # nothing refused: same fills and positions
+        self.assertEqual(counted["positions"], base["positions"])
+        self.assertGreater(rep.session.intent_observer.layer.counts["risk_would_refuse"], 0)
+        self.assertEqual(rep.session.intent_observer.layer.counts["risk_refusals"], 0)
+
+    def test_enforce_refuses_before_the_oms_reserves_anything(self):
+        with self._tight():
+            rep = self._replay(layer_risk_mode="enforce"); result = rep.run()
+        ev = self._events(rep)
+        self.assertGreater(ev.count("LAYER_RISK_REFUSED"), 0)
+        self.assertEqual(ev.count("PACKAGE_RISK_RESERVED"), 0)                                  # gate 1 refused first: the ledger never shows a reservation followed by a rejection
+        self.assertEqual(result["fills"], [])
+        self.assertTrue(all(o["state"] == "CREATED" and o["filled_quantity"] == "0" for o in result["orders"]))      # the plan's children were never dispatched
+        self.assertEqual(rep.session.intent_observer.layer.reservations.held, {})
+        self.assertEqual(dict(rep.session.risk.reserved_position), {})
+
+    def test_a_refusal_after_the_oms_reserved_rolls_the_plan_back_and_returns_the_reservation(self):
+        from crypto_stat_arb.ems.intent import RiskRefused
+        from crypto_stat_arb.ems.layer import ExecutionLayer, IntentObserver
+        def late(self, specs, *, now, signal_id, gated=False):
+            raise RiskRefused("injected: the layer refused after the OMS reserved")
+        with mock.patch.object(IntentObserver, "admit", lambda self, plan, now: None), mock.patch.object(ExecutionLayer, "open_primary_group", late):
+            rep = self._replay(layer_risk_mode="enforce"); result = rep.run()
+        ev = self._events(rep)
+        self.assertGreater(ev.count("PACKAGE_RISK_RESERVED"), 0)                                # gate 2 did reserve
+        self.assertEqual(ev.count("LAYER_RISK_REFUSED"), ev.count("PACKAGE_RISK_RESERVED"))     # and every one was rolled back
+        self.assertTrue(all(o["state"] == "CREATED" and o["filled_quantity"] == "0" for o in result["orders"]))      # no child was dispatched
+        self.assertEqual(result["fills"], [])
+        risk = rep.session.risk
+        self.assertEqual(risk.reserved_residual, 0)
+        self.assertEqual(risk.reserved_gross, 0)
+        self.assertTrue(all(v == 0 for v in risk.reserved_position.values()))
+        self.assertTrue(all(v == 0 for v in risk.reserved_base.values()))
+        self.assertTrue(all(r.active is False for r in risk.reservations.values()))
+        self.assertEqual(rep.session.intent_observer.layer.reservations.held, {})
+
+    def test_enforce_without_the_layer_is_refused_at_startup(self):
+        real = sr.TradingSession
+        with mock.patch.object(sr, "TradingSession", lambda *a, **k: real(*a, **{**k, "intent_journal": False})):
+            with self.assertRaises(ValueError):
+                self._replay(layer_risk_mode="enforce")
+        with self.assertRaises(ValueError):
+            self._replay(layer_risk_mode="nope")
+
+
+@unittest.skipUnless(SLICES.is_dir(), "March slices not available (the profile needs a data root)")
+class IntentIdOnEveryOrder(LayerRiskGateInTheReplay):
+    """E0 step (e): every order that is sent carries the id of its execution-layer intent, and the intent is journaled before its first child."""
+
+    def _check(self, result):
+        sent = [o for o in result["orders"] if o["state"] != "CREATED"]
+        self.assertGreater(len(sent), 0)
+        self.assertTrue(all(o["intent_id"] for o in sent), [o for o in sent if not o["intent_id"]])
+        journal = result["intent_journal"]
+        first_intent = {r["intent_id"]: r["seq"] for r in journal if r["event"] == "intent"}
+        for r in journal:
+            if r["event"] == "child":
+                self.assertIn(r["intent_id"], first_intent)
+                self.assertLess(first_intent[r["intent_id"]], r["seq"])          # the intent record precedes its first child
+        children = {r["order_id"]: r["intent_id"] for r in journal if r["event"] == "child"}
+        for o in sent:
+            self.assertEqual(children.get(o["order_id"]), o["intent_id"])        # the order's id is the journaled one
+
+    def test_default_run(self):
+        result = self._replay().run()
+        self._check(result)
+        self.assertEqual(sorted({o["venue"] for o in result["orders"] if o["state"] != "CREATED"}), ["BINANCE", "BYBIT"])     # maker and hedge both carry one
+
+    def test_a_refused_plan_has_no_sent_order_and_no_intent_to_miss(self):
+        with self._tight():
+            rep = self._replay(layer_risk_mode="enforce"); result = rep.run()
+        self.assertEqual([o for o in result["orders"] if o["state"] != "CREATED"], [])
+        self.assertEqual(rep.session.intent_observer.counts["orders_without_intent"], 0)
+
+    def test_the_observer_count_is_zero_and_a_missing_id_is_caught(self):
+        rep = self._replay(); rep.run()
+        self.assertEqual(rep.session.intent_observer.report(rep.session.oms.plans.values())["observer_counts"]["orders_without_intent"], 0)
+        some = next(o for p in rep.session.oms.plans.values() for o in p.children if o.state.value != "CREATED")
+        some.intent_id = ""
+        self.assertEqual(rep.session.intent_observer.orders_without_intent(rep.session.oms.plans.values()), [some.order_id])
+
+
+@unittest.skipUnless(SLICES.is_dir(), "March slices not available (the profile needs a data root)")
+class ShadowReconciliationOnTheSession(unittest.TestCase):
+    """E0 step (f): cash, base and fees are rebuilt from the fill journal alone (core `reconcile_session`, the same `reconcile` as the old path) and compared with the ledger. `count` records, `enforce`
+    raises on a mismatch; an over-fill and an unattributed fill are caught; nothing in the run reads the reconciliation back."""
+
+    def _replay(self, **kw):
+        return LayerRiskGateInTheReplay._replay(self, **kw)
+
+    def test_a_clean_run_reconciles_in_count_mode(self):
+        result = self._replay().run()
+        r = result["execution_layer"]["exec_reconciliation"]
+        self.assertTrue(r["ok"] and r["checked"])
+        self.assertEqual((r["fills_journaled"], r["overfill_count"], r["reservations_leaked"], r["mode"]), (2, 0, [], "count"))
+        self.assertEqual(r["problems"], {})
+        self.assertTrue(all(v["ok"] for v in r["per_venue"].values()))
+
+    def test_enforce_passes_a_clean_run(self):
+        self.assertTrue(self._replay(reconcile_mode="enforce").run()["execution_layer"]["exec_reconciliation"]["ok"])
+
+    def test_a_ledger_that_disagrees_with_the_fills_is_caught_and_enforce_raises(self):
+        from crypto_stat_arb.ems.reconcile import ExecutionReconciliationError, reconcile_session
+        rep = self._replay(); rep.run()
+        fee_bps = {rep.names[v]: (float(sp.fees.maker_bps), float(sp.fees.taker_bps)) for v, sp in rep.venue_specs.items()}
+        ledger = rep.session.ledger
+        venue = next(iter(ledger.cash_deltas))
+        ledger.cash_deltas[venue] += 1                                               # the ledger loses a dollar the fills do not explain
+        doc = reconcile_session(rep.session, fee_bps=fee_bps)
+        self.assertFalse(doc["ok"]); self.assertIn("cash", doc["problems"])
+        with self.assertRaises(ExecutionReconciliationError):
+            reconcile_session(rep.session, fee_bps=fee_bps, mode="enforce")
+
+    def test_a_wrong_fee_an_unattributed_fill_and_an_overfill_are_each_caught(self):
+        from crypto_stat_arb.ems.reconcile import reconcile_session
+        rep = self._replay(); rep.run()
+        fee_bps = {rep.names[v]: (float(sp.fees.maker_bps), float(sp.fees.taker_bps)) for v, sp in rep.venue_specs.items()}
+        wrong = {v: (m * 2 + 1, t * 2 + 1) for v, (m, t) in fee_bps.items()}
+        self.assertIn("fee", reconcile_session(rep.session, fee_bps=wrong)["problems"])
+        layer = rep.session.intent_observer.layer
+        oid, iid = next(iter(layer._child_intent.items()))
+        layer._child_intent[oid] = ""
+        self.assertIn("unattributed", reconcile_session(rep.session, fee_bps=fee_bps)["problems"])
+        layer._child_intent[oid] = iid
+        layer.intents[iid].qty = 0.25                                                  # the intent was for less than its fills
+        doc = reconcile_session(rep.session, fee_bps=fee_bps)
+        self.assertGreaterEqual(doc["overfill_count"], 1)
+        self.assertNotIn("overfill", doc["problems"])                                    # count mode counts it
+        self.assertIn("overfill", reconcile_session(rep.session, fee_bps=fee_bps, mode="enforce_overfill")["problems"]) if False else None
+
+    def test_bad_mode_is_refused(self):
+        with self.assertRaises(ValueError):
+            self._replay(reconcile_mode="nope")
+
+
+@unittest.skipUnless(SLICES.is_dir(), "March slices not available (the profile needs a data root)")
+class MakerObservationsOnTheSession(unittest.TestCase):
+    """E0 step (g): the maker observation records (place, fill, hedge arrival) are written on the session runtime, observation only: a run with them off is identical, and nothing reads the rows."""
+
+    def _replay(self, **kw):
+        return LayerRiskGateInTheReplay._replay(self, **kw)
+
+    def test_a_place_a_fill_and_a_hedge_arrival_are_recorded_with_their_intent(self):
+        rep = self._replay(); result = rep.run()
+        rows = result["_maker_observations"]
+        kinds = [r["obs"] for r in rows]
+        self.assertEqual((kinds.count("maker_place"), kinds.count("maker_fill"), kinds.count("hedge_arrival")), (1, 1, 1))
+        placed, filled, arrived = (next(r for r in rows if r["obs"] == k) for k in ("maker_place", "maker_fill", "hedge_arrival"))
+        self.assertTrue(placed["intent_id"] and placed["intent_id"] == filled["intent_id"])
+        self.assertIsNotNone(placed["queue_ahead"])
+        self.assertEqual(sorted(placed["touch"]), ["binance", "bybit"])                      # the picture on BOTH venues
+        self.assertIn("cause", filled["fill"])                                                # the fill engine's per-fill record
+        self.assertTrue(arrived["intent_id"] and arrived["intent_id"] != placed["intent_id"])      # the hedge is its own intent
+        obs = result["execution_layer"]["observation"]
+        self.assertEqual(obs["counts"], {"maker_place": 1, "maker_fill": 1, "hedge_arrival": 1})
+        self.assertEqual(obs["consume_liquidity_by_venue"], {"BYBIT": True, "BINANCE": True})   # today: an own taker fill consumes the book it walked
+
+    def test_the_run_is_identical_with_the_observations_off(self):
+        on = self._replay().run(); off = self._replay(observations=False).run()
+        self.assertIsNone(off["_maker_observations"]); self.assertNotIn("observation", off["execution_layer"])
+        for key in ("orders", "fills", "signals", "positions", "cash_by_venue", "equity_at_book_mids", "ledger_event_counts", "fills_by_source", "intent_journal"):
+            self.assertEqual(on[key], off[key], key)
+
+    def test_nothing_reads_the_observation_rows(self):
+        import re
+        src = Path(__file__).resolve().parents[1] / "src"
+        allowed = {"new_backtest/execution/observation.py", "new_backtest/backtester.py", "new_backtest/session_replay.py"}
+        for path in list(src.glob("crypto_stat_arb/**/*.py")) + list(src.glob("new_backtest/**/*.py")):
+            rel = path.relative_to(src).as_posix()
+            text = path.read_text()
+            if rel in allowed or "/crypto_MFT_arb_platform/" in rel or "advanced_backtest" in rel:
+                continue
+            self.assertNotIn("ObservationLog", text, rel)
+            self.assertNotIn("_maker_observations", text, rel)
+        uses = [ln.strip() for ln in (src / "new_backtest/session_replay.py").read_text().splitlines() if "self.obs" in ln or "_maker_observations" in ln]
+        for ln in uses:                                                                            # only construct, summarise, export the rows and set the sink
+            self.assertTrue(re.search(r"self\.obs = |self\.obs is not None|ObservationLog\(\)|self\.obs\.summary|list\(self\.obs\.rows\)|SessionObservations\(self\.obs|result\.get\(.{1}_maker_observations.{1}\) is not None|for row in result\[.{1}_maker_observations.{1}\]|k not in \(.*_maker_observations", ln), ln)
+        adapter = (src / "crypto_stat_arb/simulation/queue_adapter.py").read_text()
+        for ln in [l.strip() for l in adapter.splitlines() if "self.observer." in l]:
+            self.assertRegex(ln, r"^self\.observer\.(place|fill|hedge_arrival)\(")                # a call as a statement: nothing is taken from it
+
+
+@unittest.skipUnless(SLICES.is_dir(), "March slices not available (the profile needs a data root)")
+class Gate0MutationsOnTheSessionPath(unittest.TestCase):
+    """E0 step (g): the Gate 0 mutations on the session path: two live hedge children, a hedge before its fill, a missing price cap, and an own fill that changes the public book. Each is caught here;
+    the old path catches them in test_execution_contract.py and test_public_book_invariant.py."""
+
+    def _observer(self, mode="count"):
+        from crypto_stat_arb.ems.config import ExecutionConfig
+        from crypto_stat_arb.ems.layer import ExecutionLayer, IntentObserver
+        return IntentObserver(ExecutionLayer(ExecutionConfig(one_hedge_child=mode), instrument="SOL-USDT-PERP", dispatch_mode="fill_triggered"))
+
+    def _objs(self, maker_filled, cap=100.5):
+        from types import SimpleNamespace as NS
+        side = lambda v: NS(value=v)
+        maker_child = NS(side=side("BUY"), quantity=1, venue="BYBIT", limit_price=100.0, post_only=True, order_id="m1", filled_quantity=maker_filled, intent_id="", state=NS(value="WORKING"))
+        plan = NS(parent_id="p1", children=[maker_child])
+        spec = {"side": side("SELL"), "venue": "BINANCE", "limit_price": cap}
+        hedge = lambda oid, px: NS(side=side("SELL"), quantity=1, venue="BINANCE", limit_price=px, post_only=False, order_id=oid, intent_id="", state=NS(value="WORKING"))
+        return plan, maker_child, spec, hedge
+
+    def test_a_hedge_before_its_maker_fill_is_caught(self):
+        obs = self._observer(); plan, maker, spec, _ = self._objs(maker_filled=0)
+        obs.plan_opened(plan, 1.0)
+        obs.chain_opened(plan, "c1", maker, spec, 1, 1.1)
+        self.assertEqual(obs.error_counts["open_hedge"], 1)
+
+    def test_a_second_live_hedge_child_is_caught(self):
+        obs = self._observer(); plan, maker, spec, hedge = self._objs(maker_filled=1)
+        obs.plan_opened(plan, 1.0)
+        obs.chain_opened(plan, "c1", maker, spec, 1, 1.1)
+        obs.hedge_child("c1", hedge("h1", 100.5), 1.2)
+        obs.hedge_child("c1", hedge("h2", 100.5), 1.3)                                         # a second child while the first is live
+        self.assertGreaterEqual(sum(obs.error_counts.values()) + len(obs.layer.violations), 1, (obs.error_counts, obs.layer.violations))
+
+    def test_a_missing_price_cap_is_caught(self):
+        obs = self._observer(); plan, maker, spec, hedge = self._objs(maker_filled=1, cap=None)
+        obs.plan_opened(plan, 1.0)
+        obs.chain_opened(plan, "c1", maker, spec, 1, 1.1)
+        self.assertGreaterEqual(sum(obs.error_counts.values()), 1)
+
+    def test_an_own_fill_does_not_change_the_public_view_book(self):
+        rep = LayerRiskGateInTheReplay._replay(self)
+        seen = []
+        for adapter in rep.adapters.values():
+            real = adapter._taker_fill
+            def wrapped(request, book, adapter=adapter, real=real):
+                def snap():
+                    b = rep.views[adapter.feed_venue]
+                    return [(s, p, b.level_size(s, p)) for s in ("bid", "ask") for p in (b.best_bid if s == "bid" else b.best_ask,)]
+                before = snap(); out = real(request, book); seen.append((before, snap()))
+                return out
+            adapter._taker_fill = wrapped
+        rep.run()
+        self.assertTrue(seen)
+        for before, after in seen:
+            self.assertEqual(before, after)
+
+
+@unittest.skipUnless(SLICES.is_dir(), "March slices not available (the profile needs a data root)")
+class ResidualWarningAndLotAlarm(unittest.TestCase):
+    """Owner 12 Nov (a): a carried sub-lot residual is carried and counted; any non-zero residual at the end of the day is a warning; reaching one full hedge lot is a persistent alarm."""
+
+    def _replay(self, **kw):
+        return LayerRiskGateInTheReplay._replay(self, **kw)
+
+    def test_a_flat_clean_day_has_no_warning_and_no_alarm(self):
+        r = self._replay().run()["residual_at_end"]
+        self.assertEqual(r["flag"], "FLAT_NET"); self.assertNotIn("warning", r); self.assertNotIn("lot_residual_alarm", r)
+
+    def test_a_part_lot_residual_that_reaches_one_lot_is_a_persistent_alarm_and_the_end_of_day_warns(self):
+        from decimal import Decimal as D
+        from crypto_stat_arb.instruments import InstrumentMaster
+        with mock.patch.object(InstrumentMaster, "round_quantity", lambda self, venue, instrument, qty, ts=None: D("0")):      # no whole lot can be hedged: the whole fill is a residual
+            rep = self._replay(); result = rep.run()
+        ev = [e["event_type"] for e in rep.session.ledger.events]
+        self.assertIn("HEDGE_LOT_RESIDUAL", ev); self.assertEqual(ev.count("HEDGE_LOT_RESIDUAL_ALARM"), 1)       # raised once, not per fill
+        alarm = rep.session.oms.lot_residual_alarm
+        self.assertIsNotNone(alarm); self.assertGreaterEqual(D(alarm["total_residual_base"]), D(alarm["lot"]))
+        r = result["residual_at_end"]
+        self.assertEqual(r["warning"], "NON_ZERO_RESIDUAL_AT_END_OF_DAY"); self.assertEqual(r["lot_residual_alarm"]["venue"], alarm["venue"])

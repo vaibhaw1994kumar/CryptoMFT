@@ -67,3 +67,46 @@ class ObservationLog:
         with open(path, "w", encoding="utf-8") as fh:
             for r in self.rows:
                 fh.write(json.dumps(r, sort_keys=True, default=str) + "\n")
+
+
+class SessionObservations:
+    """E0 step (g): the maker observation records on the session runtime, ported from the backtester's `_obs_place`, `_obs_fill` and `_obs_hedge_arrival`. The queue adapters call `place`, `fill` and
+    `hedge_arrival`; each only appends a row to the ObservationLog. OBSERVATION ONLY: no random number, no state change, and nothing in the engine reads the rows (a test scans for any reader). The row layout
+    is the backtester's, with `order_id` (the OMS order) beside `maker_order_id` (the simulator's) and the layer's `intent_id`. `views` maps the feed venue to its float view book."""
+
+    def __init__(self, log: "ObservationLog", views: dict, intent_of) -> None:
+        self.log, self.views, self.intent_of = log, views, intent_of
+
+    def _touches(self) -> dict:
+        return {v: touch_doc(b) for v, b in self.views.items()}
+
+    def place(self, adapter, request, mo, now: float) -> None:
+        view = self.views[adapter.feed_venue]
+        lvl = float(getattr(mo, "observed_level_size", 0.0) or 0.0)
+        ahead = getattr(mo, "queue_ahead", None)
+        side = "buy" if getattr(mo.side, "value", mo.side) in ("bid", "buy", "BID") else "sell"
+        self.log.add("maker_place", {
+            "ts": now, "maker_order_id": mo.order_id, "order_id": request.order_id, "intent_id": self.intent_of(request.order_id), "venue": adapter.feed_venue, "side": side,
+            "price": float(request.price), "size": float(request.quantity), "queue_ahead": ahead, "level_size": lvl,
+            "relative_queue_position": (ahead / lvl) if (ahead is not None and lvl > 0) else None,
+            "queue_unknown": getattr(mo, "queue_unknown", None), "level_was_absent": getattr(mo, "level_was_absent", None),
+            "relative_to_touch_ticks": getattr(mo, "relative_to_touch_ticks", None), "touch": self._touches(), "touch_own_venue": touch_doc(view)})
+
+    def fill(self, adapter, request, fill) -> None:
+        ob = dict(getattr(fill, "obs", None) or {})
+        trig = dict(ob.pop("trigger", None) or {})
+        if getattr(fill, "is_synthetic", False):
+            trig["kind"] = "synthetic"
+        lvl = ob.get("level_now") or 0.0
+        qb = ob.get("queue_before")
+        self.log.add("maker_fill", {
+            "ts": fill.ts, "maker_order_id": fill.order_id, "order_id": request.order_id, "intent_id": self.intent_of(request.order_id), "venue": adapter.feed_venue,
+            "side": fill.side, "price": fill.price, "qty": fill.qty, "relative_queue_position_at_fill": (qb / lvl) if (qb is not None and lvl > 0) else None,
+            "touch": self._touches(), "trigger": trig, "fill": ob})
+
+    def hedge_arrival(self, adapter, request, now: float) -> None:
+        self.log.add("hedge_arrival", {
+            "ts": now, "order_id": request.order_id, "intent_id": self.intent_of(request.order_id), "venue": adapter.feed_venue,
+            "side": "buy" if str(getattr(request.side, "value", request.side)).lower() == "buy" else "sell", "qty": float(request.quantity),
+            "limit_price": None if request.price is None else float(request.price), "touch_at_arrival": touch_doc(self.views.get(adapter.feed_venue))})
+
