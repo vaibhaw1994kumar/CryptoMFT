@@ -15,6 +15,8 @@ signal (``on_snapshot``) is not fed; queue movement comes from the level diff.
 """
 from __future__ import annotations
 
+import dataclasses
+
 import hashlib
 from decimal import Decimal
 
@@ -300,7 +302,11 @@ class QueueAwareVenueAdapter(DeterministicVenueAdapter):
         if old is None:
             return (self._callback(request, ExecutionEventType.REJECTED, reason="replace target is not open"),)
         replaced = self._callback(request, ExecutionEventType.REPLACED)
-        return (replaced, *self._place(request, book))                 # the new order loses its queue place, like an amend on the venue
+        left = request.quantity - self._decimal(old.filled_qty)         # the REPLACE carries the quote's total (owner 12 Nov): what the old order filled before the venue processed the amend is not offered again (lineage)
+        if left <= 0:
+            return (self._callback(request, ExecutionEventType.REJECTED, reason="replace target is already filled"),)
+        placed = self._place(dataclasses.replace(request, quantity=left), book) if left != request.quantity else self._place(request, book)
+        return (replaced, *placed)                                      # ANY price amend loses the queue place here, like a cancel and a new order (CONSERVATIVE: a real venue may keep it for a size-down only; labelled in the ledger event AMEND_CONFIRMED)
 
     # ---- market data ----------------------------------------------------------------------------------------------------------
 

@@ -67,6 +67,8 @@ ORDER_STATE_BY_EVENT = {
     ExecutionEventType.TIMED_OUT: OrderState.TIMED_OUT,
     ExecutionEventType.SENT: OrderState.SENT,
     ExecutionEventType.CANCEL_REQUESTED: OrderState.CANCEL_PENDING,
+    ExecutionEventType.AMEND_REQUESTED: OrderState.AMEND_PENDING,
+    ExecutionEventType.AMEND_ACCEPTED: OrderState.SENT,        # a request accepted is not a confirmation: the replacement order stays "sent" until the venue says it is live
 }
 # Only picks which update's reason is reported; the state itself is resolved from the
 # facts (_resolve_order_state).
@@ -74,6 +76,7 @@ ORDER_STATE_RANK = {
     OrderState.CREATED: 0,
     OrderState.SENT: 0,
     OrderState.CANCEL_PENDING: 1,
+    OrderState.AMEND_PENDING: 1,
     OrderState.ACKNOWLEDGED: 1,
     OrderState.PARTIAL: 2,
     OrderState.TIMED_OUT: 3,
@@ -95,7 +98,7 @@ TERMINAL_ORDER_STATES = {
 # in flight does not make an order dead: CANCEL_PENDING counts until confirmed.
 LIVE_ORDER_STATES = frozenset({
     OrderState.CREATED, OrderState.SENT, OrderState.ACKNOWLEDGED, OrderState.PARTIAL,
-    OrderState.CANCEL_PENDING,
+    OrderState.CANCEL_PENDING, OrderState.AMEND_PENDING,
 })
 # Live with nothing filled yet.
 UNFILLED_LIVE_ORDER_STATES = frozenset({OrderState.CREATED, OrderState.SENT, OrderState.ACKNOWLEDGED})
@@ -115,10 +118,13 @@ ALLOWED_ORDER_TRANSITIONS: dict[OrderState, frozenset[OrderState]] = {
     }),
     OrderState.ACKNOWLEDGED: frozenset({
         OrderState.PARTIAL, OrderState.FILLED, OrderState.CANCELLED, OrderState.CANCEL_PENDING,
-        OrderState.TIMED_OUT,
+        OrderState.TIMED_OUT, OrderState.AMEND_PENDING,
     }),
     OrderState.PARTIAL: frozenset({
-        OrderState.FILLED, OrderState.CANCELLED, OrderState.CANCEL_PENDING, OrderState.TIMED_OUT,
+        OrderState.FILLED, OrderState.CANCELLED, OrderState.CANCEL_PENDING, OrderState.TIMED_OUT, OrderState.AMEND_PENDING,
+    }),
+    OrderState.AMEND_PENDING: frozenset({       # the old order stays live: it can fill, be cancelled, be replaced (CANCELLED) or, after a venue query, be found unchanged
+        OrderState.ACKNOWLEDGED, OrderState.PARTIAL, OrderState.FILLED, OrderState.CANCELLED, OrderState.CANCEL_PENDING, OrderState.TIMED_OUT,
     }),
     OrderState.CANCEL_PENDING: frozenset({
         OrderState.CANCELLED, OrderState.FILLED, OrderState.PARTIAL, OrderState.ACKNOWLEDGED,
@@ -303,6 +309,10 @@ class OMS:
         self.expired_at_release: list[dict[str, Any]] = []
         self.route_mode = "count"             # E0 step (d): "count" counts a layer decision that differs from the order's venue and sends the order's own venue; "enforce" rejects the order back instead
         self.lot_residual_alarm: dict[str, Any] | None = None          # owner 12 Nov (a): a carried sub-lot residual that reaches one full hedge lot raises this PERSISTENT alarm (it stays set; there is no auto-clear)
+        # Owner 12 Nov (amend semantics, CR-MQ part 2's order part): OFF by default; every caller before the requoting strategies behaves as before. See request_amend.
+        self.amend_enabled = False
+        self._lineage_of: dict[str, str] = {}              # order id -> the root order id of its amend lineage (only orders that were amended or replace one)
+        self._amend_seq: dict[str, int] = {}
         self.hedge_short_vol_bps = None       # owner 12 Nov (cap size_aware): an optional callable(venue, ts_ns) -> the short-horizon volatility in bps per sqrt(second); None = no source (the volatility term is then 0, labelled in the cap event)
         self.hedge_gate = None                # E0 step (c): a callable(child, ts_ns) the session sets; it only OBSERVES the hedge child against the risk gate (count: what it would refuse); a hedge is never blocked, it reduces exposure
         self.observer = None                  # E0 step (a): an ems IntentObserver (observation only: the OMS never reads it back); None = off
@@ -1680,7 +1690,7 @@ class OMS:
             return plan
         self._recompute_plan_economics(plan, ts_ns)
         self._assess_legging_risk(plan, ts_ns, books)
-        primary = [order for order in plan.children if order.order_role == "PRIMARY"]
+        primary = [order for order in plan.children if order.order_role == "PRIMARY" and not self._amend_bookkeeping_order(plan, order)] or [order for order in plan.children if order.order_role == "PRIMARY"]
         all_filled = all(
             order.state == OrderState.FILLED for order in primary
         )
@@ -2213,6 +2223,13 @@ class OMS:
             ):
                 self._report_deadlines.pop(order_id, None)
                 continue
+            if order.replaces_order_id and order.state in (OrderState.SENT, OrderState.CREATED):
+                # An amend the venue has not confirmed in time: the replacement is UNKNOWN (TIMED_OUT, which later venue evidence clears: a late success is still honoured), the OLD order is queried,
+                # and nothing is sent. The replacement itself is not queried: "not found" would only mean the venue has not processed the amend yet.
+                self._report_deadlines.pop(order_id, None)
+                handled += 1
+                self.mark_order_timed_out(plan.parent_id, order_id, self._next_execution_ts(now_ns), reason="amend unconfirmed: the venue's answer did not arrive in time")
+                continue
             if self.router.has_pending_order(order_id):
                 entry[0] = now_ns + policy.query_interval_ns
                 continue
@@ -2392,6 +2409,9 @@ class OMS:
             return OrderState.TIMED_OUT
         if cancel >= 0 and cancel > query:
             return OrderState.CANCEL_PENDING
+        amend = last(lambda row, state: state == OrderState.AMEND_PENDING)
+        if amend >= 0 and amend > query:             # an amend sent and not answered by a later venue query (or ended by the replacement's confirmation, which cancels this order): still live, fills count
+            return OrderState.AMEND_PENDING
         if filled > 0 or OrderState.PARTIAL in states:
             return OrderState.PARTIAL
         if OrderState.ACKNOWLEDGED in states:
@@ -2638,6 +2658,8 @@ class OMS:
         self._derive_execution_state(plan, update.observed_ts_ns)
         if plan.parent_id in self._hedge_specs:
             self._fill_triggered_react(plan, order, update.observed_ts_ns)
+        if self._lineage_of:
+            self._amend_react(plan, order, update)
         return plan
 
     @staticmethod
@@ -2734,11 +2756,184 @@ class OMS:
                 continue
             if order.state not in LIVE_ORDER_STATES or order.state == OrderState.CANCEL_PENDING or self.router.has_pending_order(order_id):
                 return False
+            if order.state == OrderState.AMEND_PENDING or self._lineage_of.get(order_id):
+                self.ledger.record("QUOTE_WITHDRAWN", now_ns, parent_id=plan.parent_id, order_id=order_id, venue=order.venue, reason=reason, net_edge_bps=net_bps)
+                return self.urgent_cancel(order_id, now_ns, reason)
             self.ledger.record("QUOTE_WITHDRAWN", now_ns, parent_id=plan.parent_id, order_id=order_id, venue=order.venue, reason=reason, net_edge_bps=net_bps)
             self.note_cancel_requested(order_id, now_ns)
             self._cancel_working_orders(plan, [order], now_ns)
             return True
         return False
+
+    # ---- amend (owner 12 Nov; off unless amend_enabled) ------------------------------------------------------------------------------------------------------------------------------------------
+    # A price amend is modelled as a lineage of two orders: the OLD order (AMEND_PENDING: still live at the OLD price, its fills count) and a REPLACEMENT order (sent with the new price, quantity = what was left).
+    # The new price counts only when the venue CONFIRMS (a REPLACED report, or the replacement live / filled): the gateway accepting the request (AMEND_ACCEPTED) confirms nothing. On confirmation the old order
+    # is recorded CANCELLED (the venue replaced it; every fill it had is already booked), the hedge spec follows to the replacement and the lineage continues. A reject sends a venue query about the OLD order; a
+    # timeout leaves both alive and queries: the OMS never sends a second order for the same quote. Fills of the lineage count once each toward the hedge; the lineage never takes more than the quote's
+    # quantity (a sibling is cancelled when it is complete).
+    def request_amend(self, order_id: str, new_price: Decimal, now_ns: int, reason: str = "requote") -> str:
+        """Ask the venue to move a resting maker quote to `new_price`. Returns REQUESTED, FALLBACK_CANCEL (the route cannot amend: the order is cancelled and NOTHING is sent in its place: the caller quotes again
+        once the cancel is confirmed, so two live orders never exist), or REFUSED:<why>."""
+        if not self.amend_enabled:
+            return "REFUSED:amend_disabled"
+        found = next(((plan, x) for plan in self.plans.values() for x in plan.children if x.order_id == order_id), None)
+        if found is None:
+            return "REFUSED:unknown_order"
+        plan, order = found
+        if order.order_role != "PRIMARY" or not order.post_only or plan.parent_id not in self._hedge_specs:
+            return "REFUSED:not_a_maker_quote"
+        if order.state not in (OrderState.ACKNOWLEDGED, OrderState.PARTIAL):
+            return f"REFUSED:state_{order.state.value.lower()}"            # no second amend while one is pending, none during a cancel, none before the venue acknowledged the order
+        if self.router.has_pending_order(order_id) or new_price == order.limit_price:
+            return "REFUSED:in_flight_or_same_price"
+        if self.risk.kill_switch:
+            return "REFUSED:kill_switch"
+        status = self.router.route_status.get(order.venue)
+        if status is not None and not status.supports_replace:
+            self.ledger.record("AMEND_FALLBACK_CANCEL", now_ns, parent_id=plan.parent_id, order_id=order_id, venue=order.venue, new_price=str(new_price), reason="route_does_not_support_replace")
+            self.note_cancel_requested(order_id, now_ns)
+            self._cancel_working_orders(plan, [order], now_ns)
+            return "FALLBACK_CANCEL"
+        seq = self._amend_seq.get(order_id, 0) + 1
+        remaining = order.quantity - order.filled_quantity
+        new = ChildOrder(
+            order_id=stable_id("amend", order_id, seq), parent_id=plan.parent_id, opportunity_id=order.opportunity_id, venue=order.venue, instrument_id=order.instrument_id, side=order.side,
+            quantity=remaining, limit_price=new_price, order_role=order.order_role, reduce_only=order.reduce_only, order_type=order.order_type, time_in_force=order.time_in_force,
+            post_only=order.post_only, intent_id=order.intent_id, replaces_order_id=order_id,
+        )
+        try:
+            self.instruments.validate_order(new, now_ns)
+        except ValueError as exc:
+            return f"REFUSED:instrument_check:{exc}"
+        self._amend_seq[order_id] = seq
+        root = self._lineage_of.get(order_id, order_id)
+        self._lineage_of[order_id] = root
+        self._lineage_of[new.order_id] = root
+        order.amend_to_price = new_price
+        plan.children.append(new)
+        self.ledger.record("AMEND_REQUESTED", now_ns, parent_id=plan.parent_id, order_id=order_id, replacement_order_id=new.order_id, venue=order.venue, old_price=str(order.limit_price), new_price=str(new_price),
+                           remaining=str(remaining), reason=reason)
+        self._record_internal_update(plan, order, ExecutionEventType.AMEND_REQUESTED, now_ns, f"amend:{new.order_id}")
+        self._record_internal_update(plan, new, ExecutionEventType.SENT, now_ns, "amend-sent")
+        request = CanonicalOrderRequest.create(
+            action=OrderAction.REPLACE, order_id=new.order_id, target_order_id=order_id, parent_opportunity_id=order.opportunity_id, parent_order_id=plan.parent_id,
+            instrument_id=order.instrument_id, venue=order.venue, side=order.side, price=new_price, quantity=order.quantity, order_type=OrderType.LIMIT, time_in_force=TimeInForce.GTC,    # the REPLACE carries the quote's TOTAL
+            post_only=order.post_only, reduce_only=order.reduce_only, created_ts_ns=now_ns, idempotency_key=stable_id("amend", order_id, seq),      # quantity (Bybit amend semantics): the venue's new order has total less what the old one filled by then
+        )
+        callbacks = self.route_order(request)
+        self._record_order_action(plan, new, request, "REPLACE", "DISPATCHED", now_ns, target_order_id=order_id)
+        self._watch_order(new, now_ns)                                       # no answer in time: the venue is queried (about the replacement, and the old order on the amend timeout), never a second order sent
+        for callback in callbacks:
+            self._ingest_request_callback(plan, new, request, callback, self._next_execution_ts(now_ns))
+        return "REQUESTED"
+
+    def urgent_cancel(self, order_id: str, now_ns: int, reason: str = "urgent") -> bool:
+        """Cancel a quote NOW, amend pending or not: every live order of its lineage gets a cancel, the old order and the replacement the venue may already have created (or will, when it processes the amend:
+        the replacement is cancelled too, so no order survives the urgent cancel). Returns False when nothing was live."""
+        found = next(((plan, x) for plan in self.plans.values() for x in plan.children if x.order_id == order_id), None)
+        if found is None:
+            return False
+        plan, order = found
+        root = self._lineage_of.get(order_id, order_id)
+        live = [x for x in plan.children if self._lineage_of.get(x.order_id, x.order_id) == root and x.state in LIVE_ORDER_STATES and x.state != OrderState.CANCEL_PENDING]
+        if not live:
+            return False
+        self.ledger.record("QUOTE_URGENT_CANCEL", now_ns, parent_id=plan.parent_id, order_id=order_id, live_members=[x.order_id for x in live], states=[x.state.value for x in live], reason=reason)
+        for x in live:
+            if x.state != OrderState.CREATED:
+                self.note_cancel_requested(x.order_id, now_ns)
+        self._cancel_working_orders(plan, live, now_ns)
+        return True
+
+    def _amend_bookkeeping_order(self, plan: ParentPlan, order: ChildOrder) -> bool:
+        """An order of an amend lineage that is not the quote itself any more: the old order the venue replaced (its fills are booked, it is simply gone), or a replacement that never took anything (rejected or cancelled
+        with no fill). The plan's "all primary orders filled" test leaves them out; a replacement or old order that is the live head of the quote counts as before."""
+        if order.order_id not in self._lineage_of:
+            return False
+        if order.state in TERMINAL_ORDER_STATES - {OrderState.TIMED_OUT} and order.state != OrderState.FILLED:
+            return any(x is not order and x.order_id in self._lineage_of and self._lineage_of[x.order_id] == self._lineage_of[order.order_id] and
+                       (x.state == OrderState.FILLED or x.state not in TERMINAL_ORDER_STATES or x.filled_quantity > 0) for x in plan.children) or order.filled_quantity == 0
+        return False
+
+    def _lineage_members(self, plan: ParentPlan, order: ChildOrder) -> list[ChildOrder]:
+        root = self._lineage_of.get(order.order_id)
+        if root is None:
+            return [order]
+        return [x for x in plan.children if self._lineage_of.get(x.order_id) == root]
+
+    def _lineage_filled(self, plan: ParentPlan, order: ChildOrder) -> Decimal:
+        return sum((x.filled_quantity for x in self._lineage_members(plan, order)), Decimal("0"))
+
+    def lineage_remaining(self, order_id: str) -> Decimal | None:
+        """What is still to be filled of the quote the order belongs to: the quote's quantity less the fills of every order of its lineage (a late fill on the old order reduces the replacement's remaining)."""
+        for plan in self.plans.values():
+            order = next((x for x in plan.children if x.order_id == order_id), None)
+            if order is None:
+                continue
+            root = self._lineage_of.get(order_id)
+            total = next((x.quantity for x in plan.children if x.order_id == root), order.quantity) if root else order.quantity
+            return total - self._lineage_filled(plan, order)
+        return None
+
+    def _amend_react(self, plan: ParentPlan, order: ChildOrder, update: CanonicalOrderUpdate) -> None:
+        ts_ns = update.observed_ts_ns
+        if order.replaces_order_id:                                            # an update about a REPLACEMENT order
+            old = next((x for x in plan.children if x.order_id == order.replaces_order_id), None)
+            if old is None:
+                return
+            if update.state == ExecutionEventType.AMEND_ACCEPTED:
+                self.ledger.record("AMEND_ACCEPTED_NOT_CONFIRMED", ts_ns, parent_id=plan.parent_id, order_id=old.order_id, replacement_order_id=order.order_id, effective_price=str(old.limit_price),
+                                   requested_price=str(order.limit_price))
+            elif update.state in (ExecutionEventType.REPLACED, ExecutionEventType.ACKNOWLEDGED, ExecutionEventType.PARTIAL, ExecutionEventType.FILLED):
+                if old.amend_to_price is not None or old.state not in TERMINAL_ORDER_STATES - {OrderState.TIMED_OUT}:
+                    self._amend_confirmed(plan, old, order, ts_ns)
+            elif update.state == ExecutionEventType.REJECTED and old.amend_to_price is not None:
+                self._amend_failed(plan, old, order, ts_ns, update.reason or "amend rejected")
+            elif update.state == ExecutionEventType.TIMED_OUT and old.amend_to_price is not None:
+                self.ledger.record("AMEND_TIMEOUT", ts_ns, parent_id=plan.parent_id, order_id=old.order_id, replacement_order_id=order.order_id)
+                self._watch_order(old, ts_ns, immediate=True, count_unknown=False)       # ask the venue about the old order too: nothing is sent, the amend may still succeed late
+        if self._lineage_of.get(order.order_id) is not None and update.cumulative_filled_quantity > 0:
+            self._lineage_guard(plan, order, ts_ns)
+
+    def _amend_confirmed(self, plan: ParentPlan, old: ChildOrder, new: ChildOrder, ts_ns: int) -> None:
+        new_price = old.amend_to_price if old.amend_to_price is not None else new.limit_price
+        self.ledger.record("AMEND_CONFIRMED", ts_ns, parent_id=plan.parent_id, order_id=old.order_id, replacement_order_id=new.order_id, venue=old.venue, old_price=str(old.limit_price), new_price=str(new_price),
+                           queue_position="LOST (any price amend is modelled as a loss of queue place: conservative)")
+        old.amend_to_price = None
+        spec = self._hedge_specs.get(plan.parent_id)
+        if spec is not None and spec["maker_order_id"] == old.order_id:        # the head of the quote moves to the replacement BEFORE the old order is closed, so the plan never reads a cancelled maker
+            spec["maker_order_id"] = new.order_id
+            self._persist(plan, ts_ns, "HEDGE_SPEC", **spec)
+        if old.order_id in self._lifetime_deadlines:                          # an amend does not restart the quote's lifetime watchdog
+            self._lifetime_deadlines.setdefault(new.order_id, self._lifetime_deadlines.pop(old.order_id))
+        if old.state not in TERMINAL_ORDER_STATES - {OrderState.TIMED_OUT}:
+            self.ingest_order_update(CanonicalOrderUpdate(
+                update_id=stable_id("amend-replaced", old.order_id, new.order_id), source=OrderUpdateSource.ADAPTER_CALLBACK, parent_order_id=plan.parent_id, order_id=old.order_id,
+                venue=old.venue, instrument_id=old.instrument_id, state=ExecutionEventType.CANCELLED, event_ts_ns=ts_ns, observed_ts_ns=ts_ns,
+                cumulative_filled_quantity=old.filled_quantity, average_price=old.average_price, reason=f"replaced by {new.order_id}",
+            ))
+
+    def _amend_failed(self, plan: ParentPlan, old: ChildOrder, new: ChildOrder, ts_ns: int, reason: str) -> None:
+        self.ledger.record("AMEND_REJECTED", ts_ns, parent_id=plan.parent_id, order_id=old.order_id, replacement_order_id=new.order_id, venue=old.venue, reason=reason,
+                           effective_price=str(old.limit_price), requested_price=str(old.amend_to_price))
+        old.amend_to_price = None
+        if old.state not in TERMINAL_ORDER_STATES:
+            self._watch_order(old, ts_ns, immediate=True, count_unknown=False)      # the old order is queried (it may have filled, or been cancelled, with the report still travelling); no blind second order, no assumption
+
+    def _lineage_guard(self, plan: ParentPlan, order: ChildOrder, ts_ns: int) -> None:
+        members = self._lineage_members(plan, order)
+        root = self._lineage_of.get(order.order_id)
+        total = next((x.quantity for x in plan.children if x.order_id == root), order.quantity)
+        filled = sum((x.filled_quantity for x in members), Decimal("0"))
+        if filled > total:
+            self.ledger.record("AMEND_LINEAGE_OVERFILL", ts_ns, parent_id=plan.parent_id, root_order_id=root, quote_quantity=str(total), lineage_filled=str(filled), alarm=True)
+        if filled >= total:
+            live = [x for x in members if x.state in LIVE_ORDER_STATES and x.state != OrderState.CANCEL_PENDING and x.state != OrderState.CREATED]
+            if live:
+                self.ledger.record("AMEND_LINEAGE_COMPLETE_CANCEL", ts_ns, parent_id=plan.parent_id, root_order_id=root, cancelled=[x.order_id for x in live])
+                for x in live:
+                    self.note_cancel_requested(x.order_id, ts_ns)
+                self._cancel_working_orders(plan, live, ts_ns)
 
     def note_cancel_requested(self, order_id: str, ts_ns: int) -> None:
         """Record that a cancel was sent for `order_id` (the same internal CANCEL_REQUESTED update the cancel path records):
@@ -3332,7 +3527,8 @@ class OMS:
 
     def _fill_triggered_react(self, plan: ParentPlan, order: ChildOrder, ts_ns: int) -> None:
         spec = self._hedge_specs[plan.parent_id]
-        if order.order_id == spec["maker_order_id"]:
+        lineage = self._lineage_of.get(order.order_id)
+        if order.order_id == spec["maker_order_id"] or (lineage is not None and lineage == self._lineage_of.get(spec["maker_order_id"])):
             self._hedge_for_maker_fill(plan, spec, order, ts_ns)
         else:
             chain = self._chain_of_child.get(order.order_id)
@@ -3341,7 +3537,7 @@ class OMS:
         self._fill_triggered_settle(plan, spec, ts_ns)
 
     def _hedge_for_maker_fill(self, plan: ParentPlan, spec: dict[str, Any], maker: ChildOrder, ts_ns: int) -> None:
-        filled = min(maker.filled_quantity, spec["max_qty"])
+        filled = min(self._lineage_filled(plan, maker), spec["max_qty"])      # an amended quote: the fills of every order of its lineage (the old order's late fill included), once each
         # Lot rule (owner 11 Nov): the hedge is a whole number of the hedge venue's lots. The cumulative target is floored to the lot, so a part-lot
         # residual is carried to the next maker fill (never lost) and is on record while it is open; a quantity already on the lot is unchanged.
         target = self.instruments.round_quantity(spec["venue"], spec["instrument_id"], filled, ts_ns)
@@ -3681,6 +3877,7 @@ class OMS:
                 # A venue never reports these (they are OMS-side); an order it holds is working.
                 OrderState.SENT: ExecutionEventType.ACKNOWLEDGED,
                 OrderState.CANCEL_PENDING: ExecutionEventType.ACKNOWLEDGED,
+                OrderState.AMEND_PENDING: ExecutionEventType.ACKNOWLEDGED,
             }[snapshot.state]
             update_ts = snapshot.observed_ts_ns or now_ns
             self.ingest_order_update(CanonicalOrderUpdate(

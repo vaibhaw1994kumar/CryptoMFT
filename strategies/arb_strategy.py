@@ -1068,7 +1068,7 @@ class CrossVenueArbStrategy:
         }
 
 
-_LIVE_CHILD_STATES = frozenset({OrderState.CREATED, OrderState.SENT, OrderState.CANCEL_PENDING, OrderState.ACKNOWLEDGED, OrderState.PARTIAL})
+_LIVE_CHILD_STATES = frozenset({OrderState.CREATED, OrderState.SENT, OrderState.CANCEL_PENDING, OrderState.AMEND_PENDING, OrderState.ACKNOWLEDGED, OrderState.PARTIAL})
 _WITHDRAWABLE_STATES = frozenset({OrderState.ACKNOWLEDGED, OrderState.PARTIAL})       # a resting quote with no cancel in flight (CANCEL_PENDING is already on its way out)
 
 

@@ -52,6 +52,7 @@ class OrderState(StrEnum):
     CREATED = "CREATED"                  # built, not yet sent
     SENT = "SENT"                        # sent, nothing heard back yet
     CANCEL_PENDING = "CANCEL_PENDING"    # cancel sent, not confirmed: still live, can still fill
+    AMEND_PENDING = "AMEND_PENDING"      # owner 12 Nov: an amend (price replace) sent, not confirmed by the venue: the OLD order is still live at the OLD price and its fills count; the new price counts only after confirmation
     ACKNOWLEDGED = "ACKNOWLEDGED"
     PARTIAL = "PARTIAL"
     FILLED = "FILLED"
@@ -282,6 +283,8 @@ class ChildOrder:
     liquidity: str = ""          # MAKER / TAKER / MIXED
     fee_source: str = ""         # VERIFIED / ASSUMED / CONSERVATIVE_ASSUMED / VENUE_REPORTED
     intent_id: str = ""          # E0 step (e): the execution-layer intent this order belongs to, set before the order is first sent ("" = no layer, or never sent); not persisted by the plan store yet
+    replaces_order_id: str = ""  # owner 12 Nov (amend): set on the replacement order of an amend: the order it replaces (lineage); "" on every order that is not one
+    amend_to_price: Decimal | None = None      # owner 12 Nov (amend): set on the OLD order while an amend of it is pending: the price asked for (not yet effective)
 
 
 @dataclass(slots=True)

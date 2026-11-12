@@ -127,6 +127,8 @@ class ExecutionEventType(StrEnum):
     # Recorded by the OMS itself (source INTERNAL) when it dispatches, not by a venue.
     SENT = "SENT"
     CANCEL_REQUESTED = "CANCEL_REQUESTED"
+    AMEND_REQUESTED = "AMEND_REQUESTED"    # owner 12 Nov: recorded by the OMS itself when it asks the venue to amend (replace) a resting order
+    AMEND_ACCEPTED = "AMEND_ACCEPTED"      # a venue's gateway accepted the amend request: NOT a confirmation (the new price is not in the book until the venue says REPLACED / the new order is live)
 
 
 class OrderUpdateSource(StrEnum):
