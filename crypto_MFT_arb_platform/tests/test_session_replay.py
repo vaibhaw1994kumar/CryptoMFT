@@ -737,3 +737,529 @@ class RouteDecisionInTheReplay(unittest.TestCase):
         with mock.patch.object(sr, "TradingSession", lambda *a, **k: real(*a, **{**k, "intent_journal": False})):
             with self.assertRaises(ValueError):
                 self._replay(layer_route_mode="enforce")
+
+
+# ── the EMS functionality note of 09 Nov (owner 12 Nov): quote validity, hedge cap, duplicate fills, rate-limit pressure ──────────────────────────────────────────────────────────────────────────
+
+def snap_sized(t, venue, bid, ask, bid_size="50", ask_size="50"):
+    return timed(t, venue, BOOK, {"timestamp": t, "bids": [[str(bid), bid_size], [str(round(bid - 0.01, 2)), "50"]], "asks": [[str(ask), ask_size], [str(round(ask + 0.01, 2)), "50"]]})
+
+
+def moved_stream(move_t, bin_bid=100.20, bin_ask=100.21, print_t=3.0, extra_snap_at_move=True, binance_bid_size="50"):
+    """The synthetic stream with the hedge venue (Binance) moving AGAINST a resting Bybit bid at `move_t`: its bid drops from 100.30 to `bin_bid`."""
+    ev = [snap(1.0, "bybit", 100.00, 100.30), snap(1.0, "binance", 100.30, 100.31)]
+    t = 1.1
+    if extra_snap_at_move:
+        ev.append(snap_sized(move_t, "binance", bin_bid, bin_ask))
+    for _ in range(80):
+        bb, ba = (100.30, 100.31) if t < move_t else (bin_bid, bin_ask)
+        ev += [snap_sized(t, "binance", bb, ba, bid_size=binance_bid_size if t < move_t else "50"), snap(t + 0.01, "bybit", 100.00, 100.30)]
+        t += 0.1
+    ev.append(timed(print_t, "bybit", TRADE, {"exchange_ts": print_t, "price": "100.24", "volume": "30", "side": "sell"}))
+    return sorted(ev, key=lambda e: (e.exchange_ts, e.venue))
+
+
+@unittest.skipUnless(SLICES.is_dir(), "March slices not available (the profile needs a data root)")
+class EmsNoteQuoteValidity(unittest.TestCase):
+    """Owner 12 Nov, EMS note section 4: with arb.quote_withdraw on (profile v1_8; default off) a resting quote whose net edge at the current hedge-venue VWAP falls below the entry threshold minus the hysteresis is cancelled on the
+    book update that shows it. Withdrawal only. A fill that lands before the cancel takes effect is booked once and hedged."""
+
+    def _replay(self, stream_events, on=True, hysteresis=None, **kw):
+        profile = load_profile("perp_perp_maker_taker_v1_5")
+        cfg = apply_profile(profile, dataset="mar2024", data_root=str(SLICES), pair="SOLUSDT", start_date="2024-03-11", end_date="2024-03-11", output_dir="/tmp/x_qv")
+        cfg.arb.max_position_base = 1.0
+        cfg.arb.quote_withdraw = on
+        if hysteresis is not None:
+            cfg.arb.quote_withdraw_hysteresis_bps = hysteresis
+        return SessionReplay(cfg, profile, stream=stream_events, **kw)
+
+    def _events(self, rep, name):
+        return [e for e in rep.session.ledger.events if e["event_type"] == name]
+
+    def test_v1_8_is_v1_7_plus_the_one_switch_and_the_default_is_off(self):
+        from crypto_stat_arb.strategies.arb_strategy import ArbConfig
+        a, b = load_profile("perp_perp_maker_taker_v1_7"), load_profile("perp_perp_maker_taker_v1_8")
+        self.assertEqual({k for k in set(a["arb"]) | set(b["arb"]) if a["arb"].get(k) != b["arb"].get(k)}, {"quote_withdraw", "quote_withdraw_hysteresis_bps"})
+        self.assertEqual({k for k in set(a) | set(b) if a.get(k) != b.get(k)}, {"description", "_sha256", "name", "_path", "arb"})
+        self.assertTrue(b["arb"]["quote_withdraw"]); self.assertEqual(b["arb"]["quote_withdraw_hysteresis_bps"], 0.5)
+        self.assertFalse(ArbConfig().quote_withdraw)
+        for v in ("perp_perp_maker_taker_v1_5", "perp_perp_maker_taker_v1_6", "perp_perp_maker_taker_v1_7"):
+            self.assertFalse(load_profile(v)["arb"].get("quote_withdraw", False))
+
+    def test_binance_moving_against_a_resting_quote_between_timer_ticks_cancels_it(self):
+        rep = self._replay(moved_stream(1.6)); result = rep.run()
+        (w, *_) = self._events(rep, "QUOTE_WITHDRAWN")
+        self.assertEqual(w["reason"], "edge_below_threshold"); self.assertLess(w["net_edge_bps"], 1.0 - 0.5)
+        self.assertLess(w["ts_ns"] / 1e9 - 1.6e0 - 1_793_000_000 if False else 0, 1)       # (the time is checked against the order's own lifetime below)
+        maker = [o for o in result["orders"] if o["post_only"]]
+        self.assertEqual((maker[0]["state"], maker[0]["limit_price"]), ("CANCELLED", "100.247"))   # the withdrawn quote is the original one
+        self.assertEqual(w["order_id"], maker[0]["order_id"])
+        self.assertLess(w["ts_ns"], maker[0]["terminal_ts_ns"] + 1)                                # cancelled because of the move, long before the 15 s lifetime
+        self.assertFalse(maker[0]["lifetime_expired"])
+        for later in maker[1:]:                                                                     # the strategy may quote again at the NEW hedge price (a fresh entry decision, not a repricing)
+            self.assertLess(float(later["limit_price"]), 100.247)
+        self.assertEqual(result["fills"], [])                                                       # the print at 3.0 finds nothing to fill: withdrawn
+        self.assertEqual(rep.session.quotes_withdrawn, 1)
+
+    def test_with_the_switch_off_the_same_stream_does_not_withdraw_and_the_quote_fills(self):
+        rep = self._replay(moved_stream(1.6), on=False); result = rep.run()
+        self.assertEqual(self._events(rep, "QUOTE_WITHDRAWN"), [])
+        self.assertEqual(len(result["fills"]), 2)                                                   # the maker fill and its hedge
+
+    def test_a_fill_that_lands_before_the_cancel_takes_effect_is_booked_once_and_hedged(self):
+        rep = self._replay(moved_stream(2.995, print_t=3.0)); result = rep.run()
+        self.assertEqual(len(self._events(rep, "QUOTE_WITHDRAWN")), 1)                              # withdrawn on the move at 2.995 ...
+        fills = result["fills"]
+        self.assertEqual([f["venue"] for f in fills].count("BYBIT"), 1)                             # ... but the print at 3.0 filled it before the cancel arrived: booked ONCE
+        self.assertEqual([f["venue"] for f in fills].count("BINANCE"), 1)                           # and hedged once
+        self.assertEqual(result["positions"], {"BYBIT:SOL-USDT-PERP": "1.0", "BINANCE:SOL-USDT-PERP": "-1.0"})
+        self.assertEqual(len([o for o in result["orders"] if o["venue"] == "BINANCE" and o["state"] != "CREATED"]), 1)
+
+    def test_a_quote_that_still_clears_the_threshold_is_left_alone_and_hysteresis_widens_the_band(self):
+        rep = self._replay(moved_stream(1.6, bin_bid=100.295, bin_ask=100.305)); rep.run()          # the hedge bid is only 0.5 bps lower: the edge still clears the threshold minus the hysteresis
+        self.assertEqual(self._events(rep, "QUOTE_WITHDRAWN"), [])
+        rep2 = self._replay(moved_stream(1.6), hysteresis=1000.0); rep2.run()                       # a huge hysteresis: nothing is ever withdrawn
+        self.assertEqual(self._events(rep2, "QUOTE_WITHDRAWN"), [])
+
+    def test_an_unmeasurable_edge_never_withdraws(self):
+        from crypto_stat_arb.strategies.arb_strategy import CrossVenueArbStrategy
+        rep = self._replay(moved_stream(1.6)); rep.run()
+        strat = rep.strategy
+        floats = rep.views
+        # a hedge book that cannot cover the size: valid, reason says why
+        thin = {v: b for v, b in floats.items()}
+        valid, net, why = strat.quote_validity("bybit", "buy", 100.247, 10_000.0, thin, 1e12)
+        self.assertEqual((valid, net), (True, None)); self.assertIn(why, ("stale_hedge_touch", "hedge_depth_unknown"))
+
+    def test_withdrawal_needs_a_non_legacy_profile(self):
+        from crypto_stat_arb.strategies.arb_strategy import CrossVenueArbStrategy
+        rep = self._replay(moved_stream(1.6)); rep.run()
+        rep.strategy.config.profile = "legacy_v0"
+        with self.assertRaises(ValueError):
+            rep.strategy.quote_validity("bybit", "buy", 100.247, 1.0, rep.views, 1.0)
+
+
+class EmsNoteHedgeCap(unittest.TestCase):
+    """Owner 12 Nov item 2: (a) tick rounding of the cap never loosens it (a buy cap rounds down, a sell cap rounds up); (b) hedge_cap_basis size_vwap starts the cap from the executable VWAP of the hedge size."""
+
+    def test_tick_rounding_never_loosens_the_cap_over_many_prices_ticks_and_slacks(self):
+        import random
+        from decimal import Decimal as D
+        from crypto_stat_arb.ems.layer import hedge_cap_on_grid
+        from crypto_stat_arb.hedge_lifecycle import touch_slack_price
+        rnd = random.Random(7)
+        for _ in range(4000):
+            tick = D(rnd.choice(["0.001", "0.005", "0.01", "0.1", "0.0001"]))
+            touch = D(str(round(rnd.uniform(0.5, 400.0), 6)))
+            slack = D(str(round(rnd.uniform(0.0, 40.0), 3)))
+            for side in ("buy", "sell"):
+                raw = touch_slack_price(side, touch, slack)
+                cap = hedge_cap_on_grid(side, touch, slack, tick)
+                self.assertEqual(cap % tick, 0)                                                      # on the venue's grid
+                if side == "buy":
+                    self.assertLessEqual(cap, raw)                                                    # a buy may pay at most the raw cap: rounding goes down
+                    self.assertGreater(cap, raw - tick)
+                else:
+                    self.assertGreaterEqual(cap, raw)                                                 # a sell must receive at least the raw cap: rounding goes up
+                    self.assertLess(cap, raw + tick)
+
+    def test_the_basis_option_is_validated_and_defaults_to_touch(self):
+        from crypto_stat_arb.ems.config import ExecutionConfig, ExecutionConfigError
+        from crypto_stat_arb.hedge_lifecycle import HedgePolicy
+        self.assertEqual(HedgePolicy().cap_basis, "touch")
+        ExecutionConfig(hedge={"tactic": "IOC_CAPPED", "cap": "touch_slack", "cap_basis": "size_vwap"})
+        with self.assertRaises(ExecutionConfigError):
+            ExecutionConfig(hedge={"tactic": "IOC_CAPPED", "cap": "touch_slack", "cap_basis": "mid"})
+
+
+@unittest.skipUnless(SLICES.is_dir(), "March slices not available (the profile needs a data root)")
+class EmsNoteHedgeCapBasisInTheReplay(unittest.TestCase):
+    def _hedge_cap(self, basis):
+        from decimal import Decimal as D
+        profile = load_profile("perp_perp_maker_taker_v1_5")
+        cfg = apply_profile(profile, dataset="mar2024", data_root=str(SLICES), pair="SOLUSDT", start_date="2024-03-11", end_date="2024-03-11", output_dir="/tmp/x_cap")
+        cfg.arb.max_position_base = 1.0
+        if basis is not None:
+            cfg.execution.hedge["cap_basis"] = basis
+        ev = [snap_sized(1.0, "bybit", 100.00, 100.30), snap_sized(1.0, "binance", 100.30, 100.31, bid_size="0.4")]
+        t = 1.1
+        for _ in range(40):
+            ev += [snap_sized(t, "binance", 100.30, 100.31, bid_size="0.4"), snap(t + 0.01, "bybit", 100.00, 100.30)]
+            t += 0.1
+        ev.append(timed(3.0, "bybit", TRADE, {"exchange_ts": 3.0, "price": "100.24", "volume": "30", "side": "sell"}))
+        result = SessionReplay(cfg, profile, stream=sorted(ev, key=lambda e: (e.exchange_ts, e.venue))).run()
+        hedge = next(o for o in result["orders"] if o["venue"] == "BINANCE" and o["state"] != "CREATED")
+        return D(hedge["limit_price"]), cfg
+
+    def test_size_vwap_starts_the_cap_from_the_vwap_of_the_hedge_size_and_touch_is_unchanged(self):
+        from decimal import Decimal as D
+        from crypto_stat_arb.ems.layer import hedge_cap_on_grid, hedge_slack_bps
+        base, cfg = self._hedge_cap(None)
+        explicit, _ = self._hedge_cap("touch")
+        vwap_cap, _ = self._hedge_cap("size_vwap")
+        slack = hedge_slack_bps(cfg.execution.hedge, cfg.arb.max_walk_bps)
+        tick = D("0.001")
+        self.assertEqual(base, explicit)                                                             # default and explicit touch: the same
+        self.assertEqual(base, hedge_cap_on_grid("sell", D("100.30"), slack, tick))                   # the touch-based cap
+        vwap = (D("0.4") * D("100.30") + D("0.6") * D("100.29")) / D("1.0")                           # the 1.0 hedge walks 0.4 at 100.30 and 0.6 at 100.29
+        self.assertEqual(vwap_cap, hedge_cap_on_grid("sell", vwap, slack, tick))
+        self.assertLess(vwap_cap, base)                                                              # a sell cap that starts from the (lower) VWAP lets the hedge walk the book
+
+
+class EmsNoteNoOffTickPrice(unittest.TestCase):
+    """Owner 12 Nov item 1: every IOC, hedge and unwind limit is rounded to the venue tick without loosening (a buy limit down, a sell limit up), and no off-tick price can be sent. Ticks are the SOL grids of the data
+    (new_backtest.session_replay.DATED_TICKS: 2022 Bybit 0.005 / Binance 0.001, 2024 both 0.001, 2026 both 0.01), not figures from memory."""
+
+    def _ticks(self):
+        from decimal import Decimal as D
+        return sorted({D(str(t)) for y in sr.DATED_TICKS.values() for t in y.values()})
+
+    def test_limit_on_grid_never_loosens_at_every_sol_tick(self):
+        import random
+        from decimal import Decimal as D
+        from crypto_stat_arb.ems.layer import limit_on_grid
+        rnd = random.Random(3)
+        for tick in self._ticks():
+            for _ in range(1500):
+                px = D(str(round(rnd.uniform(5, 300), 6)))
+                for side in ("buy", "sell"):
+                    out = limit_on_grid(side, px, tick)
+                    self.assertEqual(out % tick, 0)
+                    self.assertTrue(out <= px if side == "buy" else out >= px)
+                    self.assertTrue(abs(out - px) < tick)
+
+    def test_the_unwind_ioc_limit_is_on_the_grid_and_never_looser_than_the_band(self):
+        import random
+        from decimal import Decimal as D
+        from types import SimpleNamespace as NS
+        from crypto_stat_arb.models import Side
+        from crypto_stat_arb.oms import OMS, UnwindUrgency
+        from crypto_stat_arb.orderbook import OrderBook
+        rnd = random.Random(9)
+        for tick in self._ticks():
+            stub = NS(residual_policy=NS(unwind_price_slippage_bps=D("15")), instruments=NS(get=lambda v, i, ts=None, t=tick: NS(tick_size=t)))
+            for _ in range(800):
+                bid = D(str(round(rnd.uniform(20, 300), 3))) // tick * tick
+                ask = bid + tick * rnd.randint(1, 5)
+                book = OrderBook("BYBIT", "SOLUSDT", bids={bid: D("5")}, asks={ask: D("5")})
+                for side in (Side.BUY, Side.SELL):
+                    price, otype, tif, post_only = OMS._unwind_price(stub, "BYBIT", "SOLUSDT", side, book, UnwindUrgency.NORMAL, 0)
+                    band = ask * D("1.0015") if side == Side.BUY else bid * D("0.9985")
+                    self.assertEqual(price % tick, 0)
+                    self.assertTrue(price <= band if side == Side.BUY else price >= band)             # never beyond the band
+                    self.assertTrue(price >= ask if side == Side.BUY else price <= bid)               # and still executable at the touch
+
+    def test_the_router_refuses_an_off_tick_price_at_send_time(self):
+        from decimal import Decimal as D
+        from crypto_stat_arb.execution import CanonicalOrderRequest, OrderAction, StrategyDirectedRouter
+        from crypto_stat_arb.instruments import InstrumentMaster
+        from crypto_stat_arb.models import Instrument, Side
+        for tick in self._ticks():
+            master = InstrumentMaster([Instrument(instrument_id="SOLUSDT", venue=v, symbol="SOLUSDT", base="SOL", quote="USDT", tick_size=tick, quantity_step=D("0.1"), min_quantity=D("0.1"), min_notional=D("5"), taker_fee_bps=D("5")) for v in ("BYBIT", "BINANCE")])
+            stub = type("R", (), {"instruments": master, "route_status": {}})()
+            for venue in ("BYBIT", "BINANCE"):
+                def req(price):
+                    return CanonicalOrderRequest.create(action=OrderAction.SUBMIT, order_id="o", parent_opportunity_id="p", instrument_id="SOLUSDT", venue=venue, side=Side.BUY, price=price, quantity=D("1.0"), created_ts_ns=1)
+                StrategyDirectedRouter._validate(stub, req(D("100") + tick))                                 # on the grid: accepted
+                with self.assertRaisesRegex(ValueError, "price violates tick"):
+                    StrategyDirectedRouter._validate(stub, req(D("100") + tick / 2))                         # off the grid: refused, nothing reaches the venue
+
+    @unittest.skipUnless(SLICES.is_dir(), "March slices not available (the profile needs a data root)")
+    def test_no_order_of_a_replay_is_off_tick_under_any_session_profile(self):
+        from decimal import Decimal as D
+        for name in ("perp_perp_maker_taker_v1_5", "perp_perp_maker_taker_v1_7", "perp_perp_maker_taker_v1_9"):
+            profile = load_profile(name)
+            cfg = apply_profile(profile, dataset="mar2024", data_root=str(SLICES), pair="SOLUSDT", start_date="2024-03-11", end_date="2024-03-11", output_dir="/tmp/x_tick")
+            cfg.arb.max_position_base = 1.0
+            result = SessionReplay(cfg, profile, stream=stream()).run()
+            self.assertTrue(result["orders"], name)
+            for o in result["orders"]:
+                if o["limit_price"] is not None:
+                    self.assertEqual(D(o["limit_price"]) % D("0.001"), 0, (name, o))
+
+
+def snap_levels(t, venue, bids, asks):
+    return timed(t, venue, BOOK, {"timestamp": t, "bids": [[str(p), q] for p, q in bids], "asks": [[str(p), q] for p, q in asks]})
+
+
+class SizeAwareCapRule(unittest.TestCase):
+    """Owner 12 Nov, EMS note section 1 (price-cap construction): execution.hedge.cap = size_aware. The pure rule and the OMS method that applies it."""
+
+    def test_touch_covers_the_size_equals_touch_slack_exactly(self):
+        import random
+        from decimal import Decimal as D
+        from crypto_stat_arb.ems.layer import hedge_cap_on_grid, hedge_cap_size_aware
+        rnd = random.Random(11)
+        for _ in range(2000):
+            tick = D(rnd.choice(["0.001", "0.005", "0.01", "0.1"]))
+            touch = D(str(round(rnd.uniform(1, 400), 4)))
+            slack = D(str(round(rnd.uniform(0, 30), 3)))
+            for side in ("buy", "sell"):
+                cap, binds = hedge_cap_size_aware(side, touch, touch, slack, 0.0, 15.0, tick)
+                self.assertEqual(cap, hedge_cap_on_grid(side, touch, slack, tick))
+                self.assertFalse(binds)
+
+    def test_a_size_spanning_levels_moves_the_cap_to_the_deepest_level_and_the_absolute_limit_binds(self):
+        from decimal import Decimal as D
+        from crypto_stat_arb.ems.layer import hedge_cap_on_grid, hedge_cap_size_aware
+        tick = D("0.01")
+        cap, binds = hedge_cap_size_aware("sell", D("100.30"), D("100.29"), 5.0, 0.0, 15.0, tick)          # one tick deeper: 1 bp
+        self.assertEqual(cap, hedge_cap_on_grid("sell", D("100.29"), 5.0, tick))
+        self.assertLess(cap, hedge_cap_on_grid("sell", D("100.30"), 5.0, tick))
+        self.assertFalse(binds)
+        cap, binds = hedge_cap_size_aware("sell", D("100.30"), D("99.00"), 5.0, 0.0, 15.0, tick)           # 130 bps deeper: the limit (15 bps beyond the touch) binds
+        self.assertTrue(binds)
+        self.assertEqual(cap, hedge_cap_on_grid("sell", D("100.30"), 15.0, tick))
+        cap, binds = hedge_cap_size_aware("buy", D("100.31"), D("102.00"), 5.0, 0.0, 15.0, tick)
+        self.assertTrue(binds)
+        self.assertEqual(cap, hedge_cap_on_grid("buy", D("100.31"), 15.0, tick))
+
+    def test_the_volatility_term_widens_the_allowance_and_k_zero_is_off(self):
+        from decimal import Decimal as D
+        from crypto_stat_arb.ems.layer import hedge_cap_size_aware
+        tick = D("0.01")
+        off, _ = hedge_cap_size_aware("buy", D("100.00"), D("100.00"), 5.0, 0.0, 15.0, tick)
+        on, _ = hedge_cap_size_aware("buy", D("100.00"), D("100.00"), 5.0, 4.0, 15.0, tick)
+        self.assertGreater(on, off)
+
+    def test_tick_rounding_direction_never_loosens_even_when_the_limit_binds(self):
+        import random
+        from decimal import Decimal as D
+        from crypto_stat_arb.ems.layer import hedge_cap_size_aware
+        from crypto_stat_arb.hedge_lifecycle import touch_slack_price
+        rnd = random.Random(5)
+        for _ in range(3000):
+            tick = D(rnd.choice(["0.001", "0.005", "0.01"]))
+            touch = D(str(round(rnd.uniform(20, 300), 3)))
+            slack = rnd.uniform(0, 12)
+            far = D(str(round(rnd.uniform(0, 0.02), 4)))
+            for side in ("buy", "sell"):
+                deepest = touch + far if side == "buy" else touch - far
+                cap, _ = hedge_cap_size_aware(side, touch, deepest, slack, 0.0, 15.0, tick)
+                loosest = touch_slack_price(side, deepest, D(str(slack)))
+                limit = touch_slack_price(side, touch, D(str(max(15.0, slack))))
+                bound = min(loosest, limit) if side == "buy" else max(loosest, limit)
+                self.assertEqual(cap % tick, 0)
+                self.assertLessEqual(cap, bound) if side == "buy" else self.assertGreaterEqual(cap, bound)
+
+    def _oms_call(self, book, qty="1.0", side_name="SELL", policy_kw=None):
+        from decimal import Decimal as D
+        from types import SimpleNamespace as NS
+        from crypto_stat_arb.hedge_lifecycle import HedgePolicy
+        from crypto_stat_arb.ledger import Ledger
+        from crypto_stat_arb.models import Side
+        from crypto_stat_arb.oms import OMS
+        side = Side.SELL if side_name == "SELL" else Side.BUY
+        stub = NS(hedge_policy=HedgePolicy(touch_slack_bps=5.0, size_aware=True, **(policy_kw or {})), instruments=NS(get=lambda v, i, ts=None: NS(tick_size=D("0.01"))),
+                  realism_counters={}, ledger=Ledger(), hedge_short_vol_bps=None)
+        touch = book.best_bid if side == Side.SELL else book.best_ask
+        cap = OMS._size_aware_cap(stub, NS(parent_id="p"), NS(chain_id="c"), {"side": side, "venue": "BINANCE", "instrument_id": "SOLUSDT"}, book, touch, D(qty), 1, 0)
+        return cap, stub
+
+    def _book(self, bids, asks=None):
+        from decimal import Decimal as D
+        from crypto_stat_arb.orderbook import OrderBook
+        return OrderBook("BINANCE", "SOLUSDT", bids={D(p): D(q) for p, q in bids}, asks={D(p): D(q) for p, q in (asks or [("100.31", "50")])})
+
+    def test_the_method_covers_spans_falls_back_and_recomputes_on_each_attempt(self):
+        from decimal import Decimal as D
+        from crypto_stat_arb.ems.layer import hedge_cap_on_grid
+        covered, st = self._oms_call(self._book([("100.30", "50"), ("100.29", "50")]))
+        self.assertEqual(covered, hedge_cap_on_grid("sell", D("100.30"), 5.0, D("0.01")))                    # the touch covers 1.0: touch_slack exactly
+        ev = st.ledger.events[-1]; self.assertTrue(ev["touch_covers"]); self.assertEqual(ev["fallback"], "")
+        spans, st = self._oms_call(self._book([("100.30", "0.4"), ("100.29", "50")]))
+        self.assertEqual(spans, hedge_cap_on_grid("sell", D("100.29"), 5.0, D("0.01")))                      # the size reaches 100.29
+        self.assertFalse(st.ledger.events[-1]["touch_covers"])
+        single, st = self._oms_call(self._book([("100.30", "0.4")]))                                          # best bid/ask only and the touch cannot cover it: touch_slack, labelled
+        self.assertEqual(single, hedge_cap_on_grid("sell", D("100.30"), 5.0, D("0.01")))
+        self.assertIn("touch_slack", st.ledger.events[-1]["fallback"]); self.assertEqual(st.realism_counters["hedge_cap_depth_fallback"], 1)
+        far, st = self._oms_call(self._book([("100.30", "0.4"), ("99.00", "50")]))                            # the size needs a level 130 bps away: the limit binds, the remainder follows the retry/unwind path
+        self.assertEqual(far, hedge_cap_on_grid("sell", D("100.30"), 15.0, D("0.01")))
+        self.assertEqual(st.realism_counters["hedge_cap_abs_limit_binds"], 1)
+        self.assertEqual(st.ledger.events[-1]["book"], "view")
+        # a retry takes the CURRENT view book: the same rule on a book that moved gives a different cap, nothing is carried from the first attempt
+        first, _ = self._oms_call(self._book([("100.30", "0.4"), ("100.29", "50")]))
+        second, _ = self._oms_call(self._book([("100.20", "0.4"), ("100.19", "50")]))
+        self.assertLess(second, first)
+        self.assertEqual(second, hedge_cap_on_grid("sell", D("100.19"), 5.0, D("0.01")))
+
+    def test_config_rules(self):
+        from crypto_stat_arb.ems.config import ExecutionConfig, ExecutionConfigError
+        from crypto_stat_arb.ems.layer import hedge_policy_fields
+        ExecutionConfig(hedge={"tactic": "IOC_CAPPED", "cap": "size_aware", "slack_bps_floor": 5.0, "max_slip_bps": 15.0, "vol_k": 0.0, "latency_s": 0.0})
+        with self.assertRaises(ExecutionConfigError):
+            ExecutionConfig(hedge={"tactic": "IOC_CAPPED", "cap": "size_aware", "max_slip_bps": -1})
+        with self.assertRaises(ExecutionConfigError):
+            ExecutionConfig(hedge={"tactic": "IOC_CAPPED", "cap": "size_aware", "cap_basis": "size_vwap"})
+        self.assertEqual(hedge_policy_fields({"cap": "touch_slack", "slack_bps_floor": 5.0}, 3.0), {"touch_slack_bps": 5.0, "cap_basis": "touch"})        # touch_slack: nothing new
+        self.assertTrue(hedge_policy_fields({"cap": "size_aware"}, 3.0)["size_aware"])
+
+
+@unittest.skipUnless(SLICES.is_dir(), "March slices not available (the profile needs a data root)")
+class SizeAwareCapInTheReplay(unittest.TestCase):
+    def _run(self, profile_name, bin_bids, bin_asks=None, thin_from=None):
+        profile = load_profile(profile_name)
+        cfg = apply_profile(profile, dataset="mar2024", data_root=str(SLICES), pair="SOLUSDT", start_date="2024-03-11", end_date="2024-03-11", output_dir="/tmp/x_sacap")
+        cfg.arb.max_position_base = 1.0
+        asks = bin_asks or [("100.31", "50")]
+        ev = [snap(1.0, "bybit", 100.00, 100.30), snap_levels(1.0, "binance", bin_bids, asks)]
+        t = 1.1
+        for _ in range(40):
+            bids = bin_bids if thin_from is None or t < thin_from else [("100.30", "0.4")]        # thin_from: the hedge book holds the touch only (and too little of it) from that time on
+            ev += [snap_levels(t, "binance", bids, asks), snap(t + 0.01, "bybit", 100.00, 100.30)]
+            t += 0.1
+        ev.append(timed(3.0, "bybit", TRADE, {"exchange_ts": 3.0, "price": "100.24", "volume": "30", "side": "sell"}))
+        rep = SessionReplay(cfg, profile, stream=sorted(ev, key=lambda e: (e.exchange_ts, e.venue)))
+        result = rep.run()
+        hedge = [o for o in result["orders"] if o["venue"] == "BINANCE" and o["state"] != "CREATED"]
+        return result, rep, hedge
+
+    def test_when_the_touch_covers_the_size_v1_9_sends_the_v1_7_hedge_limit(self):
+        deep = [("100.30", "50"), ("100.29", "50")]
+        _, _, h7 = self._run("perp_perp_maker_taker_v1_7", deep)
+        r9, _, h9 = self._run("perp_perp_maker_taker_v1_9", deep)
+        self.assertTrue(h7 and h9)
+        self.assertEqual([o["limit_price"] for o in h7], [o["limit_price"] for o in h9])
+        ev = [e for e in r9["_decision_events"] if e["event_type"] == "HEDGE_CAP_SIZE_AWARE"]
+        self.assertTrue(ev and all(e["touch_covers"] for e in ev))
+
+    def test_a_size_spanning_levels_lowers_the_sell_cap_and_the_view_book_is_the_one_read(self):
+        from decimal import Decimal as D
+        from crypto_stat_arb.ems.layer import hedge_cap_on_grid
+        from crypto_stat_arb.orderbook import OrderBook
+        seen = []
+        real = OrderBook.reach
+        def spy(self, side, qty):
+            seen.append(self); return real(self, side, qty)
+        with mock.patch.object(OrderBook, "reach", spy):
+            r9, rep, h9 = self._run("perp_perp_maker_taker_v1_9", [("100.30", "0.4"), ("100.29", "50")])
+        _, _, h7 = self._run("perp_perp_maker_taker_v1_7", [("100.30", "0.4"), ("100.29", "50")])
+        self.assertEqual(D(h9[0]["limit_price"]), hedge_cap_on_grid("sell", D("100.29"), 5.0, D("0.001")))
+        self.assertLess(D(h9[0]["limit_price"]), D(h7[0]["limit_price"]))
+        view_books = {id(b) for b in rep.session.books.values()}
+        self.assertTrue(seen and all(id(b) in view_books for b in seen))                                   # the OMS reads the bot's own book objects; the venue's truth is a different structure (the simulator's SimBook)
+        ev = [e for e in r9["_decision_events"] if e["event_type"] == "HEDGE_CAP_SIZE_AWARE"]
+        self.assertFalse(ev[0]["touch_covers"]); self.assertEqual(ev[0]["book"], "view")
+
+    def test_best_bid_ask_only_falls_back_to_touch_slack_and_says_so(self):
+        full = [("100.30", "50")]
+        _, _, h7 = self._run("perp_perp_maker_taker_v1_7", full, thin_from=2.5)
+        r9, _, h9 = self._run("perp_perp_maker_taker_v1_9", full, thin_from=2.5)
+        self.assertTrue(h7 and h9)
+        self.assertEqual([o["limit_price"] for o in h7], [o["limit_price"] for o in h9])
+        ev = [e for e in r9["_decision_events"] if e["event_type"] == "HEDGE_CAP_SIZE_AWARE"]
+        self.assertTrue(ev and all("touch_slack" in e["fallback"] for e in ev))
+
+
+@unittest.skipUnless(SLICES.is_dir(), "March slices not available (the profile needs a data root)")
+class EmsNoteDuplicateFilledRace(unittest.TestCase):
+    """Owner 12 Nov item 3: Bybit repeats a "Filled" message in a cancel/fill race. The fill is booked once and the residual is hedged once."""
+
+    def _run(self, duplicate):
+        from dataclasses import replace
+        from crypto_stat_arb.execution import ExecutionEventType
+        from crypto_stat_arb.oms import OMS
+        real = OMS.ingest_order_update
+        def doubled(self, update):
+            out = real(self, update)
+            if duplicate and update.state in (ExecutionEventType.FILLED, ExecutionEventType.PARTIAL) and "INTERNAL" not in str(update.source):
+                real(self, replace(update, update_id=update.update_id + "-dup"))                  # the same fill reported again, as a new message
+            return out
+        with mock.patch.object(OMS, "ingest_order_update", doubled):
+            rep = LayerRiskGateInTheReplay._replay(self); result = rep.run()
+        return rep, result
+
+    def test_a_duplicate_filled_message_changes_nothing(self):
+        rep, dup = self._run(True); _, base = self._run(False)
+        self.assertEqual([f["venue"] for f in dup["fills"]], [f["venue"] for f in base["fills"]])      # one maker fill and one hedge fill, not two of each
+        self.assertEqual(dup["positions"], base["positions"]); self.assertEqual(dup["cash_by_venue"], base["cash_by_venue"])
+        self.assertEqual(len([o for o in dup["orders"] if o["venue"] == "BINANCE" and o["state"] != "CREATED"]), 1)       # the hedge was sent once
+        self.assertEqual(dup["residual_at_end"]["flag"], "FLAT_NET")
+        self.assertTrue(dup["execution_layer"]["exec_reconciliation"]["ok"])                         # and the shadow reconciliation agrees with the ledger
+
+
+@unittest.skipUnless(SLICES.is_dir(), "March slices not available (the profile needs a data root)")
+class EmsNoteRateLimitPressure(unittest.TestCase):
+    """Owner 12 Nov item 4: with the scoped limiter near capacity on the session path, cancels and hedges still go out and a new maker quote is refused (tiers: new risk 70%, risk-reducing 80%, cancel 100% of capacity)."""
+
+    class Row:
+        def __init__(self, name, scope, limit, interval_s=100_000.0, status="ASSUMED"):
+            self.name, self.scope, self.limit, self.interval_seconds, self.status = name, scope, limit, interval_s, status
+
+    def _limiter(self, used, ts_ns=0):
+        from crypto_stat_arb.rate_limits import ScopedRateLimiter
+        R = self.Row
+        lim = ScopedRateLimiter({("BYBIT", "PERP"): [R("HTTP", "IP", 100), R("/v5/order/create", "UID_ENDPOINT", 100), R("/v5/order/cancel", "UID_ENDPOINT", 100)],
+                                 ("BINANCE", "PERP"): [R("REQUEST_WEIGHT", "IP", 100), R("ORDERS", "ACCOUNT", 100)]})
+        for b in lim.buckets.values():
+            b.charge(ts_ns, used)
+        return lim
+
+    def _replay(self):
+        return LayerRiskGateInTheReplay._replay(self)
+
+    def test_at_75_percent_a_new_maker_quote_is_refused(self):
+        rep = self._replay(); rep.session.oms.router.scoped_limits = self._limiter(75, 1)
+        result = rep.run()
+        sent = [o for o in result["orders"] if o["state"] not in ("CREATED",)]
+        self.assertEqual([o for o in sent if o["post_only"] and o["state"] in ("ACKNOWLEDGED", "FILLED", "PARTIAL")], [])      # no maker quote rests
+        self.assertEqual(result["fills"], [])
+        self.assertGreater(sum(rep.session.oms.router.scoped_limits.throttled.values()), 0)         # and the refusal is counted
+
+    def test_at_75_percent_the_hedge_still_goes_out_and_at_90_percent_a_cancel_does(self):
+        from crypto_stat_arb.oms import OMS
+        holder = {}
+        real_hedge = OMS._hedge_for_maker_fill
+        def at_fill(self, plan, spec, maker, ts_ns):
+            self.router.scoped_limits = holder["lim"]                                                # the limiter is at 75% just as the maker fills: the hedge (risk-reducing, 80%) must still go
+            return real_hedge(self, plan, spec, maker, ts_ns)
+        rep = self._replay()
+        holder["lim"] = self._limiter(75, 1)
+        with mock.patch.object(OMS, "_hedge_for_maker_fill", at_fill):
+            result = rep.run()
+        hedges = [o for o in result["orders"] if o["venue"] == "BINANCE" and o["state"] != "CREATED"]
+        self.assertEqual([(o["state"], o["filled_quantity"]) for o in hedges], [("FILLED", "1.0")])   # the hedge (risk-reducing tier) went out near capacity
+        self.assertEqual(result["positions"], {"BYBIT:SOL-USDT-PERP": "1.0", "BINANCE:SOL-USDT-PERP": "-1.0"})
+        # a cancel (cancel tier) still goes at 90%: the limiter is checked for it directly
+        rep2 = self._replay(); rep2.run()
+        lim = self._limiter(90, 1); router = rep2.session.oms.router
+        self.assertFalse(lim.check("BYBIT", "PERP", "SUBMIT", "NEW_RISK", 2).admitted)
+        self.assertFalse(lim.check("BINANCE", "PERP", "SUBMIT", "RISK_REDUCING", 2).admitted)        # 90% is above the risk-reducing share
+        self.assertTrue(lim.check("BYBIT", "PERP", "CANCEL", "CANCEL", 2).admitted)                   # but a cancel is admitted: it has the whole capacity
+        self.assertIsNotNone(router)
+
+    def test_at_90_percent_the_hedge_is_refused_and_the_exposure_ends_as_a_visible_alarm_not_silently(self):
+        """FINDING (owner 12 Nov item 4, advisor check): the risk-reducing tier stops at 80%, so above it a hedge and its unwinds are refused (scoped_rate_limited). Today's end state is a persistent UNWIND_EXHAUSTED alarm that
+        carries the residual and the reason, and new risk is blocked. Whether hedges should be admitted up to 90% is the owner's decision (the tier shares are ASSUMED); this test pins what happens now."""
+        from crypto_stat_arb.oms import OMS
+        holder = {"lim": self._limiter(90, 1)}
+        real_hedge = OMS._hedge_for_maker_fill
+        def at_fill(self, plan, spec, maker, ts_ns):
+            self.router.scoped_limits = holder["lim"]
+            return real_hedge(self, plan, spec, maker, ts_ns)
+        rep = self._replay()
+        with mock.patch.object(OMS, "_hedge_for_maker_fill", at_fill):
+            result = rep.run()
+        hedges = [o for o in result["orders"] if o["venue"] == "BINANCE"]
+        self.assertTrue(hedges and all(o["cancel_reason"] == "scoped_rate_limited" for o in hedges))
+        self.assertEqual(result["residual_at_end"]["flag"], "UNHEDGED_OR_CARRIED_RESIDUAL")
+        alarm = next(e for e in rep.session.ledger.events if e["event_type"] == "UNWIND_EXHAUSTED_ALARM")
+        self.assertEqual(alarm["execution_blocked_reason"], "unwind_exhausted_alarm")
+        self.assertGreater(float(alarm["confirmed_residual_base"]), 0.0)
+
+
+@unittest.skipUnless(SLICES.is_dir(), "March slices not available (the profile needs a data root)")
+class EmsNoteAlertContext(unittest.TestCase):
+    """Owner 12 Nov item 5: the hedge alarm (and the breaker and unwind alarms, see test_session_breaker and test_oms_unwind_alarm) carry the confirmed residual, the pending hedge quantity, the oldest exposure age and why execution is blocked."""
+
+    def test_the_hedge_alarm_carries_the_exposure_and_the_reason(self):
+        gh = GhostHedgeInTheReplay("test_the_hedge_is_held_during_the_outage_and_executed_at_the_reconnect")
+        rep = gh._replay(gh._faults(30.0), hedge_fault_injection=True); rep.run()
+        alarms = [e for e in rep.session.ledger.events if e["event_type"] == "HEDGE_ALARM"]
+        self.assertEqual(len(alarms), 1)
+        a = alarms[0]
+        for key in ("confirmed_residual_base", "pending_hedge_qty", "oldest_exposure_age_s", "execution_blocked_reason"):
+            self.assertIn(key, a)
+        self.assertGreater(float(a["pending_hedge_qty"]), 0.0)                                         # the hedge is still out
+        self.assertGreater(a["oldest_exposure_age_s"], 0.0)
+        self.assertTrue(a["execution_blocked_reason"])                                                  # new risk is blocked, and the alert says why

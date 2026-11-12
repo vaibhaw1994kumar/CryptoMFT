@@ -524,3 +524,97 @@ class UnwindExhaustedAlarmPersistsTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class RestartAgainstTheVenueTests(unittest.TestCase):
+    """Owner 12 Nov item 2: the session was down while the venue filled its resting maker order. On restart the OMS takes the venue's account of the order, books the missed execution ONCE, sends the hedge it
+    triggers, and takes no new risk until the recovered plan is reconciled (restart_reconcile_gate, default off). A second restart books nothing new."""
+
+    def _first_session(self, plan_path, maker_script=("ack",)):
+        inst, bk, opp = _ft_instruments(), _ft_books(), _ft_opportunity()
+        store = ParentPlanStore(plan_path)
+        oms = OMS(inst, risk(), Ledger(), plan_store=store,
+                  router=StrategyDirectedRouter(inst, adapters={"BYBIT": ScriptedVenue("BYBIT", list(maker_script), price="60060"), "BINANCE": ScriptedVenue("BINANCE", ["fill"], price="60000")}),
+                  dispatch_policy=DispatchPolicy.FILL_TRIGGERED, hedge_policy=HedgePolicy(retry_limit=1))
+        plan = oms.execute(opp, bk, maker_venue="BYBIT")
+        maker = plan.children[0]
+        store.close()
+        return plan.parent_id, maker
+
+    def _restart(self, plan_path, gate=True):
+        inst = _ft_instruments()
+        store = ParentPlanStore(plan_path)
+        binance = ScriptedVenue("BINANCE", ["fill"], price="60000")
+        bybit = ScriptedVenue("BYBIT", [], price="60060")
+        oms = OMS(inst, risk(), Ledger(), plan_store=store,
+                  router=StrategyDirectedRouter(inst, adapters={"BYBIT": bybit, "BINANCE": binance}),
+                  dispatch_policy=DispatchPolicy.FILL_TRIGGERED, hedge_policy=HedgePolicy(retry_limit=1))
+        oms.restart_reconcile_gate = gate
+        return oms, store, bybit, binance
+
+    def _snapshot(self, maker, state, filled):
+        from crypto_stat_arb.plan_store import VenueOrderSnapshot
+        return VenueOrderSnapshot(order_id=maker.order_id, venue=maker.venue, instrument_id=maker.instrument_id, state=state, filled_quantity=Decimal(filled),
+                                  average_price=Decimal("60060"), venue_order_id="v-1", observed_ts_ns=500 * MS)
+
+    def _held(self, oms):
+        return [e["opportunity_id"] for e in oms.ledger.events if e["event_type"] == "NEW_RISK_HELD_RESTART_RECONCILIATION"]
+
+    def _fills(self, oms):
+        return [e for e in oms.ledger.events if e["event_type"] == "FILL"]
+
+    def test_missed_execution_is_booked_once_hedged_once_and_new_risk_waits_for_it(self):
+        from crypto_stat_arb.models import OrderState
+        with tempfile.TemporaryDirectory() as directory:
+            plan_path = Path(directory) / "oms.sqlite"
+            parent_id, maker = self._first_session(plan_path)
+            oms, store, bybit, binance = self._restart(plan_path)
+            self.assertEqual(oms.recovered_plans, 1)
+            self.assertEqual(self._fills(oms), [])                                              # nothing booked yet: the execution happened while the session was down
+            held = oms.execute(_ft_opportunity("opp-new-1"), _ft_books(), maker_venue="BYBIT")
+            self.assertEqual(held.children[0].state.value, "CREATED")                           # before reconciliation: no new maker exposure (the plan closes without a single order sent)
+            self.assertEqual(bybit.submits, [])
+            self.assertEqual(self._held(oms), ["opp-new-1"])
+            snap = self._snapshot(maker, OrderState.FILLED, "0.010")
+            plan = oms.reconcile_plan(parent_id, {maker.order_id: snap}, 600 * MS)
+            maker_fills = [e for e in self._fills(oms) if e.get("order_id") == maker.order_id]
+            self.assertEqual(len(maker_fills), 1)                                               # booked once
+            self.assertEqual(len(binance.submits), 1)                                           # the residual hedged once
+            self.assertEqual(plan.state.value, "CLOSED")
+            self.assertEqual(oms.carried_residual_base(), Decimal("0"))
+            self.assertEqual(oms.ledger.positions[("BYBIT", INSTR_FT)], Decimal("-0.010"))     # the sell maker fill
+            self.assertEqual(oms.ledger.positions[("BINANCE", INSTR_FT)], Decimal("0.010"))     # and its hedge: flat net
+            oms.execute(_ft_opportunity("opp-new-2"), _ft_books(), maker_venue="BYBIT")          # reconciled: new risk is allowed again
+            self.assertEqual(self._held(oms), ["opp-new-1"])                                      # not held a second time
+            self.assertEqual(len(bybit.submits), 1)
+            # a SECOND restart on the same store: the plan is closed, nothing is booked or sent again
+            store.close()
+            oms3, store3, bybit3, binance3 = self._restart(plan_path)
+            self.assertEqual(oms3.recovered_plans, 1 if any(p.state.value != "CLOSED" for p in oms3.plans.values()) else 0)
+            again = oms3.reconcile_plan(parent_id, {maker.order_id: snap}, 700 * MS)
+            self.assertEqual(binance3.submits, [])
+            self.assertEqual(len([e for e in self._fills(oms3) if e.get("order_id") == maker.order_id]), len(maker_fills))
+            self.assertEqual(again.children[0].filled_quantity, Decimal("0.010"))
+            store3.close()
+
+    def test_an_order_the_venue_does_not_know_keeps_new_risk_held(self):
+        with tempfile.TemporaryDirectory() as directory:
+            plan_path = Path(directory) / "oms.sqlite"
+            parent_id, maker = self._first_session(plan_path)                                    # sent and persisted, then the session died: the venue's reply says nothing about it
+            oms, store, bybit, binance = self._restart(plan_path)
+            plan = oms.reconcile_plan(parent_id, {}, 600 * MS)                                    # unresolved: pending, not closed
+            self.assertNotEqual(plan.state.value, "CLOSED")
+            oms.execute(_ft_opportunity("opp-new-3"), _ft_books(), maker_venue="BYBIT")
+            self.assertEqual(self._held(oms), ["opp-new-3"])
+            self.assertEqual(bybit.submits, [])
+            store.close()
+
+    def test_the_gate_is_off_by_default(self):
+        with tempfile.TemporaryDirectory() as directory:
+            plan_path = Path(directory) / "oms.sqlite"
+            self._first_session(plan_path)
+            oms, store, bybit, _ = self._restart(plan_path, gate=False)
+            self.assertFalse(oms.restart_reconcile_gate)
+            oms.execute(_ft_opportunity("opp-new-4"), _ft_books(), maker_venue="BYBIT")
+            self.assertEqual(len(bybit.submits), 1)                                              # every earlier caller behaves as before
+            store.close()

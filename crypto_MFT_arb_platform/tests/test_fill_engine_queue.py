@@ -861,3 +861,71 @@ class TestActiveTsTTF(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+# ── E3 participation cap (owner 12 Nov) ───────────────────────────────────────
+
+class TestParticipationCap(unittest.TestCase):
+    """Own fills never exceed the public volume of the print that caused them, across all own orders at the level (shared consumption, each print spent once). Off by default; the cases it would clip are counted."""
+
+    def _two_at_a_level(self, cfg, price=100.0, size=1.0):
+        ex = _executor(cfg)
+        book = _book(bids=[(99.0, 100.0)])                 # our level is absent: nobody ahead, both orders are at the front
+        a = _place(ex, book, price=price, size=size, now=1.0)
+        b = _place(ex, book, price=price, size=size, now=1.0)
+        return ex, a, b
+
+    def test_two_orders_at_one_level_cannot_both_take_the_same_print(self):
+        for share in (False,):
+            off = MakerConfig(share_trade_volume=share)
+            ex, a, b = self._two_at_a_level(off)
+            fills = ex.on_trade("bybit", 100.0, 1.0, -1, 2.0, 2.0)
+            self.assertGreater(sum(f.qty for f in fills), 1.0 + 1e-9)                            # without the cap and without sharing, one print of 1.0 fills 2.0
+            self.assertEqual(ex.diag["participation_cap_would_bind"], 1.0)                      # and the case is counted
+            self.assertAlmostEqual(ex.diag["participation_cap_excess_qty"], 1.0)
+            on = MakerConfig(share_trade_volume=share, participation_cap=True)
+            ex, a, b = self._two_at_a_level(on)
+            fills = ex.on_trade("bybit", 100.0, 1.0, -1, 2.0, 2.0)
+            self.assertAlmostEqual(sum(f.qty for f in fills), 1.0)                               # the print is spent once
+            self.assertAlmostEqual(a.filled_qty + b.filled_qty, 1.0)
+
+    def test_the_profile_setting_share_trade_volume_already_spends_a_print_once_so_the_cap_does_not_bind(self):
+        ex, a, b = self._two_at_a_level(MakerConfig(share_trade_volume=True))
+        fills = ex.on_trade("bybit", 100.0, 1.0, -1, 2.0, 2.0)
+        self.assertAlmostEqual(sum(f.qty for f in fills), 1.0)
+        self.assertNotIn("participation_cap_would_bind", ex.diag)                                # identity: nothing to clip, no new key
+
+    def test_a_through_print_without_the_volume_limit_is_clipped_to_the_print(self):
+        cfg = dict(share_trade_volume=True, fill_through_prints=True, through_print_volume_limited=False)
+        ex = _executor(MakerConfig(**cfg)); book = _book(bids=[(99.0, 100.0)])
+        _place(ex, book, price=100.0, size=1.0, now=1.0); _place(ex, book, price=100.0, size=1.0, now=1.0)
+        fills = ex.on_trade("bybit", 99.5, 1.0, -1, 2.0, 2.0)                                      # a sell at 99.5 goes through both bids at 100
+        self.assertGreater(sum(f.qty for f in fills), 1.0 + 1e-9)
+        self.assertGreater(ex.diag["participation_cap_would_bind"], 0.0)
+        ex = _executor(MakerConfig(**cfg, participation_cap=True)); book = _book(bids=[(99.0, 100.0)])
+        _place(ex, book, price=100.0, size=1.0, now=1.0); _place(ex, book, price=100.0, size=1.0, now=1.0)
+        self.assertAlmostEqual(sum(f.qty for f in ex.on_trade("bybit", 99.5, 1.0, -1, 2.0, 2.0)), 1.0)
+
+    def test_property_with_the_cap_on_no_print_ever_fills_more_than_its_volume_and_with_it_off_nothing_changes_when_it_does_not_bind(self):
+        import random
+        rnd = random.Random(13)
+        for variant in range(6):
+            base = dict(share_trade_volume=bool(variant % 2), fill_through_prints=variant >= 2, through_print_volume_limited=variant >= 4)
+            on, off = _executor(MakerConfig(**base, participation_cap=True)), _executor(MakerConfig(**base))
+            books = [_book(bids=[(99.0, 100.0)]) for _ in range(2)]
+            sizes = [rnd.choice([0.5, 1.0, 2.0]) for _ in range(5)]
+            for ex, book in zip((on, off), books):
+                for k in range(5):
+                    _place(ex, book, price=100.0 - (k % 3) * 0.5, size=sizes[k], now=1.0)
+            rnd2 = random.Random(variant)
+            for t in range(40):
+                price = rnd2.choice([100.0, 99.5, 99.0, 100.5]); vol = rnd2.choice([0.2, 1.0, 3.0])
+                f_on = on.on_trade("bybit", price, vol, -1, 2.0 + t, 2.0)
+                f_off = off.on_trade("bybit", price, vol, -1, 2.0 + t, 2.0)
+                self.assertLessEqual(sum(f.qty for f in f_on), vol + 1e-9)                       # the invariant, whatever the rules
+                if "participation_cap_would_bind" not in off.diag or off.diag["participation_cap_would_bind"] == 0.0:
+                    self.assertEqual([(f.order_id, f.qty) for f in f_on], [(f.order_id, f.qty) for f in f_off])      # off equals on wherever the cap has nothing to clip
+                else:
+                    break                                                                         # after the first clip the two runs have diverged: the comparison ends there
+
+

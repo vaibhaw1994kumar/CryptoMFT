@@ -46,6 +46,10 @@ class UnwindExhaustedAlarmTests(unittest.TestCase):
         alarms = kinds(ledger, "UNWIND_EXHAUSTED_ALARM")
         self.assertEqual(len(alarms), 1)
         self.assertEqual((alarms[0]["unwind_attempts"], alarms[0]["attempts_allowed"]), (2, 2))
+        for key in ("confirmed_residual_base", "pending_hedge_qty", "oldest_exposure_age_s", "execution_blocked_reason"):                                                    # owner 12 Nov: the alarm carries the exposure and why execution is blocked
+            self.assertIn(key, alarms[0])
+        self.assertEqual(alarms[0]["execution_blocked_reason"], "unwind_exhausted_alarm")
+        self.assertGreater(Decimal(alarms[0]["confirmed_residual_base"]), Decimal("0.002"))
         oms.enforce_residual_limits(10_000, books())                   # later checks do not raise it again
         oms.enforce_residual_limits(20_000, books())
         self.assertEqual(len(kinds(ledger, "UNWIND_EXHAUSTED_ALARM")), 1)

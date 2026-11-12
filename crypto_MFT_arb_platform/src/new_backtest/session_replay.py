@@ -28,7 +28,7 @@ from typing import Any, Iterable
 
 from crypto_stat_arb.config import config_from_raw, raw_config_from_profile
 from crypto_stat_arb.derivatives import DerivativeTicker
-from crypto_stat_arb.ems.layer import hedge_slack_bps
+from crypto_stat_arb.ems.layer import hedge_policy_fields
 from crypto_stat_arb.execution import DispatchPolicy
 from crypto_stat_arb.hedge_lifecycle import HedgePolicy
 from crypto_stat_arb.models import EventType, MarketEvent, TradeEvent
@@ -145,6 +145,7 @@ class SessionReplay:
         self.views = {v: OrderBook(v, config.pair, self.venue_specs[v].delta_semantics, tape_repair=config.book_tape_repair, own_overlay=config.own_impact == "overlay",
                                    message_atomic=config.message_atomic_book) for v in venues}
         executor = MakerExecutor(EmpiricalFillModel(), config.maker)
+        self.executor = executor
         executor.own_overlay = config.own_impact == "overlay"
         self.adapters = {self.names[v]: QueueAwareVenueAdapter(self.names[v], executor, tick_size=self.ticks[v], maker_fee_bps=self.venue_specs[v].fees.maker_bps, pair=config.pair,
                                                                state=self.states[v], truth=self.truth, feed_venue=v, view_book=(lambda v=v: self.views[v]), driver_fed=True) for v in venues}
@@ -182,7 +183,7 @@ class SessionReplay:
         hf, hedge_cfg = config.hedge_faults, (config.execution.hedge if getattr(config, "execution", None) is not None else {})
         hedge_policy = HedgePolicy(retry_limit=int(getattr(hf, "max_retries", 0) or 0), retry_backoff_ns=int(float(getattr(hf, "retry_backoff_s", 0.0) or 0.0) * _NS),
                                    query_attempt_limit=int(getattr(hf, "unknown_query_max_attempts", 3) or 3),
-                                   touch_slack_bps=hedge_slack_bps(hedge_cfg, config.arb.max_walk_bps))
+                                   **hedge_policy_fields(hedge_cfg, config.arb.max_walk_bps))
         # E0 step (g): the maker observation records (place / fill / hedge arrival), observation only, ported from the backtester; maker_observations.jsonl is written with the run's output
         self.obs = None
         if observations:
@@ -529,10 +530,11 @@ class SessionReplay:
         s = self.session
         orders, fills = [], []
         lifetime_ids = {e["order_id"] for e in s.ledger.events if e["event_type"] == "ORDER_LIFETIME_EXPIRED"}
+        withdrawn = {e["order_id"]: e.get("reason") for e in s.ledger.events if e["event_type"] == "QUOTE_WITHDRAWN"}        # owner 12 Nov: the order file shows why a quote was cancelled (only runs with quote_withdraw on have any)
         for plan in s.oms.plans.values():
             for child in plan.children:
                 terminal = [u for u in child.state_updates if str(u.get("resolved_order_state")) in ("CANCELLED", "FILLED", "REJECTED", "EXPIRED", "TIMED_OUT")]
-                orders.append({"cancel_reason": child.reject_reason, "terminal_ts_ns": int(terminal[-1]["event_ts_ns"]) if terminal else None,
+                orders.append({"cancel_reason": child.reject_reason or (f"quote_withdrawn:{withdrawn[child.order_id]}" if child.order_id in withdrawn else None), "terminal_ts_ns": int(terminal[-1]["event_ts_ns"]) if terminal else None,
                                "lifetime_expired": child.order_id in lifetime_ids, "order_id": child.order_id, "venue": child.venue, "side": child.side.value, "quantity": str(child.quantity), "limit_price": None if child.limit_price is None else str(child.limit_price),
                                "post_only": bool(child.post_only), "state": child.state.value, "filled_quantity": str(child.filled_quantity), "average_price": str(child.average_price), "fee": str(child.fee),
                                "intent_id": child.intent_id})      # E0 step (e): the only new field in session_orders.jsonl
@@ -553,11 +555,13 @@ class SessionReplay:
             "days": [self.config.start_date, self.config.end_date], "size_base": float(self.config.arb.max_position_base), "fee_presets": self.profile.get("fee_presets"),
             "events": dict(self.events), "signals": signals, "orders": orders, "fills": fills, "positions": positions, "cash_by_venue": cash, "equity_at_book_mids": str(equity),
             "residual_at_end": self._residual_at_end(),
+            **({"participation": {"cap_on": bool(self.config.maker.participation_cap), "prints_it_binds_on": self.executor.diag.get("participation_cap_would_bind", 0.0), "excess_fill_qty": self.executor.diag.get("participation_cap_excess_qty", 0.0)}}
+               if self.executor.diag.get("participation_cap_would_bind") or self.config.maker.participation_cap else {}),        # E3: only when the cap is on or something would have bound, so every earlier run's manifest is unchanged
             "ledger_event_counts": dict(Counter(e["event_type"] for e in s.ledger.events)),
             "strategy_counters": {"evaluations": self.strategy.evaluations, "signals": self.strategy.signals, "best_edge_seen_bps": None if self.strategy.best_edge_seen_bps == float("-inf") else self.strategy.best_edge_seen_bps,
                                   "rejects": {k: v for k, v in self.strategy.rejects.items() if v}},
             "reject_trace": self.reject_trace,
-            "execution_layer": self._layer_report(), "intent_journal": list(s.intent_observer.layer.journal) if s.intent_observer is not None else None, "_maker_observations": list(self.obs.rows) if self.obs is not None else None, "intent_fills": list(s.intent_observer.layer.fills) if s.intent_observer is not None else None,
+            "execution_layer": self._layer_report(), "intent_journal": list(s.intent_observer.layer.journal) if s.intent_observer is not None else None, "_maker_observations": list(self.obs.rows) if self.obs is not None else None, "_decision_events": [e for e in s.ledger.events if e["event_type"] in DECISION_EVENTS] or None, "intent_fills": list(s.intent_observer.layer.fills) if s.intent_observer is not None else None,
             **({} if self.decomp is None else {"markout_decomposed": {
                 "label": "EXPLORATORY: decomposed markouts (captured C, adverse D, M = C + D, fee, net) per fill and horizon, bps of the mid at the fill, positive = good for us; mid at the fill = the mid before the event that caused it",
                 "by_venue_role": self.decomp.decomposed_summary(by=("venue", "role")), "excluded_counts": self.decomp.excluded_counts(), "fills_skipped_no_mid_before": self.decomp_skipped_no_mid,
@@ -596,6 +600,9 @@ class SessionReplay:
         }
 
 
+DECISION_EVENTS = ("HEDGE_CAP_SIZE_AWARE", "QUOTE_WITHDRAWN")
+
+
 def write_result(result: dict, out_dir: Path) -> None:
     out_dir.mkdir(parents=True, exist_ok=True)
     for name in ("signals", "orders", "fills"):
@@ -615,6 +622,10 @@ def write_result(result: dict, out_dir: Path) -> None:
         with (out_dir / "maker_observations.jsonl").open("w") as fh:
             for row in result["_maker_observations"]:
                 fh.write(json.dumps(row, sort_keys=True, default=str) + "\n")
+    if result.get("_decision_events"):                    # owner 12 Nov: every size-aware hedge cap decision and every quote withdrawal, one line each; written only when the run produced any (every earlier profile writes nothing new)
+        with (out_dir / "session_decision_events.jsonl").open("w") as fh:
+            for row in result["_decision_events"]:
+                fh.write(json.dumps({k: (str(v) if isinstance(v, Decimal) else v) for k, v in row.items()}, sort_keys=True, default=str) + "\n")
     if result.get("_markout_rows"):
         with (out_dir / "session_markouts_decomposed.jsonl").open("w") as fh:
             for row in result["_markout_rows"]:
@@ -627,7 +638,7 @@ def write_result(result: dict, out_dir: Path) -> None:
             for row in pe["rows"]:
                 fh.write(json.dumps(row, default=str) + "\n")
         (out_dir / "session_pair_economics.json").write_text(json.dumps({"label": "EXPLORATORY: linked pair economics per maker fill, session runtime", "summary": pe["summary"], "metadata": pe["metadata"]}, indent=1, default=str))
-    (out_dir / "session_manifest.json").write_text(json.dumps({k: v for k, v in result.items() if k not in ("signals", "orders", "fills", "reject_trace", "intent_journal", "intent_fills", "_markout_rows", "_maker_observations")}, indent=1, default=str))
+    (out_dir / "session_manifest.json").write_text(json.dumps({k: v for k, v in result.items() if k not in ("signals", "orders", "fills", "reject_trace", "intent_journal", "intent_fills", "_markout_rows", "_maker_observations", "_decision_events")}, indent=1, default=str))
 
 
 # ---- parity (D5): v1_5 on the session against v1_4 on the backtester's loop ----------------------------------------------------------------------------------------------------
@@ -786,7 +797,7 @@ def live_paper_setup(profile_name: str) -> dict:
     hf, hedge_cfg = cfg.hedge_faults, (cfg.execution.hedge if getattr(cfg, "execution", None) is not None else {})
     hedge_policy = HedgePolicy(retry_limit=int(getattr(hf, "max_retries", 0) or 0), retry_backoff_ns=int(float(getattr(hf, "retry_backoff_s", 0.0) or 0.0) * _NS),
                                query_attempt_limit=int(getattr(hf, "unknown_query_max_attempts", 3) or 3),
-                               touch_slack_bps=hedge_slack_bps(hedge_cfg, cfg.arb.max_walk_bps))
+                               **hedge_policy_fields(hedge_cfg, cfg.arb.max_walk_bps))
     timelines = Timelines(cfg.timing) if cfg.timing is not None else None
     session_kwargs = {"dispatch_policy": DispatchPolicy.FILL_TRIGGERED, "maker_venues": tuple(names[v] for v in cfg.arb.maker_venues), "hedge_policy": hedge_policy,
                       "latency_model": TimelinesLatencyModel(timelines) if timelines is not None else None, "gate_on_every_event": True}

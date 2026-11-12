@@ -99,12 +99,15 @@ class PauseVersusTrip(unittest.TestCase):
         self.assertEqual(s.breaker.state(), "TRIPPED")
         (trip,) = events(s, "BREAKER_TRIP")
         self.assertIn("gateway_down", trip["cause"])
+        for key in ("confirmed_residual_base", "pending_hedge_qty", "oldest_exposure_age_s", "execution_blocked_reason"):                                                    # owner 12 Nov: an alert carries the exposure and why execution is blocked
+            self.assertIn(key, trip)
+        self.assertEqual(trip["execution_blocked_reason"], "breaker:TRIPPED")
         (flat,) = events(s, "BREAKER_FLATTEN")
         self.assertEqual((flat["venue"], flat["side"], flat["quantity"], flat["tactic"]), (A, "sell", Decimal("5"), "MARKET_BANDED"))
         self.assertAlmostEqual(flat["worst_price"], 99.0 * (1 - 15 / 1e4))            # the touch the sell crosses (the bid), less the unwind band: 15 bps
         (plan,) = [p for p in s.oms.plans.values() if p.inherited_base]
         (unwind,) = plan.children
-        self.assertEqual((unwind.order_role, unwind.side.value, unwind.quantity, unwind.limit_price), ("UNWIND", "SELL", Decimal("5"), Decimal("98.80")))      # on the 0.1 tick, never above the band
+        self.assertEqual((unwind.order_role, unwind.side.value, unwind.quantity, unwind.limit_price), ("UNWIND", "SELL", Decimal("5"), Decimal("98.90")))      # on the 0.1 tick, never looser than the band (owner 12 Nov: a sell limit rounds UP; 98.8515 -> 98.90, it was 98.80 before)
         for v in CFG.venues:                                                          # everything is back up: a TRIP does not resume by itself
             s.note_venue_message(v, 25 * S)
         s._breaker_step(25 * S)
@@ -123,6 +126,8 @@ class PauseVersusTrip(unittest.TestCase):
         self.assertEqual(events(s, "BREAKER_FLATTEN"), [])
         self.assertEqual([a["reason"] for a in s.breaker_alarms], ["NO_AVAILABLE_VENUE_TO_FLATTEN_ON"])
         self.assertEqual(len(events(s, "BREAKER_ALARM")), 1)
+        for key in ("confirmed_residual_base", "pending_hedge_qty", "oldest_exposure_age_s", "execution_blocked_reason"):
+            self.assertIn(key, events(s, "BREAKER_ALARM")[0])
         self.assertEqual(s.breaker_report()["breaker_alarms"][0]["quantity"], 5.0)
 
 
@@ -272,6 +277,11 @@ class MissingMarginPrice(unittest.TestCase):
         self.assertFalse(s.margin_price_paused)
         self.assertFalse(s.risk.kill_switch)
         self.assertEqual([e["event_type"] for e in events(s, "MARGIN_PRICE_PAUSE", "MARGIN_PRICE_RESUME")], ["MARGIN_PRICE_PAUSE", "MARGIN_PRICE_RESUME"])
+        pause, resume = events(s, "MARGIN_PRICE_PAUSE", "MARGIN_PRICE_RESUME")
+        for key in ("confirmed_residual_base", "pending_hedge_qty", "oldest_exposure_age_s", "execution_blocked_reason"):                  # owner 12 Nov: the pause is an alert and says why new risk stops
+            self.assertIn(key, pause)
+            self.assertNotIn(key, resume)                                                                                              # the resume is not
+        self.assertEqual(pause["execution_blocked_reason"], "margin_price_missing")
 
     def test_a_real_shortfall_with_a_fresh_price_still_trips_the_kill_switch(self):
         from crypto_stat_arb.derivatives import DerivativeTicker
@@ -282,6 +292,10 @@ class MissingMarginPrice(unittest.TestCase):
         self.assertFalse(s.margin_price_paused)
         self.assertEqual(s.risk.margin_states[A].value, "BREACH")
         self.assertTrue(s.risk.kill_switch)
+        trip = events(s, "KILL_SWITCH_STATE_TRANSITION")[0]                                                                              # owner 12 Nov: the kill switch event carries the alert fields
+        for key in ("confirmed_residual_base", "pending_hedge_qty", "oldest_exposure_age_s", "execution_blocked_reason"):
+            self.assertIn(key, trip)
+        self.assertTrue(trip["execution_blocked_reason"].startswith("kill_switch:"))
 
     def test_the_old_rule_is_the_default_without_the_pause_setting(self):
         s = margin_session(action="breach")
