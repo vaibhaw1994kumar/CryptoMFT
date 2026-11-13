@@ -64,3 +64,14 @@ def block_outbound_network(request: pytest.FixtureRequest) -> Iterator[None]:
     finally:
         socket.getaddrinfo = real_getaddrinfo  # type: ignore[assignment]
         socket.create_connection = real_create_connection  # type: ignore[assignment]
+
+
+# Owner 13 Nov: the tests that need the compiled `hft_platform_kit._ems` extension carry the `native_ems` marker, so a gate can list them (`pytest -m native_ems --collect-only -q`) or leave them out
+# (`-m "not native_ems"`; the collection error of test_native_ems.py also needs --ignore, see ENVIRONMENT_ONLY.md). They still run and still fail where the extension is not built: nothing is skipped here.
+_NATIVE_EMS_MODULES = frozenset({"test_ems_wiring.py", "test_native_ems.py"})
+
+
+def pytest_collection_modifyitems(items):  # type: ignore[no-untyped-def]
+    for item in items:
+        if item.path.name in _NATIVE_EMS_MODULES:
+            item.add_marker(pytest.mark.native_ems)

@@ -1,5 +1,6 @@
 """Phase D, step D3: QueueAwareVenueAdapter. Synthetic books and prints prove the wiring only (no profit figure): a resting post-only order is placed in the queue model, fills come
 from prints, a depth change never fills an order, taker requests keep the deterministic walk."""
+import dataclasses
 import sys
 import unittest
 from decimal import Decimal
@@ -147,6 +148,57 @@ class QueueAdapterTests(unittest.TestCase):
         self.assertEqual(router.on_trade(VENUE, sell_print("100.00", "50", 3 * S), 7 * S), 1)
         results = router.process_throttled(7 * S)
         self.assertEqual((results[0].callbacks[0].event_type, results[0].callbacks[0].event_ts_ns), (ExecutionEventType.FILLED, 7 * S))
+
+
+def rpi_print(price, qty, ts, tid="1"):
+    return TradeEvent(event_id=f"t{tid}", venue=VENUE, instrument_id=INSTR, trade_id=tid, exchange_ts_ns=ts, source_ts_ns=ts, receive_ts_ns=ts,
+                      price=Decimal(price), quantity=Decimal(qty), aggressor_side="SELL", native={"rpi": True})
+
+
+class RpiPrintTests(unittest.TestCase):
+    """Owner 13 Nov (upstreamed from the MM session): MakerConfig.exclude_rpi_trades, off by default. Off: a print flagged RPI is an ordinary print (byte-identical to a feed with no flag). On: it never fills an order and does not drain the queue."""
+
+    def _run(self, prints, **cfg):
+        a, book = adapter(**cfg), core_book(BIDS, ASKS)
+        a.handle(request("m1", Side.BUY, "100.00", "10"), book)
+        out = [a.on_trade(p) for p in prints]
+        maker = a.executor.live_orders(VENUE)
+        return a, out, [(o.queue_ahead, o.filled_qty) for o in maker], dict(a.executor.diag)
+
+    def test_default_off_a_flagged_print_behaves_exactly_like_an_unflagged_one(self):
+        flagged = [rpi_print("100.00", "30", 3 * S), rpi_print("100.00", "30", 4 * S, "2")]
+        plain = [sell_print("100.00", "30", 3 * S), sell_print("100.00", "30", 4 * S, "2")]
+        a1, out1, state1, diag1 = self._run(flagged)
+        a2, out2, state2, diag2 = self._run(plain)
+        self.assertEqual((out1, state1, diag1), (out2, state2, diag2))
+        self.assertEqual(a1.fills_by_source, {"trade": 1})
+        self.assertNotIn("rpi_trades_excluded", diag1)
+
+    def test_on_an_rpi_print_never_fills_and_does_not_drain_the_queue_but_an_ordinary_print_still_does(self):
+        a, book = adapter(exclude_rpi_trades=True), core_book(BIDS, ASKS)
+        a.handle(request("m1", Side.BUY, "100.00", "10"), book)
+        (maker,) = a.executor.live_orders(VENUE)
+        for i, ts in enumerate((3 * S, 4 * S, 5 * S)):
+            self.assertEqual(a.on_trade(rpi_print("100.00", "500", ts, str(i))), ())               # 500 would clear the queue and fill the order if it counted
+        self.assertEqual((maker.queue_ahead, maker.filled_qty), (50.0, 0.0))
+        self.assertEqual(a.executor.diag["rpi_trades_excluded"], 3)
+        self.assertEqual(a.fills_by_source, {})
+        (pair,) = a.on_trade(sell_print("100.00", "60", 6 * S, "9"))                               # an ordinary print: 50 clear the queue, 10 fill us
+        self.assertEqual(pair[1].last_fill_quantity, Decimal("10"))
+
+    def test_an_unflagged_or_false_flag_print_is_never_rpi(self):
+        from crypto_stat_arb.simulation.queue_adapter import trade_is_rpi
+        self.assertEqual([trade_is_rpi(sell_print("100", "1", S)), trade_is_rpi(rpi_print("100", "1", S))], [False, True])
+        base = sell_print("100", "1", S)
+        for flag, want in ((False, False), ("false", False), ("true", True), ("1", True), ("0", False), (None, False)):
+            self.assertEqual(trade_is_rpi(dataclasses.replace(base, native={"rpi": flag})), want, flag)
+
+    def test_the_drivers_feed_trade_passes_the_flag(self):
+        a, book = adapter(exclude_rpi_trades=True), core_book(BIDS, ASKS)
+        a.handle(request("m1", Side.BUY, "100.00", "10"), book)
+        self.assertEqual(list(a.feed_trade(100.0, 500.0, -1, 3.0, 3.0, rpi=True)), [])              # excluded: no fill, no drain
+        self.assertEqual(a.executor.diag["rpi_trades_excluded"], 1)
+        self.assertEqual(len(list(a.feed_trade(100.0, 500.0, -1, 4.0, 4.0))), 1)                     # the default flag (False): an ordinary print fills the order
 
 
 class UnfilledIocTests(unittest.TestCase):

@@ -70,6 +70,7 @@ markers = [
     "binance_testnet: credential-gated Binance Spot Testnet smoke tests",
     "concurrency: starts real threads and can observe a missing lock",
     "slow: minutes-long end-to-end suites such as the full acceptance run",
+    "native_ems: needs the compiled hft_platform_kit._ems extension (C++20 / pybind11, built by scikit-build-core from cpp/ems.cpp); fails here until it is built: see tests/platform_kit/ENVIRONMENT_ONLY.md",
 ]
 
 [build-system]
