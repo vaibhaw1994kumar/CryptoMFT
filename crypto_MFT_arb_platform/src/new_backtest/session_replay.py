@@ -222,6 +222,7 @@ class SessionReplay:
             resync_silence_ns=None if config.timing is None else int(config.timing.dead_feed_s * _NS), latency_model=self.latency_model, hedge_policy=hedge_policy,
             gate_on_every_event=True,          # owner 9 Nov (D7d): the session runtime is v1_5 and later; the gate is evaluated on every event, as the live service does
             layer_route_mode=layer_route_mode, breaker_config=breaker_config,      # owner 12 Nov (2k): the circuit breaker on the replay, off unless a config is passed
+            execution_config=getattr(config, "execution", None),      # owner 13 Nov: the layer (and so the manifest) carries the profile's own execution block, not the defaults
             layer_risk_mode=layer_risk_mode,   # E0 step (c): count (default) = the layer's base-ceiling gate only counts; enforce = it refuses before the OMS reserves anything
             intent_journal=True,               # E0 step (a) (owner 10 Nov): the orders are journaled as layer intents next to the OMS plan; observation only
             markout_horizons_s=tuple(config.markout_horizons_s),          # owner 9 Nov: forward markouts per fill, by venue and role, as the backtester reports them (the core's MarkoutTracker)

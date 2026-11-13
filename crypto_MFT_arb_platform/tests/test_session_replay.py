@@ -200,13 +200,13 @@ class SessionReplayEndToEnd(unittest.TestCase):
 
     def test_nothing_in_the_oms_reads_the_observer_back(self):
         """The OMS only CALLS the observer, as a statement: no assignment, return, argument or condition takes a value from it. E0 step (c) allows exactly two decisions, both the layer's reservation gate
-        and nothing else: `admit` (refuse before the OMS reserves) and the late refusal returned by `plan_opened` (roll the plan back)."""
+        and nothing else: `admit` (refuse before the OMS reserves) and the late refusal returned by `plan_opened` (roll the plan back). CR-MQ part 2 (owner 13 Nov) adds one read, `pairing()`, so that `execute_quote` runs only under pairing none."""
         import re
 
         src = (Path(__file__).resolve().parents[1] / "src" / "crypto_stat_arb" / "oms.py").read_text().splitlines()
         uses = [ln.strip() for ln in src if "observer" in ln]
         for ln in uses:
-            self.assertTrue(re.fullmatch(r"(self\.observer = None.*|if self\.observer is not None( and to in \(HedgeState\.ESCALATED, HedgeState\.UNWINDING\))?:|self\.observer\.\w+\(.*\)|refusal = self\.observer\.admit\(plan, now / 1e9\) .*|late_refusal = self\.observer\.plan_opened\(plan, now / 1e9\)|venue = self\.observer\.route_venue\(plan, order, maker_leg, dispatch_started_ts / 1e9\) .*)", ln), ln)
+            self.assertTrue(re.fullmatch(r"(self\.observer = None.*|if self\.observer is not None( and to in \(HedgeState\.ESCALATED, HedgeState\.UNWINDING\))?:|self\.observer\.\w+\(.*\)|refusal = self\.observer\.admit\(plan, now / 1e9\) .*|pairing = self\.observer\.pairing\(\)|late_refusal = self\.observer\.plan_opened\(plan, now / 1e9\)|venue = self\.observer\.route_venue\(plan, order, maker_leg, dispatch_started_ts / 1e9\) .*)", ln), ln)
 
 
 def _row_snapshot(eid, venue, seq, ts, bid, ask):

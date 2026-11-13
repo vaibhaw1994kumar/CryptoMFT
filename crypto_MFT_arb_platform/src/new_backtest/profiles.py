@@ -269,6 +269,8 @@ def apply_profile(doc: dict, dataset: str | None = None, **overrides):
             cfg_kw["execution"] = ExecutionConfig(**ex)
         except (ExecutionConfigError, TypeError) as e:
             raise ProfileError(f"profile {doc.get('name')}: execution block: {e}") from e
+        if cfg_kw["execution"].pairing == "none":
+            raise ProfileError(f"profile {doc.get('name')}: execution.pairing none is a market-making quote (no hedge leg), never an arb profile's pairing: this is an arb profile")
     hf = cfg_kw.pop("hedge_faults", None)
     if isinstance(hf, dict):
         cfg_kw["hedge_faults"] = HedgeFaultConfig(**{k: v for k, v in hf.items() if k != "silent_carry_bound"})      # the session runtime's residual bound (core config); the backtester's own loop has no such rule

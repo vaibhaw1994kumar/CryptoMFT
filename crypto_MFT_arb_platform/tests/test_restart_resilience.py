@@ -749,6 +749,57 @@ class ExchangeSideRestartReconciliationTests(RestartAgainstTheVenueTests):
             write_case("case10_exchange_side_restart_reconciliation_missed_fill", oms.ledger.events)
             store.close()
 
+    def test_the_live_adapters_snapshot_from_recorded_bybit_messages_reconciles_the_plan_by_client_id(self):
+        """The snapshot comes through `TestnetVenueAdapter.account_snapshot` and the Bybit linear transport from hand-written v5 messages (orderLinkId = the client id the OMS sent): the missed fill is booked once,
+        hedged once, and the gate opens. No network."""
+        from crypto_stat_arb.sdk import TestnetVenueAdapter
+        from crypto_stat_arb.plan_store import VenueAccountSnapshot
+        from crypto_stat_arb.testnet import BybitV5LinearTestnetTransport
+        from test_forward_testnet_calibration import FakeHttp, SECRET
+        with tempfile.TemporaryDirectory() as directory:
+            plan_path = Path(directory) / "oms.sqlite"
+            parent_id, maker = self._first_session(plan_path)
+            oms, store, bybit, binance = self._restart(plan_path, gate=False)
+            link = maker.order_id
+            order = {"orderLinkId": link, "orderId": "v-1", "orderStatus": "Filled", "cumExecQty": "0.010", "avgPrice": "60060", "cumExecFee": "0", "updatedTime": "500", "createdTime": "100"}
+            execution = lambda eid, q: {"execId": eid, "orderId": "v-1", "orderLinkId": link, "execPrice": "60060", "execQty": q, "execFee": "0", "execTime": "400", "isMaker": True, "execType": "Trade"}
+            http = FakeHttp([
+                (200, {"retCode": 0, "result": {"list": [], "nextPageCursor": ""}}),                                               # order/realtime: nothing open any more
+                (200, {"retCode": 0, "result": {"list": [order], "nextPageCursor": ""}}),                                          # order/history
+                (200, {"retCode": 0, "result": {"list": [execution("e1", "0.004"), execution("e2", "0.006")], "nextPageCursor": ""}}),
+                (200, {"retCode": 0, "result": {"list": [{"symbol": "BTCUSDT", "side": "Sell", "size": "0.010", "positionIdx": 0}], "nextPageCursor": ""}}),
+            ])
+            transport = BybitV5LinearTestnetTransport(symbols={INSTR_FT: "BTCUSDT"}, http=http, clock_ms=lambda: 1000)
+            live = TestnetVenueAdapter("BYBIT", lambda req: transport(req, SECRET))
+            quiet = ScriptedAccount(VenueAccountSnapshot("BINANCE", (), (), {}, 550 * MS))
+            report = oms.reconcile_account_after_restart({"BYBIT": live, "BINANCE": quiet}, 600 * MS, books=_ft_books())
+            self.assertEqual(report["problems"], {})
+            self.assertTrue(report["gate_open"], report)
+            self.assertEqual(len([e for e in self._fills(oms) if e.get("order_id") == maker.order_id]), 1)
+            self.assertEqual(len(binance.submits), 1)
+            self.assertEqual(oms.ledger.positions[("BYBIT", INSTR_FT)], Decimal("-0.010"))
+            store.close()
+
+    def test_a_restart_with_no_persisted_state_asks_the_venue_for_the_default_lookback_not_the_epoch(self):
+        """No open plan and nothing persisted: `since` would be 0, which a real venue cannot answer (the adapter refuses anything older than the venue keeps). The OMS asks for the last 24 hours instead, and the gate
+        opens on an empty, agreeing account. Epoch clock, recorded messages."""
+        from urllib.parse import parse_qs, urlparse
+        from crypto_stat_arb.sdk import TestnetVenueAdapter
+        from crypto_stat_arb.plan_store import VenueAccountSnapshot
+        from crypto_stat_arb.testnet import BybitV5LinearTestnetTransport
+        from test_forward_testnet_calibration import FakeHttp, SECRET
+        now_ms = 1_700_000_100_000
+        empty = (200, {"retCode": 0, "result": {"list": [], "nextPageCursor": ""}})
+        http = FakeHttp([empty, empty, empty, (200, {"retCode": 0, "result": {"list": [{"symbol": "BTCUSDT", "side": "", "size": "0", "positionIdx": 0}], "nextPageCursor": ""}})])
+        transport = BybitV5LinearTestnetTransport(symbols={INSTR_FT: "BTCUSDT"}, http=http, clock_ms=lambda: now_ms)
+        live = TestnetVenueAdapter("BYBIT", lambda req: transport(req, SECRET))
+        quiet = ScriptedAccount(VenueAccountSnapshot("BINANCE", (), (), {}, 1))
+        oms = OMS(_ft_instruments(), risk(), Ledger(), router=StrategyDirectedRouter(_ft_instruments(), adapters={}), dispatch_policy=DispatchPolicy.FILL_TRIGGERED, hedge_policy=HedgePolicy(retry_limit=1))
+        self.assertEqual(oms._last_execution_ts_ns, 0)
+        report = oms.reconcile_account_after_restart({"BYBIT": live, "BINANCE": quiet}, now_ms * 1_000_000)
+        self.assertEqual((report["since_basis"], report["problems"], report["gate_open"]), ("default_lookback", {}, True))
+        self.assertEqual(parse_qs(urlparse(http.calls[1][1]).query)["startTime"], [str(now_ms - 24 * 3_600_000)])
+
     def test_an_order_still_resting_at_the_venue_is_reconciled_without_being_finished(self):
         from crypto_stat_arb.models import OrderState
         with tempfile.TemporaryDirectory() as directory:

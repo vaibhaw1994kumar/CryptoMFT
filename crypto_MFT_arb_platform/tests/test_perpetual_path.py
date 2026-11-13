@@ -218,6 +218,180 @@ class FuturesTestnetTransportTests(unittest.TestCase):
             BinanceFuturesTestnetTransport(base_url="https://fapi.binance.com", symbols={PERP: "BTCUSDT"})
 
 
+class AccountSnapshotTests(unittest.TestCase):
+    """Owner 13 Nov: the perpetual transports' `account_snapshot` (orders open and closed keyed by the CLIENT order id, executions since a timestamp, positions), through `TestnetVenueAdapter.account_snapshot`.
+    The messages are written by hand in each venue's documented response shape (no account responses, no real ids); there is no network."""
+    NOW_MS = 1_700_000_100_000
+    SINCE_NS = 1_700_000_000_000 * 1_000_000
+
+    def adapter(self, transport):
+        from crypto_stat_arb.sdk import TestnetVenueAdapter
+        return TestnetVenueAdapter(transport.venue, lambda req: transport(req, SECRET))
+
+    def binance(self, responses, **kw):
+        http = FakeHttp(responses)
+        return http, BinanceFuturesTestnetTransport(symbols={PERP: "BTCUSDT"}, http=http, clock_ms=lambda: self.NOW_MS, **kw)
+
+    def bybit(self, responses, **kw):
+        http = FakeHttp(responses)
+        return http, BybitV5LinearTestnetTransport(symbols={PERP: "BTCUSDT"}, http=http, clock_ms=lambda: self.NOW_MS, **kw)
+
+    @staticmethod
+    def order(oid, client, status, executed="0", average="0", t=1_700_000_050_000):
+        return {"orderId": oid, "clientOrderId": client, "symbol": "BTCUSDT", "status": status, "executedQty": executed, "avgPrice": average, "cumQuote": "0", "updateTime": t, "time": t - 1000}
+
+    def test_binance_orders_are_keyed_by_the_client_id_executions_follow_their_order_and_the_position_is_signed(self):
+        http, transport = self.binance([
+            (200, [self.order(11, "c-open", "NEW")]),                                                       # openOrders
+            (200, [self.order(11, "c-open", "NEW"), self.order(12, "c-filled", "FILLED", "0.010", "60060.1"),
+                   self.order(13, "c-cancel", "CANCELED", "0.004", "60060.0")]),                            # allOrders (the open order is in both lists: one order)
+            (200, [{"id": 701, "orderId": 12, "price": "60060.1", "qty": "0.006", "commission": "0.0144", "commissionAsset": "USDT", "time": 1_700_000_040_000, "maker": True},
+                   {"id": 702, "orderId": 12, "price": "60060.1", "qty": "0.004", "commission": "0.0096", "commissionAsset": "USDT", "time": 1_700_000_041_000, "maker": True},
+                   {"id": 703, "orderId": 13, "price": "60060.0", "qty": "0.004", "commission": "0.0096", "commissionAsset": "USDT", "time": 1_700_000_042_000, "maker": True},
+                   {"id": 704, "orderId": 99, "price": "60000.0", "qty": "0.001", "commission": "0.0024", "commissionAsset": "USDT", "time": 1_700_000_043_000, "maker": False}]),   # userTrades
+            (200, {"orderId": 99, "clientOrderId": "c-older", "symbol": "BTCUSDT", "status": "FILLED", "executedQty": "0.001"}),      # an older order the trade belongs to, asked for by its venue id
+            (200, [{"symbol": "BTCUSDT", "positionAmt": "-0.010", "positionSide": "BOTH", "entryPrice": "60060.1"}]),                  # positionRisk
+        ])
+        snap = self.adapter(transport).account_snapshot(self.SINCE_NS)
+        paths = [urlparse(c[1]).path for c in http.calls]
+        self.assertEqual(paths, ["/fapi/v1/openOrders", "/fapi/v1/allOrders", "/fapi/v1/userTrades", "/fapi/v1/order", "/fapi/v2/positionRisk"])
+        self.assertEqual({k: v[0] for k, v in parse_qs(urlparse(http.calls[1][1]).query).items() if k in ("startTime", "endTime", "limit")},
+                         {"startTime": "1700000000000", "endTime": str(self.NOW_MS), "limit": "1000"})
+        self.assertEqual(sorted(o.order_id for o in snap.orders), ["c-cancel", "c-filled", "c-open"])           # the client id, never the venue's number
+        by = {o.order_id: o for o in snap.orders}
+        self.assertEqual((by["c-open"].state.value, by["c-filled"].state.value, by["c-cancel"].state.value), ("ACKNOWLEDGED", "FILLED", "CANCELLED"))
+        self.assertEqual((by["c-filled"].filled_quantity, by["c-filled"].average_price, by["c-filled"].venue_order_id), (Decimal("0.010"), Decimal("60060.1"), "12"))
+        self.assertEqual(by["c-filled"].fee, Decimal("0.0240"))                                              # the commissions of its two trades
+        self.assertEqual(by["c-cancel"].filled_quantity, Decimal("0.004"))                                   # a partial fill then a cancel keeps its fill
+        self.assertEqual([(e.execution_id, e.order_id, e.quantity) for e in snap.executions],
+                         [("701", "c-filled", Decimal("0.006")), ("702", "c-filled", Decimal("0.004")), ("703", "c-cancel", Decimal("0.004")), ("704", "c-older", Decimal("0.001"))])
+        self.assertEqual(snap.positions, {PERP: Decimal("-0.010")})                                          # signed: short
+        self.assertEqual(sum(e.quantity for e in snap.executions if e.order_id == "c-filled"), by["c-filled"].filled_quantity)
+
+    def test_binance_a_trade_of_an_order_the_venue_will_not_show_is_flagged_not_guessed(self):
+        http, transport = self.binance([
+            (200, []), (200, []),
+            (200, [{"id": 5, "orderId": 77, "price": "60000", "qty": "0.002", "commission": "0", "commissionAsset": "USDT", "time": 1_700_000_040_000, "maker": True}]),
+            (400, {"code": -2013, "msg": "Order does not exist."}),
+            (200, [{"symbol": "BTCUSDT", "positionAmt": "0.000", "positionSide": "BOTH"}]),
+        ])
+        snap = self.adapter(transport).account_snapshot(self.SINCE_NS)
+        self.assertEqual([e.order_id for e in snap.executions], ["venue-order:77"])                          # the OMS reads this as an execution for an unknown order and keeps its gate closed
+        self.assertEqual(snap.positions, {PERP: Decimal("0")})
+
+    def test_binance_windows_are_under_seven_days_and_trade_pages_move_forward_without_double_counting(self):
+        since_ns = (self.NOW_MS - 13 * 86_400_000) * 1_000_000
+        trades1 = [{"id": i, "orderId": 1, "price": "1", "qty": "1", "commission": "0", "commissionAsset": "USDT", "time": 1_699_000_000_000 + i, "maker": True} for i in range(1, 4)]
+        http, transport = self.binance([])
+        transport.TRADES_PAGE = 3                                                                            # a full page: the next request starts at the last trade's time and the overlap is counted once
+        trades2 = [trades1[-1], {"id": 4, "orderId": 1, "price": "1", "qty": "1", "commission": "0", "commissionAsset": "USDT", "time": 1_699_000_000_004, "maker": True}]
+        http.responses = [(200, [])] + [(200, [])] * 3 + [(200, trades1), (200, trades2), (200, []), (200, []),
+                                                           (200, {"orderId": 1, "clientOrderId": "c1", "symbol": "BTCUSDT"}), (200, [{"symbol": "BTCUSDT", "positionAmt": "0", "positionSide": "BOTH"}])]
+        # script: openOrders, allOrders x3 (3 windows), userTrades window 1 (full page) and its next page, userTrades windows 2 and 3 (empty), the trades' order by id, positionRisk
+        snap = self.adapter(transport).account_snapshot(since_ns)
+        calls = [urlparse(c[1]) for c in http.calls]
+        windows = [(int(parse_qs(u.query)["startTime"][0]), int(parse_qs(u.query)["endTime"][0])) for u in calls if u.path == "/fapi/v1/allOrders"]
+        self.assertEqual(len(windows), 3)
+        self.assertEqual(windows[0][0], since_ns // 1_000_000)
+        self.assertEqual(windows[-1][1], self.NOW_MS)
+        for (a, b), (c, _) in zip(windows, windows[1:]):
+            self.assertLess(b - a, 7 * 86_400_000)
+            self.assertEqual(c, b + 1)                                                                       # contiguous: nothing falls between two windows
+        self.assertEqual([e.execution_id for e in snap.executions], ["1", "2", "3", "4"])                    # the repeated trade 3 is one execution
+
+    def test_binance_a_full_page_of_orders_raises_instead_of_truncating(self):
+        full = [self.order(i, f"c{i}", "FILLED", "0.001", "60000") for i in range(1, 1001)]
+        _, t = self.binance([(200, []), (200, full)])
+        with self.assertRaisesRegex(ConnectionError, "full page"):
+            self.adapter(t).account_snapshot(self.SINCE_NS)
+
+    def test_binance_failures_close_the_gate_instead_of_returning_a_partial_account(self):
+        _, t = self.binance([(500, {"msg": "down"})])
+        with self.assertRaises(ConnectionError):
+            self.adapter(t).account_snapshot(self.SINCE_NS)
+        _, t = self.binance([(200, [self.order(1, "c", "SOMETHING_NEW")]), (200, []), (200, [])])
+        with self.assertRaisesRegex(ConnectionError, "unmapped"):
+            self.adapter(t).account_snapshot(self.SINCE_NS)
+        _, t = self.binance([(200, []), (200, []), (200, []), (200, [{"symbol": "BTCUSDT", "positionAmt": "0.01", "positionSide": "LONG"}])])
+        with self.assertRaisesRegex(ValueError, "hedge mode"):
+            self.adapter(t).account_snapshot(self.SINCE_NS)
+        _, t = self.binance([])
+        with self.assertRaisesRegex(ValueError, "older than the venue keeps"):
+            self.adapter(t).account_snapshot((self.NOW_MS - 91 * 86_400_000) * 1_000_000)
+
+    def test_bybit_orders_executions_and_position_with_cursor_paging(self):
+        row = lambda link, oid, status, qty="0", avg="0", t="1700000050000": {"orderLinkId": link, "orderId": oid, "orderStatus": status, "cumExecQty": qty, "avgPrice": avg, "cumExecFee": "0.01", "updatedTime": t, "createdTime": "1700000040000"}
+        ex = lambda eid, oid, link, qty, typ="Trade": {"execId": eid, "orderId": oid, "orderLinkId": link, "execPrice": "60050.5", "execQty": qty, "execFee": "0.0072", "execTime": "1700000045000", "isMaker": True, "execType": typ}
+        http, transport = self.bybit([
+            (200, {"retCode": 0, "result": {"list": [row("c-open", "b1", "New")], "nextPageCursor": "o2"}}),          # order/realtime page 1
+            (200, {"retCode": 0, "result": {"list": [row("c-part", "b2", "PartiallyFilled", "0.004", "60050.5")], "nextPageCursor": ""}}),   # page 2
+            (200, {"retCode": 0, "result": {"list": [row("c-filled", "b3", "Filled", "0.010", "60050.5"), row("c-gone", "b4", "Cancelled"),
+                                                       row("c-part", "b2", "PartiallyFilled", "0.004", "60050.5", t="1700000040000")], "nextPageCursor": ""}}),   # order/history (an older copy of c-part: the later report wins)
+            (200, {"retCode": 0, "result": {"list": [ex("e1", "b3", "c-filled", "0.006"), ex("e2", "b3", "c-filled", "0.004")], "nextPageCursor": "x2"}}),   # execution/list page 1
+            (200, {"retCode": 0, "result": {"list": [ex("e3", "b2", "c-part", "0.004"), ex("f1", "", "", "0", "Funding"), ex("e2", "b3", "c-filled", "0.004")], "nextPageCursor": ""}}),   # page 2: a funding row, a repeated e2
+            (200, {"retCode": 0, "result": {"list": [{"symbol": "BTCUSDT", "side": "Sell", "size": "0.014", "positionIdx": 0, "avgPrice": "60050.5"}], "nextPageCursor": ""}}),
+        ])
+        snap = self.adapter(transport).account_snapshot(self.SINCE_NS)
+        calls = [(urlparse(c[1]).path, parse_qs(urlparse(c[1]).query)) for c in http.calls]
+        self.assertEqual([p for p, _ in calls], ["/v5/order/realtime", "/v5/order/realtime", "/v5/order/history", "/v5/execution/list", "/v5/execution/list", "/v5/position/list"])
+        self.assertEqual(calls[1][1]["cursor"], ["o2"])                                                      # the page cursor is passed back
+        self.assertEqual((calls[2][1]["startTime"], calls[2][1]["endTime"], calls[2][1]["limit"]), (["1700000000000"], [str(self.NOW_MS)], ["50"]))
+        self.assertEqual(calls[3][1]["limit"], ["100"])
+        by = {o.order_id: o for o in snap.orders}
+        self.assertEqual(sorted(by), ["c-filled", "c-gone", "c-open", "c-part"])                              # keyed by orderLinkId
+        self.assertEqual((by["c-open"].state.value, by["c-part"].state.value, by["c-filled"].state.value, by["c-gone"].state.value), ("ACKNOWLEDGED", "PARTIAL", "FILLED", "CANCELLED"))
+        self.assertEqual(by["c-part"].observed_ts_ns, 1_700_000_050_000 * 1_000_000)                          # the later report of c-part won
+        self.assertEqual(sorted((e.execution_id, e.order_id) for e in snap.executions), [("e1", "c-filled"), ("e2", "c-filled"), ("e3", "c-part")])      # the funding row is not a fill, e2 counts once
+        self.assertEqual(snap.positions, {PERP: Decimal("-0.014")})                                           # Sell 0.014 is -0.014
+        self.assertEqual(sum(e.quantity for e in snap.executions if e.order_id == "c-filled"), by["c-filled"].filled_quantity)
+        self.assertTrue(all(c[2].get("X-BAPI-API-KEY") == "test-key" for c in http.calls))                    # read-only GETs, signed
+
+    def test_bybit_an_order_without_a_client_id_is_flagged_and_failures_close_the_gate(self):
+        row = {"orderLinkId": "", "orderId": "b9", "orderStatus": "Filled", "cumExecQty": "0.001", "avgPrice": "60000", "updatedTime": "1700000050000"}
+        _, t = self.bybit([(200, {"retCode": 0, "result": {"list": [row]}}), (200, {"retCode": 0, "result": {"list": []}}), (200, {"retCode": 0, "result": {"list": []}}),
+                           (200, {"retCode": 0, "result": {"list": [{"symbol": "BTCUSDT", "side": "", "size": "0", "positionIdx": 0}]}})])
+        snap = self.adapter(t).account_snapshot(self.SINCE_NS)
+        self.assertEqual([o.order_id for o in snap.orders], ["venue-order:b9"])                               # not ours: the OMS flags it and never cancels it
+        self.assertEqual(snap.positions, {PERP: Decimal("0")})
+        _, t = self.bybit([(200, {"retCode": 10001, "retMsg": "params error"})])
+        with self.assertRaisesRegex(ConnectionError, "params error"):
+            self.adapter(t).account_snapshot(self.SINCE_NS)
+        _, t = self.bybit([(200, {"retCode": 0, "result": {"list": [dict(row, orderStatus="Weird")]}}), (200, {"retCode": 0, "result": {"list": []}})])
+        with self.assertRaisesRegex(ConnectionError, "unmapped"):
+            self.adapter(t).account_snapshot(self.SINCE_NS)
+        _, t = self.bybit([(200, {"retCode": 0, "result": {"list": []}})] * 3 + [(200, {"retCode": 0, "result": {"list": [{"symbol": "BTCUSDT", "side": "Buy", "size": "0.01", "positionIdx": 1}]}})])
+        with self.assertRaisesRegex(ValueError, "hedge"):
+            self.adapter(t).account_snapshot(self.SINCE_NS)
+
+    def test_a_cursor_that_never_ends_raises_instead_of_looping(self):
+        calls = []
+        def http(method, url, headers, body, timeout):
+            calls.append(url)
+            return 200, json.dumps({"retCode": 0, "result": {"list": [], "nextPageCursor": "again"}})
+        transport = BybitV5LinearTestnetTransport(symbols={PERP: "BTCUSDT"}, http=http, clock_ms=lambda: self.NOW_MS)
+        transport.SNAPSHOT_MAX_PAGES = 4
+        with self.assertRaisesRegex(ConnectionError, "did not end"):
+            self.adapter(transport).account_snapshot(self.SINCE_NS)
+        self.assertEqual(len(calls), 4)
+
+    def test_the_snapshot_read_asks_for_the_read_permission_never_the_trade_one(self):
+        from crypto_stat_arb.credentials import CredentialPermission, CredentialedTestnetTransport
+
+        class Broker:
+            def inject(self, credential_id, **kw):
+                self.permissions = kw["required_permissions"]
+                return ({"event_type": "ACCOUNT_SNAPSHOT", "orders": [], "executions": [], "positions": {}},)
+        broker = Broker()
+        CredentialedTestnetTransport(broker, "cred", "BYBIT", lambda *a: ())({"action": "ACCOUNT_SNAPSHOT", "since_ns": 1})
+        self.assertEqual(broker.permissions, (CredentialPermission.READ_ACCOUNT,))
+
+    def test_a_spot_transport_has_no_snapshot_and_says_so(self):
+        from crypto_stat_arb.testnet import BybitV5TestnetTransport
+        transport = BybitV5TestnetTransport(symbols={PERP: "BTCUSDT"}, http=FakeHttp([]), clock_ms=lambda: self.NOW_MS)
+        with self.assertRaisesRegex(ValueError, "perpetual transports only"):
+            transport({"action": "ACCOUNT_SNAPSHOT", "since_ns": 1}, SECRET)
+
+
 class FundingHistoryTests(unittest.TestCase):
     def fake(self, routes):
         calls = []

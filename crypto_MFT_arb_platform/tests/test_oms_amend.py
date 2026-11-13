@@ -17,7 +17,7 @@ from crypto_stat_arb.execution import (
 )
 from crypto_stat_arb.hedge_lifecycle import HedgePolicy
 from crypto_stat_arb.ledger import Ledger
-from crypto_stat_arb.models import OrderState, PlanState
+from crypto_stat_arb.models import OrderState, PlanState, Side
 from crypto_stat_arb.oms import OMS
 from ems_evidence import write_case
 from test_restart_resilience import INSTR_FT, MS, ScriptedVenue, _cb, _ft_books, _ft_instruments, _ft_opportunity, risk
@@ -243,6 +243,195 @@ class AmendTests(unittest.TestCase):
         self.assertEqual(len(self.binance.submits), 1)
         self.assertEqual(sum(1 for f in self.fills() if f.get("venue") == "BYBIT" and f.get("order_id") == new.order_id), 1)
         self.assertEqual(self.oms.lineage_remaining(self.maker.order_id), Decimal("0"))
+
+
+class MakerQuoteTests(unittest.TestCase):
+    """Owner 13 Nov, CR-MQ part 2 on the ems layer: a market-making quote is a PASSIVE intent with pairing "none" through the existing plan model (one post-only child, no hedge spec), with fills booked
+    to inventory, amend through request_amend, and the per-pair inventory cap as the layer's admission gate. Off unless the layer is built with pairing none."""
+    CAP = "0.020"
+
+    def build(self, mode="confirm", cap=CAP, risk_mode="enforce"):
+        from crypto_stat_arb.ems.config import ExecutionConfig
+        from crypto_stat_arb.ems.layer import ExecutionLayer, IntentObserver
+        inst = _ft_instruments()
+        self.bybit, self.binance = AmendVenue("BYBIT", mode), ScriptedVenue("BINANCE", ["fill"], price="60000")
+        self.oms = OMS(inst, risk(), Ledger(), router=StrategyDirectedRouter(inst, adapters={"BYBIT": self.bybit, "BINANCE": self.binance}),
+                       dispatch_policy=DispatchPolicy.FILL_TRIGGERED, hedge_policy=HedgePolicy(retry_limit=1))
+        self.oms.amend_enabled = True
+        self.layer = ExecutionLayer(ExecutionConfig(pairing="none", quote={"inventory_cap_base": cap}, risk_reservation=risk_mode), instrument=INSTR_FT)
+        self.layer.set_risk(lambda: None, lambda: {v: float(self.oms.ledger.positions.get((v, INSTR_FT), Decimal("0"))) for v in ("BYBIT", "BINANCE")})
+        self.oms.observer = IntentObserver(self.layer)
+        self.t = 100 * MS
+
+    def quote(self, qid="q1", side=Side.BUY, price="60050.0", qty="0.010"):
+        return self.oms.execute_quote(quote_id=qid, strategy_id="mm", instrument_id=INSTR_FT, venue="BYBIT", side=side, price=Decimal(price), quantity=Decimal(qty),
+                                      books=_ft_books(), observed_ts_ns=self.t)
+
+    def events(self, *names):
+        return [e for e in self.oms.ledger.events if e["event_type"] in names]
+
+    def fills(self):
+        return [e for e in self.oms.ledger.events if e["event_type"] == "FILL"]
+
+    def no_hedge_anywhere(self):
+        self.assertEqual(self.oms._hedge_specs, {})
+        self.assertEqual(self.oms.hedge_chains, {})
+        self.assertEqual(self.binance.submits, [])
+        self.assertEqual(self.events("HEDGE_CHAIN_OPENED", "HEDGE_SPEC", "HEDGE_LOT_RESIDUAL", "HEDGE_LOT_RESIDUAL_ALARM", "RESIDUAL_DETECTED", "RESIDUAL_LIMIT_BREACH", "UNWIND_EXHAUSTED_ALARM"), [])
+        self.assertEqual({j["role"] for j in self.layer.journal if j["event"] == "intent"} - {"primary"}, set())      # the layer journal holds no HEDGE and no UNWIND intent
+
+    def test_a_quote_is_one_post_only_child_with_no_hedge_spec(self):
+        self.build()
+        plan = self.quote()
+        self.assertEqual(len(plan.children), 1)
+        order = plan.children[0]
+        self.assertEqual((order.post_only, order.time_in_force, order.order_role, order.side, order.state), (True, "GTC", "PRIMARY", Side.BUY, OrderState.ACKNOWLEDGED))
+        self.assertIn(plan.parent_id, self.oms._quote_plans)
+        self.assertEqual(len(self.bybit.submits), 1)
+        self.no_hedge_anywhere()
+        self.assertTrue(order.intent_id)                                                     # the order carries its layer intent, journaled before it was sent
+        self.assertEqual(self.oms.execute_quote.__name__, "execute_quote")
+        self.assertEqual(self.oms.carried_residual_base(), Decimal("0"))
+
+    def test_a_fill_is_booked_to_inventory_once_with_no_hedge_and_the_plan_closes(self):
+        self.build()
+        plan = self.quote()
+        order = plan.children[0]
+        self.oms.ingest_order_update(stream_update(plan, order, 1, ExecutionEventType.PARTIAL, "0.004", self.t + 2 * MS, price="60050"))
+        self.oms.ingest_order_update(stream_update(plan, order, 2, ExecutionEventType.PARTIAL, "0.004", self.t + 3 * MS, price="60050"))      # a repeat of the same report
+        self.assertEqual(sum((Decimal(str(f["fill_quantity"])) for f in self.fills()), Decimal("0")), Decimal("0.004"))
+        self.assertNotEqual(plan.state, PlanState.CLOSED)                                    # still resting
+        self.oms.ingest_order_update(stream_update(plan, order, 3, ExecutionEventType.FILLED, "0.010", self.t + 4 * MS, price="60050"))
+        self.assertEqual(sum((Decimal(str(f["fill_quantity"])) for f in self.fills()), Decimal("0")), Decimal("0.010"))
+        self.assertEqual(self.oms.ledger.positions[("BYBIT", INSTR_FT)], Decimal("0.010"))      # inventory, not flat: nothing hedges it
+        self.assertEqual((plan.state, plan.terminal_outcome), (PlanState.CLOSED, "QUOTE_FILLED"))
+        self.no_hedge_anywhere()
+        self.assertEqual(self.oms.carried_residual_base(), Decimal("0"))                      # the quote's fills never count as an arb residual
+        snap = self.oms.residual_risk_snapshot()
+        self.assertEqual((snap["open_residual_plans"], snap["total_residual_base"]), (0, "0"))
+
+    def test_a_fill_during_amend_pending_is_booked_once_and_the_amended_quote_completes(self):
+        self.build("accept_only")
+        plan = self.quote()
+        old = plan.children[0]
+        self.assertEqual(self.oms.request_amend(old.order_id, Decimal("60055.0"), self.t + MS), "REQUESTED")
+        self.assertEqual(old.state, OrderState.AMEND_PENDING)
+        new = next(x for x in plan.children if x.replaces_order_id)
+        self.oms.ingest_order_update(stream_update(plan, old, 1, ExecutionEventType.PARTIAL, "0.004", self.t + 2 * MS, price="60050"))      # the old order fills while the amend is pending
+        self.oms.ingest_order_update(stream_update(plan, old, 2, ExecutionEventType.PARTIAL, "0.004", self.t + 3 * MS, price="60050"))      # and the venue repeats the report
+        self.assertEqual(len([f for f in self.fills() if f.get("order_id") == old.order_id]), 1)                                              # booked once
+        self.oms.ingest_order_update(stream_update(plan, new, 1, ExecutionEventType.ACKNOWLEDGED, "0", self.t + 4 * MS, price="60055"))      # the venue confirms the amend
+        self.assertEqual(len(self.events("AMEND_CONFIRMED")), 1)
+        self.assertNotEqual(plan.state, PlanState.CLOSED)                                    # the replacement is live: the quote is still working (the old order's CANCELLED does not end it)
+        self.oms.ingest_order_update(stream_update(plan, new, 2, ExecutionEventType.FILLED, "0.006", self.t + 5 * MS, price="60055"))
+        self.assertEqual(sum((Decimal(str(f["fill_quantity"])) for f in self.fills()), Decimal("0")), Decimal("0.010"))
+        self.assertEqual((plan.state, plan.terminal_outcome), (PlanState.CLOSED, "QUOTE_FILLED"))
+        self.assertEqual(self.oms.ledger.positions[("BYBIT", INSTR_FT)], Decimal("0.010"))
+        self.no_hedge_anywhere()
+        self.assertEqual(len(self.bybit.submits), 1)                                         # one order was ever submitted; the amend was a REPLACE
+
+    def test_a_quote_is_cancelled_and_its_plan_closes_with_nothing_filled(self):
+        self.build()
+        plan = self.quote()
+        order = plan.children[0]
+        self.assertTrue(self.oms.urgent_cancel(order.order_id, self.t + MS, "withdraw"))
+        self.assertEqual(order.state, OrderState.CANCELLED)
+        self.assertEqual((plan.state, plan.terminal_outcome), (PlanState.CLOSED, "QUOTE_ENDED_UNFILLED"))
+        self.assertEqual(self.fills(), [])
+        self.no_hedge_anywhere()
+
+    def test_the_inventory_cap_refuses_a_quote_that_would_exceed_it_and_leaves_nothing_reserved(self):
+        self.build(cap="0.015")
+        first = self.quote("q1", qty="0.010")
+        self.assertEqual(first.children[0].state, OrderState.ACKNOWLEDGED)
+        reserved_before = (dict(self.oms.risk.reserved_position), self.oms.risk.reserved_gross, len(self.layer.reservations.held))
+        refused = self.quote("q2", qty="0.010")                                              # 0.010 resting + 0.010 more > 0.015
+        self.assertEqual((refused.state, refused.terminal_outcome), (PlanState.CLOSED, "REJECTED"))
+        self.assertEqual(self.events("LAYER_RISK_REFUSED")[-1]["reason"].split(": ")[-1], "inventory_cap")
+        self.assertEqual(len(self.bybit.submits), 1)                                         # the refused quote was never sent
+        self.assertEqual((dict(self.oms.risk.reserved_position), self.oms.risk.reserved_gross, len(self.layer.reservations.held)), reserved_before)
+        sell = self.quote("q3", side=Side.SELL, price="60070.0", qty="0.010")                # the other side nets against the resting buy: it is inside the cap
+        self.assertEqual(sell.children[0].state, OrderState.ACKNOWLEDGED)
+        self.no_hedge_anywhere()
+
+    def test_in_count_mode_the_cap_only_counts(self):
+        self.build(cap="0.015", risk_mode="count")
+        self.quote("q1", qty="0.010")
+        over = self.quote("q2", qty="0.010")
+        self.assertEqual(over.children[0].state, OrderState.ACKNOWLEDGED)
+        self.assertEqual(self.layer.counts["risk_would_refuse"], 1)
+
+    def test_a_quote_needs_the_layer_with_pairing_none(self):
+        from crypto_stat_arb.ems.config import ExecutionConfig
+        from crypto_stat_arb.ems.layer import ExecutionLayer, IntentObserver
+        self.build()
+        self.oms.observer = IntentObserver(ExecutionLayer(ExecutionConfig(), instrument=INSTR_FT))      # the arb pairing
+        with self.assertRaises(ValueError):
+            self.quote()
+        self.oms.observer = None
+        with self.assertRaises(ValueError):
+            self.quote()
+        self.assertEqual(self.bybit.submits, [])
+
+    def test_an_arb_package_is_refused_under_pairing_none_and_nothing_is_sent(self):
+        """One OMS is a market-making quote book or an arb book: under pairing none the arb entry refuses (the arb gate would otherwise read as the inventory cap)."""
+        self.build()
+        with self.assertRaises(ValueError):
+            self.oms.execute(_ft_opportunity("arb-1"), _ft_books(), maker_venue="BYBIT")
+        self.assertEqual((self.bybit.submits, self.binance.submits, self.oms.plans), ([], [], {}))
+
+    def test_the_layer_journals_the_replacements_fills_and_the_cap_counts_each_fill_once(self):
+        """Amend replacement orders belong to the quote's intent: the layer's fill total equals the ledger's, and the reservation shrinks with each fill, so the inventory cap neither double counts nor loses a fill."""
+        self.build("accept_only", cap="0.015")
+        plan = self.quote("q1", qty="0.010")
+        old = plan.children[0]
+        self.oms.request_amend(old.order_id, Decimal("60055.0"), self.t + MS)
+        new = next(x for x in plan.children if x.replaces_order_id)
+        self.assertEqual(new.intent_id, old.intent_id)
+        self.oms.ingest_order_update(stream_update(plan, old, 1, ExecutionEventType.PARTIAL, "0.004", self.t + 2 * MS, price="60050"))
+        self.oms.ingest_order_update(stream_update(plan, new, 1, ExecutionEventType.ACKNOWLEDGED, "0", self.t + 3 * MS, price="60055"))      # confirmed
+        self.oms.ingest_order_update(stream_update(plan, new, 2, ExecutionEventType.PARTIAL, "0.003", self.t + 4 * MS, price="60055"))       # the replacement part-fills and keeps resting
+        ledger_base = self.oms.ledger.positions[("BYBIT", INSTR_FT)]
+        self.assertEqual(ledger_base, Decimal("0.007"))
+        self.assertEqual(sum((Decimal(str(f["qty"])) for f in self.layer.fills), Decimal("0")), ledger_base)       # the layer saw both orders' fills
+        held = next(iter(self.layer.reservations.held.values()))
+        self.assertEqual(round(held.remaining, 9), 0.003)                                                    # 0.010 quoted less the 0.007 filled: what is still resting
+        over = self.quote("q2", qty="0.006")                                                                 # 0.007 filled + 0.003 resting + 0.006 = 0.016 > 0.015
+        self.assertEqual(over.terminal_outcome, "REJECTED")
+        fits = self.quote("q3", qty="0.005")                                                                 # = 0.015
+        self.assertEqual(fits.children[0].state, OrderState.ACKNOWLEDGED)
+
+    def test_a_quote_plan_survives_a_restart_as_a_quote_with_no_residual_and_no_unwind(self):
+        """The QUOTE_PLAN marker is persisted: after a restart a filled quote is still inventory, never an arb residual (no HEDGE_UNWIND, no UNWIND child, nothing carried)."""
+        import tempfile
+        from crypto_stat_arb.plan_store import ParentPlanStore
+        self.build()
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "oms.sqlite"
+            store = ParentPlanStore(path)
+            from crypto_stat_arb.ems.config import ExecutionConfig
+            from crypto_stat_arb.ems.layer import ExecutionLayer, IntentObserver
+            inst = _ft_instruments()
+            bybit = AmendVenue("BYBIT", "confirm")
+            oms = OMS(inst, risk(), Ledger(), plan_store=store, router=StrategyDirectedRouter(inst, adapters={"BYBIT": bybit, "BINANCE": ScriptedVenue("BINANCE", ["fill"], price="60000")}),
+                      dispatch_policy=DispatchPolicy.FILL_TRIGGERED, hedge_policy=HedgePolicy(retry_limit=1))
+            oms.observer = IntentObserver(ExecutionLayer(ExecutionConfig(pairing="none", quote={"inventory_cap_base": "0.020"}), instrument=INSTR_FT))
+            plan = oms.execute_quote(quote_id="q1", strategy_id="mm", instrument_id=INSTR_FT, venue="BYBIT", side=Side.BUY, price=Decimal("60050.0"), quantity=Decimal("0.010"), books=_ft_books(), observed_ts_ns=self.t)
+            oms.ingest_order_update(stream_update(plan, plan.children[0], 1, ExecutionEventType.PARTIAL, "0.004", self.t + 2 * MS, price="60050"))      # filled in part, still resting
+            store.close()
+            store = ParentPlanStore(path)
+            again = OMS(inst, risk(), Ledger(), plan_store=store, router=StrategyDirectedRouter(inst, adapters={"BYBIT": AmendVenue("BYBIT"), "BINANCE": ScriptedVenue("BINANCE", ["fill"])}),
+                        dispatch_policy=DispatchPolicy.FILL_TRIGGERED, hedge_policy=HedgePolicy(retry_limit=1))
+            self.assertIn(plan.parent_id, again._quote_plans)                                                 # the marker came back
+            restored = again.plans[plan.parent_id]
+            again._recompute_plan_economics(restored, self.t + 3 * MS)
+            self.assertEqual(restored.residual_base, Decimal("0.004"))
+            again.enforce_residual_limits(self.t + 5 * MS)
+            self.assertNotEqual(restored.state, PlanState.HEDGE_UNWIND)
+            self.assertEqual([x for x in restored.children if x.order_role == "UNWIND"], [])
+            self.assertEqual(again.carried_residual_base(), Decimal("0"))
+            self.assertEqual(again.residual_risk_snapshot()["open_residual_plans"], 0)
+            store.close()
 
 
 if __name__ == "__main__":

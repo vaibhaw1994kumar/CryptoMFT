@@ -158,6 +158,33 @@ class ConfigTests(unittest.TestCase):
             Harness(cfg_kw={"execution": ExecutionConfig(pairing="taker_taker")})
 
 
+    def test_pairing_none_is_a_market_making_quote_and_needs_the_inventory_cap(self):
+        """Owner 13 Nov, CR-MQ part 2: pairing none has one post-only child and no hedge; it needs execution.quote.inventory_cap_base and nothing else may carry a quote block."""
+        ok = ExecutionConfig(pairing="none", quote={"inventory_cap_base": 5})
+        self.assertEqual(ok.as_dict()["quote"], {"inventory_cap_base": 5})
+        for bad in (dict(pairing="none"), dict(pairing="none", quote={"inventory_cap_base": 0}), dict(pairing="none", quote={"inventory_cap_base": True}),
+                    dict(pairing="none", quote={"inventory_cap_base": 5, "other": 1}), dict(pairing="maker_taker", quote={"inventory_cap_base": 5})):
+            with self.assertRaises(ExecutionConfigError, msg=str(bad)):
+                ExecutionConfig(**bad)
+
+    def test_an_arb_config_has_no_quote_key_so_its_identity_is_unchanged(self):
+        """Every existing profile's execution hash must not move: the new key is absent from as_dict unless set."""
+        for pairing in ("maker_taker", "taker_taker", "maker_maker"):
+            self.assertNotIn("quote", ExecutionConfig(pairing=pairing).as_dict())
+
+    def test_the_quote_gate_counts_filled_plus_resting_per_side_and_never_refuses_a_reducing_leg(self):
+        from crypto_stat_arb.ems.risk import ReservationBook
+        book = ReservationBook()
+        self.assertEqual(book.quote_breach(10.0, [("V", "buy", 10.0)], 0.0), "")                       # exactly at the cap
+        self.assertEqual(book.quote_breach(10.0, [("V", "buy", 10.5)], 0.0), "inventory_cap")
+        self.assertEqual(book.quote_breach(10.0, [("V", "buy", 1.0)], 9.5), "inventory_cap")           # filled 9.5 + 1.0
+        self.assertEqual(book.quote_breach(10.0, [("V", "sell", 5.0)], 9.5), "")                       # a sell reduces it
+        self.assertEqual(book.quote_breach(10.0, [("V", "sell", 20.0)], 9.5), "inventory_cap")         # but not through to below -cap (9.5 - 20 = -10.5)
+        book.reserve("i1", "V", "buy", 8.0)
+        self.assertEqual(book.quote_breach(10.0, [("V", "buy", 3.0)], 0.0), "inventory_cap")           # resting 8 + 3
+        self.assertEqual(book.quote_breach(10.0, [("V", "sell", 3.0)], 0.0), "")                       # the other side has its own room
+
+
 class ProfileTests(unittest.TestCase):
     def _doc(self, name="perp_perp_maker_taker_v1", **execution):
         doc = load_profile(name)
@@ -194,6 +221,13 @@ class ProfileTests(unittest.TestCase):
             self.assertTrue(self._apply(doc).execution.price_cap_required)
         off = self._apply(self._doc(price_cap_required=False))                       # allowed while CALIBRATED; recorded in the switch table
         self.assertFalse(off.execution.price_cap_required)
+
+    def test_pairing_none_is_refused_in_an_arb_profile(self):
+        with self.assertRaises(ProfileError) as cm:
+            self._apply(self._doc(pairing="none", quote={"inventory_cap_base": 5}))
+        self.assertIn("never an arb profile", str(cm.exception))
+        with self.assertRaises(ProfileError):
+            self._apply(self._doc("legacy_v0", pairing="none", quote={"inventory_cap_base": 5}))
 
     def test_a_bad_block_is_a_profile_error(self):
         with self.assertRaises(ProfileError):
