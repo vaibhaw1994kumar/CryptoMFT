@@ -434,5 +434,189 @@ class MakerQuoteTests(unittest.TestCase):
             store.close()
 
 
+class QuoteBookStrategy:
+    """A market-making strategy test double: scripted actions per call, every callback logged."""
+    quote_book = True
+    strategy_id = "mm"
+
+    def __init__(self):
+        self.script, self.log, self.calls = [], [], 0
+
+    def quotes(self, books, now_ns):
+        self.calls += 1
+        return self.script.pop(0) if self.script else []
+
+    def on_quote_ack(self, quote_id, accepted, reason, ts):
+        self.log.append(("ack", quote_id, accepted, reason))
+
+    def on_quote_fill(self, quote_id, qty, price, fee, liquidity, ts):
+        self.log.append(("fill", quote_id, qty, price, liquidity))
+
+    def on_quote_closed(self, quote_id, reason, ts):
+        self.log.append(("closed", quote_id, reason))
+
+    def on_quote_amend_refused(self, quote_id, reason, ts):
+        self.log.append(("amend_refused", quote_id, reason))
+
+
+class SessionQuoteBookTests(unittest.TestCase):
+    """Owner 13 Nov, CR-MQ part 3: a strategy with `quote_book = True` is asked for quote actions inside TradingSession.on_event (replay, live paper and live share that call site) and gets ack / fill / closed
+    callbacks keyed by its own quote id. place -> execute_quote, amend -> request_amend, cancel -> the normal urgent cancel, an exit IOC for inventory; the layer's inventory cap and the rate-limit reserve apply."""
+
+    def build(self, *, cap="0.60", cancel_answers=True, risk_mode="enforce"):
+        import test_session_breaker as sb
+        from crypto_stat_arb.ems.config import ExecutionConfig
+        from crypto_stat_arb.session import ExecutionMode, TradingSession
+        self.sb, self.A, self.B = sb, sb.A, sb.B
+        parent = self
+
+        class Venue(AmendVenue):
+            def handle(self, req, book):
+                if req.action == OrderAction.CANCEL and not cancel_answers:
+                    self.cancels.append(req.target_order_id)
+                    return ()                                                            # the venue has not answered the cancel yet: the order is CANCEL_PENDING and can still fill
+                if req.action == OrderAction.SUBMIT and req.time_in_force.value == "IOC":
+                    self.submits.append(req)
+                    return (_cb(req, ExecutionEventType.FILLED, cum=str(req.quantity), last=str(req.quantity), price=str(req.price)),)
+                return super().handle(req, book)
+
+        self.bybit, self.binance = Venue(self.B), Venue(self.A)
+        self.strategy = QuoteBookStrategy()
+        self.session = TradingSession(sb.CFG, execution_mode=ExecutionMode.INTERNAL_SIMULATION, adapters={self.B: self.bybit, self.A: self.binance}, strategies=[self.strategy],
+                                      intent_journal=True, layer_risk_mode=risk_mode, execution_config=ExecutionConfig(pairing="none", quote={"inventory_cap_base": cap}))
+        self.session.oms.amend_enabled = True
+        sb.with_books(self.session)
+        self.t = 10 * 1_000_000_000
+        self.tick()                                                                                 # warm-up: both books fresh before the first action
+    def tick(self, script=None, step=1000):
+        if script is not None:
+            self.strategy.script.append(script)
+        self.t += step * 1_000_000
+        for venue in (self.B, self.A):                                                              # both books fresh at every step (the pre-trade check refuses a stale book)
+            self.session.on_event(self.sb.snapshot(venue, self.t, seq=int(self.t / 1_000_000)), gate_allowed=True)
+
+    def act(self, script):
+        """The actions go out at one event; the session's latency model releases the order and the venue answers at the NEXT event: two steps, so the callbacks of the action have been delivered."""
+        self.tick(script)
+        self.tick()
+
+    def plan_of(self, qid):
+        return self.session.oms.plans[self.session._quote_book[qid]["parent_id"]]
+
+    def update(self, plan, order, n, state, cum, price="99.5"):
+        self.session.oms.ingest_order_update(stream_update(plan, order, n, state, cum, self.t + n, price=price))
+        self.tick()
+
+    def fills(self):
+        return [e for e in self.session.ledger.events if e["event_type"] == "FILL"]
+
+    def test_a_quote_is_placed_amended_partly_filled_and_cancelled_with_callbacks_keyed_by_its_id(self):
+        from crypto_stat_arb.strategy import AmendQuote, CancelQuote, PlaceQuote
+        self.build()
+        self.act([PlaceQuote("q1", self.B, "buy", Decimal("99.5"), Decimal("0.5"))])
+        plan = self.plan_of("q1")
+        self.assertEqual(self.strategy.log[0], ("ack", "q1", True, ""))
+        self.assertEqual((len(plan.children), plan.children[0].post_only, plan.children[0].state), (1, True, OrderState.ACKNOWLEDGED))
+        self.assertEqual(self.session.oms._hedge_specs, {})                                       # a quote has no hedge
+        self.act([AmendQuote("q1", Decimal("99.6"))])
+        new = next(x for x in plan.children if x.replaces_order_id)
+        self.assertEqual((new.limit_price, plan.children[0].state), (Decimal("99.6"), OrderState.CANCELLED))      # REPLACE confirmed: the replacement is the live head
+        self.update(plan, new, 1, ExecutionEventType.PARTIAL, "0.2", "99.6")
+        self.assertEqual([x for x in self.strategy.log if x[0] == "fill"], [("fill", "q1", Decimal("0.2"), Decimal("99.6"), "MAKER")])
+        self.act([CancelQuote("q1")])
+        self.assertIn(new.order_id, self.bybit.cancels)
+        self.assertEqual(self.strategy.log[-1], ("closed", "q1", "cancelled_after_partial_fill"))
+        self.assertEqual(plan.state, PlanState.CLOSED)
+        self.assertEqual(self.session.ledger.positions[(self.B, self.session.cfg.instrument_id)], Decimal("0.2"))          # the partial fill is inventory
+        self.assertEqual(self.session.oms.carried_residual_base(), Decimal("0"))
+        self.assertEqual((self.binance.submits, self.session.oms.hedge_chains), ([], {}))                                      # no hedge was ever sent, no chain exists
+
+    def test_a_late_fill_after_the_cancel_request_is_booked_once_and_reported_once(self):
+        from crypto_stat_arb.strategy import CancelQuote, PlaceQuote
+        self.build(cancel_answers=False)
+        self.act([PlaceQuote("q1", self.B, "buy", Decimal("99.5"), Decimal("0.5"))])
+        plan = self.plan_of("q1")
+        order = plan.children[0]
+        self.act([CancelQuote("q1")])
+        self.assertEqual(order.state, OrderState.CANCEL_PENDING)                                   # cancel sent, not answered: still live
+        self.update(plan, order, 1, ExecutionEventType.FILLED, "0.5")                              # the fill that raced the cancel
+        self.update(plan, order, 2, ExecutionEventType.FILLED, "0.5")                              # and the venue repeats it
+        self.assertEqual(len(self.fills()), 1)                                                     # booked once
+        self.assertEqual([x for x in self.strategy.log if x[0] == "fill"], [("fill", "q1", Decimal("0.5"), Decimal("99.5"), "MAKER")])      # reported once
+        self.assertEqual(self.strategy.log[-1], ("closed", "q1", "filled"))
+        self.assertEqual(self.strategy.log.count(("closed", "q1", "filled")), 1)
+
+    def test_the_inventory_cap_refuses_a_quote_with_a_reason_and_nothing_is_sent(self):
+        from crypto_stat_arb.strategy import PlaceQuote
+        self.build(cap="0.60")
+        self.act([PlaceQuote("q1", self.B, "buy", Decimal("99.5"), Decimal("0.5"))])
+        self.act([PlaceQuote("q2", self.B, "buy", Decimal("99.4"), Decimal("0.5"))])               # 0.5 resting + 0.5 > 0.60
+        self.assertEqual([x for x in self.strategy.log if x[1] == "q2"][0][:3], ("ack", "q2", False))
+        closed = [x for x in self.strategy.log if x[0] == "closed" and x[1] == "q2"]
+        self.assertTrue(closed and closed[0][2].startswith("rejected:") and "inventory_cap" in closed[0][2], closed)
+        self.assertEqual(len(self.bybit.submits), 1)
+
+    def test_an_exit_ioc_reduces_inventory_at_its_cap_and_is_never_blocked_by_the_stops(self):
+        from crypto_stat_arb.strategy import ExitInventory, PlaceQuote
+        self.build()
+        self.act([PlaceQuote("q1", self.B, "buy", Decimal("99.5"), Decimal("0.5"))])
+        plan = self.plan_of("q1")
+        self.update(plan, plan.children[0], 1, ExecutionEventType.FILLED, "0.5")
+        inst = self.session.cfg.instrument_id
+        self.assertEqual(self.session.ledger.positions[(self.B, inst)], Decimal("0.5"))
+        self.session.flattening = True                                                             # a stop that blocks new quotes
+        self.act([ExitInventory("x1", self.B, "sell", Decimal("0.5"), Decimal("99.0"))])
+        exit_order = self.plan_of("x1").children[0]
+        self.assertEqual((exit_order.order_role, exit_order.time_in_force, exit_order.reduce_only, exit_order.limit_price, exit_order.state), ("UNWIND", "IOC", True, Decimal("99.0"), OrderState.FILLED))
+        self.assertEqual(self.session.ledger.positions[(self.B, inst)], Decimal("0"))
+        self.assertEqual(self.strategy.log[-1], ("closed", "x1", "filled"))
+        self.assertEqual(self.session.oms.carried_residual_base(), Decimal("0"))
+
+    def test_the_shadow_reconciliation_compares_the_fee_of_each_fill_not_the_orders_cumulative_fee(self):
+        """Found in the 29 Oct rehearsal: a FILL event's `fee` is the order's cumulative fee, so a second partial fill of one order was flagged as a fee mismatch. The journal now uses `fee_delta`."""
+        from crypto_stat_arb.ems.reconcile import reconcile_session
+        from crypto_stat_arb.fees import Liquidity
+        from crypto_stat_arb.strategy import PlaceQuote
+        self.build()
+        self.act([PlaceQuote("q1", self.B, "buy", Decimal("99.5"), Decimal("0.5"))])
+        plan = self.plan_of("q1")
+        self.update(plan, plan.children[0], 1, ExecutionEventType.PARTIAL, "0.2")
+        self.update(plan, plan.children[0], 2, ExecutionEventType.FILLED, "0.5")                    # the second fill: 0.3 more, the order's fee is cumulative
+        self.assertEqual(len(self.fills()), 2)
+        inst = self.session.cfg.instrument_id
+        fee_bps = {v: tuple(float(self.session.oms.instruments.fee_rule(v, inst, self.t).effective_bps(liq)[0]) for liq in (Liquidity.MAKER, Liquidity.TAKER)) for v in (self.A, self.B)}
+        doc = reconcile_session(self.session, fee_bps=fee_bps)
+        self.assertEqual((doc["ok"], doc["problems"].get("fee", [])), (True, []), doc["problems"])
+        self.assertAlmostEqual(doc["fees_journal"], doc["fees_engine"], places=9)
+
+    def test_a_new_quote_under_a_stop_is_blocked_with_a_reason(self):
+        from crypto_stat_arb.strategy import PlaceQuote
+        self.build()
+        self.session.flattening = True
+        self.act([PlaceQuote("q1", self.B, "buy", Decimal("99.5"), Decimal("0.5"))])
+        self.assertEqual(self.strategy.log, [("ack", "q1", False, "blocked:flattening"), ("closed", "q1", "blocked:flattening")])
+        self.assertEqual(self.bybit.submits, [])
+
+    def test_a_strategy_without_the_exact_opt_in_is_never_called_so_arb_strategies_are_untouched(self):
+        self.build()
+
+        class Looks:
+            strategy_id = "arb-like"
+            quote_book = 1                                                                        # truthy but not True
+            def __init__(self):
+                self.quotes_called, self.evaluated = 0, 0
+            def quotes(self, books, now):
+                self.quotes_called += 1
+                return []
+            def evaluate(self, books, now):
+                self.evaluated += 1
+                return None
+        arb = Looks()
+        self.session.strategies.append(arb)
+        self.tick()
+        self.assertEqual((arb.quotes_called, arb.evaluated), (0, 2))                               # evaluated like any arb strategy (once per book event), never asked for quotes
+        self.assertEqual(self.session._quote_book, {})
+
+
 if __name__ == "__main__":
     unittest.main()
