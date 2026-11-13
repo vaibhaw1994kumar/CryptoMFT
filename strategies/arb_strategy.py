@@ -183,6 +183,11 @@ class ArbConfig:
     funding_expected_holding_s: float = 0.0
     funding_credit: str = "floor_zero"
     funding_rate_max_age_s: float = 600.0        # ASSUMED: a predicted rate older than this is not used
+    # Funding stop-quoting window (owner 14 Nov): no NEW quote within funding_window_s before a funding timestamp on EITHER venue (the next funding time from the derivative stream); resting quotes are withdrawn when the
+    # window starts; quoting resumes once the settlement has passed and the stream shows the next one (funding booked), or funding_window_after_s after the timestamp (ASSUMED 30 s) if it does not. 0 = off (bit-identical).
+    # With no next-funding time for a venue the window is NOT EVALUABLE: counted (reject funding_window_not_evaluable), never skipped silently, and nothing is blocked.
+    funding_window_s: float = 0.0
+    funding_window_after_s: float = 30.0
     # PLACEHOLDER — NOT MEASURED. p_fail = 0.07 is the hedge-failure study's break-even figure, an assumed value. A replay with no
     # injected failures cannot measure a production hedge-failure rate: the zero failures seen in the Jan-2022 replays are only the
     # simulator's own depth misses and say nothing about rejects, outages or disconnects. Sensitivity (0.02 / 0.05 / 0.07 / 0.10)
@@ -231,6 +236,8 @@ class ArbConfig:
             raise ValueError(f"arb.entry_hedge_price must be 'touch' or 'vwap', got {self.entry_hedge_price!r}")
         if self.funding_credit not in ("floor_zero", "allow"):
             raise ValueError(f"arb.funding_credit must be 'floor_zero' or 'allow', got {self.funding_credit!r}")
+        if self.funding_window_s < 0 or self.funding_window_after_s < 0:
+            raise ValueError("arb.funding_window_s and funding_window_after_s must be >= 0")
         if self.funding_expected_holding_s < 0 or self.funding_rate_max_age_s <= 0:
             raise ValueError("arb.funding_expected_holding_s must be >= 0 and funding_rate_max_age_s > 0")
         if self.entry_hedge_price == "vwap" and self.profile == "legacy_v0":
@@ -374,6 +381,7 @@ class CrossVenueArbStrategy:
         self.fill_model_v1 = fill_model_v1
 
         self.clip_binding: dict[str, int] = {"depth": 0, "inventory": 0, "clip": 0}
+        self._next_funding: dict[str, float] = {}                                   # venue -> the next funding timestamp (seconds) the derivative stream last gave
         self._funding_rates: dict[str, tuple[float, float, float]] = {}       # venue -> (predicted rate per interval, interval seconds, as-of time); fed by observe_funding_rate
         self.rejects: dict[str, int] = {
             "not_ready": 0, "stale": 0, "crossed": 0, "wide_spread": 0,
@@ -535,10 +543,29 @@ class CrossVenueArbStrategy:
             return False, net, "edge_below_threshold"
         return True, net, "ok"
 
-    def observe_funding_rate(self, venue: str, rate: float, interval_s: float, ts: float) -> None:
-        """The latest PREDICTED funding rate of `venue` (a fraction per settlement interval of `interval_s` seconds) from the derivative stream, as of `ts`. Never realised funding."""
-        if interval_s > 0:
+    def observe_funding_rate(self, venue: str, rate: float | None, interval_s: float, ts: float, next_funding_ts: float | None = None) -> None:
+        """The latest PREDICTED funding rate of `venue` (a fraction per settlement interval of `interval_s` seconds) from the derivative stream, as of `ts`, and the next funding timestamp (seconds) when the tick has it.
+        Never realised funding. A next-funding time later than the one held means the held one has settled: the window of that venue ends."""
+        if rate is not None and interval_s > 0:
             self._funding_rates[venue] = (float(rate), float(interval_s), float(ts))
+        if next_funding_ts:
+            self._next_funding[venue] = float(next_funding_ts)
+
+    def funding_window_state(self, now: float) -> tuple[str, str]:
+        """The funding stop-quoting window at `now`: ("off", "") when funding_window_s is 0; ("blocked", venue) when a venue is inside its window (from funding_window_s before its next funding timestamp until the stream shows the
+        settlement has passed, at most funding_window_after_s after the timestamp); ("not_evaluable", venue) when a venue has no usable next-funding time (never seen, or the held one is more than funding_window_after_s past
+        with no newer one); else ("open", "")."""
+        cfg = self.config
+        if cfg.funding_window_s <= 0:
+            return "off", ""
+        unusable = ""
+        for venue in self.venue_names:
+            t = self._next_funding.get(venue)
+            if t is None or now > t + cfg.funding_window_after_s:
+                unusable = unusable or venue                                      # never seen, or the held timestamp passed with no newer one: nothing to evaluate against
+            elif t - cfg.funding_window_s <= now:
+                return "blocked", venue                                           # a stream tick after the settlement moves t to the next timestamp, which ends the window (funding booked)
+        return ("not_evaluable", unusable) if unusable else ("open", "")
 
     def _funding_holding_bps(self, maker_venue: str, taker_venue: str, side: str, now: float) -> float:
         """The funding / holding deduction of the edge in bps: the configured constant, plus (only when funding_expected_holding_s > 0) the expected funding cost of holding the pair for that time. `side` "bid": we buy
@@ -689,6 +716,13 @@ class CrossVenueArbStrategy:
         if cfg.min_resignal_gap_s > 0 and now - self._last_signal_ts < cfg.min_resignal_gap_s:
             self.rejects["throttled"] += 1
             return None
+
+        window, _venue = self.funding_window_state(now)
+        if window == "blocked":
+            self.rejects["funding_window"] = self.rejects.get("funding_window", 0) + 1
+            return None
+        if window == "not_evaluable":
+            self.rejects["funding_window_not_evaluable"] = self.rejects.get("funding_window_not_evaluable", 0) + 1      # labelled, nothing blocked
 
         # A7: enforce maker_max_live_orders before even computing the signal.
         if cfg.mode == MAKER_TAKER and live_maker_orders >= cfg.maker_max_live_orders:
@@ -1247,6 +1281,11 @@ class ArbSessionStrategy:
     def quotes_to_withdraw(self, books: dict, now_ns: int) -> list[dict]:
         """Quote validity, session side: the resting maker orders whose edge no longer clears the threshold minus the hysteresis. Empty unless `quote_withdraw` is on. Reads the OMS plans and the view books;
         it cancels nothing itself (the session asks the OMS to withdraw each one). An order that already has a cancel in flight is not offered again."""
+        window, _venue = self.strategy.funding_window_state(now_ns / 1_000_000_000)
+        if window == "blocked":                                      # owner 14 Nov: the funding window starts: every resting primary quote is withdrawn (not only the ones whose edge fell)
+            return [{"order_id": child.order_id, "net_bps": None, "reason": "funding_window"}
+                    for plan in self.oms.plans.values() for child in plan.children
+                    if child.post_only and child.order_role == "PRIMARY" and child.state in _WITHDRAWABLE_STATES and child.venue in self._feed_name and child.quantity - child.filled_quantity > 0]
         if not self.strategy.config.quote_withdraw:
             return []
         floats = self.view_books() if self.view_books is not None else self.float_books(books, now_ns / 1_000_000_000)
@@ -1271,13 +1310,16 @@ class ArbSessionStrategy:
     def on_derivative(self, ticker) -> None:
         """The session routes every derivative tick here (TradingSession.on_derivative): the predicted funding rate of a venue feeds the strategy's expected funding term (arb.funding_expected_holding_s; off by default,
         then nothing is read). The interval is the tick's own (hours), else 8 h; the venue maps from the core name to the feed name."""
-        if ticker.funding_rate is None or self.strategy.config.funding_expected_holding_s <= 0:
+        cfg = self.strategy.config
+        if cfg.funding_expected_holding_s <= 0 and cfg.funding_window_s <= 0:
             return
         feed = next((f for f, core in (self.venue_names or {}).items() if core == ticker.venue), None)
         if feed is None:
             return
         hours = float(ticker.funding_interval_hours) if ticker.funding_interval_hours else 8.0
-        self.strategy.observe_funding_rate(feed, float(ticker.funding_rate), hours * 3600.0, ticker.receive_ts_ns / 1_000_000_000)
+        rate = float(ticker.funding_rate) if (ticker.funding_rate is not None and cfg.funding_expected_holding_s > 0) else None
+        nxt = ticker.next_funding_ts_ns / 1_000_000_000 if ticker.next_funding_ts_ns else None
+        self.strategy.observe_funding_rate(feed, rate, hours * 3600.0, ticker.receive_ts_ns / 1_000_000_000, nxt)
 
     def evaluate(self, books: dict, now_ns: int) -> Opportunity | None:
         now_s = now_ns / 1_000_000_000          # int / int is correctly rounded; / 1e9 is not at today's epoch

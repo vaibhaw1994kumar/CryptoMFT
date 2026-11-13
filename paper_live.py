@@ -100,7 +100,7 @@ class LivePaperSession:
         # makes a missing reader a refusal too. A purely simulated session with none of these has no account to read and starts as before.
         readers = fee_readers if fee_readers is not None else (adapters if (adapters and execution_mode != ExecutionMode.INTERNAL_PAPER) else None)
         self.account_fee_check: list[dict] | None = None
-        if require_account_fees or readers is not None:
+        if require_account_fees or readers is not None or execution_mode != ExecutionMode.INTERNAL_PAPER:       # any mode that sends real orders reads the account's fees: no fallback to assumed fees
             self.account_fee_check = verify_account_fee_rates(self.cfg.instruments.fee_schedule, self.cfg.instrument_id, readers or {})
         self.clock_ns = clock_ns
         self.service = LiveOrderBookService(
