@@ -190,7 +190,7 @@ if ev is not None:
     flat = [e for e in ev if e["event_type"] == "BREAKER_FLATTEN"]
     reset = [e for e in ev if e["event_type"] == "BREAKER_RESET"]
     fields = all(k in trip[0] for k in ("confirmed_residual_base", "pending_hedge_qty", "oldest_exposure_age_s", "execution_blocked_reason")) if trip else False
-    tactic = bool(flat) and all(f["tactic"] == "MARKET_BANDED" for f in flat)
+    tactic = all(f["tactic"] == "MARKET_BANDED" for f in flat)           # every flatten, if any, is MARKET_BANDED. Since 13 Nov (section N) the breaker flattens only what no open plan manages: an exposure whose hedge is in flight (here the ghost hedge) is closed by that hedge, so no flatten is required
     band_ok = True
     r = load("2k_breaker_trip")
     quotes_after = []
@@ -198,8 +198,11 @@ if ev is not None:
         t0, t1 = trip[0]["ts_ns"], reset[0]["ts_ns"]
         sent = {t["order_id"]: t["ts"] for t in rows(r["trace"]) if t["stage"] == "request_sent" and t.get("order_id")}
         quotes_after = [o["order_id"] for o in r["orders"] if o["post_only"] and o["order_id"] in sent and t0 / 1e9 < sent[o["order_id"]] < t1 / 1e9]
-    ok = bool(trip) and fields and tactic and bool(reset) and reset[0].get("operator_id") and not quotes_after and r["manifest"]["residual_at_end"]["flag"] == "FLAT_NET"
-    add("2k Breaker trip: exposure plus a hedge unknown 30 s: cancel quotes, flatten MARKET_BANDED at the touch band, stay tripped until a logged manual reset", "session breaker, OMS, router", len(flat), ok,
+    kind = lambda o: str(o.get("intent_id") or "-").split("-")[-1][:1]
+    exposed = sum(float(o["filled_quantity"]) for o in r["orders"] if kind(o) == "P") - sum(float(o["filled_quantity"]) for o in r["orders"] if kind(o) == "H")
+    closed_once = sum(float(o["filled_quantity"]) for o in r["orders"] if kind(o) == "U") <= exposed + 1e-9 and abs(float(r["manifest"]["residual_at_end"]["net_position_base"])) < 0.01
+    ok = bool(trip) and fields and tactic and bool(reset) and reset[0].get("operator_id") and not quotes_after and r["manifest"]["residual_at_end"]["flag"] == "FLAT_NET" and closed_once
+    add("2k Breaker trip: exposure plus a hedge unknown 30 s: cancel quotes, the exposure closed once (the hedge in flight, or a MARKET_BANDED flatten at the touch band for what no open plan manages), stay tripped until a logged manual reset", "session breaker, OMS, router", len(flat), ok,
         f"trip cause {trip[0]['cause'] if trip else None}; alarm fields present {fields}; flatten orders {[(f['venue'], f['side'], f['tactic'], round(f['worst_price'], 3)) for f in flat]}; maker quotes sent between the trip and the reset {len(quotes_after)}; "
         f"manual reset logged by {reset[0].get('operator_id') if reset else None}; residual at end {r['manifest']['residual_at_end']['flag']}", "scn_2k_breaker_trip.jsonl, runs/scn_2k_breaker_trip/session_safety_events.jsonl")
 
@@ -229,6 +232,44 @@ if ev is not None:
         f"Needs oms.maker_ack_deadline (off by default; without it the lost quote sat SENT 565 s, recorded). NOT simulated: a submit that reached the venue with only its ack lost, and the stream reconnect replaying events",
         "scn_2l_maker_outage.jsonl, runs/scn_2l_maker_outage/session_safety_events.jsonl")
 
+LOT = 0.01                                              # the hedge venue's (Binance) SOLUSDT lot: the silent-carry bound of v1_9 (hedge_faults.silent_carry_bound: below_one_lot, owner 13 Nov)
+
+
+def pre_trip_orders(d, r):
+    """The orders of the plans that had finished before the BREAKER_TRIP (all their orders terminal before it): the old retry mechanics are checked on these only."""
+    ev = rows(d / "session_safety_events.jsonl") if (d / "session_safety_events.jsonl").exists() else []
+    trip_ts = next((int(e["ts_ns"]) for e in ev if e["event_type"] == "BREAKER_TRIP"), None)
+    plan = lambda o: str(o.get("intent_id") or "-").split("-")[0]
+    done = {}
+    for o in r["orders"]:
+        t = o.get("terminal_ts_ns")
+        done[plan(o)] = done.get(plan(o), True) and (trip_ts is None or (t is not None and int(t) < trip_ts))
+    return [o for o in r["orders"] if done.get(plan(o)) and o["venue"] in ("BINANCE", "BYBIT")]
+
+
+def breaker_design(d, r):
+    """The 2c pass rule under the profile's own breaker (v1_9_TOLERANCES.md section N, written before the rerun): (ok, text). Every part is measured from the run's files."""
+    ev = rows(d / "session_safety_events.jsonl") if (d / "session_safety_events.jsonl").exists() else []
+    trips = [e for e in ev if e["event_type"] == "BREAKER_TRIP"]
+    trip_ok = bool(trips) and "consecutive_failures" in str(trips[0].get("cause", ""))
+    payload = ("execution_blocked_reason", "confirmed_residual_base", "pending_hedge_qty", "oldest_exposure_age_s")
+    states = [e["state"] for e in ev if e["event_type"] == "BREAKER_STATE_TRANSITION"]
+    alarm_ok = trip_ok and all(k in trips[0] for k in payload) and trips[0]["execution_blocked_reason"] == "breaker:TRIPPED" and states[-1:] == ["TRIPPED"] and not any(e["event_type"] == "BREAKER_RESET" for e in ev)
+    kind = lambda o: str(o.get("intent_id") or "-").split("-")[-1][:1]
+    maker = sum(float(o["filled_quantity"]) for o in r["orders"] if kind(o) == "P")
+    hedged = sum(float(o["filled_quantity"]) for o in r["orders"] if kind(o) == "H")
+    unwound = sum(float(o["filled_quantity"]) for o in r["orders"] if kind(o) == "U")
+    once_ok = unwound <= maker - hedged + 1e-9
+    res = r["manifest"]["residual_at_end"]
+    net = abs(float(res["net_position_base"]))
+    lot_ok = net < LOT and res["open_residual_plans"] == 0
+    acct_ok = abs(float(res["total_residual_base"]) - net) < 1e-9
+    ok = trip_ok and alarm_ok and once_ok and lot_ok and acct_ok
+    text = (f"trip {trip_ok} (cause {trips[0]['cause'] if trips else None}); alarm payload and latched {alarm_ok}; closed once {once_ok} (unwind filled {unwound:.4f} <= maker {maker:.4f} - hedged {hedged:.4f}); "
+            f"end |net| {net:.6f} < one lot {LOT} and no open plan {lot_ok}; residual accounting {res['total_residual_base']} vs |net| {net:.12f} agree {acct_ok}")
+    return ok, text
+
+
 # ---- 2c: partial and zero IOC forced by a thinned hedge-venue book (opt-in, shows less than the capture)
 for (case, title), (tag, base, sfx) in [(c, v) for c in (("2c_zero_then_fill", "2c Zero fill: the first hedge IOC of every plan finds nothing inside its limit, the retry fills"), ("2c_partial_then_fill", "2c Partial fill: the first hedge IOC finds 0.8 of 1.0, only the true residual is retried")) for v in VARIANTS]:
     d = base / f"scn_{case}{sfx}"
@@ -238,10 +279,16 @@ for (case, title), (tag, base, sfx) in [(c, v) for c in (("2c_zero_then_fill", "
         paths = r["cov"]["paths"]
         want = zero if "zero" in case else part
         ok = retry_ok and balanced and want > 0 and paths["unwind_orders"] == 0 and paths["hedge_alarm"] == 0 and r["manifest"]["residual_at_end"]["flag"] == "FLAT_NET" and r["cov"]["checks"]["pass"]
+        design_text = ""
+        if not tag and "zero" in case:                                  # section N: the profile's own breaker is on, so the rule is the intended breaker design, not "no unwinds"
+            ok_design, design_text = breaker_design(d, r)
+            pre = pre_trip_orders(d, r)
+            pre_retry_ok, _, pre_zero, _ = hedge_chain_check({"orders": pre})
+            ok = ok_design and pre_retry_ok and pre_zero > 0 and r["cov"]["checks"]["pass"]
+            design_text = f"INTENDED DESIGN (section N): {design_text}; plans finished before the trip: every unfilled hedge remainder retried once for its true residual {pre_retry_ok} ({pre_zero} zero fills); per-order checks pass {r['cov']['checks']['pass']}. "
         add(title + tag, "hedge lifecycle, OMS, simulator (thinned hedge book, opt-in)", want, ok,
-            f"thinned attempts injected {thin_injected(r)}; hedge IOC full {paths['hedge_ioc_full']}, partial {paths['hedge_ioc_partial']}, zero {paths['hedge_ioc_zero']}, retries {paths['hedge_retry']}; every unfilled remainder retried exactly once for its true residual {retry_ok}; "
+            design_text + f"thinned attempts injected {thin_injected(r)}; hedge IOC full {paths['hedge_ioc_full']}, partial {paths['hedge_ioc_partial']}, zero {paths['hedge_ioc_zero']}, retries {paths['hedge_retry']}; every unfilled remainder retried exactly once for its true residual {retry_ok}; "
             f"hedged quantity equals maker quantity {balanced}; unwind orders {paths['unwind_orders']}, alarms {paths['hedge_alarm']}; residual at end {r['manifest']['residual_at_end']['flag']}. The OMS priced the hedge from ITS full view of the book; the venue-truth book had less (no depth is added)", f"scn_{case}.jsonl")
-LOT = 0.01                                              # the hedge venue's (Binance) SOLUSDT lot: the silent-carry bound of v1_9 (hedge_faults.silent_carry_bound: below_one_lot, owner 13 Nov)
 
 
 def plan_unwinds(r):
@@ -280,8 +327,13 @@ for tag, base, sfx in VARIANTS:
         ok = (paths["hedge_ioc_zero"] > 0 and paths["hedge_retry"] > 0 and bool(failed) and all(x["unwind_filled"] >= x["unwind_qty"] - 1e-9 for x in failed) and carried < LOT
               and res["open_residual_plans"] == 0 and cn.get("RESIDUAL_WITHIN_APPROVED_BOUND", 0) <= 1 and r["cov"]["checks"]["pass"])
         losses = [round(x["loss_bps"], 2) for x in failed if x["loss_bps"] is not None]
+        design_text = ""
+        if not tag:                                                    # section N: the profile's own breaker is on: the intended design (the sig1 plan of the first failures unwinds in full; the rest is the breaker design)
+            ok_design, design_text = breaker_design(d, r)
+            ok = ok_design and bool(failed) and all(x["unwind_filled"] >= x["unwind_qty"] - 1e-9 for x in failed) and paths["hedge_ioc_zero"] > 0 and r["cov"]["checks"]["pass"]
+            design_text = f"INTENDED DESIGN (section N): {design_text}; plans whose hedge failed on every attempt were unwound in full {bool(failed) and all(x['unwind_filled'] >= x['unwind_qty'] - 1e-9 for x in failed)}. "
         add("2c Zero fill on every attempt: retries run out, the residual is unwound at the 15 bps band whatever its size, only a sub-lot remainder is carried" + tag, "hedge lifecycle, OMS unwind, simulator (thinned hedge book, opt-in)", paths["hedge_ioc_zero"], ok,
-            f"hedge IOC zero {paths['hedge_ioc_zero']}, retries {paths['hedge_retry']}, unwind intents {paths['unwind_intents']}, unwind orders {paths['unwind_orders']}, hedge alarms {paths['hedge_alarm']}, unwind-exhausted alarms {paths['unwind_exhausted_alarm']}; "
+            design_text + f"hedge IOC zero {paths['hedge_ioc_zero']}, retries {paths['hedge_retry']}, unwind intents {paths['unwind_intents']}, unwind orders {paths['unwind_orders']}, hedge alarms {paths['hedge_alarm']}, unwind-exhausted alarms {paths['unwind_exhausted_alarm']}; "
             f"plans whose hedge failed on all attempts and were unwound: {[(x['plan'], x['maker_filled'], x['unwind_filled'], x['loss_bps'] if x['loss_bps'] is None else round(x['loss_bps'], 2)) for x in failed]} (plan, maker filled, unwind filled, loss against the maker price in bps); "
             f"residual at end {res['flag']} ({res['total_residual_base']} SOL carried, below one lot of {LOT}; open plans {res['open_residual_plans']}); events RESIDUAL_WITHIN_APPROVED_BOUND {cn.get('RESIDUAL_WITHIN_APPROVED_BOUND', 0)} (the sub-lot remainder only), RESIDUAL_LIMIT_BREACH {cn.get('RESIDUAL_LIMIT_BREACH', 0)}. "
             f"Owner 13 Nov: a failed hedge always unwinds (MARKET_BANDED at the touch band) whatever its size; v1_9 sets the silent-carry bound to one lot. Before the change the 0.0876 SOL plan of this case was carried to the end of the day with no action", "scn_2c_zero_exhausted.jsonl")

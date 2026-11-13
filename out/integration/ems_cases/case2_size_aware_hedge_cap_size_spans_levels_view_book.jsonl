@@ -10,3 +10,6 @@
 {"cumulative_filled_quantity": "0", "event": "ORDER_LIFECYCLE", "order_id": "90db34cf-e755-5833-a5f5-55ed3a428e17", "reason": "", "source": "ADAPTER_CALLBACK", "stage": "exchange_effective_notified", "ts": 3.038093089, "venue": "BINANCE"}
 {"cumulative_filled_quantity": "1.0", "event": "FILL", "fill_price": "100.294", "fill_quantity": "1.0", "order_id": "90db34cf-e755-5833-a5f5-55ed3a428e17", "side": "SELL", "stage": "fill_booked", "ts": 3.038093091, "venue": "BINANCE"}
 {"cumulative_filled_quantity": "1.0", "event": "ORDER_LIFECYCLE", "order_id": "90db34cf-e755-5833-a5f5-55ed3a428e17", "reason": "", "source": "ADAPTER_CALLBACK", "stage": "fill_notified", "ts": 3.038093091, "venue": "BINANCE"}
+{"event": "OPPORTUNITY", "stage": "decision", "ts": 3.102}
+{"cumulative_filled_quantity": "0", "event": "ORDER_LIFECYCLE", "order_id": "7e689328-b938-53ef-8084-5ac30d0f4aea", "reason": "", "source": "INTERNAL", "stage": "request_sent", "ts": 3.102000001, "venue": "BYBIT"}
+{"cumulative_filled_quantity": "0", "event": "ORDER_LIFECYCLE", "order_id": "7e689328-b938-53ef-8084-5ac30d0f4aea", "reason": "", "source": "ADAPTER_CALLBACK", "stage": "exchange_effective_notified", "ts": 3.110158516, "venue": "BYBIT"}

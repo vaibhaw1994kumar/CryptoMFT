@@ -21,7 +21,7 @@ def _opt(flag, default, cast=float):
     if flag in argv:
         i = argv.index(flag); v = cast(argv[i + 1]); del argv[i:i + 2]; return v
     return default
-size, gross = _opt("--size", 1.0), _opt("--gross", 5.0)
+size, gross_cli = _opt("--size", 1.0), _opt("--gross", None)       # owner 13 Nov: without --gross the profile's own gross per venue is used (v1_9: 2.0, approved production limit), else 5.0
 proc_strategy, proc_risk = _opt("--processing-strategy-ms", 0.0), _opt("--processing-risk-ms", 0.0)      # owner 12 Nov: the decision and risk processing time (default 0: nothing changes)
 boundaries = _opt("--regime-boundaries", None, str)                                                      # the training-day boundaries file: with it the lifecycle report is written (session_lifecycle_report.json)
 cap = "--cap" in argv
@@ -34,6 +34,7 @@ minutes = float(argv[2]) if len(argv) > 2 else None
 profile = load_profile(name)
 cfg = apply_profile(profile, dataset="mar2024", data_root="", pair="SOLUSDT", start_date="2026-10-29", end_date="2026-10-29", output_dir=str(out))
 cfg.arb.max_position_base = size                # the clip and the net ceiling (1 SOL by default, + the profile's fill headroom)
+gross = gross_cli if gross_cli is not None else (cfg.arb.max_venue_imbalance_base or 5.0)
 cfg.arb.max_venue_imbalance_base = gross        # owner 11 Nov: 5 SOL gross per venue (the net stays at the ceiling above); the core's per-venue risk limit follows it
 cfg.maker.participation_cap = cap               # E3 (owner 12 Nov): off unless --cap
 if proc_strategy or proc_risk:
@@ -51,5 +52,28 @@ result["run"] = {"profile": name, "minutes_limit": minutes, "wall_s": round(time
                  "labels": ["EXPLORATORY", "recorder quality REJECTED; host clock UNKNOWN", "funding not included (no derivatives files locally); mark = mid", "S1 table out-of-period (SOL, fitted March 2024)",
                             "no own orders on the venues: simulated fills show mechanics only", f"size {size} SOL clip, net ceiling {size} SOL + headroom, {gross} SOL gross per venue (owner 11 Nov; sweep settings), participation cap {'ON' if cap else 'off'}", f"processing time strategy {proc_strategy} ms + risk {proc_risk} ms" + (" (ASSUMED sensitivity)" if proc_strategy or proc_risk else " (ASSUMED_ZERO)"), "marks: the recorded derivatives stream when present, else MARK_FROM_MID (replay only)"]}
 write_result(result, out)
+# Owner 13 Nov (the end-to-end rehearsal): the files the report needs that write_result does not make. The safety events in full (payloads included), and one file with every stop-quoting condition and every limit counter of the run,
+# read from the session (counts are complete, never a truncated list).
+import collections
+sess = replay.session
+led = sess.ledger.events
+safety = [e for e in led if e["event_type"].startswith(("BREAKER_", "KILL_SWITCH", "UNWIND_", "HEDGE_ALARM", "HEDGE_CHAIN", "HEDGE_STATE", "MARGIN_", "NEW_RISK_HELD", "RECONCILIATION", "QUOTE_SKIPPED", "QUOTE_WITHDRAWN", "RESIDUAL_", "LAYER_RISK", "RISK_FLATTEN", "ORDER_LIFETIME", "TIME_INTEGRITY", "ORDER_TIMED_OUT", "ORDER_REJECT_CLASSIFIED"))]
+(out / "session_safety_events.jsonl").write_text("".join(json.dumps({k: (str(v) if not isinstance(v, (int, float, bool, type(None), list, dict)) else v) for k, v in e.items()}, sort_keys=True, default=str) + "\n" for e in safety))
+lim = getattr(sess.router, "scoped_limits", None)
+rejects = getattr(replay.strategy, "rejects", None)
+doc = {"label": "EXPLORATORY: every counter of the run; counts are complete (nothing truncated)",
+       "ledger_event_type_counts": dict(sorted(collections.Counter(e["event_type"] for e in led).items())),
+       "stop_quoting": {"signals_blocked_by_breaker": sess.signals_blocked_by_breaker, "breaker": sess.breaker_report().get("breaker"), "breaker_alarms": list(sess.breaker_alarms),
+                        "margin_price_paused_at_end": sess.margin_price_paused, "signals_blocked_by_margin_price": sess.signals_blocked_by_margin_price,
+                        "quotes_skipped_rate_limit": sess.quotes_skipped_rate_limit, "quotes_withdrawn": sess.quotes_withdrawn, "risk_gate_refusals_by_reason": dict(sess.gate_counts),
+                        "kill_switch": bool(sess.oms.risk.kill_switch), "kill_switch_reason": getattr(sess.oms.risk, "kill_switch_reason", ""),
+                        "strategy_reject_counts": (dict(rejects.counts) if hasattr(rejects, "counts") else (dict(rejects) if isinstance(rejects, dict) else None)),
+                        "oms_new_risk_held": {k: v for k, v in sess.oms.realism_counters.items() if k.startswith("new_risk_held")}},
+       "limits_that_bound": {"rate_limiter": None if lim is None else lim.snapshot(getattr(replay, "last_ns", None)), "risk_engine_refusals": dict(getattr(sess.oms.risk, "refusals", {}) or {}),
+                             "layer_gate": {k: v for k, v in (result.get("execution_layer", {}).get("layer", {}).get("counts", {}) or {}).items() if "risk" in k or "refus" in k},
+                             "residual_breaches": result["manifest"].get("residual_risk") if isinstance(result.get("manifest"), dict) else None,
+                             "oms_realism_counters": dict(sess.oms.realism_counters)},
+       "safety_from_profile": getattr(replay, "safety_from_profile", None)}
+(out / "session_limits_and_stops.json").write_text(json.dumps(doc, indent=1, default=str))
 print(json.dumps({"profile": name, "wall_s": result["run"]["wall_s"], "events": result["events"], "signals": len(result["signals"]), "orders": len(result["orders"]), "fills": len(result["fills"]),
                   "positions": result["positions"], "ledger_events": sum(result["ledger_event_counts"].values())}, indent=1))

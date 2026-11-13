@@ -56,6 +56,20 @@ class ProfileSafetyInTheReplay(unittest.TestCase):
         self.assertIsNone(r.session.breaker)
         self.assertEqual(r.safety_from_profile["profile_safety"], False)
 
+    def test_the_profiles_rate_limit_shares_reach_the_limiter_and_older_profiles_keep_the_core_default(self):
+        """Owner 13 Nov (production limits): v1_9 carries oms.rate_limits quote_share 0.7 / quote_min_free 2 and the replay's limiter uses them; v1_8 sets none and keeps the core default 0.8. v1_9 meets the real-orders table."""
+        from crypto_stat_arb.config import check_real_order_profile
+        lim = self._replay().session.router.scoped_limits
+        self.assertEqual((lim.quote_share, lim.quote_min_free), (0.7, 2))
+        self.assertEqual((lim.shares["RISK_REDUCING"], lim.shares["CANCEL"]), (1.0, 1.0))               # hedges, unwinds and cancels may use the whole window: never refused, queued with priority
+        profile = load_profile("perp_perp_maker_taker_v1_8")
+        cfg = apply_profile(profile, dataset="mar2024", data_root=str(SLICES), pair="SOLUSDT", start_date="2024-03-11", end_date="2024-03-11", output_dir="/tmp/x_safety8")
+        cfg.arb.max_position_base = 1.0
+        older = SessionReplay(cfg, profile, stream=stream()).session.router.scoped_limits
+        self.assertEqual((older.quote_share, older.quote_min_free), (0.8, 2))
+        self.assertEqual(check_real_order_profile(load_profile("perp_perp_maker_taker_v1_9")), [])
+        self.assertTrue(any("quote_share" in m for m in check_real_order_profile(profile)))              # an older profile is told what it lacks
+
     def test_on_the_gate_is_enforce_and_the_breaker_is_the_profiles_block(self):
         r = self._replay(profile_safety=True)
         self.assertEqual(r.session.layer_risk_mode, "enforce")

@@ -108,6 +108,7 @@ arb:
   count_pending_exposure: true           # MANDATORY
   count_unknown_exposure: true           # MANDATORY
   net_ceiling_multiple: 1.0              # MANDATORY — hard net ceiling 1x max_position_base (DECISION_PENDING_CALIBRATION)
+  max_venue_imbalance_base: 2.0          # owner 13 Nov (production limits approved): gross per venue 2.0 SOL at stage 0 (the replays used 5.0; the run scripts still set their own unless told: run_day.py takes the profile's value now). ASSUMED: no data basis, a smaller number makes a bug cheaper
   fill_headroom_base: 0.25               # SEPARATE fill headroom on top of the ceiling, base units at max_position_base=1 (STARTING VALUE chosen
                                          # by the assistant: 25% of one position, not specified by the owner; the size sweeps scale it with size)
   p_fail: 0.07                           # PLACEHOLDER — NOT MEASURED (assumed; a replay with no injected failures cannot measure it); sensitivity in the report
@@ -179,6 +180,10 @@ breaker:                                 # MANDATORY — DECISION_PENDING_CALIBR
   tripped_unwind_retries: 10             # unwind sends still allowed while tripped (engine default)
 # Reset is MANUAL ONLY: nothing in the simulator or the strategy clears a tripped breaker (bt.reset_breaker() is an operator action).
 oms:
+  rate_limits:                           # owner 13 Nov (production limits approved; ASSUMED: no venue data for the shares). New quotes use at most 70% of each rate-limit window and always leave at least 2 requests free;
+    enabled: true                        # hedges, unwinds and flattens are NEVER refused by the limiter (they queue with priority and may use the whole window); cancels are unrestricted (the whole window).
+    quote_share: 0.7                     # v1_5 to v1_8 and the core default: 0.8
+    quote_min_free: 2
   maker_ack_deadline: true               # owner 13 Nov: a sent PostOnly quote is watched from the send, not only from its ack (a submit or ack lost in a gateway outage ends TIMED_OUT with the kill switch instead of sitting SENT unwatched; 565 s in the 2l replay). Earlier profiles: off. REQUIRED for any profile used with real orders (config.REAL_ORDER_REQUIRED)
 hedge_faults:                            # the response policy (recovery), not injected faults
   response: retry_unwind                 # MANDATORY (not the legacy oracle)
@@ -241,3 +246,34 @@ execution:                               # canonical execution layer, phase 0: v
     latency_s: 0.0                       # the hedge latency the volatility term scales with
   unwind:
     tactic: MARKET_BANDED                # the unwind price band is hedge_faults.unwind_band_bps
+
+# Owner 13 Nov: production limits APPROVED as proposed (out/integration/production_limits_proposal.md) with two changes: silent residual carry only below one hedge-venue lot (0.01 SOL), failed hedges always unwind or alarm
+# (not 0.10 SOL); hedges are never refused by the limiter, new quotes use at most 70% of each window with at least 2 requests free, cancels unrestricted. Every value without data is ASSUMED. Status of each item in code
+# (ENFORCED = a rule reads it; CONFIG = the profile carries it and the run uses it; NOT BUILT = approved, no code enforces it yet; this list is documentation, the loader ignores keys that start with an underscore):
+_production_limits_approved_13nov:
+  ENFORCED_OR_CONFIG:
+    clip_sol: "1.0 (run setting: arb.max_position_base; EXISTING)"
+    net_ceiling_multiple: "1.0 (arb.net_ceiling_multiple; EXISTING, DECISION_PENDING_CALIBRATION -> approved)"
+    fill_headroom_base: "0.25 (arb.fill_headroom_base; ASSUMED, the assistant's starting value, now approved)"
+    gross_per_venue_sol: "2.0 (arb.max_venue_imbalance_base; ASSUMED)"
+    open_quotes: "1 per venue (the strategy places one; EXISTING)"
+    residual_hold_and_kill: "hold new risk after 5 s, kill switch after 30 s (EXISTING, owner 8 Nov)"
+    silent_carry_bound: "below one hedge-venue lot, 0.01 SOL (hedge_faults.silent_carry_bound: below_one_lot); a failed hedge always unwinds or alarms (the 0.10 SOL proposal is WITHDRAWN)"
+    unwind: "15 bps band, 3 attempts, then the persistent alarm (EXISTING)"
+    hedge_cap: "size_aware, 5 bps floor, 15 bps absolute limit (ASSUMED values)"
+    quote_lifetime_s: "15 (arb.maker_max_age_s)"
+    rate_limits: "oms.rate_limits: quote_share 0.7, quote_min_free 2, hedges never refused, cancels unrestricted (ASSUMED shares)"
+    layer_risk_gate: "enforce (execution.risk_reservation). The proposal said count until day-1 and spot validation; the owner's later order (13 Nov) runs v1_9 in the profile's mandatory enforce mode, and the gate refused nothing in 22 runs: the later order stands"
+    breaker: "the profile's breaker block (trips, flatten, dust rules of 13 Nov)"
+    restart_gate_and_snapshot: "oms.restart_reconcile_gate + account_snapshot adapters built; a session setting, not a profile key"
+  NOT_BUILT_APPROVED:
+    new_maker_orders_per_second: "2/s per venue sustained, 5/s peak: no per-second order limiter exists; the venue window limiter (70% share) is the only rate rule"
+    daily_loss_stop: "kill switch at -5 USDT on 1 SOL clips (realised + marked): no code"
+    funding_quiet_window: "no new quote in the 30 s before a funding timestamp: no code"
+    clock_offset_gate: "stop quoting when the clock offset is unknown or its uncertainty is above 5 ms: no code"
+    margin_warning_stop: "stop new quotes on a margin WARNING state or free margin below 10x the hard-cap initial margin: no code (margin BREACH and a missing mark are enforced)"
+    missing_mark_kill_after_60s: "kill after 60 s of paused missing marks: no code (the pause is enforced)"
+    tier_table_read_at_startup: "refuse to go live until the account's own tier table is read: no code"
+    account_settings_check_at_startup: "position mode, reduce-only, leverage, margin mode against the account: built for the testnet transports (verify_account), not wired into the session"
+    quote_requote_delay_after_withdraw_1s: "a withdrawn quote is not re-quoted for 1 s: no code"
+    market_data_stress: "10,000 events/s for 5 s without a stale-book event: not proven (needs a 3x-speed replay)"

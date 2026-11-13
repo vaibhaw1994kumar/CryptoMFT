@@ -544,6 +544,53 @@ class HedgeLotResidualLimits(_LotVenues, Scenario):
         self.assertEqual(self.oms.realism_counters["residual_breach_kill_escalations"], 1)
 
 
+class BreakerFlattenAndOpenChains(Scenario):
+    """Owner 13 Nov (the 2c rehearsal defect): a breaker trip with a hedge chain still retrying exited the same 1.0 SOL twice (the flatten sold it, then the chain's own unwind sold it again). Now a chain with no order in
+    flight is escalated on the trip and unwinds ONCE through its own path; the exposure open plans manage is excluded from what the breaker flattens; and a breaker flatten plan counts only its own fills in the
+    residual totals, so carried + open residual equals the ledger net (the 0.0076 read as 0.0152)."""
+
+    def test_a_retrying_chain_is_escalated_by_the_trip_and_unwinds_once_and_the_retry_never_fires(self):
+        self.build(hedge=[("reject", "-1003")] * 4, policy=HedgePolicy(retry_limit=3, retry_backoff_ns=5 * S))
+        self.maker_fill("2.0", 5 * S, ExecutionEventType.FILLED)
+        self.assertEqual(self.chain.state, H.RETRYING)                                                  # the first hedge was rejected; a retry is waiting out its 5 s backoff
+        self.assertEqual(self.oms.open_plan_position_by_venue(), {"BYBIT": Decimal("2.0")})              # the open plan manages the +2.0 (the maker fill)
+        moved = self.oms.escalate_open_chains(int(5.5 * S), "breaker trip")
+        self.assertEqual(moved, [self.chain.chain_id])
+        self.assertIn(self.chain.state, (H.UNWINDING, H.RECONCILED))
+        self.assertEqual([(o.venue, o.side.value, float(o.quantity)) for o in self.unwinds()], [("BYBIT", "SELL", 2.0)])      # ONE unwind, for the whole exposure
+        sends = len(self.binance.submits)
+        self.oms.advance_time(20 * S)                                                                  # the retry timer would have fired at 10 s
+        self.assertEqual(len(self.binance.submits), sends)                                              # it never did: no second hedge on top of the unwind
+        self.assertEqual((self.position("BYBIT"), self.position("BINANCE")), (0.0, 0.0))                # flat, nothing exited twice
+        self.assertEqual(len(self.unwinds()), 1)
+
+    def test_a_chain_with_an_order_in_flight_is_left_alone(self):
+        self.build(hedge=["silent"], policy=HedgePolicy(retry_limit=3), query=lambda oid: VenueOrderStatus(
+            order_id=oid, venue="BINANCE", instrument_id=INSTR, state=None, reason="not found"))
+        self.maker_fill("2.0", 5 * S, ExecutionEventType.FILLED)
+        self.assertIn(self.chain.state, (H.SUBMITTED, H.UNKNOWN))
+        self.assertEqual(self.oms.escalate_open_chains(6 * S, "breaker trip"), [])                      # the order may still fill: not escalated, not unwound
+
+    def test_a_breaker_flatten_plan_counts_only_its_own_fills_so_the_totals_equal_the_ledger_net(self):
+        """The invariant: carried + open residual == the ledger's net. A breaker flatten plan inherits an exposure other plans (or the ledger, as dust) already carry, so its inherited base is not counted again;
+        a liquidation flatten inherits exposure no plan holds and still counts in full. Here the 0.0076 sub-lot remainder is carried by a closed plan, and the flatten cannot send it (below the minimum)."""
+        self.build(hedge=[("fill", None)], qty="1.0")
+        self.maker_fill("1.0", 5 * S, ExecutionEventType.FILLED)                                        # hedged: flat
+        carried_before = self.oms.carried_residual_base()
+        self.plan.residual_base = Decimal("0.0076")                                                     # a closed plan that left a 0.0076 remainder (as the failed-hedge rule does below one lot)
+        self.assertEqual(self.plan.state.value, "CLOSED")
+        carried = self.oms.carried_residual_base()
+        self.assertEqual(carried - carried_before, Decimal("0.0076"))
+        flat = self.oms.open_flatten_plan("BINANCE", INSTR, Decimal("0.0076"), 8 * S, "circuit breaker trip", shadow=True)
+        self.assertIn(flat.parent_id, self.oms._flatten_shadow)
+        snap = self.oms.residual_risk_snapshot()
+        self.assertEqual(Decimal(snap["total_residual_base"]), carried)                                  # unchanged by the shadow flatten: 0.0076, not 0.0152
+        self.assertEqual(Decimal(snap["open_residual_base"]), Decimal("0"))
+        other = self.oms.open_flatten_plan("BYBIT", INSTR, Decimal("0.0076"), 9 * S, "after a liquidation", shadow=False)
+        self.assertNotIn(other.parent_id, self.oms._flatten_shadow)
+        self.assertEqual(Decimal(self.oms.residual_risk_snapshot()["total_residual_base"]), carried + Decimal("0.0076"))      # a liquidation flatten's inherited exposure counts in full
+
+
 class _QuietBybit(Venue):
     """Bybit that does not answer the submit; a CANCEL is answered CANCELLED only when `cancel_answers`, else it stays in flight (the venue answers later, scripted by the test)."""
     cancel_answers = False
