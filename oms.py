@@ -317,7 +317,7 @@ class OMS:
         self.hedge_short_vol_bps = None       # owner 12 Nov (cap size_aware): an optional callable(venue, ts_ns) -> the short-horizon volatility in bps per sqrt(second); None = no source (the volatility term is then 0, labelled in the cap event)
         self.hedge_gate = None                # E0 step (c): a callable(child, ts_ns) the session sets; it only OBSERVES the hedge child against the risk gate (count: what it would refuse); a hedge is never blocked, it reduces exposure
         self.observer = None                  # E0 step (a): an ems IntentObserver (observation only: the OMS never reads it back); None = off
-        self.restart_default_lookback_ns = 24 * 3_600 * 1_000_000_000      # the account snapshot's window when there is nothing persisted to start from (no plan, no execution): the last 24 hours
+        self.restart_default_lookback_ns = 24 * 3_600 * 1_000_000_000      # the account snapshot's window when there is nothing persisted to start from (no plan, no execution): the last 24 hours; and the longest gap since the last persisted state that is reconciled automatically (a longer one keeps the gate closed)
         self._quote_plans: set[str] = set()                                # CR-MQ part 2 (owner 13 Nov): plans that are a market-making quote (one post-only child, no hedge); marked at creation, rebuilt from the plan store
         self._hedge_specs: dict[str, dict[str, Any]] = {}                  # FILL_TRIGGERED: the declared hedge leg of a plan (no ChildOrder until a maker fill)
         self.hedge_chains: dict[str, dict[str, HedgeLifecycle]] = {}       # parent_id -> chain_id -> chain
@@ -3947,9 +3947,19 @@ class OMS:
         if since_ns <= 0:                                                  # nothing was ever persisted: ask for the default lookback, never from the epoch (a venue keeps no such history and the fetch would refuse)
             since_ns, since_basis = max(0, now_ns - self.restart_default_lookback_ns), "default_lookback"
         snapshots: dict[str, VenueAccountSnapshot] = {}
-        for name, venue in venues.items():
+        gap_ns = now_ns - since_ns
+        gap_exceeded = gap_ns > self.restart_default_lookback_ns
+        if gap_exceeded:                                                   # owner 13 Nov: a gap longer than the lookback is not reconciled automatically; it is reported and the gate stays closed (an operator reconciles, or raises the lookback knowingly)
+            note = f"restart_gap_exceeds_lookback:{gap_ns / 3.6e12:.1f}h>{self.restart_default_lookback_ns / 3.6e12:.1f}h"
+            for name in venues:
+                self._restart_account_problems.setdefault(name, []).append(note)
+            self.ledger.record("RESTART_GAP_EXCEEDS_LOOKBACK", now_ns, gap_ns=gap_ns, lookback_ns=self.restart_default_lookback_ns, since_ns=since_ns, since_basis=since_basis, venues=sorted(venues))
+        for name, venue in ({} if gap_exceeded else venues).items():
             try:
                 snap = venue.account_snapshot(since_ns)
+            except ValueError as exc:                                    # the adapter refused: the window is beyond what the venue keeps (or a hedge-mode account): not a transient failure, named as such
+                snap = None
+                self._restart_account_problems.setdefault(name, []).append(f"account_snapshot_refused:{str(exc)[:100]}")
             except Exception as exc:                                     # noqa: BLE001 - any fetch failure keeps the gate closed
                 snap = None
                 self._restart_account_problems.setdefault(name, []).append(f"account_fetch_failed:{type(exc).__name__}")
@@ -4006,7 +4016,7 @@ class OMS:
             if plan.parent_id in self._restart_unreconciled:
                 for name in {o.venue for o in plan.children}:
                     self._restart_account_problems.setdefault(name, []).append(f"plan_unreconciled:{plan.parent_id}")
-        report = {"venues_fetched": sorted(snapshots), "since_ns": since_ns, "since_basis": since_basis, "recovered_open_plans": len(open_plans), "orders_with_a_booked_fill_here": booked_executions,
+        report = {"venues_fetched": sorted(snapshots), "since_ns": since_ns, "since_basis": since_basis, "gap_hours": round(gap_ns / 3.6e12, 3), "recovered_open_plans": len(open_plans), "orders_with_a_booked_fill_here": booked_executions,
                   "problems": {k: sorted(set(v)) for k, v in self._restart_account_problems.items()}, "gate_open": not (self._restart_unreconciled or self._restart_account_problems)}
         self.ledger.record("RESTART_ACCOUNT_RECONCILIATION", now_ns, **{k: v for k, v in report.items() if k != "since_ns"}, since_ns=since_ns)
         return report
