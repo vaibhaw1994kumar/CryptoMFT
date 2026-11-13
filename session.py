@@ -28,7 +28,7 @@ from .margin import LiquidationEngine, MarginConfig
 from .transfers import RebalanceRule, TransferEngine, TransferRoute
 from .risk import InventoryModel
 from .ledger import Ledger
-from .models import BookState, EventType, MarketEvent, Opportunity, PlanState, TradeEvent
+from .models import BookState, EventType, MarketEvent, Opportunity, OrderState, PlanState, Side, TradeEvent
 from .oms import LIVE_ORDER_STATES, OMS, instrument_assets
 from .circuit_breaker import CircuitBreaker, CircuitBreakerConfig
 from .hedge_lifecycle import HedgeState
@@ -37,7 +37,7 @@ from .ems.risk_gate import ExposureView, GateChild, GateContext, GateLimits, eva
 from .orderbook import OrderBook
 from .plan_store import ParentPlanStore
 from .risk import RiskEngine
-from .strategy import CrossVenueSpreadStrategy
+from .strategy import AmendQuote, CancelQuote, CrossVenueSpreadStrategy, ExitInventory, PlaceQuote
 from .mean_reversion import CrossVenueMeanReversionStrategy, MeanReversionConfig
 from .time_integrity import TimeIntegrityMonitor
 
@@ -407,6 +407,10 @@ class TradingSession:
         self.last_seen_ts_by_venue: dict[str, int] = {}
         self.opportunities_by_strategy: dict[str, int] = {}
         self._tracked_plans: dict[str, Any] = {}
+        self._quote_book: dict[str, dict[str, Any]] = {}        # CR-MQ part 3: quote id -> {strategy, parent_id, kind, venue, side, qty, acked, closed, cancel_requested}; empty unless a strategy has `quote_book = True`
+        self._quote_by_parent: dict[str, str] = {}
+        self._quote_pos = 0                                       # cursor into the ledger events for the fill callbacks
+        self.quote_book_counters: dict[str, int] = {}
         self.flattening = False
         # Track A item 1 (owner 11 Nov): the circuit breaker (pause versus trip, flatten on trip, manual reset) and the pre-send risk gate on the session. Both OFF by default: with breaker_config None and
         # risk_gate_mode "off" nothing below runs and every result is as before. The rules are the pure modules circuit_breaker.py, ems/risk.py (plan_flatten_on_trip) and ems/risk_gate.py.
@@ -541,6 +545,7 @@ class TradingSession:
                     self._flatten_surviving_leg(result, now)
             self._evaluate_margin(now)
         self._notify_closed_plans()
+        self._pump_quote_callbacks(now)
         self._breaker_step(now)
         if gate_allowed is None:
             required = tuple(
@@ -554,6 +559,9 @@ class TradingSession:
         self._withdraw_invalid_quotes(now)          # quote validity (default off: a strategy without `quotes_to_withdraw`, or with it switched off, returns nothing)
         last: Opportunity | None = None
         for strategy in self.strategies:
+            if getattr(strategy, "quote_book", False) is True:       # CR-MQ part 3: a market-making strategy is asked for its quote actions here, after the timers, the book and the gate; an arb strategy never reaches this branch
+                self._run_quote_strategy(strategy, now)
+                continue
             if self.flattening and not hasattr(strategy, "force_exit"):
                 continue
             if self.breaker is not None and not self.breaker.allow_signal(now / 1e9, self._net_abs()) and not hasattr(strategy, "force_exit"):
@@ -650,6 +658,7 @@ class TradingSession:
         if produced:
             self.last_event_ts_ns = max(self.last_event_ts_ns, now)
             self._notify_closed_plans()
+            self._pump_quote_callbacks(now)
         return produced
 
     def _dispatch(
@@ -720,6 +729,155 @@ class TradingSession:
             })
         self._notify_closed_plans()
         return plan
+
+    # -- the market-making quote interface (owner 13 Nov, CR-MQ part 3) ---------------------------------------------------------------------------------------------------------------------------------
+    def _quote_count(self, name: str) -> None:
+        self.quote_book_counters[name] = self.quote_book_counters.get(name, 0) + 1
+
+    def _quote_cb(self, rec: dict[str, Any], name: str, *args: Any) -> None:
+        fn = getattr(rec["strategy"], name, None)
+        if fn is not None:
+            fn(*args)
+
+    def _quote_new_risk_block(self, now: int) -> str | None:
+        """Why a NEW quote may not go out now (the stops an arb strategy honours): flattening, a paused or tripped breaker, a missing margin price. Cancels, amends and exits are never blocked by these."""
+        if self.flattening:
+            return "flattening"
+        if self.breaker is not None and not self.breaker.allow_signal(now / 1e9, self._net_abs()):
+            return "breaker"
+        if self.margin_price_paused:
+            return "margin_price_missing"
+        return None
+
+    def _run_quote_strategy(self, strategy: Any, now: int) -> None:
+        actions = strategy.quotes(self.books, now) or ()
+        blocked = self._quote_new_risk_block(now)
+        for action in actions:
+            self._apply_quote_action(strategy, action, now, blocked)
+        self._pump_quote_callbacks(now)
+
+    def _quote_head_order(self, plan: Any) -> Any:
+        """The live order of a quote's amend lineage (the quote itself, or its newest replacement)."""
+        live = [o for o in plan.children if o.state in LIVE_ORDER_STATES and o.state != OrderState.CREATED]
+        return live[-1] if live else None
+
+    def _apply_quote_action(self, strategy: Any, action: Any, now: int, blocked: str | None) -> None:
+        instrument_id = self.cfg.instrument_id
+        if isinstance(action, (PlaceQuote, ExitInventory)):
+            qid = action.quote_id
+            if qid in self._quote_book:
+                self._quote_count("duplicate_quote_id_ignored")
+                return
+            rec = {"strategy": strategy, "parent_id": None, "kind": "exit" if isinstance(action, ExitInventory) else "quote", "venue": action.venue, "side": action.side.lower(),
+                   "qty": action.qty, "acked": False, "closed": False, "cancel_requested": False}
+            self._quote_book[qid] = rec
+            is_quote = isinstance(action, PlaceQuote)
+            reason = None
+            if is_quote and blocked is not None:
+                reason = f"blocked:{blocked}"
+            elif is_quote and not self.oms.router.quote_has_room(action.venue, instrument_id, now):
+                reason = "rate_limit_skipped"                      # the quote share of the window is used up: skipped, never queued (an exit is risk reducing and is never refused by the limiter)
+                self.quotes_skipped_rate_limit += 1
+                if self.quotes_skipped_rate_limit <= 200:
+                    self.ledger.record("QUOTE_SKIPPED_RATE_LIMIT", now, opportunity_id=qid, venue=action.venue)
+            if reason is not None:
+                self._quote_count(reason.split(":")[0])
+                rec["acked"] = rec["closed"] = True
+                self._quote_cb(rec, "on_quote_ack", qid, False, reason, now)
+                self._quote_cb(rec, "on_quote_closed", qid, reason, now)
+                return
+            side = Side.BUY if action.side.lower() == "buy" else Side.SELL
+            if is_quote:
+                plan = self.oms.execute_quote(quote_id=qid, strategy_id=getattr(strategy, "strategy_id", "mm"), instrument_id=instrument_id, venue=action.venue, side=side, price=Decimal(action.price),
+                                              quantity=Decimal(action.qty), books=self.books, observed_ts_ns=now)
+            else:
+                plan = self.oms.execute_exit(exit_id=qid, strategy_id=getattr(strategy, "strategy_id", "mm"), instrument_id=instrument_id, venue=action.venue, side=side, cap_price=Decimal(action.cap_price),
+                                             quantity=Decimal(action.qty), books=self.books, observed_ts_ns=now)
+            rec["parent_id"] = plan.parent_id
+            self._quote_by_parent[plan.parent_id] = qid
+            self._quote_count("exits_sent" if not is_quote else "quotes_sent")
+            return
+        rec = self._quote_book.get(action.quote_id)
+        if rec is None or rec["closed"]:
+            self._quote_cb(rec or {"strategy": strategy}, "on_quote_closed", action.quote_id, "amend_refused:unknown_or_closed_quote" if isinstance(action, AmendQuote) else "cancel_refused:unknown_or_closed_quote", now)
+            self._quote_count("action_on_unknown_quote")
+            return
+        plan = self.oms.plans.get(rec["parent_id"])
+        head = None if plan is None else self._quote_head_order(plan)
+        if isinstance(action, AmendQuote):
+            if head is None:
+                self._quote_cb(rec, "on_quote_closed", action.quote_id, "amend_refused:no_live_order", now)
+                return
+            if action.qty is not None and Decimal(action.qty) != rec["qty"]:
+                self._quote_cb(rec, "on_quote_amend_refused", action.quote_id, "quantity_change_not_supported", now)
+                self._quote_count("amend_refused")
+                return
+            result = self.oms.request_amend(head.order_id, Decimal(action.price), now, reason="strategy amend")
+            if result.startswith("REFUSED"):
+                self._quote_count("amend_refused")
+                self._quote_cb(rec, "on_quote_amend_refused", action.quote_id, result.removeprefix("REFUSED:"), now)
+            else:
+                self._quote_count("amends_sent" if result == "REQUESTED" else "amend_fallback_cancel")
+                rec["cancel_requested"] = rec["cancel_requested"] or result == "FALLBACK_CANCEL"
+        elif isinstance(action, CancelQuote):
+            if head is not None:
+                rec["cancel_requested"] = True
+                self.oms.urgent_cancel(head.order_id, now, "strategy cancel")
+                self._quote_count("cancels_sent")
+
+    def _quote_closed_reason(self, rec: dict[str, Any], plan: Any) -> str:
+        outcome = plan.terminal_outcome
+        if plan.children and plan.children[0].state == OrderState.CREATED:
+            return "rejected:" + next((t["reason"] for t in plan.transitions if t["state"] == "REJECTED" and t["reason"]), "not sent")
+        if outcome == "QUOTE_FILLED":
+            return "filled"
+        rejected = next((o for o in plan.children if o.state == OrderState.REJECTED and not o.replaces_order_id), None)
+        filled = any(o.filled_quantity > 0 for o in plan.children)
+        if rejected is not None and not filled:
+            return "rejected:" + (rejected.reject_reason or "rejected by the venue")
+        if rec["kind"] == "exit":
+            return "ioc_partial_fill" if filled else "ioc_not_filled"
+        if filled:
+            return "cancelled_after_partial_fill"
+        return "cancelled" if rec["cancel_requested"] else "ended_unfilled"
+
+    def _pump_quote_callbacks(self, now: int) -> None:
+        """Acks, fills and closings of the strategy's quotes, once each, in that order: fills come from the ledger's FILL events (already de-duplicated by the OMS reducer, so a repeated report or the old order's
+        late fill during an amend is one callback), mapped to the quote id through the plan (an amend's replacement order belongs to the same plan)."""
+        if not self._quote_book:
+            return
+        events = self.ledger.events
+        while self._quote_pos < len(events):
+            e = events[self._quote_pos]
+            self._quote_pos += 1
+            if e["event_type"] != "FILL":
+                continue
+            qid = self._quote_by_parent.get(e.get("parent_id"))
+            rec = self._quote_book.get(qid) if qid is not None else None
+            if rec is None:
+                continue
+            if not rec["acked"]:
+                rec["acked"] = True
+                self._quote_cb(rec, "on_quote_ack", qid, True, "", int(e["ts_ns"]))
+            liquidity = str((e.get("order") or {}).get("liquidity", "")).upper()
+            self._quote_cb(rec, "on_quote_fill", qid, Decimal(str(e["fill_quantity"])), Decimal(str(e["fill_price"])), Decimal(str(e["fee"])), liquidity, int(e["ts_ns"]))
+        for qid, rec in list(self._quote_book.items()):
+            if rec["closed"] or rec["parent_id"] is None:
+                continue
+            plan = self.oms.plans.get(rec["parent_id"])
+            if plan is None:
+                continue
+            if not rec["acked"]:
+                if any(o.state in (OrderState.ACKNOWLEDGED, OrderState.PARTIAL, OrderState.FILLED, OrderState.AMEND_PENDING, OrderState.CANCEL_PENDING) for o in plan.children):
+                    rec["acked"] = True
+                    self._quote_cb(rec, "on_quote_ack", qid, True, "", now)
+                elif plan.state == PlanState.CLOSED or any(o.state == OrderState.REJECTED for o in plan.children):
+                    rec["acked"] = True
+                    why = self._quote_closed_reason(rec, plan) if plan.state == PlanState.CLOSED else "rejected:" + next((o.reject_reason or "" for o in plan.children if o.state == OrderState.REJECTED), "")
+                    self._quote_cb(rec, "on_quote_ack", qid, False, why.removeprefix("rejected:"), now)
+            if plan.state == PlanState.CLOSED:
+                rec["closed"] = True
+                self._quote_cb(rec, "on_quote_closed", qid, self._quote_closed_reason(rec, plan), now)
 
     def _notify_closed_plans(self) -> None:
         if not self._tracked_plans:

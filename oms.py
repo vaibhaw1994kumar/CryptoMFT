@@ -3131,6 +3131,7 @@ class OMS:
         maker_venue: str | None = None,
         *,
         quote_side: Side | None = None,
+        exit_cap: Decimal | None = None,
     ) -> ParentPlan:
         """Admit and dispatch one arb package. `quote_side` (owner 13 Nov, CR-MQ part 2; only through `execute_quote`) makes it a market-making QUOTE: one post-only GTC child on that side, no hedge spec, no
         eligibility alignment (there is one venue), one-leg risk reservation. None (every arb package) is the unchanged path."""
@@ -3173,7 +3174,10 @@ class OMS:
         hedge_proto = None
         if quote_side is not None:
             children = [c for c in children if c.side == quote_side]
-            children[0].post_only, children[0].time_in_force = True, "GTC"
+            if exit_cap is None:
+                children[0].post_only, children[0].time_in_force = True, "GTC"
+            else:                                                            # an exit IOC for inventory (CR-MQ part 3): a reduce-only UNWIND child, IOC, priced at the strategy's cap (its worst price)
+                children[0].order_role, children[0].reduce_only, children[0].time_in_force, children[0].post_only = "UNWIND", True, "IOC", False
             plan = ParentPlan(parent_id, opportunity, children)
             self._quote_plans.add(parent_id)
         elif fill_triggered:
@@ -3190,7 +3194,7 @@ class OMS:
         self._transition(plan, PlanState.CREATED, now, event_type="PLAN_CREATED")
         if quote_side is not None:
             self._persist(plan, now, "QUOTE_PLAN", side=quote_side.value)         # the marker survives a restart (_recover_hedge_state rebuilds it)
-        held = self._new_risk_hold(plan, opportunity, now)
+        held = self._new_risk_hold(plan, opportunity, now) if exit_cap is None else None      # an exit reduces risk: no hold on new risk applies to it
         if held is not None:
             return held
         if self.eligibility_policy is not None and quote_side is None:      # a quote has one venue: the two-book alignment of a package does not apply (the book gate still blocks quoting on an invalid book)
@@ -3325,7 +3329,7 @@ class OMS:
         if fill_triggered:
             self._hedge_register(plan, hedge_proto, plan.children[0], opportunity, package_dispatch_ts)
         for leg_index, order in enumerate(list(plan.children)):
-            if self._dispatch_leg(plan, order, leg_index, opportunity, books, dispatch_base, now, maker_leg=fill_triggered or quote_side is not None):
+            if self._dispatch_leg(plan, order, leg_index, opportunity, books, dispatch_base, now, maker_leg=fill_triggered or (quote_side is not None and exit_cap is None)):
                 package_throttled = True
 
         package_completed_ts = self._next_execution_ts(now)
@@ -3379,6 +3383,21 @@ class OMS:
         )
         return self.execute(opportunity, books, dispatch_ts_ns, None, quote_side=side)
 
+    def execute_exit(
+        self, *, exit_id: str, strategy_id: str, instrument_id: str, venue: str, side: Side, cap_price: Decimal, quantity: Decimal,
+        books: dict[tuple[str, str], OrderBook], observed_ts_ns: int, dispatch_ts_ns: int | None = None,
+    ) -> ParentPlan:
+        """An exit IOC for market-making inventory (owner 13 Nov, CR-MQ part 3): one reduce-only UNWIND child, IOC, limited at `cap_price` (the strategy's cap is the worst price, MARKET_BANDED in the layer's
+        vocabulary), through the same plan model and the same pairing-none layer as a quote. It reduces risk, so no hold on new risk applies, and the plan counts as a quote-book plan (its fills are inventory moves,
+        never an arb residual)."""
+        book = books.get((venue, instrument_id))
+        source = (book.last_event_id or "") if book is not None else ""
+        opportunity = Opportunity(
+            opportunity_id=exit_id, strategy_id=strategy_id, instrument_id=instrument_id, observed_ts_ns=observed_ts_ns, buy_venue=venue, sell_venue=venue,
+            buy_price=cap_price, sell_price=cap_price, quantity=quantity, gross_edge_bps=Decimal("0"), estimated_net_edge_bps=Decimal("0"), source_event_ids=(source, source),
+        )
+        return self.execute(opportunity, books, dispatch_ts_ns, None, quote_side=side, exit_cap=cap_price)
+
     def _dispatch_leg(
         self, plan: ParentPlan, order: ChildOrder, leg_index: int, opportunity: Opportunity,
         books: dict[tuple[str, str], OrderBook], dispatch_base: int, now: int, *, maker_leg: bool = False,
@@ -3417,7 +3436,7 @@ class OMS:
             leg_index=leg_index,
         )
         self._recompute_plan_economics(plan, dispatch_started_ts)
-        risk_reducing = self._order_reduces_residual(plan, order)
+        risk_reducing = self._order_reduces_residual(plan, order) or (order.order_role == "UNWIND" and plan.parent_id in self._quote_plans)      # a quote-book exit IOC reduces inventory: allowed under a stop
         instruction = RoutingInstruction(
             strategy_id=opportunity.strategy_id,
             eligible_venues=(venue,),
@@ -3433,7 +3452,7 @@ class OMS:
             time_in_force=TimeInForce.GTC if maker_leg else TimeInForce.IOC,
             maker_taker_intent=MakerTakerIntent.MAKER if maker_leg else MakerTakerIntent.TAKER,
             post_only=maker_leg,
-            reduce_only=False,
+            reduce_only=order.reduce_only,
             created_ts_ns=dispatch_started_ts,
             idempotency_key=stable_id("submit", order.order_id),
             risk_reducing=risk_reducing,

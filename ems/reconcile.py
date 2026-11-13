@@ -137,7 +137,7 @@ def reconcile_session(session, *, fee_bps: dict[str, tuple[float, float]], mode:
         if e["event_type"] != "FILL":
             continue
         order = e["order"]
-        q, px, fee = float(e["fill_quantity"]), float(e["fill_price"]), float(e["fee"])
+        q, px, fee = float(e["fill_quantity"]), float(e["fill_price"]), float(e["fee_delta"] if e.get("fee_delta") is not None else e["fee"])      # the fee of THIS fill: `fee` on a FILL event is the order's cumulative fee, so a second partial fill of one order was compared with the whole order's fee (found in the 29 Oct rehearsal, 13 Nov)
         side = str(e["side"]).lower()
         oid = e["order_id"]
         fills.append({"seq": len(fills), "ts": int(e["ts_ns"]) / 1e9, "order_id": oid, "child_id": oid, "intent_id": layer._child_intent.get(oid, ""), "kind": "child",

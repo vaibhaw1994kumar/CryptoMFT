@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 from decimal import Decimal
 
 from .fees import Liquidity
@@ -8,6 +9,45 @@ from .models import Opportunity, Side, stable_id
 from .orderbook import OrderBook
 from .alignment import CrossVenueEligibilityPolicy
 from .strategies.edge import cross_gross_bps
+
+
+# ---- the market-making quote interface (owner 13 Nov, CR-MQ part 3) --------------------------------------------------------------------------------------------------------------------------------------
+# A strategy that sets `quote_book = True` is called by TradingSession.on_event (replay, live paper and live share that one call site) after the timers have run and the book is applied:
+#     strategy.quotes(books, now_ns) -> list of actions: PlaceQuote | AmendQuote | CancelQuote | ExitInventory
+# and receives, keyed by the quote id it chose (each is optional on the strategy):
+#     on_quote_ack(quote_id, accepted, reason, ts_ns)
+#     on_quote_fill(quote_id, qty, price, fee, liquidity, ts_ns)          each unique execution once (the ledger's de-duplicated fills)
+#     on_quote_closed(quote_id, reason, ts_ns)                            filled / cancelled / rejected / amend_refused:<why> / blocked / rate_limit_skipped, with the reason
+#     on_quote_amend_refused(quote_id, reason, ts_ns)                     a refused amend of a quote that is still live
+# Off unless the strategy opts in with the exact attribute `quote_book = True`: an arb strategy is never called this way and every arb result is unchanged.
+@dataclass(frozen=True)
+class PlaceQuote:
+    quote_id: str
+    venue: str
+    side: str                 # "buy" | "sell"
+    price: Decimal
+    qty: Decimal
+
+
+@dataclass(frozen=True)
+class AmendQuote:
+    quote_id: str
+    price: Decimal
+    qty: Decimal | None = None   # the OMS amend keeps the quote's quantity (the REPLACE carries the quote total); a different qty is refused
+
+
+@dataclass(frozen=True)
+class CancelQuote:
+    quote_id: str
+
+
+@dataclass(frozen=True)
+class ExitInventory:
+    quote_id: str             # the id the callbacks use for this exit
+    venue: str
+    side: str
+    qty: Decimal
+    cap_price: Decimal        # the worst price (an IOC limit): a buy never above it, a sell never below it
 
 
 class CrossVenueSpreadStrategy:
