@@ -48,6 +48,8 @@ class VenueState:
         self.lambda_engine = LambdaRegimeEngine()
 
         self._trades: deque[tuple[float, float, int]] = deque()   # (ts, volume, sign)
+        self._level_window_s = 0.0                                # E3 participation limit: 0 = per-level volume is not tracked
+        self._level_trades: dict[float, deque] = {}               # price -> (ts, volume) prints inside the window
         self.top_depth_baseline: float = 0.0
         self.short_vol: float = 0.0
         self.last_mid: float = 0.0
@@ -64,6 +66,30 @@ class VenueState:
         self._trades.append((ts, volume, sign))
         self.trades_seen += 1
         self._trim(ts)
+        if self._level_window_s > 0:
+            key = round(price, 9)
+            dq = self._level_trades.get(key)
+            if dq is None:
+                dq = self._level_trades[key] = deque()
+            dq.append((ts, volume))
+            cutoff = ts - self._level_window_s
+            while dq and dq[0][0] < cutoff:
+                dq.popleft()
+            if len(self._level_trades) > 4000:                       # drop the levels that have gone quiet, so the map stays small over a day
+                for k in [k for k, d in self._level_trades.items() if not d or d[-1][0] < cutoff]:
+                    del self._level_trades[k]
+
+    # Public volume traded at one price level over a recent window (E3 participation limit, owner 13 Nov). Off until a strategy asks for a window.
+    def track_level_volume(self, window_s: float) -> None:
+        self._level_window_s = max(self._level_window_s, float(window_s))
+
+    def level_volume(self, price: float, now: float, window_s: float) -> float:
+        """Public volume (both aggressor sides) printed at exactly `price` in the last `window_s` seconds up to `now`."""
+        dq = self._level_trades.get(round(price, 9))
+        if not dq:
+            return 0.0
+        cutoff = now - window_s
+        return sum(v for t, v in dq if t >= cutoff)
 
     def _trim(self, now: float) -> None:
         cutoff = now - self.config.flow_window_s

@@ -345,6 +345,15 @@ class TradingSession:
             if len(self.maker_venues) >= 1 and len(cfg.venues) == 2 and self.maker_venues[0] in cfg.venues:          # E0 step (d): fixed assignment, the first maker venue rests and the other venue hedges
                 self.intent_observer.layer.set_routing(self.maker_venues[0], next(v for v in cfg.venues if v != self.maker_venues[0]))
             self.intent_observer.layer.set_risk(self._layer_limits, self._base_by_venue)       # E0 step (c): the layer's reservation gate reads the session's own limits and positions (one rule, not a second mapping)
+        # S0 quote repricing in the session runtime (owner 14 Nov): ONE controller per resting quote, on every book update after the quote-validity withdrawals. The RULE is the layer's pure decide_reprice
+        # (ems/tactics/passive.py), the TARGET is the strategy's requote_target, the TRANSPORT is oms.request_amend. Off (execution.primary.reprice "none", the default): nothing is built or called.
+        from .ems.tactics.passive import RepriceConfig
+        self._reprice_cfg = RepriceConfig.parse(((execution_config.primary if execution_config is not None else {}) or {}).get("reprice"))
+        self._reprice_states: dict[str, Any] = {}                    # plan (parent) id -> RepriceState: one quote, its start time kept across amends
+        self._reprice_pending: dict[str, tuple[str, str]] = {}       # plan id -> (the order id the request was made on, "AMEND" | "CANCEL")
+        self.reprice_counters: dict[str, int] = {}
+        if self._reprice_cfg.enabled:
+            self.oms.amend_enabled = True
         self.ledger.journal = self.financing_journal
         # Margin is evaluated during the session, not only at the end (ECO04):
         # on market-data time every ``evaluate_interval_ms`` and after any fill
@@ -557,6 +566,7 @@ class TradingSession:
         wall_strategy = self.wall_ns()
         self.stage_timer.add("feed_to_strategy_ns", wall_strategy - wall_start)
         self._withdraw_invalid_quotes(now)          # quote validity (default off: a strategy without `quotes_to_withdraw`, or with it switched off, returns nothing)
+        self._reprice_quotes(now)                   # S0 (default off): only for a quote validity did not just withdraw
         last: Opportunity | None = None
         for strategy in self.strategies:
             if getattr(strategy, "quote_book", False) is True:       # CR-MQ part 3: a market-making strategy is asked for its quote actions here, after the timers, the book and the gate; an arb strategy never reaches this branch
@@ -1072,6 +1082,85 @@ class TradingSession:
             for q in quotes(self.books, now_ns):
                 if self.oms.withdraw_quote(q["order_id"], now_ns, q["reason"], q["net_bps"]):
                     self.quotes_withdrawn += 1
+
+    def _count_reprice(self, key: str) -> None:
+        self.reprice_counters[key] = self.reprice_counters.get(key, 0) + 1
+
+    def _reprice_quotes(self, now_ns: int) -> None:
+        """S0 controller, per resting quote, in this order: (a) quote validity has already withdrawn what lost its edge (a quote with a cancel in flight is not offered here); (b) the strategy's target for the quote at the
+        CURRENT hedge-venue VWAP for its size, the layer's decide_reprice (stickiness band, min_interval, the 15 s lifetime stays the OMS backstop), then amend first through the OMS, cancel-and-replace as the fallback
+        (the OMS sends NOTHING in place of a cancelled quote: the replacement is a fresh signal through the quote-validity and risk-gate checks); (c) else keep. A request is a REQUEST: the quote counts as repriced only
+        when the OMS sees the venue's confirmation (a replacement order live); until then the old order is live at the old price and its fills count (oms.request_amend, AMEND_PENDING)."""
+        cfg = self._reprice_cfg
+        if not cfg.enabled:
+            return
+        from .ems.tactics.passive import AMEND, CANCEL, CANCEL_REPLACE, RepriceState, after_amend_rejected, decide_reprice
+        now = now_ns / 1_000_000_000
+        for strategy in self.strategies:
+            hook = getattr(strategy, "quote_targets", None)
+            if hook is None:
+                continue
+            for c in hook(self.books, now_ns):
+                pid = c["parent_id"]
+                st = self._reprice_states.get(pid)
+                if st is None:
+                    st = self._reprice_states[pid] = RepriceState(quote_start_ts=now)
+                if c["hedge_px"] > 0:
+                    st.observe_hedge(cfg, now, c["hedge_px"])
+                pending = self._reprice_pending.pop(pid, None)
+                if pending is not None:                             # the quote is offered again: the request resolved (a confirmed amend shows as a NEW order id, a rejected or refused one as the SAME id)
+                    st.pending = False
+                    if pending[0] == c["order_id"] and pending[1] == "AMEND":
+                        self._count_reprice("amend_not_effective_same_order_live")
+                        d = after_amend_rejected(cfg, c["target"], False)           # never resend the same amend blindly: the target is read again and the answer is cancel or a fresh replace
+                        if d.action == CANCEL:
+                            self._cancel_for_reprice(c, now_ns, "amend_rejected_no_target")
+                        else:
+                            self._cancel_for_reprice(c, now_ns, "amend_rejected")
+                        continue
+                    if pending[0] != c["order_id"]:
+                        self._count_reprice("amends_confirmed")
+                if c["why"] in ("stale_hedge_touch", "no_hedge_price"):
+                    self._count_reprice("hold_" + c["why"])             # never act on a touch we cannot trust
+                    continue
+                if c["target"] is None and c.get("validity_checked"):
+                    # quote validity ran first on this very update and left the quote standing: its CURRENT price still clears the edge (within the hysteresis). No price clears at the target's depth (a quote that
+                    # rests ON the touch has none: a deeper price sits behind the queue where the S1 table predicts a larger move), so there is nothing to move it to: keep it. Without validity (v1_9 with S0 alone) a quote
+                    # with no target is cancelled as the rule says.
+                    self._count_reprice("hold_no_target_but_valid")
+                    continue
+                d = decide_reprice(cfg, c["side"], c["price"], c["target"], now, st, c["queue_ahead"])
+                if d.action == "HOLD":
+                    self._count_reprice("hold_" + d.reason)
+                elif d.action == CANCEL:
+                    self._cancel_for_reprice(c, now_ns, d.reason)
+                elif d.action == CANCEL_REPLACE:
+                    self._cancel_for_reprice(c, now_ns, d.reason)
+                else:
+                    self._amend_for_reprice(c, st, now, now_ns, d)
+
+    def _cancel_for_reprice(self, c: dict, now_ns: int, reason: str) -> None:
+        if self.oms.withdraw_quote(c["order_id"], now_ns, "reprice:" + reason, None):
+            self._count_reprice("cancels_" + reason)
+            self.quotes_withdrawn += 1
+
+    def _amend_for_reprice(self, c: dict, st, now: float, now_ns: int, d) -> None:
+        if not self.router.quote_has_room(c["venue"], c["instrument_id"], now_ns):       # an amend is quote-tier traffic (at most quote_share of each window, quote_min_free left free): skipped, never queued; cancels and hedges are never refused
+            self._count_reprice("amend_skipped_rate_limit")
+            return
+        outcome = self.oms.request_amend(c["order_id"], Decimal(repr(round(d.price, 10))), now_ns, "reprice:" + d.reason)
+        st.last_request_ts = now
+        if outcome == "REQUESTED":
+            st.pending = True
+            st.reprices += 1
+            self._reprice_pending[c["parent_id"]] = (c["order_id"], "AMEND")
+            self._count_reprice("amend_requests")
+        elif outcome == "FALLBACK_CANCEL":
+            st.pending = True
+            self._reprice_pending[c["parent_id"]] = (c["order_id"], "CANCEL")
+            self._count_reprice("amend_fallback_cancel")
+        else:
+            self._count_reprice("amend_" + outcome.replace(":", "_").lower())          # REFUSED:<why>: counted, never retried blindly (min_interval holds the next one)
 
     def _layer_limits(self):
         """The limits of the layer's reservation gate: the session's own gate limits, so the base ceiling is one rule (E0 step (c))."""

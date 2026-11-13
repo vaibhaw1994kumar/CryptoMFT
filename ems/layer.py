@@ -408,6 +408,11 @@ class ExecutionLayer:
 
     def escalate(self, intent: ExecutionIntent | None, now: float, why: str) -> None:
         if intent is not None and not intent.terminal and intent.state != IntentState.ESCALATED:
+            if intent.state == IntentState.ACCEPTED and not self._live.get(intent.intent_id):
+                # The intent never reached `working`: nothing was sent (a hedge refused by an instrument rule such as a minimum notional before any order existed), so there is nothing to escalate. It fails
+                # as not sent; the unwind that follows is its own intent. (Found by the 25 SOL sweep run: the illegal accepted -> escalated move ended the whole session.)
+                self.settle(intent, now, "refused before send: " + why)
+                return
             self._move(intent, IntentState.ESCALATED, now, why)
 
     def settle(self, intent: ExecutionIntent | None, now: float | None, why: str = "") -> None:

@@ -187,6 +187,11 @@ class ArbConfig:
     # window starts; quoting resumes once the settlement has passed and the stream shows the next one (funding booked), or funding_window_after_s after the timestamp (ASSUMED 30 s) if it does not. 0 = off (bit-identical).
     # With no next-funding time for a venue the window is NOT EVALUABLE: counted (reject funding_window_not_evaluable), never skipped silently, and nothing is blocked.
     funding_window_s: float = 0.0
+    # Participation limit on NEW quotes (E3, owner 13 Nov; risk control, the same rule live and in replay): a new quote's size is capped at participation_max x the public volume printed at its price level on the maker
+    # venue over the last participation_window_s. 0 = off (bit-identical). A cap that leaves less than min_clip_notional refuses the quote (reject "participation"); a cap that only shrinks it is counted
+    # (participation_size_capped). Hedges are never touched: they keep their depth cap. ASSUMED 10% of the last 60 s in v1_9 (owner to approve).
+    participation_max: float = 0.0
+    participation_window_s: float = 60.0
     funding_window_after_s: float = 30.0
     # PLACEHOLDER — NOT MEASURED. p_fail = 0.07 is the hedge-failure study's break-even figure, an assumed value. A replay with no
     # injected failures cannot measure a production hedge-failure rate: the zero failures seen in the Jan-2022 replays are only the
@@ -236,6 +241,8 @@ class ArbConfig:
             raise ValueError(f"arb.entry_hedge_price must be 'touch' or 'vwap', got {self.entry_hedge_price!r}")
         if self.funding_credit not in ("floor_zero", "allow"):
             raise ValueError(f"arb.funding_credit must be 'floor_zero' or 'allow', got {self.funding_credit!r}")
+        if not 0.0 <= self.participation_max <= 1.0 or self.participation_window_s <= 0:
+            raise ValueError("arb.participation_max must be in [0, 1] and participation_window_s > 0")
         if self.funding_window_s < 0 or self.funding_window_after_s < 0:
             raise ValueError("arb.funding_window_s and funding_window_after_s must be >= 0")
         if self.funding_expected_holding_s < 0 or self.funding_rate_max_age_s <= 0:
@@ -493,7 +500,13 @@ class CrossVenueArbStrategy:
         fee_bps = maker_fees.maker_bps + taker_fees.taker_bps
         rq_h = cfg.adverse_requote_horizon_s                                 # the repricing rule reads its own horizon (None: the entry rule's)
         funding_bps = self._funding_holding_bps(maker_venue, taker_venue, "bid" if bid else "ask", now)
-        px = self._quote_limit("bid" if bid else "ask", hedge_px, fee_bps, self._hedge_move_bps("bid" if bid else "ask", maker_venue, taker_venue, books, None, rq_h), funding_bps)
+        edge_book, price_px = taker_book, hedge_px
+        if cfg.entry_hedge_price == "vwap":                                   # the same walk as entry and quote_validity: the hedge is priced at the VWAP for the quote's remaining size
+            edge_book = self._hedge_vwap_view(taker_book, "bid" if bid else "ask", qty)
+            if edge_book is None:
+                return None, "no_hedge_price"
+            price_px = edge_book.best_bid if bid else edge_book.best_ask
+        px = self._quote_limit("bid" if bid else "ask", price_px, fee_bps, self._hedge_move_bps("bid" if bid else "ask", maker_venue, taker_venue, books, None, rq_h), funding_bps)
         if cfg.round_quotes_to_tick:
             px = self._quote_to_tick(maker_venue, px, "bid" if bid else "ask")
             tick = cfg.venue_ticks[maker_venue]
@@ -505,7 +518,7 @@ class CrossVenueArbStrategy:
         if px <= 0:
             return None, "no_edge"
         er = edge_mod.maker_taker_expected_edge_bps(
-            px, "bid" if bid else "ask", taker_book, qty, maker_fees.maker_bps, taker_fees.taker_bps,
+            px, "bid" if bid else "ask", edge_book, qty, maker_fees.maker_bps, taker_fees.taker_bps,
             expected_hedge_move_bps=self._hedge_move_bps("bid" if bid else "ask", maker_venue, taker_venue, books, px, rq_h),
             expected_hedge_slippage_bps=cfg.expected_hedge_slippage_bps, funding_holding_bps=funding_bps, p_fail=cfg.p_fail, loss_fail_bps=cfg.loss_fail_bps)
         if er.net_bps - cfg.safety_buffer_bps < cfg.min_net_edge_bps:
@@ -597,6 +610,18 @@ class CrossVenueArbStrategy:
         if walk.exhausted or walk.filled_qty + 1e-12 < qty or walk.vwap <= 0:
             return None
         return _VwapTouch(walk.vwap)
+
+    def _participation_qty(self, state, price: float, qty: float, now: float) -> tuple[float, bool]:
+        """The quote size after the participation limit and whether the limit cut it: participation_max x the public volume printed at `price` on the maker venue in the last participation_window_s. Off (0): unchanged."""
+        cfg = self.config
+        if cfg.participation_max <= 0:
+            return qty, False
+        state.track_level_volume(cfg.participation_window_s)
+        limit = cfg.participation_max * state.level_volume(price, now, cfg.participation_window_s)
+        if limit >= qty - 1e-12:
+            return qty, False
+        self.rejects["participation_size_capped"] = self.rejects.get("participation_size_capped", 0) + 1
+        return limit, True
 
     def _entry_quote_qty(self, side: str, price: float, taker_book, hedge_px: float, maker_venue: str, taker_venue: str, inventory, pending) -> float:
         """The size a signal at `price` will have: min(tradeable hedge depth, inventory room, max clip), the formula the signal itself uses below. 0 when a limit leaves nothing (the signal then fails its own later
@@ -964,8 +989,9 @@ class CrossVenueArbStrategy:
             return None
 
         qty = min(hedge_depth, inv_cap, self._max_clip(max_bid))
+        qty, part_cut = self._participation_qty(states[maker_venue], max_bid, qty, now)
         if qty * max_bid < cfg.min_clip_notional:
-            self.rejects["clip_too_small"] += 1
+            self.rejects["participation" if part_cut else "clip_too_small"] = self.rejects.get("participation" if part_cut else "clip_too_small", 0) + 1
             return None
         if self._dnq_skip("bid", max_bid, maker_venue, books, states, maker_fees.maker_bps, taker_fees.taker_bps, now):
             return None
@@ -1118,8 +1144,9 @@ class CrossVenueArbStrategy:
             return None
 
         qty = min(hedge_depth, inv_cap, self._max_clip(min_ask))
+        qty, part_cut = self._participation_qty(states[maker_venue], min_ask, qty, now)
         if qty * min_ask < cfg.min_clip_notional:
-            self.rejects["clip_too_small"] += 1
+            self.rejects["participation" if part_cut else "clip_too_small"] = self.rejects.get("participation" if part_cut else "clip_too_small", 0) + 1
             return None
         if self._dnq_skip("ask", min_ask, maker_venue, books, states, maker_fees.maker_bps, taker_fees.taker_bps, now):
             return None
@@ -1238,6 +1265,9 @@ class ArbSessionStrategy:
         self.entry_gate_blocked = 0
         self.view_books = view_books          # a runtime that owns persistent float view books (touch ages, message-atomic repair) passes them; else a mirror of the core books is built per decision
         self.ledger, self.oms, self.states = ledger, oms, states
+        if strategy.config.participation_max > 0:               # E3: the per-level public volume is tracked from the first print, not from the first decision
+            for st in (states or {}).values():
+                st.track_level_volume(strategy.config.participation_window_s)
         self.instruments, self.instrument_id = instruments, instrument_id
         self.venue_names = venue_names or {v: v.upper() for v in strategy.venue_names}        # feed name -> core venue name
         self._feed_name = {core: feed for feed, core in self.venue_names.items()}
@@ -1276,6 +1306,30 @@ class ArbSessionStrategy:
                 return None
             ts = book.last_receive_ts_ns / 1_000_000_000 if book.last_receive_ts_ns else now_s
             out[feed] = float_mirror(feed, self.strategy.pair, book.bids, book.asks, ts)
+        return out
+
+    def quote_targets(self, books: dict, now_ns: int) -> list[dict]:
+        """S0, session side: for every resting primary maker quote with no cancel or amend in flight, the price it should sit at NOW (`requote_target`: the edge at the current hedge-venue VWAP for its remaining size, the
+        S1 table at adverse_requote_horizon_s) or None when no price clears the edge. The session's controller decides and acts (decide_reprice, request_amend); nothing is sent from here."""
+        floats = self.view_books() if self.view_books is not None else self.float_books(books, now_ns / 1_000_000_000)
+        if floats is None:
+            return []
+        now_s = now_ns / 1_000_000_000
+        out = []
+        for plan in self.oms.plans.values():
+            for child in plan.children:
+                if not child.post_only or child.order_role != "PRIMARY" or child.state not in _WITHDRAWABLE_STATES or child.venue not in self._feed_name:
+                    continue
+                remaining = float(child.quantity - child.filled_quantity)
+                if remaining <= 0:
+                    continue
+                feed, side = self._feed_name[child.venue], child.side.value.lower()
+                target, why = self.strategy.requote_target(feed, side, remaining, floats, now_s)
+                taker = next(v for v in floats if v != feed)
+                hedge_book = floats[taker]
+                out.append({"order_id": child.order_id, "parent_id": plan.parent_id, "venue": child.venue, "instrument_id": child.instrument_id, "side": side, "price": float(child.limit_price), "remaining": remaining, "target": target, "why": why,
+                            "hedge_px": hedge_book.best_bid if side == "buy" else hedge_book.best_ask, "queue_ahead": 0.0,
+                            "validity_checked": bool(self.strategy.config.quote_withdraw)})
         return out
 
     def quotes_to_withdraw(self, books: dict, now_ns: int) -> list[dict]:
