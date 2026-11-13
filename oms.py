@@ -317,6 +317,8 @@ class OMS:
         self.hedge_short_vol_bps = None       # owner 12 Nov (cap size_aware): an optional callable(venue, ts_ns) -> the short-horizon volatility in bps per sqrt(second); None = no source (the volatility term is then 0, labelled in the cap event)
         self.hedge_gate = None                # E0 step (c): a callable(child, ts_ns) the session sets; it only OBSERVES the hedge child against the risk gate (count: what it would refuse); a hedge is never blocked, it reduces exposure
         self.observer = None                  # E0 step (a): an ems IntentObserver (observation only: the OMS never reads it back); None = off
+        self.restart_default_lookback_ns = 24 * 3_600 * 1_000_000_000      # the account snapshot's window when there is nothing persisted to start from (no plan, no execution): the last 24 hours
+        self._quote_plans: set[str] = set()                                # CR-MQ part 2 (owner 13 Nov): plans that are a market-making quote (one post-only child, no hedge); marked at creation, rebuilt from the plan store
         self._hedge_specs: dict[str, dict[str, Any]] = {}                  # FILL_TRIGGERED: the declared hedge leg of a plan (no ChildOrder until a maker fill)
         self.hedge_chains: dict[str, dict[str, HedgeLifecycle]] = {}       # parent_id -> chain_id -> chain
         self._chain_of_child: dict[str, HedgeLifecycle] = {}
@@ -1050,7 +1052,7 @@ class OMS:
         policy = self.residual_policy
         open_residuals = [
             plan for plan in self.plans.values()
-            if plan.state != PlanState.CLOSED and plan.residual_base != 0
+            if plan.state != PlanState.CLOSED and plan.residual_base != 0 and plan.parent_id not in self._quote_plans
         ]
         return {
             "schema_version": "1.0.0",
@@ -1146,7 +1148,7 @@ class OMS:
         return sum(
             (
                 plan.residual_base for plan in self.plans.values()
-                if plan.state == PlanState.CLOSED and plan is not exclude
+                if plan.state == PlanState.CLOSED and plan is not exclude and plan.parent_id not in self._quote_plans      # a quote's fills are inventory (the pair cap), not an arb residual
             ),
             Decimal("0"),
         )
@@ -1695,6 +1697,8 @@ class OMS:
         if unconfirmed:
             self._defer_close(plan, ts_ns, "ORDER_TIMED_OUT_UNCONFIRMED", unconfirmed)
             return plan
+        if plan.parent_id in self._quote_plans:
+            return self._finalize_quote(plan, ts_ns)
         self._recompute_plan_economics(plan, ts_ns)
         self._assess_legging_risk(plan, ts_ns, books)
         primary = [order for order in plan.children if order.order_role == "PRIMARY" and not self._amend_bookkeeping_order(plan, order)] or [order for order in plan.children if order.order_role == "PRIMARY"]
@@ -1805,6 +1809,24 @@ class OMS:
                 plan, "RESIDUAL_WITHIN_APPROVED_BOUND", ts_ns,
                 max_residual_base=self.residual_policy.max_residual_base,
             )
+        return self._release_and_close(plan, ts_ns)
+
+    def _finalize_quote(self, plan: ParentPlan, ts_ns: int) -> ParentPlan:
+        """A market-making quote closes when its order (the whole amend lineage) has no live member. There is no hedge to wait for, no residual to unwind and no legging risk: what the quote filled is
+        inventory, bounded by the pair cap at the layer's gate, so none of the arb residual rules (bound, unwind, alarm, hold on breach) applies. A quote still working is left alone."""
+        self._recompute_plan_economics(plan, ts_ns)
+        if any(order.state in LIVE_ORDER_STATES for order in plan.children):
+            return plan
+        root = next((order for order in plan.children if not order.replaces_order_id), plan.children[0])
+        lineage_filled = sum((order.filled_quantity for order in plan.children), Decimal("0"))
+        filled = lineage_filled >= root.quantity                      # the quote's own quantity, over the whole amend lineage (an amended quote ends CANCELLED on its last order once the lineage is complete)
+        plan.terminal_outcome = "QUOTE_FILLED" if filled else ("QUOTE_PARTIAL_THEN_ENDED" if any(o.filled_quantity > 0 for o in plan.children) else "QUOTE_ENDED_UNFILLED")
+        if filled:
+            if plan.state != PlanState.FILLED:
+                self._transition(plan, PlanState.FILLED, ts_ns)
+        elif plan.state not in (PlanState.REJECTED, PlanState.TIMED_OUT):
+            self._transition(plan, PlanState.REJECTED, ts_ns, "quote ended")
+        self.ledger.record("QUOTE_PLAN_CLOSED", ts_ns, parent_id=plan.parent_id, outcome=plan.terminal_outcome, filled_base=str(sum((o.filled_quantity for o in plan.children), Decimal("0"))))
         return self._release_and_close(plan, ts_ns)
 
     def enforce_residual_limits(
@@ -2454,6 +2476,9 @@ class OMS:
             hedged = sum((o.filled_quantity for o in plan.children if o.order_role == "HEDGE"), Decimal("0"))
             if all(state == OrderState.FILLED for state in states) and hedged < spec["max_qty"]:
                 states = states | {OrderState.PARTIAL}
+        elif plan.parent_id in self._quote_plans:
+            # a quote that was amended is judged by its live head, not by the old order the venue replaced (which reads CANCELLED)
+            states = {order.state for order in plan.children if not self._amend_bookkeeping_order(plan, order)} or {order.state for order in plan.children}
         else:
             states = {order.state for order in plan.children}
         if all(state == OrderState.FILLED for state in states):
@@ -2638,7 +2663,7 @@ class OMS:
             fee=order.fee,
             reason=update.reason,
         )
-        if order.filled_quantity > 0 and plan.parent_id in self._hedge_specs:
+        if order.filled_quantity > 0 and (plan.parent_id in self._hedge_specs or plan.parent_id in self._quote_plans):
             self._price_fills(order, update.observed_ts_ns)      # FILL_TRIGGERED: a maker fill arrives as a stream update, not as a dispatch callback: it is priced here (once per delta)
         self.ledger.apply_fill(order, update.observed_ts_ns)
         self._update_exposure_control(update.observed_ts_ns)
@@ -2667,6 +2692,8 @@ class OMS:
             self._fill_triggered_react(plan, order, update.observed_ts_ns)
         if self._lineage_of:
             self._amend_react(plan, order, update)
+        if plan.parent_id in self._quote_plans and plan.state != PlanState.CLOSED and not any(o.state in LIVE_ORDER_STATES for o in plan.children):
+            self._finalize_plan(plan, update.observed_ts_ns, self._books)      # a quote has no hedge to wait for: it closes as soon as its order (and every order of its amend lineage) has ended
         return plan
 
     @staticmethod
@@ -2787,7 +2814,7 @@ class OMS:
         if found is None:
             return "REFUSED:unknown_order"
         plan, order = found
-        if order.order_role != "PRIMARY" or not order.post_only or plan.parent_id not in self._hedge_specs:
+        if order.order_role != "PRIMARY" or not order.post_only or (plan.parent_id not in self._hedge_specs and plan.parent_id not in self._quote_plans):
             return "REFUSED:not_a_maker_quote"
         if order.state not in (OrderState.ACKNOWLEDGED, OrderState.PARTIAL):
             return f"REFUSED:state_{order.state.value.lower()}"            # no second amend while one is pending, none during a cancel, none before the venue acknowledged the order
@@ -2818,6 +2845,8 @@ class OMS:
         self._lineage_of[new.order_id] = root
         order.amend_to_price = new_price
         plan.children.append(new)
+        if self.observer is not None:
+            self.observer.amend_child(plan, order, new, now_ns / 1e9)
         self.ledger.record("AMEND_REQUESTED", now_ns, parent_id=plan.parent_id, order_id=order_id, replacement_order_id=new.order_id, venue=order.venue, old_price=str(order.limit_price), new_price=str(new_price),
                            remaining=str(remaining), reason=reason)
         self._record_internal_update(plan, order, ExecutionEventType.AMEND_REQUESTED, now_ns, f"amend:{new.order_id}")
@@ -2985,57 +3014,10 @@ class OMS:
             )
         return result
 
-    def execute(
-        self,
-        opportunity: Opportunity,
-        books: dict[tuple[str, str], OrderBook],
-        dispatch_ts_ns: int | None = None,
-        maker_venue: str | None = None,
-    ) -> ParentPlan:
-        self._books.update(books)
-        parent_id = stable_id("parent", opportunity.opportunity_id)
-        if parent_id in self.plans:
-            return self.plans[parent_id]
-        if self.order_owner_guard is not None:
-            self.order_owner_guard()
-        if self.new_risk_guard is not None:
-            self.new_risk_guard()
-        children = [
-            ChildOrder(
-                order_id=stable_id("child", parent_id, opportunity.buy_venue, "BUY"),
-                parent_id=parent_id,
-                opportunity_id=opportunity.opportunity_id,
-                venue=opportunity.buy_venue,
-                instrument_id=opportunity.instrument_id,
-                side=Side.BUY,
-                quantity=opportunity.quantity,
-                limit_price=opportunity.buy_price,
-            ),
-            ChildOrder(
-                order_id=stable_id("child", parent_id, opportunity.sell_venue, "SELL"),
-                parent_id=parent_id,
-                opportunity_id=opportunity.opportunity_id,
-                venue=opportunity.sell_venue,
-                instrument_id=opportunity.instrument_id,
-                side=Side.SELL,
-                quantity=opportunity.quantity,
-                limit_price=opportunity.sell_price,
-            ),
-        ]
-        fill_triggered = self.dispatch_policy == DispatchPolicy.FILL_TRIGGERED
-        hedge_proto = None
-        if fill_triggered:
-            if maker_venue not in (opportunity.buy_venue, opportunity.sell_venue):
-                raise ValueError("FILL_TRIGGERED needs maker_venue to be one of the opportunity's venues")
-            maker_child = next(c for c in children if c.venue == maker_venue)
-            hedge_proto = next(c for c in children if c is not maker_child)
-            maker_child.post_only, maker_child.time_in_force = True, "GTC"       # a resting post-only order: priced as maker, and a quiet GTC order is resting, not unknown
-            plan = ParentPlan(parent_id, opportunity, [maker_child])
-        else:
-            plan = ParentPlan(parent_id, opportunity, children)
-        self.plans[parent_id] = plan
-        now = opportunity.observed_ts_ns
-        self._transition(plan, PlanState.CREATED, now, event_type="PLAN_CREATED")
+    def _new_risk_hold(self, plan: ParentPlan, opportunity: Opportunity, now: int) -> ParentPlan | None:
+        """The holds on new risk, ONE place for an arb package and a market-making quote (execute, execute_quote): a restart not yet reconciled, an open residual breach, an unknown hedge, an unwind-exhausted
+        alarm. Returns the plan closed REJECTED when one holds, None when new risk may be admitted. Records exactly what execute recorded before the move."""
+        parent_id = plan.parent_id
         if self.restart_reconcile_gate and (self._restart_unreconciled or self._restart_account_problems):
             self.ledger.record(
                 "NEW_RISK_HELD_RESTART_RECONCILIATION", now,
@@ -3070,7 +3052,79 @@ class OMS:
             return self._close_without_exposure(
                 plan, now, PlanState.REJECTED, "unwind_exhausted_alarm"
             )
-        if self.eligibility_policy is not None:
+        return None
+
+    def execute(
+        self,
+        opportunity: Opportunity,
+        books: dict[tuple[str, str], OrderBook],
+        dispatch_ts_ns: int | None = None,
+        maker_venue: str | None = None,
+        *,
+        quote_side: Side | None = None,
+    ) -> ParentPlan:
+        """Admit and dispatch one arb package. `quote_side` (owner 13 Nov, CR-MQ part 2; only through `execute_quote`) makes it a market-making QUOTE: one post-only GTC child on that side, no hedge spec, no
+        eligibility alignment (there is one venue), one-leg risk reservation. None (every arb package) is the unchanged path."""
+        pairing = None
+        if self.observer is not None:
+            pairing = self.observer.pairing()
+        if (pairing == "none") != (quote_side is not None):                  # a quote runs only under pairing none, an arb package never does: one OMS is one or the other
+            raise ValueError("a market-making quote needs the execution layer with pairing none, and an arb package is never sent under pairing none")
+        self._books.update(books)
+        parent_id = stable_id("parent", opportunity.opportunity_id)
+        if parent_id in self.plans:
+            return self.plans[parent_id]
+        if self.order_owner_guard is not None:
+            self.order_owner_guard()
+        if self.new_risk_guard is not None:
+            self.new_risk_guard()
+        children = [
+            ChildOrder(
+                order_id=stable_id("child", parent_id, opportunity.buy_venue, "BUY"),
+                parent_id=parent_id,
+                opportunity_id=opportunity.opportunity_id,
+                venue=opportunity.buy_venue,
+                instrument_id=opportunity.instrument_id,
+                side=Side.BUY,
+                quantity=opportunity.quantity,
+                limit_price=opportunity.buy_price,
+            ),
+            ChildOrder(
+                order_id=stable_id("child", parent_id, opportunity.sell_venue, "SELL"),
+                parent_id=parent_id,
+                opportunity_id=opportunity.opportunity_id,
+                venue=opportunity.sell_venue,
+                instrument_id=opportunity.instrument_id,
+                side=Side.SELL,
+                quantity=opportunity.quantity,
+                limit_price=opportunity.sell_price,
+            ),
+        ]
+        fill_triggered = self.dispatch_policy == DispatchPolicy.FILL_TRIGGERED and quote_side is None
+        hedge_proto = None
+        if quote_side is not None:
+            children = [c for c in children if c.side == quote_side]
+            children[0].post_only, children[0].time_in_force = True, "GTC"
+            plan = ParentPlan(parent_id, opportunity, children)
+            self._quote_plans.add(parent_id)
+        elif fill_triggered:
+            if maker_venue not in (opportunity.buy_venue, opportunity.sell_venue):
+                raise ValueError("FILL_TRIGGERED needs maker_venue to be one of the opportunity's venues")
+            maker_child = next(c for c in children if c.venue == maker_venue)
+            hedge_proto = next(c for c in children if c is not maker_child)
+            maker_child.post_only, maker_child.time_in_force = True, "GTC"       # a resting post-only order: priced as maker, and a quiet GTC order is resting, not unknown
+            plan = ParentPlan(parent_id, opportunity, [maker_child])
+        else:
+            plan = ParentPlan(parent_id, opportunity, children)
+        self.plans[parent_id] = plan
+        now = opportunity.observed_ts_ns
+        self._transition(plan, PlanState.CREATED, now, event_type="PLAN_CREATED")
+        if quote_side is not None:
+            self._persist(plan, now, "QUOTE_PLAN", side=quote_side.value)         # the marker survives a restart (_recover_hedge_state rebuilds it)
+        held = self._new_risk_hold(plan, opportunity, now)
+        if held is not None:
+            return held
+        if self.eligibility_policy is not None and quote_side is None:      # a quote has one venue: the two-book alignment of a package does not apply (the book gate still blocks quoting on an invalid book)
             decision = self.eligibility_policy.evaluate(books, now)
             current_sources = (
                 books[(opportunity.buy_venue, opportunity.instrument_id)].last_event_id or "",
@@ -3144,7 +3198,7 @@ class OMS:
             for order in children:
                 self.instruments.validate_order(order, now)
             self.risk.carried_residual_base = self.carried_residual_base()
-            reserved = self.risk.reserve(opportunity)
+            reserved = self.risk.reserve(opportunity, None if quote_side is None else quote_side.value.lower())
         except ValueError as exc:
             self.ledger.record(
                 "PACKAGE_RISK_REJECTED",
@@ -3202,7 +3256,7 @@ class OMS:
         if fill_triggered:
             self._hedge_register(plan, hedge_proto, plan.children[0], opportunity, package_dispatch_ts)
         for leg_index, order in enumerate(list(plan.children)):
-            if self._dispatch_leg(plan, order, leg_index, opportunity, books, dispatch_base, now, maker_leg=fill_triggered):
+            if self._dispatch_leg(plan, order, leg_index, opportunity, books, dispatch_base, now, maker_leg=fill_triggered or quote_side is not None):
                 package_throttled = True
 
         package_completed_ts = self._next_execution_ts(now)
@@ -3236,7 +3290,25 @@ class OMS:
         if fill_triggered:
             self._fill_triggered_settle(plan, self._hedge_specs[parent_id], package_completed_ts)
             return plan
+        if quote_side is not None:
+            return plan                              # the quote rests; it closes through _finalize_quote when its order has ended
         return self._finalize_plan(plan, package_completed_ts, books)
+
+    def execute_quote(
+        self, *, quote_id: str, strategy_id: str, instrument_id: str, venue: str, side: Side, price: Decimal, quantity: Decimal,
+        books: dict[tuple[str, str], OrderBook], observed_ts_ns: int, dispatch_ts_ns: int | None = None,
+    ) -> ParentPlan:
+        """A market-making quote (owner 13 Nov, CR-MQ part 2): ONE post-only GTC child through the existing plan model, with no hedge spec, no hedge and no unwind. It needs the execution layer
+        with execution.pairing none (the per-pair inventory cap is its admission gate beside the notional / margin reservation; an arb profile can never have that pairing). Fills book to inventory once;
+        the quote is amended through request_amend (REPLACE, AMEND_PENDING) and cancelled like any resting order; the plan closes when its order has ended. The Opportunity the plan carries is the
+        quote's record (one venue, the quote's price on both sides, edge fields zero: no edge is computed for a quote)."""
+        book = books.get((venue, instrument_id))
+        source = (book.last_event_id or "") if book is not None else ""
+        opportunity = Opportunity(
+            opportunity_id=quote_id, strategy_id=strategy_id, instrument_id=instrument_id, observed_ts_ns=observed_ts_ns, buy_venue=venue, sell_venue=venue,
+            buy_price=price, sell_price=price, quantity=quantity, gross_edge_bps=Decimal("0"), estimated_net_edge_bps=Decimal("0"), source_event_ids=(source, source),
+        )
+        return self.execute(opportunity, books, dispatch_ts_ns, None, quote_side=side)
 
     def _dispatch_leg(
         self, plan: ParentPlan, order: ChildOrder, leg_index: int, opportunity: Opportunity,
@@ -3451,7 +3523,9 @@ class OMS:
             spec = None
             chains: dict[str, dict[str, Any]] = {}
             for ev in self.plan_store.events(parent_id):
-                if ev["event_type"] == "HEDGE_SPEC":
+                if ev["event_type"] == "QUOTE_PLAN":
+                    self._quote_plans.add(parent_id)
+                elif ev["event_type"] == "HEDGE_SPEC":
                     spec = ev["payload"]
                 elif ev["event_type"] == "HEDGE_CHAIN":
                     pl = ev["payload"]
@@ -3869,6 +3943,9 @@ class OMS:
             self._books.update(books)                                      # the hedge of a missed maker fill needs the hedge venue's book (a running session already has them)
         open_plans = [p for p in self.plans.values() if p.state != PlanState.CLOSED]
         since_ns = min((p.opportunity.observed_ts_ns for p in open_plans), default=self._last_execution_ts_ns)
+        since_basis = "open_plans" if open_plans else "last_persisted_state"
+        if since_ns <= 0:                                                  # nothing was ever persisted: ask for the default lookback, never from the epoch (a venue keeps no such history and the fetch would refuse)
+            since_ns, since_basis = max(0, now_ns - self.restart_default_lookback_ns), "default_lookback"
         snapshots: dict[str, VenueAccountSnapshot] = {}
         for name, venue in venues.items():
             try:
@@ -3929,7 +4006,7 @@ class OMS:
             if plan.parent_id in self._restart_unreconciled:
                 for name in {o.venue for o in plan.children}:
                     self._restart_account_problems.setdefault(name, []).append(f"plan_unreconciled:{plan.parent_id}")
-        report = {"venues_fetched": sorted(snapshots), "since_ns": since_ns, "recovered_open_plans": len(open_plans), "orders_with_a_booked_fill_here": booked_executions,
+        report = {"venues_fetched": sorted(snapshots), "since_ns": since_ns, "since_basis": since_basis, "recovered_open_plans": len(open_plans), "orders_with_a_booked_fill_here": booked_executions,
                   "problems": {k: sorted(set(v)) for k, v in self._restart_account_problems.items()}, "gate_open": not (self._restart_unreconciled or self._restart_account_problems)}
         self.ledger.record("RESTART_ACCOUNT_RECONCILIATION", now_ns, **{k: v for k, v in report.items() if k != "since_ns"}, since_ns=since_ns)
         return report

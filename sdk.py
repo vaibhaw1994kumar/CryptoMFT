@@ -294,6 +294,32 @@ class TestnetVenueAdapter:
             venue_order_id=str(native.get("venue_order_id", "")),
         )
 
+    def account_snapshot(self, since_ns: int) -> "VenueAccountSnapshot":
+        """Owner 13 Nov, exchange-side restart reconciliation: this venue's account (orders open and closed keyed by the client order id, executions since `since_ns`, positions by instrument) through the same
+        credentialed transport, read-only. A transport that cannot answer raises (the OMS keeps the restart gate closed); a spot transport has no snapshot and says so."""
+        from .models import OrderState
+        from .plan_store import VenueAccountSnapshot, VenueExecution, VenueOrderSnapshot
+
+        natives = tuple(self.transport({"action": "ACCOUNT_SNAPSHOT", "since_ns": int(since_ns)}))
+        snapshot = next((n for n in natives if n.get("event_type") == "ACCOUNT_SNAPSHOT"), None)
+        if snapshot is None:
+            raise ConnectionError(f"{self.venue} returned no account snapshot")
+        state_of = {"NEW": OrderState.ACKNOWLEDGED, "PARTIAL": OrderState.PARTIAL, "FILLED": OrderState.FILLED, "CANCELLED": OrderState.CANCELLED, "REJECTED": OrderState.REJECTED}
+        return VenueAccountSnapshot(
+            venue=self.venue,
+            orders=tuple(VenueOrderSnapshot(
+                order_id=str(o["order_id"]), venue=self.venue, instrument_id=str(o["instrument_id"]), state=state_of[str(o["state"])],
+                filled_quantity=Decimal(str(o["filled_quantity"])), average_price=Decimal(str(o["average_price"])), fee=Decimal(str(o.get("fee", "0"))),
+                venue_order_id=str(o.get("venue_order_id", "")), observed_ts_ns=int(o.get("observed_ts_ns", 0)),
+            ) for o in snapshot.get("orders", ())),
+            executions=tuple(VenueExecution(
+                execution_id=str(e["execution_id"]), order_id=str(e["order_id"]), venue=self.venue, instrument_id=str(e["instrument_id"]),
+                quantity=Decimal(str(e["quantity"])), price=Decimal(str(e["price"])), ts_ns=int(e["ts_ns"]), fee=Decimal(str(e.get("fee", "0"))),
+            ) for e in snapshot.get("executions", ())),
+            positions={str(k): Decimal(str(v)) for k, v in dict(snapshot.get("positions", {})).items()},
+            fetched_ts_ns=int(snapshot.get("fetched_ts_ns", self.clock_ns())),
+        )
+
 
 class LookaheadError(RuntimeError):
     """A feature used information not available at its timestamp."""

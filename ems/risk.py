@@ -63,6 +63,18 @@ class ReservationBook:
                 return "net_ceiling"
         return ""
 
+    def quote_breach(self, cap: float, legs: list[tuple[str, str, float]], net_base: float) -> str:
+        """'' if the quote legs fit under the per-pair inventory cap, else "inventory_cap". Pure. The inventory the quotes could build is the filled net base plus every resting reservation plus the new legs, on
+        each side: a buy may not take the pair above +cap, a sell not below -cap. A leg that reduces the inventory is never refused by the cap (it moves the pair towards flat)."""
+        buys, sells = self.totals()
+        add_b = sum(q for _, side, q in legs if side == "buy")
+        add_s = sum(q for _, side, q in legs if side == "sell")
+        if add_b > 0 and net_base + sum(buys.values()) + add_b > cap + EPS and add_b > max(0.0, -net_base) + EPS:
+            return "inventory_cap"
+        if add_s > 0 and net_base - sum(sells.values()) - add_s < -cap - EPS and add_s > max(0.0, net_base) + EPS:
+            return "inventory_cap"
+        return ""
+
     def reserve(self, intent_id: str, venue: str, side: str, qty: float) -> None:
         self.held[intent_id] = Reservation(venue, side, qty)
 

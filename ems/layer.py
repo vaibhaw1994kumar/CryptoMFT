@@ -167,9 +167,14 @@ class ExecutionLayer:
     def _risk_gate(self, legs: list[tuple[str, str, float]], signal_id: int) -> None:
         """Check ONLY (pure). Raises RiskRefused in `enforce`; in `count` it records what would have been refused. E0 step (c): this is gate 1 of the two atomic gates (the layer's base ceiling over filled +
         reserved exposure); the core's notional / margin / residual reservation (`risk.reserve`) is gate 2. Both are decided before anything is written; the layer's check runs first."""
-        if self.cfg.risk_reservation == "off" or self._limits_fn is None or self._base_fn is None:
+        if self.cfg.pairing == "none":                                    # a market-making quote (owner 13 Nov): the per-pair inventory cap, beside the other reservations; there is no arb ceiling
+            if self.cfg.risk_reservation == "off" or self._base_fn is None:
+                return
+            why = self.reservations.quote_breach(float(self.cfg.quote["inventory_cap_base"]), legs, sum(self._base_fn().values()))
+        elif self.cfg.risk_reservation == "off" or self._limits_fn is None or self._base_fn is None:
             return
-        why = self.reservations.headroom_breach(self._limits_fn(), legs, self._base_fn())
+        else:
+            why = self.reservations.headroom_breach(self._limits_fn(), legs, self._base_fn())
         if not why:
             return
         self.counts["risk_would_refuse"] += 1
@@ -253,7 +258,8 @@ class ExecutionLayer:
         """A retry or a repeated unwind attempt re-prices the cap from the then-current book (cap rule `touch_slack`, and the
         unwind band): the cap moves with the touch, never past what the cap rule allows (4h.3). A fixed cap (phase 1:
         conditional break-even) refuses retargeting. The retry covers the unfilled remainder only."""
-        if intent.role == Role.HEDGE and self.cfg.hedge.get("cap", "touch_slack") != "touch_slack":
+        cap_rule = self.cfg.hedge.get("cap", "touch_slack")
+        if intent.role == Role.HEDGE and cap_rule not in ("touch_slack", "size_aware"):      # size_aware re-prices from the then-current book at every attempt, like touch_slack
             raise IntentError(f"hedge intent {intent.intent_id}: cap rule {self.cfg.hedge.get('cap')!r} is fixed for the intent")
         remaining = intent.qty - intent.filled_qty
         if qty > intent.qty + 1e-9:
@@ -264,7 +270,7 @@ class ExecutionLayer:
                 raise IntentError(f"retry qty {qty} exceeds the unfilled remainder {remaining} of {intent.intent_id}")
         if worst_price is None and self.cfg.price_cap_required and intent.role not in (Role.UNWIND, Role.FLATTEN):
             raise IntentError(f"intent {intent.intent_id}: retarget without a worst_price")
-        if (intent.role == Role.HEDGE and touch is not None and max_walk_bps is not None and worst_price is not None):
+        if (intent.role == Role.HEDGE and cap_rule == "touch_slack" and touch is not None and max_walk_bps is not None and worst_price is not None):      # a size_aware cap may span levels: the touch_slack bound is not its rule
             rule = self.touch_slack_cap(intent.side, touch, max_walk_bps)
             tol = abs(rule) * 1e-12
             if (intent.side == "buy" and worst_price > rule + tol) or (intent.side == "sell" and worst_price < rule - tol):
@@ -490,6 +496,10 @@ class IntentObserver:
         self._closed: set[str] = set()
         self._admitted: set[str] = set()                # plans whose layer gate ran in admit()
 
+    def pairing(self) -> str:
+        """The layer's execution.pairing: the OMS reads it once, to admit a market-making quote only under pairing none (execute_quote)."""
+        return self.layer.cfg.pairing
+
     def _guard(self, what: str, fn, *args, **kw):
         try:
             return fn(*args, **kw)
@@ -587,6 +597,13 @@ class IntentObserver:
             self.counts["cap_looser_than_opportunity_price"] += 1
         self._child(it, order, now, passive=False)
         self.counts["hedge_children"] += 1
+
+    def amend_child(self, plan, old, new, now: float) -> None:
+        """An amend's replacement order belongs to the SAME intent as the order it replaces (owner 13 Nov): its fills are journaled and consume the intent's reservation, so the layer's fill total and the
+        inventory-cap arithmetic count each fill once."""
+        it = self._by_order.get(old.order_id)
+        if it is not None:
+            self._child(it, new, now, passive=bool(new.post_only))
 
     def unwind_child(self, plan, order, now: float) -> None:
         sid = self._signal.setdefault(plan.parent_id, len(self._signal) + 1)

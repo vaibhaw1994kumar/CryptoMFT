@@ -1658,16 +1658,21 @@ class RiskEngine:
         self.last_pretrade_validation = report
         return report
 
-    def reserve(self, opportunity: Opportunity) -> PackageReservation:
-        """Admit a package or raise; refusals are counted by reason for monitoring."""
+    def reserve(self, opportunity: Opportunity, only_side: str | None = None) -> PackageReservation:
+        """Admit a package or raise; refusals are counted by reason for monitoring. `only_side` ("buy" | "sell", owner 13 Nov, CR-MQ part 2) admits ONE leg of the opportunity: a market-making quote
+        has no second leg, so only that leg's notional, cash or margin, position and message are reserved and no legging exposure is (there is no package to leg out of; the quote's exposure is the pair
+        inventory cap, checked by the execution layer). None (every arb package) is the unchanged two-leg rule."""
         try:
-            return self._reserve_package(opportunity)
+            return self._reserve_package(opportunity, only_side)
         except ValueError as exc:
             reason = str(exc).split(":")[0].split(" (")[0]
             self.refusals[reason] = self.refusals.get(reason, 0) + 1
             raise
 
-    def _reserve_package(self, opportunity: Opportunity) -> PackageReservation:
+    def _reserve_package(self, opportunity: Opportunity, only_side: str | None = None) -> PackageReservation:
+        if only_side not in (None, "buy", "sell"):
+            raise ValueError("only_side must be buy or sell")
+        buy_on, sell_on = only_side != "sell", only_side != "buy"
         if self.kill_switch:
             raise ValueError("strategy kill switch active")
         blocked = sorted({
@@ -1680,8 +1685,8 @@ class RiskEngine:
         existing = self.reservations.get(opportunity.opportunity_id)
         if existing is not None and existing.active:
             return existing
-        buy_notional = opportunity.buy_price * opportunity.quantity
-        sell_notional = opportunity.sell_price * opportunity.quantity
+        buy_notional = opportunity.buy_price * opportunity.quantity if buy_on else Decimal("0")
+        sell_notional = opportunity.sell_price * opportunity.quantity if sell_on else Decimal("0")
         if max(buy_notional, sell_notional) > self.limits.max_order_notional:
             raise ValueError("max order notional exceeded")
         package_gross = buy_notional + sell_notional
@@ -1692,8 +1697,8 @@ class RiskEngine:
 
         buy_account = self._account(opportunity.buy_venue)
         tiered = {
-            venue for venue in (opportunity.buy_venue, opportunity.sell_venue)
-            if self._tiered_perp(venue, opportunity.instrument_id)
+            venue for venue, on in ((opportunity.buy_venue, buy_on), (opportunity.sell_venue, sell_on))
+            if on and self._tiered_perp(venue, opportunity.instrument_id)
         }
         buy_fee = self._reserve_fee(opportunity.buy_venue, opportunity.instrument_id, opportunity.observed_ts_ns)
         sell_fee = self._reserve_fee(opportunity.sell_venue, opportunity.instrument_id, opportunity.observed_ts_ns)
@@ -1704,14 +1709,14 @@ class RiskEngine:
                 # Spend includes the fee when it is charged in quote (ECO05).
                 else buy_notional * (Decimal("1") + (buy_fee[0] if buy_fee[1] == "QUOTE" else Decimal("0")))
             )
-        }
+        } if buy_on else {}
         margin: dict[str, Decimal] = {}
         positions: dict[str, Decimal] = {}
         messages: dict[str, int] = {}
-        legs = (
-            (opportunity.buy_venue, opportunity.quantity, buy_notional),
-            (opportunity.sell_venue, -opportunity.quantity, sell_notional),
-        )
+        legs = tuple(leg for leg, on in (
+            ((opportunity.buy_venue, opportunity.quantity, buy_notional), buy_on),
+            ((opportunity.sell_venue, -opportunity.quantity, sell_notional), sell_on),
+        ) if on)
         for venue, position_delta, notional in legs:
             account = self._account(venue)
             if venue in tiered:
@@ -1748,13 +1753,16 @@ class RiskEngine:
         # otherwise reserve nothing and many could leg out at once).
         planned_residual = max(abs(delta) for _, delta, _ in legs)
         carried = abs(self.carried_residual_base)
-        if carried and carried >= self.limits.max_residual_base:
-            raise ValueError("carried residual at limit")
-        if (
-            self.reserved_residual + planned_residual + carried
-            > self.limits.max_legging_exposure_base
-        ):
-            raise ValueError("max legging exposure exceeded")
+        if only_side is not None:
+            planned_residual = Decimal("0")          # one leg is not a package: no legging term and no carried-residual term (the quote's exposure is the pair inventory cap, at the layer)
+        else:
+            if carried and carried >= self.limits.max_residual_base:
+                raise ValueError("carried residual at limit")
+            if (
+                self.reserved_residual + planned_residual + carried
+                > self.limits.max_legging_exposure_base
+            ):
+                raise ValueError("max legging exposure exceeded")
 
         # Validate the complete package using temporary totals. No reservation
         # state is mutated unless every venue and resource passes.
@@ -1794,7 +1802,7 @@ class RiskEngine:
         if self.inventory.model == InventoryModel.PRE_FUNDED:
             locked = self.locked_provider() if self.locked_provider is not None else {}
             quote_asset = self._inventory_assets(opportunity.buy_venue)[1]
-            if not buy_account.margin_enabled:
+            if buy_on and not buy_account.margin_enabled:
                 # Quote borrowing for margin buys is not modelled (ECO04).
                 needed = (
                     self.reserved_cash.get(opportunity.buy_venue, Decimal("0")) + cash[opportunity.buy_venue]
@@ -1807,8 +1815,8 @@ class RiskEngine:
                 )
                 if needed > free_quote:
                     raise ValueError(f"insufficient quote inventory: {opportunity.buy_venue}")
-            for venue, (bps, fee_asset) in ((opportunity.buy_venue, buy_fee), (opportunity.sell_venue, sell_fee)):
-                if fee_asset in ("QUOTE", "BASE") or bps <= 0:
+            for venue, (bps, fee_asset), on in ((opportunity.buy_venue, buy_fee, buy_on), (opportunity.sell_venue, sell_fee, sell_on)):
+                if not on or fee_asset in ("QUOTE", "BASE") or bps <= 0:
                     continue
                 # A fee charged in a third token must be payable from that token.
                 notional = buy_notional if venue == opportunity.buy_venue else sell_notional
@@ -1821,15 +1829,16 @@ class RiskEngine:
             # margin_enabled flag alone is not authorization to borrow.
             sell_venue = opportunity.sell_venue
             base_asset = self._inventory_assets(sell_venue)[0]
-            base[sell_venue] = opportunity.quantity * (
-                Decimal("1") + (sell_fee[0] if sell_fee[1] == "BASE" else Decimal("0"))
-            )
-            needed = self.reserved_base.get(sell_venue, Decimal("0")) + base[sell_venue]
+            if sell_on:
+                base[sell_venue] = opportunity.quantity * (
+                    Decimal("1") + (sell_fee[0] if sell_fee[1] == "BASE" else Decimal("0"))
+                )
+            needed = self.reserved_base.get(sell_venue, Decimal("0")) + base.get(sell_venue, Decimal("0"))
             held = max(
                 self.held_base(sell_venue) - locked.get((sell_venue, base_asset), Decimal("0")),
                 Decimal("0"),
             )
-            if needed > held:
+            if sell_on and needed > held:
                 already = self.reserved_borrow.get(sell_venue, Decimal("0"))
                 extra = needed - held - already
                 if extra > 0:

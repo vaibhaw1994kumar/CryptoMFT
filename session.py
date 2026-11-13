@@ -9,7 +9,7 @@ so a paper fill can never be labelled as a venue fill (and vice versa).
 from __future__ import annotations
 
 from collections import deque
-from dataclasses import asdict
+from dataclasses import asdict, replace as dataclass_replace
 from enum import StrEnum
 from decimal import Decimal
 import time
@@ -187,6 +187,7 @@ class TradingSession:
         gate_limits: GateLimits | None = None,
         layer_risk_mode: str = "count",
         layer_route_mode: str = "count",
+        execution_config: Any = None,
     ) -> None:
         execution_mode = ExecutionMode(execution_mode)
         assert_execution_mode(
@@ -333,8 +334,11 @@ class TradingSession:
             from .ems.config import ExecutionConfig
             from .ems.layer import ExecutionLayer, IntentObserver
 
+            # the layer's config is the profile's own `execution:` block when the caller has it (the manifest then reports what the run used); the gate mode stays the session's layer_risk_mode.
+            # The layer only observes: nothing the OMS decides reads it back, so this changes the report and the layer's own counters, never an order.
+            layer_cfg = dataclass_replace(execution_config, risk_reservation=layer_risk_mode) if execution_config is not None else ExecutionConfig(risk_reservation=layer_risk_mode)
             self.intent_observer = IntentObserver(ExecutionLayer(
-                ExecutionConfig(risk_reservation=layer_risk_mode), instrument=cfg.instrument_id,
+                layer_cfg, instrument=cfg.instrument_id,
                 dispatch_mode="fill_triggered" if self.oms.dispatch_policy == DispatchPolicy.FILL_TRIGGERED else "simultaneous"))
             self.oms.observer = self.intent_observer
             self.oms.route_mode = layer_route_mode

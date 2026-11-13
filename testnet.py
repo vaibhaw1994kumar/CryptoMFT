@@ -21,6 +21,13 @@ Safety properties:
   position mode (and, on Bybit, in the expected margin mode). Account
   settings are only read, never changed.
 
+* ``account_snapshot`` (owner 13 Nov, exchange-side restart reconciliation): the perpetual transports read the
+  account's orders (open and closed, keyed by the CLIENT order id this platform sent), executions since a
+  timestamp and positions, read-only. Paging and time windows follow the venue documentation (Bybit v5:
+  cursor paging, windows of at most 7 days, 50 orders / 100 executions a page; Binance USDⓈ-M: windows of
+  less than 7 days, 1000 rows a page); a window older than the venue keeps data, a page that does not end,
+  an unmapped status or a hedge-mode position raises, so the caller keeps the restart gate closed.
+
 These transports are verified against recorded/fake HTTP responses in the
 test suite only; running them against the real testnets requires testnet
 API keys registered in the credential broker.
@@ -165,11 +172,13 @@ class VenueTestnetTransport:
         self, request: dict[str, Any], secret: memoryview
     ) -> tuple[dict[str, Any], ...]:
         key, secret_bytes = split_secret(secret)
+        action = str(request["action"])
         try:
-            symbol = self.symbols[str(request["instrument_id"])]
+            symbol = self.symbols[str(request["instrument_id"])] if action != "ACCOUNT_SNAPSHOT" else ""
         except KeyError as exc:
             raise ValueError(f"no {self.venue} symbol for {request['instrument_id']}") from exc
-        action = str(request["action"])
+        if action == "ACCOUNT_SNAPSHOT":
+            return (self.account_snapshot(request, key, secret_bytes),)
         if action == "VERIFY_ACCOUNT":
             return self.verify_account(request, symbol, key, secret_bytes)
         if action in {"SUBMIT", "REPLACE"}:
@@ -192,6 +201,32 @@ class VenueTestnetTransport:
     def verify_account(self, request, symbol, key, secret) -> tuple[dict[str, Any], ...]:
         """Spot accounts have no position mode or margin settings to check."""
         return ({"event_type": "ACCOUNT_VERIFIED", "market": "spot"},)
+
+    # ---- account snapshot (owner 13 Nov): the perpetual transports implement it; the venue's data limits are constants here --------------
+    SNAPSHOT_WINDOW_MS = 6 * 86_400_000        # one request window: under the 7 days both venues allow
+    SNAPSHOT_RETENTION_MS = 90 * 86_400_000    # Binance keeps trades and orders 90 days (the shorter of the two); older than that is refused, not guessed
+    SNAPSHOT_MAX_PAGES = 200
+
+    def account_snapshot(self, request, key, secret) -> dict[str, Any]:  # pragma: no cover - spot has none
+        raise ValueError(f"account_snapshot is built for the perpetual transports only, not {type(self).__name__}")
+
+    def _snapshot_windows(self, since_ms: int, now_ms: int) -> list[tuple[int, int]]:
+        if since_ms > now_ms:
+            raise ValueError("account_snapshot since is in the future")
+        if now_ms - since_ms > self.SNAPSHOT_RETENTION_MS:
+            raise ValueError("account_snapshot since is older than the venue keeps orders and trades: refusing to reconcile from a partial history")
+        out, start = [], since_ms
+        while start <= now_ms:
+            end = min(start + self.SNAPSHOT_WINDOW_MS, now_ms)
+            out.append((start, end))
+            start = end + 1
+        return out
+
+    def _instrument_of(self, symbol: str) -> str:
+        for instrument_id, name in self.symbols.items():
+            if name == symbol:
+                return instrument_id
+        raise ConnectionError(f"{self.venue} reported a symbol this platform does not trade: {symbol}")
 
 
 def _liquidity(maker_flags: list[bool]) -> str:
@@ -523,6 +558,97 @@ class BinanceFuturesTestnetTransport(BinanceSpotTestnetTransport):
             raise ConnectionError(f"binance futures cancel failed: {payload.get('msg')}")
         return self._events(payload, submit=False)
 
+    # ---- account snapshot (owner 13 Nov) --------------------------------------------------------------------------------------------------------
+    POSITION_PATH = "/fapi/v2/positionRisk"       # signed positionAmt, positionSide BOTH in one-way mode: from the venue's v2 shape, to be confirmed in the testnet drill (a wrong sign shows as venue_position_differs, never as a silent pass)
+    TRADES_PAGE = 1000
+
+    def _list(self, path: str, params: dict[str, Any], key: str, secret: bytes) -> list[dict[str, Any]]:
+        status, rows = self._signed("GET", path, params, key, secret)
+        if status != 200 or not isinstance(rows, list):
+            message = rows.get("msg") if isinstance(rows, dict) else rows
+            raise ConnectionError(f"binance futures {path} failed: {message}")
+        return rows
+
+    def _trades(self, symbol: str, windows: list[tuple[int, int]], key: str, secret: bytes) -> dict[Any, dict[str, Any]]:
+        """Every trade of the symbol in the windows, by the venue's trade id. A window is paged forward by moving its start to the last trade's time (the id de-duplicates the overlap); a full page that adds
+        nothing new means more trades share one millisecond than a page holds, which cannot be paged past: raised, not truncated."""
+        seen: dict[Any, dict[str, Any]] = {}
+        for start, end in windows:
+            cursor = start
+            for _ in range(self.SNAPSHOT_MAX_PAGES):
+                rows = self._list("/fapi/v1/userTrades", {"symbol": symbol, "startTime": cursor, "endTime": end, "limit": self.TRADES_PAGE}, key, secret)
+                new = [row for row in rows if row["id"] not in seen]
+                seen.update({row["id"]: row for row in rows})
+                if len(rows) < self.TRADES_PAGE:
+                    break
+                if not new:
+                    raise ConnectionError("binance futures userTrades page did not advance")
+                cursor = max(int(row["time"]) for row in rows)
+            else:
+                raise ConnectionError("binance futures userTrades paging did not end")
+        return seen
+
+    def account_snapshot(self, request, key, secret) -> dict[str, Any]:
+        """The account as the venue holds it: orders (open ones, and every order created in the window, closed or not) keyed by the CLIENT order id, executions since `since_ns` keyed by the venue's trade id and
+        tied to the client id through the order, and the one-way position per instrument (signed). Read-only. A trade whose order the venue did not list is fetched once by its venue id; if that fails too its
+        order id is `venue-order:<id>`, which the OMS flags as an execution for an unknown order (the gate stays closed)."""
+        now_ms = self.clock_ms()
+        windows = self._snapshot_windows(int(request["since_ns"]) // 1_000_000, now_ms)
+        orders: dict[str, dict[str, Any]] = {}
+        client_of: dict[Any, str] = {}
+        executions: list[dict[str, Any]] = []
+        positions: dict[str, str] = {}
+        for instrument_id, symbol in sorted(self.symbols.items()):
+            rows = list(self._list("/fapi/v1/openOrders", {"symbol": symbol}, key, secret))
+            for start, end in windows:
+                page = self._list("/fapi/v1/allOrders", {"symbol": symbol, "startTime": start, "endTime": end, "limit": 1000}, key, secret)
+                if len(page) >= 1000:                                              # a full page may be a truncated one, and the next page is not asked for: raised, never a partial account
+                    raise ConnectionError("binance futures allOrders returned a full page for one window: more orders than a page holds")
+                rows += page
+            by_venue_id: dict[Any, dict[str, Any]] = {}
+            for row in rows:
+                if str(row.get("symbol", symbol)) != symbol:
+                    raise ConnectionError(f"binance futures returned an order for {row.get('symbol')} on the {symbol} query")
+                client_of[row["orderId"]] = str(row["clientOrderId"])
+                by_venue_id[row["orderId"]] = row                                  # the same order from openOrders and allOrders is one order
+            trades = self._trades(symbol, windows, key, secret)
+            fees: dict[Any, Decimal] = {}
+            for trade in trades.values():
+                fees[trade["orderId"]] = fees.get(trade["orderId"], Decimal("0")) + Decimal(str(trade.get("commission") or "0"))
+            for venue_id, row in by_venue_id.items():
+                native = str(row.get("status", ""))
+                state = self.STATUS.get(native)
+                if state is None:
+                    raise ConnectionError(f"unmapped venue order state {native!r}")
+                executed = Decimal(str(row.get("executedQty") or "0"))
+                average = Decimal(str(row.get("avgPrice") or "0"))
+                if not average and executed and row.get("cumQuote"):
+                    average = Decimal(str(row["cumQuote"])) / executed
+                orders[str(row["clientOrderId"])] = {
+                    "order_id": str(row["clientOrderId"]), "venue_order_id": str(venue_id), "instrument_id": instrument_id, "state": state,
+                    "filled_quantity": decimal_text(executed), "average_price": decimal_text(average), "fee": decimal_text(fees.get(venue_id, Decimal("0"))),
+                    "observed_ts_ns": int(row.get("updateTime") or row.get("time") or now_ms) * 1_000_000,
+                }
+            for trade in sorted(trades.values(), key=lambda t: (int(t["time"]), int(t["id"]))):
+                venue_id = trade["orderId"]
+                if venue_id not in client_of:                                      # an order older than the window that this trade belongs to: ask for it by its venue id
+                    status, payload = self._signed("GET", self.ORDER_PATH, {"symbol": symbol, "orderId": venue_id}, key, secret)
+                    if status == 200 and isinstance(payload, dict) and payload.get("clientOrderId"):
+                        client_of[venue_id] = str(payload["clientOrderId"])
+                executions.append({
+                    "execution_id": str(trade["id"]), "order_id": client_of.get(venue_id, f"venue-order:{venue_id}"), "instrument_id": instrument_id,
+                    "quantity": decimal_text(trade["qty"]), "price": decimal_text(trade["price"]), "ts_ns": int(trade["time"]) * 1_000_000,
+                    "fee": decimal_text(trade.get("commission") or "0"),
+                })
+            amount = Decimal("0")
+            for row in self._list(self.POSITION_PATH, {"symbol": symbol}, key, secret):
+                size = Decimal(str(row.get("positionAmt") or "0"))
+                if size and str(row.get("positionSide", "BOTH")) != "BOTH":
+                    raise ValueError("binance futures position is in hedge mode (positionSide LONG/SHORT); the platform trades one-way mode only")
+                amount += size
+            positions[instrument_id] = decimal_text(amount)
+        return {"event_type": "ACCOUNT_SNAPSHOT", "orders": list(orders.values()), "executions": executions, "positions": positions, "fetched_ts_ns": now_ms * 1_000_000}
+
     def verify_account(self, request, symbol, key, secret):
         status, payload = self._signed("GET", "/fapi/v1/positionSide/dual", {}, key, secret)
         if status != 200:
@@ -575,6 +701,70 @@ class BybitV5LinearTestnetTransport(BybitV5TestnetTransport):
             if Decimal(str(e.get("cumulative_filled_quantity") or "0")) else e
             for e in events
         )
+
+    # ---- account snapshot (owner 13 Nov) --------------------------------------------------------------------------------------------------------
+    def _all_pages(self, path: str, key: str, secret: bytes, params: dict[str, Any]) -> list[dict[str, Any]]:
+        rows: list[dict[str, Any]] = []
+        cursor = ""
+        for _ in range(self.SNAPSHOT_MAX_PAGES):
+            payload = self._signed("GET", path, key, secret, params={**params, **({"cursor": cursor} if cursor else {})})
+            if payload.get("retCode") != 0:
+                raise ConnectionError(f"bybit {path} failed: {payload.get('retMsg')}")
+            result = payload.get("result", {})
+            rows += result.get("list", [])
+            cursor = str(result.get("nextPageCursor") or "")
+            if not cursor:
+                return rows
+        raise ConnectionError(f"bybit {path} paging did not end")
+
+    def account_snapshot(self, request, key, secret) -> dict[str, Any]:
+        """The account as the venue holds it (see the Binance transport): orders keyed by `orderLinkId` (the client id this platform sent; an order placed another way has none and is reported as
+        `venue-order:<id>`, which the OMS flags), the open orders plus the order history of each window, executions (execType Trade only) since `since_ns` keyed by `execId`, and the one-way position per
+        instrument, signed (Buy positive, Sell negative). Limits used: history and executions are asked in windows under 7 days with cursor paging (50 orders / 100 executions a page); Bybit keeps a
+        Cancelled, Rejected or Deactivated order with no fill only 24 hours, so a plan whose only order was cancelled with no fill more than a day before the restart cannot be shown by the venue and stays unreconciled."""
+        now_ms = self.clock_ms()
+        windows = self._snapshot_windows(int(request["since_ns"]) // 1_000_000, now_ms)
+        orders: dict[str, dict[str, Any]] = {}
+        executions: dict[str, dict[str, Any]] = {}
+        positions: dict[str, str] = {}
+        for instrument_id, symbol in sorted(self.symbols.items()):
+            rows = self._all_pages("/v5/order/realtime", key, secret, {"category": self.category, "symbol": symbol, "limit": 50})
+            for start, end in windows:
+                rows += self._all_pages("/v5/order/history", key, secret, {"category": self.category, "symbol": symbol, "startTime": start, "endTime": end, "limit": 50})
+            for row in rows:
+                native = str(row.get("orderStatus", ""))
+                state = self.STATUS.get(native)
+                if state is None:
+                    raise ConnectionError(f"unmapped venue order state {native!r}")
+                client_id = str(row.get("orderLinkId") or f"venue-order:{row.get('orderId')}")
+                updated = int(row.get("updatedTime") or row.get("createdTime") or now_ms)
+                if client_id in orders and int(orders[client_id]["observed_ts_ns"]) >= updated * 1_000_000:
+                    continue                                                      # the same order from the open list and the history: the later report wins
+                executed = Decimal(str(row.get("cumExecQty") or "0"))
+                orders[client_id] = {
+                    "order_id": client_id, "venue_order_id": str(row.get("orderId", "")), "instrument_id": instrument_id,
+                    "state": state,
+                    "filled_quantity": decimal_text(executed), "average_price": decimal_text(row.get("avgPrice") or "0"),
+                    "fee": decimal_text(row.get("cumExecFee") or "0"), "observed_ts_ns": updated * 1_000_000,
+                }
+            for start, end in windows:
+                for row in self._all_pages("/v5/execution/list", key, secret, {"category": self.category, "symbol": symbol, "startTime": start, "endTime": end, "limit": 100}):
+                    if str(row.get("execType", "Trade")) != "Trade":
+                        continue                                                  # funding, fee and delivery rows are not fills
+                    executions[str(row["execId"])] = {
+                        "execution_id": str(row["execId"]), "order_id": str(row.get("orderLinkId") or f"venue-order:{row.get('orderId')}"), "instrument_id": instrument_id,
+                        "quantity": decimal_text(row["execQty"]), "price": decimal_text(row["execPrice"]), "ts_ns": int(row["execTime"]) * 1_000_000,
+                        "fee": decimal_text(row.get("execFee") or "0"),
+                    }
+            amount = Decimal("0")
+            for row in self._all_pages("/v5/position/list", key, secret, {"category": self.category, "symbol": symbol, "limit": 200}):
+                size = Decimal(str(row.get("size") or "0"))
+                if size and int(row.get("positionIdx", 0)) != 0:
+                    raise ValueError("bybit position is in hedge (both-side) mode; the platform trades one-way mode only")
+                amount += size if str(row.get("side")) == "Buy" else -size if str(row.get("side")) == "Sell" else Decimal("0")
+            positions[instrument_id] = decimal_text(amount)
+        return {"event_type": "ACCOUNT_SNAPSHOT", "orders": list(orders.values()),
+                "executions": sorted(executions.values(), key=lambda e: (e["ts_ns"], e["execution_id"])), "positions": positions, "fetched_ts_ns": now_ms * 1_000_000}
 
     def verify_account(self, request, symbol, key, secret):
         info = self._signed("GET", "/v5/account/info", key, secret, params={})

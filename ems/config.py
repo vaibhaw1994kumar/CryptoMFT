@@ -5,7 +5,7 @@ import hashlib
 import json
 from dataclasses import dataclass, field
 
-PAIRINGS = ("maker_taker", "maker_maker", "taker_taker")
+PAIRINGS = ("maker_taker", "maker_maker", "taker_taker", "none")      # "none" (owner 13 Nov, CR-MQ part 2): a market-making quote, one post-only child and no hedge leg; never an arb profile's pairing
 ONE_HEDGE_CHILD = ("off", "count", "enforce")
 RISK_RESERVATION = ("off", "count", "enforce")
 TACTIC_CHOICES = ("off", "market_state")        # execution.tactic_choice: off = the profile's tactics as written (every arb profile); market_state = choose_tactic (tactics/base.py), not allowed with the arb pairing maker_taker
@@ -44,6 +44,7 @@ class ExecutionConfig:
     price_cap_required: bool = True
     one_hedge_child: str = "count"
     risk_reservation: str = "count"             # MANDATORY in perp: atomic check-and-reserve of primary exposure (4h.2)
+    quote: dict = field(default_factory=dict)    # pairing "none" only: {"inventory_cap_base": N}, the largest |net base| of the pair the quotes may build (filled plus resting, per side); absent from as_dict while empty
     tactic_choice: str = "off"                  # Gap F: "market_state" lets ExecutionLayer.suggest_tactic answer from the market state; refused with pairing maker_taker; absent from as_dict (and so from the hash) while off
 
     def __post_init__(self) -> None:
@@ -57,6 +58,12 @@ class ExecutionConfig:
             raise ExecutionConfigError(f"execution.tactic_choice must be one of {TACTIC_CHOICES}")
         if self.tactic_choice != "off" and self.pairing == "maker_taker":
             raise ExecutionConfigError("execution.tactic_choice is never set with the arb pairing maker_taker (the arb profiles keep their tactics as written)")
+        if self.pairing == "none":
+            cap = self.quote.get("inventory_cap_base")
+            if set(self.quote) - {"inventory_cap_base"} or isinstance(cap, bool) or not isinstance(cap, (int, float, str)) or not float(cap) > 0:
+                raise ExecutionConfigError("execution.pairing none needs execution.quote.inventory_cap_base > 0 (the per-pair inventory cap; no other quote key exists)")
+        elif self.quote:
+            raise ExecutionConfigError("execution.quote is only valid with pairing none")
         for name, want in SECTION_TACTIC.items():
             t = getattr(self, name).get("tactic", want)
             if t in _RENAMED:
@@ -96,6 +103,8 @@ class ExecutionConfig:
         out = {"pairing": self.pairing, "primary": dict(self.primary), "hedge": dict(self.hedge), "maker_maker": dict(self.maker_maker),
                "unwind": dict(self.unwind), "price_cap_required": self.price_cap_required, "one_hedge_child": self.one_hedge_child,
                "risk_reservation": self.risk_reservation}
+        if self.quote:
+            out["quote"] = dict(self.quote)                    # only when set, so every arb profile's identity is unchanged
         if self.tactic_choice != "off":
             out["tactic_choice"] = self.tactic_choice          # only when on, so every existing profile's identity is unchanged
         return out
