@@ -40,6 +40,12 @@ _NS = 1_000_000_000          # an int: ns / _NS is the correctly rounded float s
 _EPS = 1e-12
 
 
+def trade_is_rpi(trade) -> bool:
+    """True when a canonical trade print is flagged as a Retail Price Improvement print: `native["rpi"]` (True, or the text "true" / "1" of a CSV column). A print with no flag is not RPI, so every existing feed is unaffected."""
+    flag = (getattr(trade, "native", None) or {}).get("rpi", False)
+    return flag is True or str(flag).strip().lower() in ("true", "1")
+
+
 class QueueAwareVenueAdapter(DeterministicVenueAdapter):
     def __init__(
         self, venue: str, executor: MakerExecutor, *, tick_size: float, maker_fee_bps: float, pair: str = "",
@@ -379,7 +385,7 @@ class QueueAwareVenueAdapter(DeterministicVenueAdapter):
             self.state.on_trade(now, float(trade.price), float(trade.quantity), sign)
         fills = self.executor.on_trade(
             self.venue, float(trade.price), float(trade.quantity), sign, now, self.maker_fee_bps,
-            event_ts=self._secs(trade.exchange_ts_ns),
+            event_ts=self._secs(trade.exchange_ts_ns), rpi=trade_is_rpi(trade),
         )
         return self._relay(fills)
 
@@ -412,8 +418,8 @@ class QueueAwareVenueAdapter(DeterministicVenueAdapter):
     def feed_delta(self, side: str, price: float, new_size: float, now: float, ets: float | None):
         return self._relay(self.executor.on_delta(self.venue, side, price, new_size, now, self.tick_size, self.maker_fee_bps, event_ts=ets))
 
-    def feed_trade(self, price: float, volume: float, sign: int, now: float, ets: float | None):
-        return self._relay(self.executor.on_trade(self.venue, price, volume, sign, now, self.maker_fee_bps, event_ts=ets))
+    def feed_trade(self, price: float, volume: float, sign: int, now: float, ets: float | None, rpi: bool = False):
+        return self._relay(self.executor.on_trade(self.venue, price, volume, sign, now, self.maker_fee_bps, event_ts=ets, rpi=rpi))
 
     def feed_cross(self, view: SimBook, now: float, ets: float | None):
         if not self.executor.config.opposite_cross_fills:
@@ -518,7 +524,7 @@ class SimulatedVenueFeeder:
         view, state, adapter, ets = self.views[fv], self.states[fv], self.adapters[trade.venue], self.ets_of(trade.exchange_ts_ns)
         view.on_trade(price, volume, sign, now_s)
         state.on_trade(now_s, price, volume, sign)
-        produced = list(adapter.feed_trade(price, volume, sign, now_s, ets)) + list(adapter.feed_cross(view, now_s, ets))
+        produced = list(adapter.feed_trade(price, volume, sign, now_s, ets, rpi=trade_is_rpi(trade))) + list(adapter.feed_cross(view, now_s, ets))
         self._deliver(adapter, produced, now, trade.exchange_ts_ns)
         return True
 

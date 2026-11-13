@@ -444,6 +444,9 @@ class MakerConfig:
     # level we rest on has been consumed, so the order fills in full, as in the core queue engines. The print's volume is
     # not charged to the shared budget. False (default, legacy): the print only burns queue and fills what is left.
     fill_through_prints: bool = False
+    # RPI prints (Bybit Retail Price Improvement, owner 13 Nov, upstreamed from the MM session): a print flagged `rpi` executed against RPI liquidity, not the displayed book. True: such a print never fills our orders and is not
+    # matched against a book decrease or counted as queue drain (it is counted in diag["rpi_trades_excluded"]). False (default, every arb profile): every print is treated alike, byte-identical to before.
+    exclude_rpi_trades: bool = False
     # Queue model v2 (step 8), opt-in; only with fill_through_prints. False (default): a print strictly through our price fills the order in full. True: the fill is
     # limited by the print's volume (one budget shared by every order the print went through): what a print can really have executed at a level it passed through.
     through_print_volume_limited: bool = False
@@ -1004,18 +1007,19 @@ class MakerExecutor:
 
     def on_trade(
         self, venue: str, price: float, volume: float, sign: int, now: float, fee_bps: float,
-        is_synthetic: bool = False, event_ts: float | None = None,
+        is_synthetic: bool = False, event_ts: float | None = None, rpi: bool = False,
     ) -> list[Fill]:
-        """A public trade crossed the book. Fill any resting order it reached. The print is spent once across all own orders (see MakerConfig.participation_cap; the budget is only counted when it is off)."""
+        """A public trade crossed the book. Fill any resting order it reached. The print is spent once across all own orders (see MakerConfig.participation_cap; the budget is only counted when it is off).
+        `rpi` marks a Retail Price Improvement print: with MakerConfig.exclude_rpi_trades on it never fills (off by default: the flag changes nothing)."""
         self._print_left = volume
         try:
-            return self._on_trade(venue, price, volume, sign, now, fee_bps, is_synthetic, event_ts)
+            return self._on_trade(venue, price, volume, sign, now, fee_bps, is_synthetic, event_ts, rpi)
         finally:
             self._print_left = None
 
     def _on_trade(
         self, venue: str, price: float, volume: float, sign: int, now: float, fee_bps: float,
-        is_synthetic: bool = False, event_ts: float | None = None,
+        is_synthetic: bool = False, event_ts: float | None = None, rpi: bool = False,
     ) -> list[Fill]:
         """The body of on_trade.
 
@@ -1025,6 +1029,9 @@ class MakerExecutor:
         ct = self._credit_time(now, event_ts)
         self.diag["trade_events"] += 1
         self.diag["trade_volume_observed"] += volume
+        if rpi and cfg.exclude_rpi_trades:
+            self.diag["rpi_trades_excluded"] = self.diag.get("rpi_trades_excluded", 0) + 1       # key present only when the switch is on and a print was excluded
+            return []
         gross_volume = volume
         confirm_ids: set[int] = set()
         if cfg.fill_evidence in _TRADE_CONFIRM_MODES:
