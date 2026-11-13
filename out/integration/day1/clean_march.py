@@ -19,7 +19,7 @@ profile = load_profile("perp_perp_maker_taker_v1_9")
 cfg = apply_profile(profile, dataset="mar2024", data_root=SLICES, pair="SOLUSDT", start_date="2024-03-11", end_date="2024-03-11", output_dir=str(out))
 cfg.arb.max_position_base = 1.0
 t = time.time()
-result = SessionReplay(cfg, profile, decompose_markouts=True, lifecycle_report=True, regime_boundaries=BND).run()
+result = SessionReplay(cfg, profile, decompose_markouts=True, lifecycle_report=True, regime_boundaries=BND, profile_safety=True).run()
 result["run"] = {"case": "clean_march_0311", "wall_s": round(time.time() - t, 1), "labels": ["EXPLORATORY: mechanics only", "March 2024-03-11, the local 2-hour slice (not the full day)", "no funding file in March", "regime boundaries: March training slice, PARTIAL"]}
 write_result(result, out)
 print({"signals": len(result["signals"]), "orders": len(result["orders"]), "fills": len(result["fills"]), "wall_s": result["run"]["wall_s"]})

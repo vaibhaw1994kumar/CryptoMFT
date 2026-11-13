@@ -58,9 +58,12 @@ def hms(text):
     return DAY0 + parts[0] * 3600 + parts[1] * 60 + parts[2]
 
 
+layer_only = "--layer-only" in argv          # attribution run (owner 13 Nov): the layer gate in enforce but NO breaker; writes runs/scn_<case>_layeronly and no stage trace under ems_cases
+if layer_only:
+    argv.remove("--layer-only")
 case = argv[0]
 st = CASES[case]
-out = Path("runs") / f"scn_{case}"
+out = Path("runs") / (f"scn_{case}_layeronly" if layer_only else f"scn_{case}")
 profile = dict(load_profile(st["profile"]))
 cfg = apply_profile(profile, dataset="mar2024", data_root="", pair="SOLUSDT", start_date="2026-10-29", end_date="2026-10-29", output_dir=str(out))
 cfg.arb.max_position_base = st.get("size", 1.0)
@@ -92,13 +95,11 @@ if st.get("latency_q"):
                                             fill_report=spec(fill, vt.fill_report), cancel=spec(at(grids["cancel_rest_rtt_ms"]) / 2, vt.cancel), cancel_report=spec(at(grids["cancel_rest_rtt_ms"]) / 2, vt.cancel_report))
     cfg.timing = dataclasses.replace(cfg.timing, venues=venues)
 kw = {}
-if st.get("breaker"):
-    from crypto_stat_arb.circuit_breaker import CircuitBreakerConfig
-    b = profile["breaker"]          # the profile's breaker block (owner 1 Nov starting values)
-    kw["breaker_config"] = CircuitBreakerConfig(consecutive_failures=b["consecutive_failures"], failure_rate_window_n=b["failure_rate_window_n"], failure_rate_thresh=b["failure_rate_thresh"],
-                                                trip_on_failed_unwind=b["trip_on_failed_unwind"], net_exposure_s=b["net_exposure_s"], unknown_order_s=b["unknown_order_s"],
-                                                trip_on_gateway_down=b["trip_on_gateway_down"], heartbeat_timeout_s=b["heartbeat_timeout_s"], tripped_unwind_retries=b["tripped_unwind_retries"],
-                                                pause_on_gateway_down_when_flat=True)      # a gateway silent while flat PAUSES (resumes by itself); with exposure it TRIPS (manual reset)
+if st["profile"] == "perp_perp_maker_taker_v1_9":
+    if layer_only:
+        kw["layer_risk_mode"] = "enforce"
+    else:
+        kw["profile_safety"] = True          # owner 13 Nov: the layer risk gate in the profile's own mandatory mode (enforce) and the profile's breaker block, never the replay's defaults (count, no breaker)
 if st.get("ghost_s"):
     from crypto_stat_arb.simulation.hedge_faults import HedgeFaultConfig
     cfg.hedge_faults = HedgeFaultConfig(outage_on_fill_s=st["ghost_s"], outage_on_fill_venue="hedge", outage_policy="ghost", max_retries=2, retry_backoff_s=0.25)
@@ -201,6 +202,6 @@ sigs = result["signals"]
 trace = stage_trace(replay.session.ledger.events, [(s["ts"], "signal-trigger", "book") for s in sigs])
 cases_dir = Path("/Users/vaibhav/Documents/Newproject/out/integration/ems_cases")
 cases_dir.mkdir(parents=True, exist_ok=True)
-(cases_dir / f"scn_{case}.jsonl").write_text("".join(json.dumps(r, sort_keys=True, default=str) + "\n" for r in trace))
+(out if layer_only else cases_dir).joinpath(f"scn_{case}.jsonl").write_text("".join(json.dumps(r, sort_keys=True, default=str) + "\n" for r in trace))
 print(json.dumps({"case": case, "wall_s": result["run"]["wall_s"], "events": result["events"], "signals": len(sigs), "orders": len(result["orders"]), "fills": len(result["fills"]), "trace_rows": len(trace),
                   "positions": result["positions"]}, indent=1))

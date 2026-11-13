@@ -1,0 +1,1770 @@
+{
+ "label": "EXPLORATORY: session runtime, not a result to quote",
+ "runtime": "session",
+ "profile": "perp_perp_maker_taker_v1_9",
+ "pair": "SOLUSDT",
+ "days": [
+  "2026-10-29",
+  "2026-10-29"
+ ],
+ "size_base": 25.0,
+ "fee_presets": {
+  "bybit": "bybit_perp_vip5",
+  "binance": "binance_perp_vip9"
+ },
+ "events": {
+  "book": 402268,
+  "trade": 204272
+ },
+ "positions": {
+  "BYBIT:SOL-USDT-PERP": "124.987620191459",
+  "BINANCE:SOL-USDT-PERP": "-124.98"
+ },
+ "cash_by_venue": {
+  "BYBIT": "-12559.225759651297133163",
+  "BINANCE": "12559.131184678"
+ },
+ "equity_at_book_mids": "-1.828383832624928163",
+ "residual_at_end": {
+  "net_position_base": "0.007620191459",
+  "flag": "UNHEDGED_OR_CARRIED_RESIDUAL",
+  "carried_residual_base": "0.007620191459",
+  "open_residual_base": "0",
+  "total_residual_base": "0.007620191459",
+  "open_residual_plans": 0,
+  "limit_breaches": 0,
+  "warning": "NON_ZERO_RESIDUAL_AT_END_OF_DAY"
+ },
+ "participation": {
+  "cap_on": true,
+  "prints_it_binds_on": 0.0,
+  "excess_fill_qty": 0.0
+ },
+ "ledger_event_counts": {
+  "FEED_CONTROL_STATE_TRANSITION": 83,
+  "FEED_CONTROL_VENUE_CANCEL": 41,
+  "MARGIN_STATE_TRANSITION": 14,
+  "OPPORTUNITY": 6,
+  "PLAN_STATE_TRANSITION": 49,
+  "ROUTE_ELIGIBILITY": 6,
+  "PRE_TRADE_VALIDATION": 6,
+  "PACKAGE_RISK_RESERVED": 6,
+  "PACKAGE_DISPATCH_STARTED": 6,
+  "CHILD_DISPATCH_STARTED": 45,
+  "ORDER_LIFECYCLE": 217,
+  "ORDER_STATE_UPDATE_APPLIED": 171,
+  "ORDER_REPORT_DEADLINE_SET": 46,
+  "CHILD_DISPATCH_IN_FLIGHT": 45,
+  "CHILD_DISPATCH_COMPLETED": 45,
+  "PACKAGE_DISPATCH_COMPLETED": 6,
+  "PACKAGE_DISPATCH_THROTTLED": 6,
+  "CHILD_REPORT_OBSERVED": 124,
+  "FILL": 78,
+  "HEDGE_LOT_RESIDUAL": 2,
+  "HEDGE_CHAIN_OPENED": 39,
+  "HEDGE_STATE": 140,
+  "HEDGE_CAP_SIZE_AWARE": 39,
+  "HEDGE_TOUCH_PAST_PLANNED_LIMIT": 25,
+  "HEDGE_SUBMIT": 39,
+  "LEGGING_LIMIT_BOUND": 18,
+  "LEGGING_LIMIT_CLEARED": 10,
+  "ORDER_LIFETIME_EXPIRED": 1,
+  "WORKING_ORDER_CANCEL_BEFORE_CLOSE": 1,
+  "RESIDUAL_DETECTED": 1,
+  "RESIDUAL_WITHIN_APPROVED_BOUND": 1,
+  "RMS_INTERNAL_RECONCILIATION": 6,
+  "PACKAGE_RISK_RELEASED": 6,
+  "PLAN_CLOSED": 6
+ },
+ "strategy_counters": {
+  "evaluations": 401873,
+  "signals": 6,
+  "best_edge_seen_bps": 1.0731902249423435,
+  "rejects": {
+   "stale": 231,
+   "no_edge": 397911,
+   "stale_touch": 5,
+   "clip_too_small": 35,
+   "maker_limit": 906,
+   "cross_venue_skew": 5558,
+   "tick_rounding_joined_touch": 2
+  }
+ },
+ "execution_layer": {
+  "layer": {
+   "config": {
+    "pairing": "maker_taker",
+    "primary": {
+     "tactic": "PASSIVE",
+     "placement": "deep",
+     "price_rule": "conditional_edge",
+     "reprice": {
+      "enabled": false,
+      "source": "TRADER_SET",
+      "band_down_bps": null,
+      "band_up_bps": null,
+      "debounce_ms": null,
+      "jump_bps": null,
+      "min_interval_ms": null,
+      "max_age_s": null,
+      "queue_hold": true,
+      "amend_first": true
+     }
+    },
+    "hedge": {
+     "tactic": "IOC_CAPPED",
+     "cap": "size_aware",
+     "slack_bps_floor": 5.0,
+     "max_slip_bps": 15.0,
+     "vol_k": 0.0,
+     "latency_s": 0.0
+    },
+    "maker_maker": {},
+    "unwind": {
+     "tactic": "MARKET_BANDED"
+    },
+    "price_cap_required": true,
+    "one_hedge_child": "enforce",
+    "risk_reservation": "enforce"
+   },
+   "config_sha256": "1d81e6cde44a4e2a54f636e0b560fdc12446fbf0e7fc3e03fe5270fcb4e2cf49",
+   "intents": 45,
+   "intents_by_state": {
+    "failed": 1,
+    "done": 44
+   },
+   "counts": {
+    "intents_primary": 6,
+    "reservations_made": 6,
+    "children": 45,
+    "children_PASSIVE": 6,
+    "route_decisions": 45,
+    "intents_hedge": 39,
+    "children_IOC_CAPPED": 39,
+    "max_live_hedge_children": 1,
+    "reservations_open_at_end": 0
+   },
+   "journal_entries": 183,
+   "fills_journaled": 78,
+   "one_hedge_child_mode": "enforce",
+   "risk_reservation_mode": "enforce",
+   "violations": [],
+   "risk_refusals": [],
+   "reservations_open": 0,
+   "reservations_released": 6,
+   "reservations_leaked": []
+  },
+  "observer_counts": {
+   "primary_children": 6,
+   "cap_looser_than_opportunity_price": 39,
+   "hedge_children": 39,
+   "orders_without_intent": 0
+  },
+  "layer_rule_errors": {},
+  "layer_rule_error_samples": [],
+  "observation_only": true,
+  "observation": {
+   "counts": {
+    "maker_place": 6,
+    "maker_fill": 39,
+    "hedge_arrival": 39
+   },
+   "rows_kept": 84,
+   "rows_dropped": 0,
+   "maker_fill_causes": {
+    "trade": 23,
+    "trade_after_front": 2,
+    "trade_confirmed_cross_after": 12,
+    "trade_confirmed_cross_before": 2
+   },
+   "maker_fill_uncertainty_flags": {
+    "ambiguous_trade_depth": 19,
+    "netting_without_proof": 18
+   },
+   "consume_liquidity_by_venue": {
+    "BYBIT": true,
+    "BINANCE": true
+   },
+   "note": "observation only: nothing in the run reads these rows; consume_liquidity True = an own hedge fill removes the walked quantity from the book it walked"
+  },
+  "exec_reconciliation": {
+   "checked": true,
+   "ok": false,
+   "fills_journaled": 78,
+   "fill_kinds": {
+    "child": 78
+   },
+   "notional": 25119.236562655016,
+   "problems": {
+    "fee": [
+     {
+      "seq": 2,
+      "venue": "BYBIT",
+      "kind": "child",
+      "booked": 0.11653669626550316,
+      "recomputed": 0.11565549999999998
+     },
+     {
+      "seq": 3,
+      "venue": "BYBIT",
+      "kind": "child",
+      "booked": 0.11754239626550317,
+      "recomputed": 0.0010057
+     },
+     {
+      "seq": 4,
+      "venue": "BYBIT",
+      "kind": "child",
+      "booked": 0.11854809626550317,
+      "recomputed": 0.0010057
+     },
+     {
+      "seq": 5,
+      "venue": "BYBIT",
+      "kind": "child",
+      "booked": 0.12860509626550315,
+      "recomputed": 0.010057
+     },
+     {
+      "seq": 6,
+      "venue": "BYBIT",
+      "kind": "child",
+      "booked": 0.13162219626550317,
+      "recomputed": 0.0030170999999999996
+     },
+     {
+      "seq": 12,
+      "venue": "BYBIT",
+      "kind": "child",
+      "booked": 0.13262789626550317,
+      "recomputed": 0.0010057
+     },
+     {
+      "seq": 13,
+      "venue": "BYBIT",
+      "kind": "child",
+      "booked": 0.13363359626550317,
+      "recomputed": 0.0010057
+     },
+     {
+      "seq": 14,
+      "venue": "BYBIT",
+      "kind": "child",
+      "booked": 0.13463929626550317,
+      "recomputed": 0.0010057
+     },
+     {
+      "seq": 18,
+      "venue": "BYBIT",
+      "kind": "child",
+      "booked": 0.13564499626550316,
+      "recomputed": 0.0010057
+     },
+     {
+      "seq": 19,
+      "venue": "BYBIT",
+      "kind": "child",
+      "booked": 0.13665069626550316,
+      "recomputed": 0.0010057
+     },
+     {
+      "seq": 22,
+      "venue": "BYBIT",
+      "kind": "child",
+      "booked": 0.13966779626550316,
+      "recomputed": 0.0030170999999999996
+     },
+     {
+      "seq": 24,
+      "venue": "BYBIT",
+      "kind": "child",
+      "booked": 0.14067349626550316,
+      "recomputed": 0.0010057
+     },
+     {
+      "seq": 25,
+      "venue": "BYBIT",
+      "kind": "child",
+      "booked": 0.14167919626550315,
+      "recomputed": 0.0010057
+     },
+     {
+      "seq": 28,
+      "venue": "BYBIT",
+      "kind": "child",
+      "booked": 0.14469629626550315,
+      "recomputed": 0.0030170999999999996
+     },
+     {
+      "seq": 29,
+      "venue": "BYBIT",
+      "kind": "child",
+      "booked": 0.14570199626550318,
+      "recomputed": 0.0010057
+     },
+     {
+      "seq": 36,
+      "venue": "BYBIT",
+      "kind": "child",
+      "booked": 0.050255,
+      "recomputed": 0.0010051
+     },
+     {
+      "seq": 37,
+      "venue": "BYBIT",
+      "kind": "child",
+      "booked": 0.1316681,
+      "recomputed": 0.0814131
+     },
+     {
+      "seq": 38,
+      "venue": "BYBIT",
+      "kind": "child",
+      "booked": 0.1437293,
+      "recomputed": 0.0120612
+     },
+     {
+      "seq": 42,
+      "venue": "BYBIT",
+      "kind": "child",
+      "booked": 0.1447344,
+      "recomputed": 0.0010051
+     },
+     {
+      "seq": 43,
+      "venue": "BYBIT",
+      "kind": "child",
+      "booked": 0.2432342,
+      "recomputed": 0.09849980000000001
+     }
+    ],
+    "fees_paid": [
+     {
+      "journal": 3.3912123182655023,
+      "engine": 7.238054077099883
+     }
+    ]
+   },
+   "problems_more": {
+    "fee": 13
+   },
+   "overfills": [],
+   "overfill_count": 0,
+   "per_venue": {
+    "BINANCE": {
+     "base_journal": -124.97999999999998,
+     "base_ledger": -124.98,
+     "cash_journal": 12559.131184677997,
+     "cash_ledger": 12559.131184678,
+     "ok": true
+    },
+    "BYBIT": {
+     "base_journal": 124.987620191459,
+     "base_ledger": 124.987620191459,
+     "cash_journal": -12559.225759651297,
+     "cash_ledger": -12559.225759651297,
+     "ok": true
+    }
+   },
+   "cash_pnl_journal": -0.09457497330004117,
+   "cash_pnl_engine": -0.09457497329640319,
+   "fees_journal": 3.3912123182655023,
+   "fees_engine": 7.238054077099883,
+   "mode": "count",
+   "reservations_leaked": [],
+   "funding_not_modelled": true
+  }
+ },
+ "markout_decomposed": {
+  "label": "EXPLORATORY: decomposed markouts (captured C, adverse D, M = C + D, fee, net) per fill and horizon, bps of the mid at the fill, positive = good for us; mid at the fill = the mid before the event that caused it",
+  "by_venue_role": {
+   "BYBIT|maker": {
+    "1s": {
+     "n": 39,
+     "captured_bps": 0.03816680795968173,
+     "adverse_bps": -1.710022180918114,
+     "fee_bps": -1.0,
+     "net_bps": -2.671855372958432,
+     "notional_weighted_net_bps": -3.5640923122722428,
+     "m_bps": -1.6718553729584322,
+     "stats": {
+      "captured_bps": {
+       "status": "ok",
+       "n": 39,
+       "mean": 0.03816680795968173,
+       "median": 0.497141436739713,
+       "p5": -1.4926115727151168,
+       "p95": 0.49789391054310045,
+       "blocks": 1,
+       "ci95": null,
+       "ci_status": "insufficient_blocks"
+      },
+      "adverse_bps": {
+       "status": "ok",
+       "n": 39,
+       "mean": -1.7100221809181135,
+       "median": -2.986411826190945,
+       "p5": -5.970446290860467,
+       "p95": 2.9828486204326263,
+       "blocks": 1,
+       "ci95": null,
+       "ci_status": "insufficient_blocks"
+      },
+      "fee_bps": {
+       "status": "ok",
+       "n": 39,
+       "mean": -1.0,
+       "median": -0.9999999999999999,
+       "p5": -1.0000000000000002,
+       "p95": -0.9999999999999999,
+       "blocks": 1,
+       "ci95": null,
+       "ci_status": "insufficient_blocks"
+      },
+      "net_bps": {
+       "status": "ok",
+       "n": 39,
+       "mean": -2.671855372958432,
+       "median": -4.483800328472263,
+       "p5": -8.463057863575584,
+       "p95": 2.4799900571723392,
+       "blocks": 1,
+       "ci95": null,
+       "ci_status": "insufficient_blocks"
+      },
+      "m_bps": {
+       "status": "ok",
+       "n": 39,
+       "mean": -1.6718553729584318,
+       "median": -3.4838003284722627,
+       "p5": -7.4630578635755835,
+       "p95": 3.4799900571723392,
+       "blocks": 1,
+       "ci95": null,
+       "ci_status": "insufficient_blocks"
+      }
+     },
+     "support": {
+      "kept": 39,
+      "excluded": {}
+     }
+    },
+    "5s": {
+     "n": 39,
+     "captured_bps": 0.03816680795968173,
+     "adverse_bps": 0.6636423064301974,
+     "fee_bps": -1.0,
+     "net_bps": -0.29819088561012086,
+     "notional_weighted_net_bps": -0.24427415770522426,
+     "m_bps": 0.7018091143898791,
+     "stats": {
+      "captured_bps": {
+       "status": "ok",
+       "n": 39,
+       "mean": 0.03816680795968173,
+       "median": 0.497141436739713,
+       "p5": -1.4926115727151168,
+       "p95": 0.49789391054310045,
+       "blocks": 1,
+       "ci95": null,
+       "ci_status": "insufficient_blocks"
+      },
+      "adverse_bps": {
+       "status": "ok",
+       "n": 39,
+       "mean": 0.6636423064301973,
+       "median": 0.9942828734766,
+       "p5": -2.984629159827005,
+       "p95": 3.0859985294796246,
+       "blocks": 1,
+       "ci95": null,
+       "ci_status": "insufficient_blocks"
+      },
+      "fee_bps": {
+       "status": "ok",
+       "n": 39,
+       "mean": -1.0,
+       "median": -0.9999999999999999,
+       "p5": -1.0000000000000002,
+       "p95": -0.9999999999999999,
+       "blocks": 1,
+       "ci95": null,
+       "ci_status": "insufficient_blocks"
+      },
+      "net_bps": {
+       "status": "ok",
+       "n": 39,
+       "mean": -0.29819088561012097,
+       "median": 0.49142431021631305,
+       "p5": -3.4876859545256664,
+       "p95": 1.4887012983360088,
+       "blocks": 1,
+       "ci95": null,
+       "ci_status": "insufficient_blocks"
+      },
+      "m_bps": {
+       "status": "ok",
+       "n": 39,
+       "mean": 0.701809114389879,
+       "median": 1.491424310216313,
+       "p5": -2.4876859545256664,
+       "p95": 2.488701298336009,
+       "blocks": 1,
+       "ci95": null,
+       "ci_status": "insufficient_blocks"
+      }
+     },
+     "support": {
+      "kept": 39,
+      "excluded": {}
+     }
+    },
+    "30s": {
+     "n": 39,
+     "captured_bps": 0.03816680795968173,
+     "adverse_bps": -1.4015661699790878,
+     "fee_bps": -1.0,
+     "net_bps": -2.363399362019406,
+     "notional_weighted_net_bps": 2.8236568360068817,
+     "m_bps": -1.363399362019406,
+     "stats": {
+      "captured_bps": {
+       "status": "ok",
+       "n": 39,
+       "mean": 0.03816680795968173,
+       "median": 0.497141436739713,
+       "p5": -1.4926115727151168,
+       "p95": 0.49789391054310045,
+       "blocks": 1,
+       "ci95": null,
+       "ci_status": "insufficient_blocks"
+      },
+      "adverse_bps": {
+       "status": "ok",
+       "n": 39,
+       "mean": -1.4015661699790873,
+       "median": -0.994282873478013,
+       "p5": -4.974381933044536,
+       "p95": 2.4892019220220365,
+       "blocks": 1,
+       "ci95": null,
+       "ci_status": "insufficient_blocks"
+      },
+      "fee_bps": {
+       "status": "ok",
+       "n": 39,
+       "mean": -1.0,
+       "median": -0.9999999999999999,
+       "p5": -1.0000000000000002,
+       "p95": -0.9999999999999999,
+       "blocks": 1,
+       "ci95": null,
+       "ci_status": "insufficient_blocks"
+      },
+      "net_bps": {
+       "status": "ok",
+       "n": 39,
+       "mean": -2.363399362019406,
+       "median": -1.4971414367383002,
+       "p5": -6.4729090999559,
+       "p95": 0.19498112390031097,
+       "blocks": 1,
+       "ci95": null,
+       "ci_status": "insufficient_blocks"
+      },
+      "m_bps": {
+       "status": "ok",
+       "n": 39,
+       "mean": -1.3633993620194056,
+       "median": -0.4971414367383,
+       "p5": -5.4729090999559,
+       "p95": 1.194981123900311,
+       "blocks": 1,
+       "ci95": null,
+       "ci_status": "insufficient_blocks"
+      }
+     },
+     "support": {
+      "kept": 39,
+      "excluded": {}
+     }
+    }
+   },
+   "BINANCE|taker": {
+    "1s": {
+     "n": 39,
+     "captured_bps": -0.49729489978383895,
+     "adverse_bps": 1.7602597950117524,
+     "fee_bps": -1.700000000000001,
+     "net_bps": -0.4370351047720875,
+     "notional_weighted_net_bps": 1.004290186529434,
+     "m_bps": 1.2629648952279136,
+     "stats": {
+      "captured_bps": {
+       "status": "ok",
+       "n": 39,
+       "mean": -0.49729489978383923,
+       "median": -0.4972897707489634,
+       "p5": -0.4974629500947599,
+       "p95": -0.49713155272074894,
+       "blocks": 1,
+       "ci95": null,
+       "ci_status": "insufficient_blocks"
+      },
+      "adverse_bps": {
+       "status": "ok",
+       "n": 39,
+       "mean": 1.760259795011753,
+       "median": 1.988170386201702,
+       "p5": -2.9828486204326263,
+       "p95": 4.974184144698056,
+       "blocks": 1,
+       "ci95": null,
+       "ci_status": "insufficient_blocks"
+      },
+      "fee_bps": {
+       "status": "ok",
+       "n": 39,
+       "mean": -1.7,
+       "median": -1.7000000000000002,
+       "p5": -1.7000000000000004,
+       "p95": -1.6999999999999995,
+       "blocks": 1,
+       "ci95": null,
+       "ci_status": "insufficient_blocks"
+      },
+      "net_bps": {
+       "status": "ok",
+       "n": 39,
+       "mean": -0.4370351047720865,
+       "median": -0.20887221034837022,
+       "p5": -5.17999005717234,
+       "p95": 2.776765730227388,
+       "blocks": 1,
+       "ci95": null,
+       "ci_status": "insufficient_blocks"
+      },
+      "m_bps": {
+       "status": "ok",
+       "n": 39,
+       "mean": 1.2629648952279136,
+       "median": 1.4911277896516297,
+       "p5": -3.4799900571723392,
+       "p95": 4.476765730227388,
+       "blocks": 1,
+       "ci95": null,
+       "ci_status": "insufficient_blocks"
+      }
+     },
+     "support": {
+      "kept": 39,
+      "excluded": {}
+     }
+    },
+    "5s": {
+     "n": 39,
+     "captured_bps": -0.49729489978383895,
+     "adverse_bps": 1.2754012444547271,
+     "fee_bps": -1.700000000000001,
+     "net_bps": -0.9218936553291128,
+     "notional_weighted_net_bps": -0.5480237798812212,
+     "m_bps": 0.7781063446708882,
+     "stats": {
+      "captured_bps": {
+       "status": "ok",
+       "n": 39,
+       "mean": -0.49729489978383923,
+       "median": -0.4972897707489634,
+       "p5": -0.4974629500947599,
+       "p95": -0.49713155272074894,
+       "blocks": 1,
+       "ci95": null,
+       "ci_status": "insufficient_blocks"
+      },
+      "adverse_bps": {
+       "status": "ok",
+       "n": 39,
+       "mean": 1.2754012444547267,
+       "median": 1.988170386201702,
+       "p5": -2.9828486204326263,
+       "p95": 6.962056790492554,
+       "blocks": 1,
+       "ci95": null,
+       "ci_status": "insufficient_blocks"
+      },
+      "fee_bps": {
+       "status": "ok",
+       "n": 39,
+       "mean": -1.7,
+       "median": -1.7000000000000002,
+       "p5": -1.7000000000000004,
+       "p95": -1.6999999999999995,
+       "blocks": 1,
+       "ci95": null,
+       "ci_status": "insufficient_blocks"
+      },
+      "net_bps": {
+       "status": "ok",
+       "n": 39,
+       "mean": -0.9218936553291127,
+       "median": -0.20887221034837022,
+       "p5": -5.179990057172339,
+       "p95": 4.76476701974359,
+       "blocks": 1,
+       "ci95": null,
+       "ci_status": "insufficient_blocks"
+      },
+      "m_bps": {
+       "status": "ok",
+       "n": 39,
+       "mean": 0.7781063446708872,
+       "median": 1.4911277896516297,
+       "p5": -3.4799900571723392,
+       "p95": 6.46476701974359,
+       "blocks": 1,
+       "ci95": null,
+       "ci_status": "insufficient_blocks"
+      }
+     },
+     "support": {
+      "kept": 39,
+      "excluded": {}
+     }
+    },
+    "30s": {
+     "n": 39,
+     "captured_bps": -0.49729489978383895,
+     "adverse_bps": 3.340117417599928,
+     "fee_bps": -1.700000000000001,
+     "net_bps": 1.142822517816088,
+     "notional_weighted_net_bps": -3.5388152311615,
+     "m_bps": 2.842822517816089,
+     "stats": {
+      "captured_bps": {
+       "status": "ok",
+       "n": 39,
+       "mean": -0.49729489978383923,
+       "median": -0.4972897707489634,
+       "p5": -0.4974629500947599,
+       "p95": -0.49713155272074894,
+       "blocks": 1,
+       "ci95": null,
+       "ci_status": "insufficient_blocks"
+      },
+      "adverse_bps": {
+       "status": "ok",
+       "n": 39,
+       "mean": 3.340117417599927,
+       "median": 3.9795055464364775,
+       "p5": -0.1990743044841088,
+       "p95": 5.967477248993214,
+       "blocks": 1,
+       "ci95": null,
+       "ci_status": "insufficient_blocks"
+      },
+      "fee_bps": {
+       "status": "ok",
+       "n": 39,
+       "mean": -1.7,
+       "median": -1.7000000000000002,
+       "p5": -1.7000000000000004,
+       "p95": -1.6999999999999995,
+       "blocks": 1,
+       "ci95": null,
+       "ci_status": "insufficient_blocks"
+      },
+      "net_bps": {
+       "status": "ok",
+       "n": 39,
+       "mean": 1.1428225178160878,
+       "median": 1.7820673531324485,
+       "p5": -2.3962701736709837,
+       "p95": 3.7701874782442504,
+       "blocks": 1,
+       "ci95": null,
+       "ci_status": "insufficient_blocks"
+      },
+      "m_bps": {
+       "status": "ok",
+       "n": 39,
+       "mean": 2.8428225178160877,
+       "median": 3.482067353132448,
+       "p5": -0.6962701736709838,
+       "p95": 5.470187478244251,
+       "blocks": 1,
+       "ci95": null,
+       "ci_status": "insufficient_blocks"
+      }
+     },
+     "support": {
+      "kept": 39,
+      "excluded": {}
+     }
+    }
+   }
+  },
+  "excluded_counts": {
+   "1s": {},
+   "5s": {},
+   "30s": {}
+  },
+  "fills_skipped_no_mid_before": 0,
+  "rows": 234,
+  "age_rule": "off (no mid_max_age_s)"
+ },
+ "markout_summary": {
+  "1s": {
+   "count": 78.0,
+   "qty_weighted_markout_bps": 0.17550932059193977,
+   "adverse_rate": 0.46153846153846156
+  },
+  "5s": {
+   "count": 78.0,
+   "qty_weighted_markout_bps": 0.80815928902799,
+   "adverse_rate": 0.32051282051282054
+  },
+  "30s": {
+   "count": 78.0,
+   "qty_weighted_markout_bps": 1.1441603232629043,
+   "adverse_rate": 0.34615384615384615
+  }
+ },
+ "markout_by_venue_role": {
+  "binance/taker": {
+   "1s": {
+    "count": 39.0,
+    "qty_weighted_markout_bps": 3.295199669703414,
+    "adverse_rate": 0.358974358974359
+   },
+   "5s": {
+    "count": 39.0,
+    "qty_weighted_markout_bps": 1.038607448107234,
+    "adverse_rate": 0.41025641025641024
+   },
+   "30s": {
+    "count": 39.0,
+    "qty_weighted_markout_bps": -1.6432199120314974,
+    "adverse_rate": 0.05128205128205128
+   }
+  },
+  "bybit/maker": {
+   "1s": {
+    "count": 39.0,
+    "qty_weighted_markout_bps": -2.9439908285803997,
+    "adverse_rate": 0.5641025641025641
+   },
+   "5s": {
+    "count": 39.0,
+    "qty_weighted_markout_bps": 0.5777251798129712,
+    "adverse_rate": 0.23076923076923078
+   },
+   "30s": {
+    "count": 39.0,
+    "qty_weighted_markout_bps": 3.9313706187582325,
+    "adverse_rate": 0.6410256410256411
+   }
+  }
+ },
+ "gate_events": [
+  {
+   "event_type": "HEDGE_TOUCH_PAST_PLANNED_LIMIT",
+   "ts_ns": 1793272529292168077,
+   "parent_id": "b6ccc099-5931-56b3-afe1-65da38b5b426",
+   "chain_id": "6ef05b2e-8a97-5b53-b78d-a563b5975bdc",
+   "reason": "touch_past_planned_limit"
+  },
+  {
+   "event_type": "HEDGE_TOUCH_PAST_PLANNED_LIMIT",
+   "ts_ns": 1793272530135586238,
+   "parent_id": "b6ccc099-5931-56b3-afe1-65da38b5b426",
+   "chain_id": "ac88a8d2-8e5e-5c61-9bf4-004c58204f16",
+   "reason": "touch_past_planned_limit"
+  },
+  {
+   "event_type": "HEDGE_TOUCH_PAST_PLANNED_LIMIT",
+   "ts_ns": 1793272530135586243,
+   "parent_id": "b6ccc099-5931-56b3-afe1-65da38b5b426",
+   "chain_id": "dcd92e35-990f-500a-a28b-cc42c43048d1",
+   "reason": "touch_past_planned_limit"
+  },
+  {
+   "event_type": "HEDGE_TOUCH_PAST_PLANNED_LIMIT",
+   "ts_ns": 1793272530135586248,
+   "parent_id": "b6ccc099-5931-56b3-afe1-65da38b5b426",
+   "chain_id": "dd098999-94e6-5d3d-89c3-1b5fcc3a2540",
+   "reason": "touch_past_planned_limit"
+  },
+  {
+   "event_type": "HEDGE_TOUCH_PAST_PLANNED_LIMIT",
+   "ts_ns": 1793272530135586253,
+   "parent_id": "b6ccc099-5931-56b3-afe1-65da38b5b426",
+   "chain_id": "6375143a-9108-5ecf-ac9b-9ed684b157aa",
+   "reason": "touch_past_planned_limit"
+  },
+  {
+   "event_type": "HEDGE_TOUCH_PAST_PLANNED_LIMIT",
+   "ts_ns": 1793272530135586258,
+   "parent_id": "b6ccc099-5931-56b3-afe1-65da38b5b426",
+   "chain_id": "ba3bf0a6-d623-51fe-9077-d47bb92eda9f",
+   "reason": "touch_past_planned_limit"
+  },
+  {
+   "event_type": "HEDGE_TOUCH_PAST_PLANNED_LIMIT",
+   "ts_ns": 1793272533770962589,
+   "parent_id": "b6ccc099-5931-56b3-afe1-65da38b5b426",
+   "chain_id": "97913ac5-972c-542a-a429-bac8a6fbca6c",
+   "reason": "touch_past_planned_limit"
+  },
+  {
+   "event_type": "HEDGE_TOUCH_PAST_PLANNED_LIMIT",
+   "ts_ns": 1793272533770962594,
+   "parent_id": "b6ccc099-5931-56b3-afe1-65da38b5b426",
+   "chain_id": "76a68274-b3fa-5664-86e1-a3ac447b68fe",
+   "reason": "touch_past_planned_limit"
+  },
+  {
+   "event_type": "HEDGE_TOUCH_PAST_PLANNED_LIMIT",
+   "ts_ns": 1793272533770962599,
+   "parent_id": "b6ccc099-5931-56b3-afe1-65da38b5b426",
+   "chain_id": "aaa2f824-09af-5681-b62f-9fb0532f6280",
+   "reason": "touch_past_planned_limit"
+  },
+  {
+   "event_type": "HEDGE_TOUCH_PAST_PLANNED_LIMIT",
+   "ts_ns": 1793272535713718610,
+   "parent_id": "b6ccc099-5931-56b3-afe1-65da38b5b426",
+   "chain_id": "ca0e2d2c-b573-5bf5-abbc-68868e18ddf8",
+   "reason": "touch_past_planned_limit"
+  },
+  {
+   "event_type": "HEDGE_TOUCH_PAST_PLANNED_LIMIT",
+   "ts_ns": 1793272535713718615,
+   "parent_id": "b6ccc099-5931-56b3-afe1-65da38b5b426",
+   "chain_id": "a8bad4c5-63c8-51ba-87c5-a96eec189f65",
+   "reason": "touch_past_planned_limit"
+  },
+  {
+   "event_type": "HEDGE_TOUCH_PAST_PLANNED_LIMIT",
+   "ts_ns": 1793272536342431766,
+   "parent_id": "b6ccc099-5931-56b3-afe1-65da38b5b426",
+   "chain_id": "972b3c57-46ab-58e5-be1e-5a7c40ca16c6",
+   "reason": "touch_past_planned_limit"
+  },
+  {
+   "event_type": "HEDGE_TOUCH_PAST_PLANNED_LIMIT",
+   "ts_ns": 1793272537941741245,
+   "parent_id": "b6ccc099-5931-56b3-afe1-65da38b5b426",
+   "chain_id": "9bd89f86-eb82-5db4-9a56-de7c88985212",
+   "reason": "touch_past_planned_limit"
+  },
+  {
+   "event_type": "HEDGE_TOUCH_PAST_PLANNED_LIMIT",
+   "ts_ns": 1793272537941741250,
+   "parent_id": "b6ccc099-5931-56b3-afe1-65da38b5b426",
+   "chain_id": "12e57b13-6fec-5ad1-8cab-171460654f9b",
+   "reason": "touch_past_planned_limit"
+  },
+  {
+   "event_type": "HEDGE_TOUCH_PAST_PLANNED_LIMIT",
+   "ts_ns": 1793272540481576484,
+   "parent_id": "b6ccc099-5931-56b3-afe1-65da38b5b426",
+   "chain_id": "4daef8a4-5373-54b1-a5f0-93468bb0760e",
+   "reason": "touch_past_planned_limit"
+  },
+  {
+   "event_type": "HEDGE_TOUCH_PAST_PLANNED_LIMIT",
+   "ts_ns": 1793272540481576489,
+   "parent_id": "b6ccc099-5931-56b3-afe1-65da38b5b426",
+   "chain_id": "b5785dda-2016-5e00-94c8-717bff1d8113",
+   "reason": "touch_past_planned_limit"
+  },
+  {
+   "event_type": "ORDER_LIFETIME_EXPIRED",
+   "ts_ns": 1793272542972078625,
+   "parent_id": "b6ccc099-5931-56b3-afe1-65da38b5b426"
+  },
+  {
+   "event_type": "HEDGE_TOUCH_PAST_PLANNED_LIMIT",
+   "ts_ns": 1793276999104680226,
+   "parent_id": "523b7b19-a881-5ba2-aff5-0c7f7d65679b",
+   "chain_id": "6a7a5732-a64f-529e-9c55-af34227c6063",
+   "reason": "touch_past_planned_limit"
+  },
+  {
+   "event_type": "HEDGE_TOUCH_PAST_PLANNED_LIMIT",
+   "ts_ns": 1793277011329604990,
+   "parent_id": "63599f1d-b796-53ed-a7b1-09b483e3de8f",
+   "chain_id": "3218b687-a02b-5710-acda-5f40091044a0",
+   "reason": "touch_past_planned_limit"
+  },
+  {
+   "event_type": "HEDGE_TOUCH_PAST_PLANNED_LIMIT",
+   "ts_ns": 1793277011409422960,
+   "parent_id": "63599f1d-b796-53ed-a7b1-09b483e3de8f",
+   "chain_id": "1bb04b51-2788-5e01-8653-b0b23796ba19",
+   "reason": "touch_past_planned_limit"
+  },
+  {
+   "event_type": "HEDGE_TOUCH_PAST_PLANNED_LIMIT",
+   "ts_ns": 1793277011409422965,
+   "parent_id": "63599f1d-b796-53ed-a7b1-09b483e3de8f",
+   "chain_id": "12410dad-ded1-5c36-b37f-17f5a03a8e80",
+   "reason": "touch_past_planned_limit"
+  },
+  {
+   "event_type": "HEDGE_TOUCH_PAST_PLANNED_LIMIT",
+   "ts_ns": 1793277011409422970,
+   "parent_id": "63599f1d-b796-53ed-a7b1-09b483e3de8f",
+   "chain_id": "28fa46c8-2e65-5b0b-8a6e-d90e4d27dbf6",
+   "reason": "touch_past_planned_limit"
+  },
+  {
+   "event_type": "HEDGE_TOUCH_PAST_PLANNED_LIMIT",
+   "ts_ns": 1793277011633508558,
+   "parent_id": "63599f1d-b796-53ed-a7b1-09b483e3de8f",
+   "chain_id": "a336e8c5-9c03-5e9a-836e-00610ff62acd",
+   "reason": "touch_past_planned_limit"
+  },
+  {
+   "event_type": "HEDGE_TOUCH_PAST_PLANNED_LIMIT",
+   "ts_ns": 1793277011633508563,
+   "parent_id": "63599f1d-b796-53ed-a7b1-09b483e3de8f",
+   "chain_id": "1634ce9c-06ce-567c-bdb0-78d677653258",
+   "reason": "touch_past_planned_limit"
+  },
+  {
+   "event_type": "HEDGE_TOUCH_PAST_PLANNED_LIMIT",
+   "ts_ns": 1793277011634699454,
+   "parent_id": "63599f1d-b796-53ed-a7b1-09b483e3de8f",
+   "chain_id": "eb658a25-fe40-59f8-87a5-dee99aa8e68d",
+   "reason": "touch_past_planned_limit"
+  },
+  {
+   "event_type": "HEDGE_TOUCH_PAST_PLANNED_LIMIT",
+   "ts_ns": 1793277011635093361,
+   "parent_id": "63599f1d-b796-53ed-a7b1-09b483e3de8f",
+   "chain_id": "9d761dca-abf4-53e9-95b3-5a9bc6206435",
+   "reason": "touch_past_planned_limit"
+  }
+ ],
+ "grid_snaps": {
+  "price": 4,
+  "quantity": 1
+ },
+ "fills_by_source": {
+  "BYBIT": {
+   "trade": 23,
+   "trade_after_front": 2,
+   "trade_confirmed_cross_after": 12,
+   "trade_confirmed_cross_before": 2
+  },
+  "BINANCE": {}
+ },
+ "manifest": {
+  "invalid_book_policy": {
+   "invalid_book_policy": "RESUBSCRIBE_AFTER_ASSUMED_DELAY",
+   "resync_delay_s": 5.0,
+   "resync_delay_label": "ASSUMED",
+   "resyncs": [
+    {
+     "venue": "BINANCE",
+     "invalid_since_ns": 1793277309374455753,
+     "resync_at_ns": 1793277309476895989,
+     "wait_ns": 102440236,
+     "reason": "GAP_DETECTED:sequence_gap:11956917222403->11956918466436-11956918474008",
+     "by": "DATA_SNAPSHOT",
+     "state_after": "VALID"
+    }
+   ],
+   "resync_unavailable_count": 0,
+   "resyncs_by_source": {
+    "DATA_SNAPSHOT": 1
+   },
+   "suspension_intervals_ns": [
+    [
+     1793267812413779778,
+     1793267812740792672,
+     "BINANCE:SYNCING"
+    ],
+    [
+     1793267850144247103,
+     1793267850197974429,
+     "BYBIT:STALE"
+    ],
+    [
+     1793267901111875458,
+     1793267901398447836,
+     "BYBIT:STALE"
+    ],
+    [
+     1793268003278831511,
+     1793268003281303493,
+     "BYBIT:STALE"
+    ],
+    [
+     1793268019760216715,
+     1793268020098565440,
+     "BYBIT:STALE"
+    ],
+    [
+     1793268533223177713,
+     1793268533418644629,
+     "BYBIT:STALE"
+    ],
+    [
+     1793268582339392038,
+     1793268582498661242,
+     "BYBIT:STALE"
+    ],
+    [
+     1793268744968162973,
+     1793268745078156160,
+     "BYBIT:STALE"
+    ],
+    [
+     1793269422224797693,
+     1793269422320781159,
+     "BYBIT:STALE"
+    ],
+    [
+     1793269666898564177,
+     1793269666940404027,
+     "BYBIT:STALE"
+    ],
+    [
+     1793269678860451695,
+     1793269679078557566,
+     "BYBIT:STALE"
+    ],
+    [
+     1793269988770592259,
+     1793269988838360965,
+     "BYBIT:STALE"
+    ],
+    [
+     1793272234433244880,
+     1793272234456428227,
+     "BINANCE:STALE"
+    ],
+    [
+     1793273088577315178,
+     1793273088598610185,
+     "BYBIT:STALE"
+    ],
+    [
+     1793273234621277478,
+     1793273234637919735,
+     "BYBIT:STALE"
+    ],
+    [
+     1793273531761203399,
+     1793273532038453211,
+     "BYBIT:STALE"
+    ],
+    [
+     1793273815545245627,
+     1793273815634325138,
+     "BYBIT:STALE"
+    ],
+    [
+     1793273818339096421,
+     1793273818559168306,
+     "BYBIT:STALE"
+    ],
+    [
+     1793273834283231962,
+     1793273834379324811,
+     "BYBIT:STALE"
+    ],
+    [
+     1793273871449401701,
+     1793273871457920017,
+     "BYBIT:STALE"
+    ],
+    [
+     1793273888121093607,
+     1793273888359828343,
+     "BYBIT:STALE"
+    ],
+    [
+     1793274292529589531,
+     1793274292597897812,
+     "BYBIT:STALE"
+    ],
+    [
+     1793274379955182725,
+     1793274379978074971,
+     "BYBIT:STALE"
+    ],
+    [
+     1793274482625258756,
+     1793274482659661924,
+     "BYBIT:STALE"
+    ],
+    [
+     1793275102701305147,
+     1793275102878007079,
+     "BYBIT:STALE"
+    ],
+    [
+     1793275241135076989,
+     1793275241138652354,
+     "BYBIT:STALE"
+    ],
+    [
+     1793275772997395014,
+     1793275773218590832,
+     "BYBIT:STALE"
+    ],
+    [
+     1793275814053115417,
+     1793275814158340845,
+     "BYBIT:STALE"
+    ],
+    [
+     1793276334915307946,
+     1793276334998187911,
+     "BYBIT:STALE"
+    ],
+    [
+     1793276466835064321,
+     1793276466917958616,
+     "BYBIT:STALE"
+    ],
+    [
+     1793276657639305676,
+     1793276657658682163,
+     "BYBIT:STALE"
+    ],
+    [
+     1793276664911320908,
+     1793276664938500238,
+     "BYBIT:STALE"
+    ],
+    [
+     1793276743035233103,
+     1793276743077933130,
+     "BYBIT:STALE"
+    ],
+    [
+     1793276746829579853,
+     1793276747118499947,
+     "BYBIT:STALE"
+    ],
+    [
+     1793276747687107844,
+     1793276747918045515,
+     "BYBIT:STALE"
+    ],
+    [
+     1793276850921038940,
+     1793276851038365379,
+     "BYBIT:STALE"
+    ],
+    [
+     1793276871171197874,
+     1793276871461117195,
+     "BYBIT:STALE"
+    ],
+    [
+     1793276968841307072,
+     1793276968900159450,
+     "BYBIT:STALE"
+    ],
+    [
+     1793277305329224925,
+     1793277309374455753,
+     "BINANCE:STALE"
+    ],
+    [
+     1793277309374455753,
+     1793277309476895989,
+     "BINANCE:GAP_DETECTED"
+    ],
+    [
+     1793277576870308499,
+     1793277577018390582,
+     "BYBIT:STALE"
+    ],
+    [
+     1793278632754402443,
+     1793278632958673741,
+     "BYBIT:STALE"
+    ]
+   ],
+   "suspended_seconds_by_day": {
+    "2026-10-29": {
+     "BINANCE:GAP_DETECTED": 0.102440236,
+     "BINANCE:STALE": 4.068414175,
+     "BINANCE:SYNCING": 0.327012894,
+     "BYBIT:STALE": 4.76287361
+    }
+   },
+   "suspended_seconds_total_by_day": {
+    "2026-10-29": 9.260740915
+   }
+  },
+  "coverage": {
+   "venues": {
+    "bybit": {
+     "first_ns": 1793267812413779778,
+     "last_ns": 1793278799998674973
+    },
+    "binance": {
+     "first_ns": 1793267812740792672,
+     "last_ns": 1793278799930577129
+    }
+   },
+   "common_window_ns": [
+    1793267812740792672,
+    1793278799930577129
+   ],
+   "common_window_hours": 3.0519971623491666,
+   "excluded_span": [
+    {
+     "venue_with_data_until": "bybit",
+     "excluded_from_ns": 1793278799930577129,
+     "excluded_to_ns": 1793278799998674973,
+     "excluded_seconds": 0.068097844
+    }
+   ],
+   "label": "DATA_LIMITATION: the span after one venue's data ends is excluded from the comparison and from the suspended seconds; it is not a suspension"
+  },
+  "suspended_seconds_two_ways": {
+   "any_message_age (the rule), common hours only": {
+    "2026-10-29": 8.933728021
+   },
+   "book_change_age_only (older reading), common hours only": {
+    "2026-10-29": 10.474038522
+   },
+   "any_message_age, whole run (incl. the span after a venue's data ends: a data limitation, not a suspension)": {
+    "2026-10-29": 9.260740915
+   }
+  },
+  "price_sanity_core_stats": {
+   "BYBIT": {
+    "price_jumps": 0,
+    "confirmed_price_moves": 0,
+    "wide_spreads": 0,
+    "crossed_or_locked": 0,
+    "stale_transitions": 38,
+    "invalid_levels": 0,
+    "resyncs": 0,
+    "snapshots": 1,
+    "deltas_applied": 299427
+   },
+   "BINANCE": {
+    "price_jumps": 0,
+    "confirmed_price_moves": 0,
+    "wide_spreads": 0,
+    "crossed_or_locked": 0,
+    "stale_transitions": 2,
+    "invalid_levels": 0,
+    "resyncs": 1,
+    "snapshots": 2,
+    "deltas_applied": 102837
+   }
+  },
+  "time_integrity_blocks": 0,
+  "model_choices": {
+   "consume_liquidity_on_own_taker_fills": {
+    "BYBIT": true,
+    "BINANCE": true,
+    "status": "DELIBERATE_MODEL_CHOICE (owner 12 Nov): an own hedge or unwind fill removes the walked quantity from the book it walked; the public view book is not changed by it (every level on both venues, tested)"
+   }
+  },
+  "mark_source": {
+   "exchange_mark_ticks": 0,
+   "MARK_FROM_MID_ticks": 175849,
+   "venues_with_exchange_marks": [],
+   "label": "the margin check marks a position with the venue's exchange mark when the recorded derivatives stream has one (age at most mark_max_age, 5 s ASSUMED), else with the last good mark or valid book mid (kept for up to 5 s; after that the price is missing and new risk is paused, not the kill switch); MARK_FROM_MID is the replay's labelled fallback for a venue with no exchange mark (replay only; funding is not settled from it)"
+  },
+  "sequence_gap_counter_of_the_core_book": "NOT REPORTED: synthetic sequence, gaps NOT_MEASURED",
+  "entry_gates": {
+   "book_age_rule": "core, 500 ms, age from the last message of any kind (owner 8 Nov Q-G1)",
+   "dead_feed_5s": "not a blocking gate; the resubscribe trigger only (Q-G2)",
+   "price_sanity_500bps": "core, kept (Q-G3)",
+   "time_integrity": "core, host-offset correction on (Q-G4)",
+   "circuit_breaker": "in the core (CircuitBreaker + pre-send risk gate in TradingSession, Track A item 1, off by default); NOT SWITCHED ON in this replay (no breaker_config is passed); old-path trips are in the parity report"
+  },
+  "feed": {
+   "adapter_version": "research-feed-canonical-v1",
+   "sequence_numbers": "SYNTHETIC",
+   "sequence_gaps": {
+    "status": "NOT_MEASURED",
+    "count": null,
+    "reason": "the files carry no update ids; the sequence is constructed contiguous by the converter, so a gap can never show and zero would mean nothing"
+   },
+   "trade_ids": "TRADE_ID_CONSTRUCTED where the record has no id",
+   "resync_snapshots": "SIMULATED: the data's own state at the resync time, repaired of a cross; not an exchange snapshot",
+   "counts": {
+    "snapshots": 0,
+    "delta_messages": 0,
+    "delta_records": 0,
+    "trades": 0,
+    "levels_changed": 0,
+    "crossed_messages": 0,
+    "crossed_snapshots": 0,
+    "resync_snapshots": 0
+   }
+  },
+  "ticks": {
+   "bybit": 0.01,
+   "binance": 0.01
+  },
+  "quantity_step": {
+   "values": {
+    "binance": 0.01,
+    "bybit": 0.1
+   },
+   "label": "PUBLISHED_CURRENT_RULES_NOT_HISTORICAL",
+   "fetched": "2026-11-08",
+   "sources": {
+    "binance": "https://fapi.binance.com/fapi/v1/exchangeInfo",
+    "bybit": "https://api.bybit.com/v5/market/instruments-info?category=linear&symbol=SOLUSDT"
+   }
+  },
+  "config_notes": {
+   "silent_carry_bound": "below_one_lot: residual bound 0.01 base (risk.max_residual_base and oms.residual.max_residual_base)",
+   "book_sanity": "core defaults (500 bps mid jump and spread), KEPT (owner 8 Nov, Q-G3); the backtester has no price-sanity gate; triggers are counted in the manifest",
+   "time": "core defaults except feed age = max_book_age_s and correct_host_offset true (owner 8 Nov, Q-G4); replay receive stamps are the backtester's",
+   "quality": "core defaults (preflight limits are not used by the session)",
+   "monitoring": "core defaults",
+   "oms.timeouts": "core defaults",
+   "risk.limits": "notional and gross limits set far above any clip: the backtester's own limits are position and margin based",
+   "tick_and_step": "the dated grid passed by the caller (not read from the profile's venue_ticks)",
+   "resync_delay_s": "5.0 ASSUMED (profile setting; read by the replay driver, not part of AppConfig)",
+   "real_order_requirements": "met"
+  },
+  "safety_from_profile": {
+   "profile_safety": false,
+   "layer_risk_mode": "enforce",
+   "breaker": null,
+   "layer_route_mode": "count",
+   "reconcile_mode": "count",
+   "not_set_by_the_profile": "layer_route_mode and reconcile_mode have no profile key (count); risk_gate_mode is off in the session"
+  },
+  "timing": {
+   "latency_model": {
+    "source": "timelines:profile",
+    "stage_map": {
+     "entry": "entry",
+     "cancel": "cancel",
+     "submit_reject": "ack_report",
+     "cancel_report": "cancel_report"
+    },
+    "zero_stages": {
+     "strategy": 6,
+     "risk": 6,
+     "submit_ack": 45,
+     "fill": 40
+    },
+    "zero_stages_label": "ASSUMED_ZERO (owner 8 Nov: realistic values come later as a new profile version, once measured)",
+    "timelines": {
+     "binance.ack_report": {
+      "mean_ms": 36.0,
+      "jitter_ms": 8.0,
+      "draws": 0,
+      "source": "ASSUMED:latency_preset"
+     },
+     "binance.cancel": {
+      "mean_ms": 40.0,
+      "jitter_ms": 8.0,
+      "draws": 0,
+      "source": "ASSUMED:floor_ms"
+     },
+     "binance.cancel_report": {
+      "mean_ms": 36.0,
+      "jitter_ms": 8.0,
+      "draws": 0,
+      "source": "ASSUMED:latency_preset"
+     },
+     "binance.entry": {
+      "mean_ms": 40.0,
+      "jitter_ms": 8.0,
+      "draws": 39,
+      "source": "ASSUMED:floor_ms"
+     },
+     "binance.feed": {
+      "mean_ms": 36.0,
+      "jitter_ms": 8.0,
+      "draws": 0,
+      "source": "ASSUMED:latency_preset"
+     },
+     "binance.fill_report": {
+      "mean_ms": 36.0,
+      "jitter_ms": 8.0,
+      "draws": 0,
+      "source": "ASSUMED:latency_preset"
+     },
+     "bybit.ack_report": {
+      "mean_ms": 2.0,
+      "jitter_ms": 2.5,
+      "draws": 0,
+      "source": "ASSUMED:latency_preset"
+     },
+     "bybit.cancel": {
+      "mean_ms": 6.0,
+      "jitter_ms": 2.5,
+      "draws": 1,
+      "source": "ASSUMED:latency_preset"
+     },
+     "bybit.cancel_report": {
+      "mean_ms": 2.0,
+      "jitter_ms": 2.5,
+      "draws": 0,
+      "source": "ASSUMED:latency_preset"
+     },
+     "bybit.entry": {
+      "mean_ms": 6.0,
+      "jitter_ms": 2.5,
+      "draws": 6,
+      "source": "ASSUMED:latency_preset"
+     },
+     "bybit.feed": {
+      "mean_ms": 2.0,
+      "jitter_ms": 2.5,
+      "draws": 0,
+      "source": "ASSUMED:latency_preset"
+     },
+     "bybit.fill_report": {
+      "mean_ms": 2.0,
+      "jitter_ms": 2.5,
+      "draws": 39,
+      "source": "ASSUMED:latency_preset"
+     }
+    }
+   },
+   "truth_books": {}
+  },
+  "release_identity": {
+   "profile": "perp_perp_maker_taker_v1_9",
+   "profile_status": "WORKING",
+   "profile_sha256": "e2d7b5068a795297361fbc55f3547af7d420420b7353b331d8d00f75993329cf",
+   "profile_path": "/Users/vaibhav/Documents/Newproject/crypto_MFT_arb_platform/profiles/perp_perp_maker_taker_v1_9.yaml",
+   "decision_status": {
+    "block_on_toxic": "OFF_BY_HOLDOUT_GATE_SCORE_EXPLORATORY_SHA256_e1db1d0cf6c847ec8162ef891f7c4b27dbcedb38f45d7c8de18814c2897b256f",
+    "march_stamps": "ASSUMED_CONSTRUCTED_LOCAL_TS_NOT_TRUSTED_PRESET_FEED_DELAY_APPLIED",
+    "net_ceiling_multiple": "DECISION_PENDING_CALIBRATION",
+    "fill_headroom_base": "DECISION_PENDING_CALIBRATION",
+    "breaker": "DECISION_PENDING_CALIBRATION",
+    "unwind_band_bps": "DECISION_PENDING_CALIBRATION",
+    "unwind_max_attempts": "DECISION_PENDING_CALIBRATION",
+    "residual_limit": "DECISION_PENDING_CALIBRATION",
+    "unwind_band_core": "DECISION_PENDING_CALIBRATION",
+    "hedge_unknown_escalation": "DECISION_PENDING_CALIBRATION",
+    "p_fail": "SCENARIO_NOT_CALIBRATED",
+    "loss_fail_bps": "SCENARIO_NOT_CALIBRATED",
+    "fees": "PUBLIC_SCHEDULE_UNVERIFIED_BYBIT_VIP5_BINANCE_VIP9",
+    "requote": "TRADER_SET_NOT_FITTED_OFF_BY_DEFAULT",
+    "queue_parameters": "SPOT_PRIOR_PERP_UNVALIDATED",
+    "hedge_move": "PROBE_ARRIVAL_ESTIMATE_45MS_PINNED_BY_SHA256_EXPLORATORY",
+    "adverse_table": "MARKET_DATA_LABELS_TRAIN_ONLY_PINNED_BY_SHA256_EXPLORATORY",
+    "s1_label_resolution": "BELOW_DATA_RESOLUTION_50MS_MARCH_2024_BYBIT_RECEIVE_TIME_CONSTRUCTED_BINANCE_BEST_BID_ASK",
+    "data_manifest": "REQUIRED_AT_RUN",
+    "unknown_queue_fit": "PER_DAY_FILE_FROM_STRICTLY_EARLIER_DAYS"
+   },
+   "code": {
+    "sha256_sources": "3470e8862ea043e3bbab4261209f7d2354b4b4a25e3c3ee01f16e446708bff89",
+    "n_files": 98,
+    "git_rev": "719c127",
+    "git_dirty": true
+   },
+   "data": {
+    "manifests_sha256": null,
+    "manifest_files": [],
+    "day_listing_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "files_listed": 0
+   },
+   "fee_snapshot_sha256": "485b47f4075ca74bb53090ea2328a600db639609304a01dc480d3e9ea750f995",
+   "fee_schedule": {
+    "source": "core crypto_stat_arb.fees.FEE_TIERS",
+    "rows": [
+     {
+      "instrument_id": "SOL-USDT-PERP",
+      "effective_from": "1970-01-01T00:00:00Z",
+      "venue": "BYBIT",
+      "maker_fee_bps": "1.0",
+      "taker_fee_bps": "3.2",
+      "fee_source": "PUBLIC_SCHEDULE_UNVERIFIED",
+      "conservative_unverified": true,
+      "tier": "bybit_perp_vip5: linear VIP 5 (owner-confirmed tier), public schedule as given by the owner 7 Nov 2026, account SOLUSDT rates not read"
+     },
+     {
+      "instrument_id": "SOL-USDT-PERP",
+      "effective_from": "1970-01-01T00:00:00Z",
+      "venue": "BINANCE",
+      "maker_fee_bps": "0.0",
+      "taker_fee_bps": "1.7",
+      "fee_source": "PUBLIC_SCHEDULE_UNVERIFIED",
+      "conservative_unverified": true,
+      "tier": "binance_perp_vip9: USD-M VIP 9 (owner-confirmed tier), public schedule as given by the owner 7 Nov 2026, account SOLUSDT rates not read; with BNB the taker is 1.53 (recorded, not built: a BNB fee needs a BNB price)"
+     }
+    ],
+    "rows_sha256": "96fbfe34366e775230fc4f2a3c7440f97486a2c31bab0111f0a6b3d3a3f33f8a"
+   },
+   "funding_source": "core",
+   "margin_source": "core",
+   "ledger_source": "core",
+   "runtime": "session",
+   "resync_delay_s": 5.0,
+   "resync_delay_label": "ASSUMED",
+   "funding_modelled": false,
+   "fee_presets": {
+    "bybit": "bybit_perp_vip5",
+    "binance": "binance_perp_vip9"
+   },
+   "instrument_master_sha256": "e3c4116cfc3d86b2028a1b98e67131cdb6ad6147213343f49a9d0b3b49c2b210",
+   "calibration_file": "/Users/vaibhav/Documents/Newproject/crypto_MFT_arb_platform/config/lifecycle_calibration_perp_bybit.json",
+   "calibration_cutoff": "2026-11-01T19:55:22Z",
+   "calibration": {
+    "file": "/Users/vaibhav/Documents/Newproject/crypto_MFT_arb_platform/config/lifecycle_calibration_perp_bybit.json",
+    "file_sha256": "4984335f71e91afff6b9a42432c2694c08b1b782e6b6ed2bcaebbc31ef83d5c0",
+    "content_sha256": "93d66954c9bb9140e84d9290172c3e70660d29c18be607e6bed5eb345a1726bb",
+    "product": "perp",
+    "venue": "bybit",
+    "schema": "lifecycle_calibration_perp/v1",
+    "networks_with_data": [
+     "testnet"
+    ]
+   },
+   "git": {
+    "outer": {
+     "repo": "/Users/vaibhav/Documents/Newproject",
+     "branch": "integration-2026-11-01",
+     "commit": "719c127c0a5a723521642fc024f191d6e72ecb07",
+     "dirty": true,
+     "tracked_files_changed": 12
+    },
+    "core": {
+     "repo": "/Users/vaibhav/Documents/Newproject/crypto_MFT_arb_platform/src/crypto_stat_arb",
+     "branch": "consolidate-new-backtest",
+     "commit": "04195eb577f9a8dfc321589ea381f6a73fe9d2e7",
+     "dirty": true,
+     "tracked_files_changed": 14
+    }
+   },
+   "seed": 7,
+   "latency_preset": "singapore",
+   "execution": {
+    "config": {
+     "pairing": "maker_taker",
+     "primary": {
+      "tactic": "PASSIVE",
+      "placement": "deep",
+      "price_rule": "conditional_edge",
+      "reprice": {
+       "enabled": false,
+       "source": "TRADER_SET",
+       "band_down_bps": null,
+       "band_up_bps": null,
+       "debounce_ms": null,
+       "jump_bps": null,
+       "min_interval_ms": null,
+       "max_age_s": null,
+       "queue_hold": true,
+       "amend_first": true
+      }
+     },
+     "hedge": {
+      "tactic": "IOC_CAPPED",
+      "cap": "size_aware",
+      "slack_bps_floor": 5.0,
+      "max_slip_bps": 15.0,
+      "vol_k": 0.0,
+      "latency_s": 0.0
+     },
+     "maker_maker": {},
+     "unwind": {
+      "tactic": "MARKET_BANDED"
+     },
+     "price_cap_required": true,
+     "one_hedge_child": "enforce",
+     "risk_reservation": "enforce"
+    },
+    "config_sha256": "1d81e6cde44a4e2a54f636e0b560fdc12446fbf0e7fc3e03fe5270fcb4e2cf49"
+   },
+   "dataset_settings": {
+    "dataset": "mar2024",
+    "applied": {
+     "maker": {
+      "dedupe_window_s": 0.15,
+      "evidence_window_ms": 50.0
+     }
+    }
+   },
+   "latency_sensitivity": null,
+   "hedge_move_calibration": {
+    "file": "/Users/vaibhav/Documents/Newproject/crypto_MFT_arb_platform/config/hedge_move_arrival45ms_mar2024_train_0301_0307_v1.json",
+    "sha256": "c369b1b97af87dd7cecf146cce0583361be0d026a1d6dc6e3fed0d32506e8de7",
+    "days": [
+     "2024-03-01",
+     "2024-03-02",
+     "2024-03-03",
+     "2024-03-04",
+     "2024-03-05",
+     "2024-03-06",
+     "2024-03-07"
+    ],
+    "horizon_s": 0.045,
+    "n": {
+     "bid": 2037,
+     "ask": 2450680
+    },
+    "method": "PROBE: one 1 SOL Bybit bid per 15 s slot at the strategy's quote depth (qv2_probe.py, v1.1 fill rules, 00:00-02:00 UTC slice of each day); bid = the Binance mid move (bps) from each simulated probe fill to fill + 45 ms, mean over all fills. The 45 ms is an ASSUMED hedge arrival delay (the singapore preset gives about 31-52 ms for a hedge), NOT measured on mainnet. The probe is bid-only: the ask value is the market-data value, carried over unchanged and unused while maker_passive_side is bid"
+   },
+   "adverse_table": {
+    "file": "/Users/vaibhav/Documents/Newproject/crypto_MFT_arb_platform/config/adverse_table_mar2024_train_0301_0307_fullday_v1.json",
+    "sha256": "9c06b5c983e7d56cbaeacbd6eb188a6f42fa79246fd78e99febafbe090198854",
+    "days": [
+     "2024-03-01",
+     "2024-03-02",
+     "2024-03-03",
+     "2024-03-04",
+     "2024-03-05",
+     "2024-03-06",
+     "2024-03-07"
+    ],
+    "dims": [
+     "depth",
+     "flow"
+    ],
+    "shrink_k": 1000.0,
+    "events": 4724361,
+    "version": "adverse_table_v1",
+    "horizon_s": 0.05,
+    "requote_horizon_s": 1.0
+   }
+  },
+  "differences_from_backtester_loop": [
+   "timing is shared (profile timing block through Timelines; venue-truth books built by this driver): the old text 'no timing timelines or venue-truth books' is no longer true (corrected 10 Nov)",
+   "STILL MISSING in the session runtime (Phase E): E0 ems/ layer (repricing, tactics, PASSIVE placements, risk gate, pairing, venue selector); E1 maker order lifetime as a timer (the OMS deadline fires only on an event or tick); E2 the fault presets and the conditional scenarios other than outage_on_fill (hedge-fault injection itself is built and opt-in: hedge_fault_injection=True, ghost and partial hedge included; the manifest key hedge_fault_injection lists what it refuses); E3 participation cap and size sweep; circuit breaker: in the core but not switched on in this replay; the backtester's margin step (the core margin engine replaces it)",
+   "message-end cross invalidates the core book",
+   "sequence SYNTHETIC, gaps NOT_MEASURED"
+  ]
+ },
+ "run": {
+  "case": "2n_size25",
+  "settings": {
+   "profile": "perp_perp_maker_taker_v1_9",
+   "window": [
+    "11:00",
+    "13:00"
+   ],
+   "size": 25.0,
+   "gross": 125.0,
+   "cap": true
+  },
+  "window_utc": [
+   "11:00",
+   "13:00"
+  ],
+  "wall_s": 132.1,
+  "labels": [
+   "EXPLORATORY: mechanics only, no profit claim",
+   "2-hour window of the 2026-10-29 capture; the books are warmed from the capture start (09:56 UTC) with quoting off until the window opens: counts of events and the regime samples include the warm-up",
+   "mark = mid, no funding",
+   "regime boundaries IN-SAMPLE (the capture's own terciles)"
+  ]
+ }
+}

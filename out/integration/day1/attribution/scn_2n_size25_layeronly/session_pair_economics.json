@@ -1,0 +1,83 @@
+{
+ "label": "EXPLORATORY: linked pair economics per maker fill, session runtime",
+ "summary": {
+  "pair_gross_bps": {
+   "status": "ok",
+   "n": 39,
+   "mean": 2.552173952231573,
+   "median": 1.9886646117142521,
+   "p5": 0.0,
+   "p95": 5.972526378658399,
+   "blocks": 1,
+   "ci95": null,
+   "ci_status": "insufficient_blocks"
+  },
+  "pair_net_bps": {
+   "status": "ok",
+   "n": 37,
+   "mean": -0.17173377710423654,
+   "median": -0.7116734612697391,
+   "p5": -2.7000000000000006,
+   "p95": 3.2715110491740274,
+   "blocks": 1,
+   "ci95": null,
+   "ci_status": "insufficient_blocks"
+  },
+  "unhedged_interval_s": {
+   "status": "ok",
+   "n": 37,
+   "mean": 0.04028418257429793,
+   "median": 0.03926897048950195,
+   "p5": 0.03500008583068848,
+   "p95": 0.0506845474243164,
+   "blocks": 1,
+   "ci95": null,
+   "ci_status": "insufficient_blocks"
+  },
+  "hedge_send_delay_s": {
+   "status": "ok",
+   "n": 39,
+   "mean": 0.0,
+   "median": 0.0,
+   "p5": 0.0,
+   "p95": 0.0,
+   "blocks": 1,
+   "ci95": null,
+   "ci_status": "insufficient_blocks"
+  },
+  "first_hedge_fill_delay_s": {
+   "status": "ok",
+   "n": 39,
+   "mean": 0.040022917282887,
+   "median": 0.03856945037841797,
+   "p5": 0.035000061988830565,
+   "p95": 0.05051820278167725,
+   "blocks": 1,
+   "ci95": null,
+   "ci_status": "insufficient_blocks"
+  }
+ },
+ "metadata": {
+  "coverage": {
+   "rows_total": 39,
+   "rows_kept": 37,
+   "share_kept": 0.9487179487179487
+  },
+  "denominator": "maker fills (one row per maker fill; bps over the maker fill price); net and interval only for fully hedged fills",
+  "excluded_by_reason": {
+   "no_hedge_intent": 0,
+   "hedge_intent_but_no_fill": 0,
+   "partly_hedged": 2
+  },
+  "horizon_support": null,
+  "splits": {
+   "block_s": 86400.0,
+   "blocks": 1,
+   "days": [
+    "2026-10-29"
+   ]
+  },
+  "dependence": "rows of one block (a day by default) are resampled together in the bootstrap interval; no fill is treated as independent of its day",
+  "notes": "simulated fill price at hedge arrival (size-aware where the venue book has depth; with best bid/ask only, as Binance in March 2024, the touch is assumed to fit the size); the pair leaves out funding and the cost of an unwind"
+ }
+}

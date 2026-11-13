@@ -1,0 +1,15 @@
+{"seq": 0, "event": "intent", "intent_id": "sig1-P1", "role": "primary", "instrument": "SOL-USDT-PERP", "side": "buy", "qty": 1.0, "venues": ["BYBIT"], "worst_price": 100.57, "urgency": "normal", "deadline_ts": null, "tactic_hint": "", "reason": "maker leg", "parent_id": "", "parent_filled_qty": 0.0, "signal_id": 1, "created_ts": 1793272527.9642212}
+{"seq": 1, "event": "state", "intent_id": "sig1-P1", "from": "accepted", "to": "working", "why": "first child sent", "ts": 1793272527.9642212}
+{"seq": 2, "event": "child", "intent_id": "sig1-P1", "order_id": "93f276be-4e55-5026-9def-0499bacda8f6", "tactic": "PASSIVE", "ts": 1793272527.9642212}
+{"seq": 3, "event": "state", "intent_id": "sig1-P1", "from": "working", "to": "partially_done", "why": "fill", "ts": 1793272529.2921681}
+{"seq": 4, "event": "intent", "intent_id": "sig1-H1", "role": "hedge", "instrument": "SOL-USDT-PERP", "side": "sell", "qty": 0.08, "venues": ["BINANCE"], "worst_price": 100.62, "urgency": "urgent", "deadline_ts": null, "tactic_hint": "", "reason": "hedge after maker fill", "parent_id": "sig1-P1", "parent_filled_qty": 0.087620191459, "signal_id": 1, "created_ts": 1793272529.2921681}
+{"seq": 5, "event": "state", "intent_id": "sig1-H1", "from": "accepted", "to": "working", "why": "first child sent", "ts": 1793272529.2921681}
+{"seq": 6, "event": "child", "intent_id": "sig1-H1", "order_id": "e77186a5-df7e-5b28-8764-cfa57733c496", "tactic": "IOC_CAPPED", "ts": 1793272529.2921681}
+{"seq": 7, "event": "state", "intent_id": "sig1-P1", "from": "partially_done", "to": "done", "why": "fill", "ts": 1793272530.1355863}
+{"seq": 8, "event": "intent", "intent_id": "sig1-H2", "role": "hedge", "instrument": "SOL-USDT-PERP", "side": "sell", "qty": 0.92, "venues": ["BINANCE"], "worst_price": 100.62, "urgency": "urgent", "deadline_ts": null, "tactic_hint": "", "reason": "hedge after maker fill", "parent_id": "sig1-P1", "parent_filled_qty": 1.0, "signal_id": 1, "created_ts": 1793272530.1355863}
+{"seq": 9, "event": "state", "intent_id": "sig1-H2", "from": "accepted", "to": "working", "why": "first child sent", "ts": 1793272530.1355863}
+{"seq": 10, "event": "child", "intent_id": "sig1-H2", "order_id": "8992fd08-601f-5f0f-8c4d-0a7a890b4542", "tactic": "IOC_CAPPED", "ts": 1793272530.1355863}
+{"seq": 11, "event": "state", "intent_id": "sig1-H1", "from": "working", "to": "unknown", "why": "child given up but still live at the venue", "ts": 1793272532.2921681}
+{"seq": 12, "event": "state", "intent_id": "sig1-H2", "from": "working", "to": "unknown", "why": "child given up but still live at the venue", "ts": 1793272532.8625505}
+{"seq": 13, "event": "state", "intent_id": "sig1-H1", "from": "unknown", "to": "done", "why": "fill", "ts": 1793272559.2921681}
+{"seq": 14, "event": "state", "intent_id": "sig1-H2", "from": "unknown", "to": "done", "why": "fill", "ts": 1793272559.2921681}

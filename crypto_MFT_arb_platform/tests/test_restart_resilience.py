@@ -800,6 +800,41 @@ class ExchangeSideRestartReconciliationTests(RestartAgainstTheVenueTests):
         self.assertEqual((report["since_basis"], report["problems"], report["gate_open"]), ("default_lookback", {}, True))
         self.assertEqual(parse_qs(urlparse(http.calls[1][1]).query)["startTime"], [str(now_ms - 24 * 3_600_000)])
 
+    def test_a_gap_longer_than_the_lookback_or_beyond_the_venue_window_is_reported_and_the_gate_stays_closed(self):
+        """Owner 13 Nov: more than 24 h since the last persisted state is not reconciled automatically (nothing is fetched, the report says how long), and a venue that refuses the window keeps the gate closed too."""
+        from crypto_stat_arb.models import OrderState
+        with tempfile.TemporaryDirectory() as directory:
+            plan_path = Path(directory) / "oms.sqlite"
+            parent_id, maker = self._first_session(plan_path)              # the plan was opened at observed_ts_ns = 1
+            oms, store, bybit, binance = self._restart(plan_path, gate=False)
+            by_acct, bn_acct = self._account(maker, OrderState.ACKNOWLEDGED, "0", positions={INSTR_FT: Decimal("0")})
+            late = 25 * 3_600 * 1_000_000_000
+            report = oms.reconcile_account_after_restart({"BYBIT": by_acct, "BINANCE": bn_acct}, late, books=_ft_books())
+            self.assertFalse(report["gate_open"])
+            self.assertEqual((by_acct.calls, bn_acct.calls), ([], []))                                   # nothing was fetched: a partial history would only look reconciled
+            self.assertTrue(all(any(x.startswith("restart_gap_exceeds_lookback:25.0h>24.0h") for x in p) for p in report["problems"].values()), report["problems"])
+            self.assertEqual(sorted(report["problems"]), ["BINANCE", "BYBIT"])
+            self.assertAlmostEqual(report["gap_hours"], 25.0, places=2)
+            self.assertEqual(len([e for e in oms.ledger.events if e["event_type"] == "RESTART_GAP_EXCEEDS_LOOKBACK"]), 1)
+            oms.execute(_ft_opportunity("opp-held"), _ft_books(), maker_venue="BYBIT")                   # new risk is still held
+            self.assertEqual((bybit.submits, self._held(oms)), ([], ["opp-held"]))
+            # within the lookback the same restart reconciles
+            oms2, store2, bybit2, binance2 = self._restart(plan_path, gate=False)
+            by2, bn2 = self._account(maker, OrderState.ACKNOWLEDGED, "0", positions={INSTR_FT: Decimal("0")})
+            ok = oms2.reconcile_account_after_restart({"BYBIT": by2, "BINANCE": bn2}, 23 * 3_600 * 1_000_000_000, books=_ft_books())
+            self.assertTrue(ok["gate_open"], ok)
+            self.assertEqual(len(by2.calls), 1)
+            # a venue that refuses the window (older than it keeps) keeps the gate closed and says why
+            class Refusing:
+                def account_snapshot(self, since_ns):
+                    raise ValueError("account_snapshot since is older than the venue keeps orders and trades")
+            oms3, store3, _, _ = self._restart(plan_path, gate=False)
+            refused = oms3.reconcile_account_after_restart({"BYBIT": Refusing(), "BINANCE": bn2}, 23 * 3_600 * 1_000_000_000, books=_ft_books())
+            self.assertFalse(refused["gate_open"])
+            self.assertTrue(any(x.startswith("account_snapshot_refused:account_snapshot since is older than the venue keeps") for x in refused["problems"]["BYBIT"]), refused["problems"])
+            for st in (store, store2, store3):
+                st.close()
+
     def test_an_order_still_resting_at_the_venue_is_reconciled_without_being_finished(self):
         from crypto_stat_arb.models import OrderState
         with tempfile.TemporaryDirectory() as directory:

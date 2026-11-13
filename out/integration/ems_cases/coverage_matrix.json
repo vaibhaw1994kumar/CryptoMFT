@@ -42,7 +42,7 @@
  {
   "case": "J2/J3 checks, 2c_zero_exhausted",
   "covering_layer": "execution layer, router",
-  "count": 27,
+  "count": 5,
   "result": "PASS",
   "detail": "off_tick=0, tactic_violations=0",
   "evidence": "runs/scn_2c_zero_exhausted/session_ems_path_coverage.json"
@@ -58,7 +58,7 @@
  {
   "case": "J2/J3 checks, 2d_ghost3",
   "covering_layer": "execution layer, router",
-  "count": 11,
+  "count": 7,
   "result": "PASS",
   "detail": "off_tick=0, tactic_violations=0",
   "evidence": "runs/scn_2d_ghost3/session_ems_path_coverage.json"
@@ -66,7 +66,7 @@
  {
   "case": "J2/J3 checks, 2d_ghost30",
   "covering_layer": "execution layer, router",
-  "count": 4,
+  "count": 5,
   "result": "PASS",
   "detail": "off_tick=0, tactic_violations=0",
   "evidence": "runs/scn_2d_ghost30/session_ems_path_coverage.json"
@@ -154,7 +154,7 @@
  {
   "case": "J2/J3 checks, 2n_size25",
   "covering_layer": "execution layer, router",
-  "count": 45,
+  "count": 10,
   "result": "PASS",
   "detail": "off_tick=0, tactic_violations=0",
   "evidence": "runs/scn_2n_size25/session_ems_path_coverage.json"
@@ -202,17 +202,17 @@
  {
   "case": "2d Timeout then late success (ghost 3 s)",
   "covering_layer": "OMS, simulator, router",
-  "count": 6,
+  "count": 4,
   "result": "PASS",
-  "detail": "hedge filled quantity 4 = maker filled quantity 4; hedge orders 6 for 5 maker fills (a cancelled unfilled replacement is not a hedge); ghost delivered {'BYBIT': 0, 'BINANCE': 5}, held at end {'BYBIT': 0, 'BINANCE': 0}; residual at end FLAT_NET; four-way reconciliation is a unit case (case 9)",
+  "detail": "hedge filled quantity 3 = maker filled quantity 3; hedge orders 4 for 4 maker fills (a cancelled unfilled replacement is not a hedge); ghost delivered {'BYBIT': 0, 'BINANCE': 4}, held at end {'BYBIT': 0, 'BINANCE': 0}; residual at end FLAT_NET; four-way reconciliation is a unit case (case 9)",
   "evidence": "scn_2d_ghost3.jsonl"
  },
  {
   "case": "2d Timeout then late success (ghost 30 s)",
   "covering_layer": "OMS, simulator, router",
-  "count": 2,
+  "count": 3,
   "result": "PASS",
-  "detail": "hedge filled quantity 1 = maker filled quantity 1; hedge orders 2 for 2 maker fills (a cancelled unfilled replacement is not a hedge); ghost delivered {'BYBIT': 0, 'BINANCE': 2}, held at end {'BYBIT': 0, 'BINANCE': 0}; residual at end FLAT_NET; four-way reconciliation is a unit case (case 9)",
+  "detail": "hedge filled quantity 2 = maker filled quantity 2; hedge orders 3 for 3 maker fills (a cancelled unfilled replacement is not a hedge); ghost delivered {'BYBIT': 0, 'BINANCE': 3}, held at end {'BYBIT': 0, 'BINANCE': 0}; residual at end FLAT_NET; four-way reconciliation is a unit case (case 9)",
   "evidence": "scn_2d_ghost30.jsonl"
  },
  {
@@ -282,9 +282,9 @@
  {
   "case": "2n Size 25 SOL (size_aware cap, participation cap on)",
   "covering_layer": "OMS, size_aware cap, simulator, E3",
-  "count": 39,
+  "count": 9,
   "result": "PASS",
-  "detail": "hedge IOC full 39, partial 0, zero 0, unwind orders 0, cap binds on the print 0; size_aware decisions 39 (touch did NOT cover the size in 0, abs limit bound in 0, fallback 0); hedge price vs the maker quote price (bps, n=39; the decision touch itself is in the cap events): max 5.98",
+  "detail": "hedge IOC full 9, partial 0, zero 0, unwind orders 0, cap binds on the print 0; size_aware decisions 9 (touch did NOT cover the size in 0, abs limit bound in 0, fallback 0); hedge price vs the maker quote price (bps, n=9; the decision touch itself is in the cap events): max 0.00",
   "evidence": "scn_2n_size25.jsonl"
  },
  {
@@ -315,6 +315,14 @@
   "case": "2c Zero fill: the first hedge IOC of every plan finds nothing inside its limit, the retry fills",
   "covering_layer": "hedge lifecycle, OMS, simulator (thinned hedge book, opt-in)",
   "count": 5,
+  "result": "FAIL",
+  "detail": "thinned attempts injected 5; hedge IOC full 5, partial 0, zero 4, retries 4; every unfilled remainder retried exactly once for its true residual True; hedged quantity equals maker quantity True; unwind orders 3, alarms 0; residual at end FLAT_NET. The OMS priced the hedge from ITS full view of the book; the venue-truth book had less (no depth is added) || WHY IT FAILS (owner 13 Nov, the profile's own safety values): the profile's circuit breaker is ON in this run and tripped (runs/scn_2c_*/session_safety_events.jsonl: BREAKER_TRIP, flatten, kill switch), which stops the plans this rule counts. The same case with the layer gate in enforce and the breaker OFF is the attribution row below (it passes): the layer gate itself changed nothing. Reported as a finding, not tuned away",
+  "evidence": "scn_2c_zero_then_fill.jsonl"
+ },
+ {
+  "case": "2c Zero fill: the first hedge IOC of every plan finds nothing inside its limit, the retry fills [attribution: layer gate enforce, breaker OFF]",
+  "covering_layer": "hedge lifecycle, OMS, simulator (thinned hedge book, opt-in)",
+  "count": 5,
   "result": "PASS",
   "detail": "thinned attempts injected 5; hedge IOC full 6, partial 0, zero 5, retries 5; every unfilled remainder retried exactly once for its true residual True; hedged quantity equals maker quantity True; unwind orders 0, alarms 0; residual at end FLAT_NET. The OMS priced the hedge from ITS full view of the book; the venue-truth book had less (no depth is added)",
   "evidence": "scn_2c_zero_then_fill.jsonl"
@@ -329,6 +337,14 @@
  },
  {
   "case": "2c Zero fill on every attempt: retries run out, the residual is unwound at the 15 bps band whatever its size, only a sub-lot remainder is carried",
+  "covering_layer": "hedge lifecycle, OMS unwind, simulator (thinned hedge book, opt-in)",
+  "count": 3,
+  "result": "FAIL",
+  "detail": "hedge IOC zero 3, retries 2, unwind intents 1, unwind orders 1, hedge alarms 0, unwind-exhausted alarms 0; plans whose hedge failed on all attempts and were unwound: [('sig1', 0.087620191459, 0.08, 0.0)] (plan, maker filled, unwind filled, loss against the maker price in bps); residual at end UNHEDGED_OR_CARRIED_RESIDUAL (0.015240382918 SOL carried, below one lot of 0.01; open plans 1); events RESIDUAL_WITHIN_APPROVED_BOUND 1 (the sub-lot remainder only), RESIDUAL_LIMIT_BREACH 224058. Owner 13 Nov: a failed hedge always unwinds (MARKET_BANDED at the touch band) whatever its size; v1_9 sets the silent-carry bound to one lot. Before the change the 0.0876 SOL plan of this case was carried to the end of the day with no action || WHY IT FAILS (owner 13 Nov, the profile's own safety values): the profile's circuit breaker is ON in this run and tripped (runs/scn_2c_*/session_safety_events.jsonl: BREAKER_TRIP, flatten, kill switch), which stops the plans this rule counts. The same case with the layer gate in enforce and the breaker OFF is the attribution row below (it passes): the layer gate itself changed nothing. Reported as a finding, not tuned away",
+  "evidence": "scn_2c_zero_exhausted.jsonl"
+ },
+ {
+  "case": "2c Zero fill on every attempt: retries run out, the residual is unwound at the 15 bps band whatever its size, only a sub-lot remainder is carried [attribution: layer gate enforce, breaker OFF]",
   "covering_layer": "hedge lifecycle, OMS unwind, simulator (thinned hedge book, opt-in)",
   "count": 15,
   "result": "PASS",
@@ -346,9 +362,9 @@
  {
   "case": "2h New-level vs queued fills: every maker fill carries queue_class",
   "covering_layer": "simulator observation rows",
-  "count": 149,
+  "count": 118,
   "result": "PASS",
-  "detail": "maker fills with the field 149 in 20 runs (scn_2c_partial_then_fill, scn_2c_thin_top, scn_2c_zero_exhausted, scn_2c_zero_then_fill, scn_2d_ghost3, scn_2d_ghost30, scn_2e_feed_gap, scn_2f_rate_limit, scn_2j_duplicate_filled, scn_2k_breaker_pause, scn_2k_breaker_trip, scn_2l_maker_outage, scn_2m_p99, scn_2m_p999, scn_2m_processing, scn_2n_size1, scn_2n_size25, scn_2n_size5, scn_H1a, scn_H1b): {'queued': 149}. The class is read from the placement of the same order (new_level: no displayed size at our price when we placed, queued: behind displayed size, unknown: queue not known); it sits on the maker_fill rows of maker_observations.jsonl, an observation-only file, so no existing output changed. Agreement with real fills is a Track C result and is NOT claimed",
+  "detail": "maker fills with the field 118 in 21 runs (scn_2a_quote_withdraw, scn_2c_partial_then_fill, scn_2c_thin_top, scn_2c_zero_exhausted, scn_2c_zero_then_fill, scn_2d_ghost3, scn_2d_ghost30, scn_2e_feed_gap, scn_2f_rate_limit, scn_2j_duplicate_filled, scn_2k_breaker_pause, scn_2k_breaker_trip, scn_2l_maker_outage, scn_2m_p99, scn_2m_p999, scn_2m_processing, scn_2n_size1, scn_2n_size25, scn_2n_size5, scn_H1a, scn_H1b): {'queued': 118}. The class is read from the placement of the same order (new_level: no displayed size at our price when we placed, queued: behind displayed size, unknown: queue not known); it sits on the maker_fill rows of maker_observations.jsonl, an observation-only file, so no existing output changed. Agreement with real fills is a Track C result and is NOT claimed",
   "evidence": "runs/scn_*/maker_observations.jsonl"
  },
  {
@@ -372,7 +388,7 @@
   "covering_layer": "OMS amend lineage",
   "count": null,
   "result": "NOT COVERED",
-  "detail": "OMS level: tests/test_oms_amend.py (11 cases, evidence case7_amend_*.jsonl). No strategy in the arb replay calls request_amend. Owner 13 Nov: to be covered by the MM replays after CR-MQ part 2 (amend on real paths, MAKER_QUOTE plans); recorded here, not claimed",
+  "detail": "OMS level: tests/test_oms_amend.py (11 cases, evidence case7_amend_*.jsonl). No strategy in the arb replay calls request_amend. Owner 13 Nov: to be covered by the MM replays after CR-MQ part 2 (amend on real paths, quote plans: execute_quote, pairing none); recorded here, not claimed",
   "evidence": "see detail"
  }
 ]

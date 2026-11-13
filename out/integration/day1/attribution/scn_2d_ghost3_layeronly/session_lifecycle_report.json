@@ -1,0 +1,743 @@
+{
+ "label": "EXPLORATORY: lifecycle report by regime (definitions: v1_9_TOLERANCES.md section D)",
+ "total": {
+  "quotes": {
+   "matched_entry_spread_bps": {
+    "n": 5,
+    "p50": 4.9778485738461,
+    "min": 4.672130740136214,
+    "max": 5.270301849080161
+   },
+   "lifecycle_net_pnl_usdt": {
+    "n_quotes_with_pnl": 4,
+    "sum": -0.18891374947826522
+   },
+   "label_pnl": "EXPLORATORY, mechanics only: mark = mid, no funding",
+   "quotes_placed": 5,
+   "quotes_filled": 4,
+   "fill_rate": null,
+   "withdrawn": 0,
+   "fills_during_cancel_pending": 0,
+   "cancel_while_submitted": 0,
+   "late_fills_after_cancel": 0,
+   "note": "n < 30: counts only, no rate"
+  },
+  "message_load_per_minute": {
+   "orders": {
+    "n": 5,
+    "p50": 1.0,
+    "p99": 1.96,
+    "max": 2.0
+   },
+   "cancels": {
+    "n": 5,
+    "p50": 0.0,
+    "p99": 0.96,
+    "max": 1.0
+   },
+   "amends": {
+    "n": 5,
+    "p50": 0.0,
+    "p99": 0.0,
+    "max": 0.0
+   }
+  },
+  "residual_exposure": {
+   "unhedged_interval_s": {
+    "n": 4,
+    "p50": 3.0,
+    "p99": 3.2764500832557677,
+    "max": 3.2850000858306885
+   },
+   "oldest_exposure_age_s": 3.2850000858306885
+  },
+  "hedge_completion": {
+   "maker_fills": 5,
+   "fully_hedged": 4,
+   "with_retry_or_split": 1
+  },
+  "adverse_tails_markout_bps": {
+   "1s": {
+    "n": 5,
+    "p5": -3.879929102607277,
+    "p95": 2.684563758390211
+   },
+   "5s": {
+    "n": 5,
+    "p5": -3.083809997513928,
+    "p95": 1.09371116082539
+   },
+   "30s": {
+    "n": 5,
+    "p5": -14.026361601592175,
+    "p95": 17.02778107287168
+   }
+  }
+ },
+ "by_regime": {
+  "volatility": {
+   "high": {
+    "quotes": {
+     "matched_entry_spread_bps": {
+      "n": 4,
+      "p50": 4.826383816546473,
+      "min": 4.672130740136214,
+      "max": 4.982312789596649
+     },
+     "lifecycle_net_pnl_usdt": {
+      "n_quotes_with_pnl": 3,
+      "sum": -0.16177064947826522
+     },
+     "label_pnl": "EXPLORATORY, mechanics only: mark = mid, no funding",
+     "quotes_placed": 4,
+     "quotes_filled": 3,
+     "fill_rate": null,
+     "withdrawn": 0,
+     "fills_during_cancel_pending": 0,
+     "cancel_while_submitted": 0,
+     "late_fills_after_cancel": 0,
+     "note": "n < 30: counts only, no rate"
+    },
+    "message_load_per_minute": {
+     "orders": {
+      "n": 1,
+      "p50": 1.0,
+      "p99": 1.0,
+      "max": 1.0
+     },
+     "cancels": {
+      "n": 1,
+      "p50": 0.0,
+      "p99": 0.0,
+      "max": 0.0
+     },
+     "amends": {
+      "n": 1,
+      "p50": 0.0,
+      "p99": 0.0,
+      "max": 0.0
+     }
+    },
+    "residual_exposure": {
+     "unhedged_interval_s": {
+      "n": 2,
+      "p50": 3.1425000429153442,
+      "p99": 3.2821500849723817,
+      "max": 3.2850000858306885
+     },
+     "oldest_exposure_age_s": 3.2850000858306885
+    },
+    "hedge_completion": {
+     "maker_fills": 2,
+     "fully_hedged": 2,
+     "with_retry_or_split": 1
+    },
+    "adverse_tails_markout_bps": {
+     "1s": {
+      "n": 2,
+      "p5": -4.327356063266967,
+      "p95": -1.6427942993088256
+     },
+     "5s": {
+      "n": 2,
+      "p5": -3.332529116339871,
+      "p95": -0.6470758416244715
+     },
+     "30s": {
+      "n": 2,
+      "p5": -3.182222879298812,
+      "p95": 20.114736196086124
+     }
+    }
+   },
+   "low": {
+    "quotes": {
+     "matched_entry_spread_bps": {
+      "n": 1,
+      "p50": 5.270301849080161,
+      "min": 5.270301849080161,
+      "max": 5.270301849080161
+     },
+     "lifecycle_net_pnl_usdt": {
+      "n_quotes_with_pnl": 1,
+      "sum": -0.0271431
+     },
+     "label_pnl": "EXPLORATORY, mechanics only: mark = mid, no funding",
+     "quotes_placed": 1,
+     "quotes_filled": 1,
+     "fill_rate": null,
+     "withdrawn": 0,
+     "fills_during_cancel_pending": 0,
+     "cancel_while_submitted": 0,
+     "late_fills_after_cancel": 0,
+     "note": "n < 30: counts only, no rate"
+    },
+    "message_load_per_minute": {
+     "orders": {
+      "n": 0
+     },
+     "cancels": {
+      "n": 0
+     },
+     "amends": {
+      "n": 0
+     }
+    },
+    "residual_exposure": {
+     "unhedged_interval_s": {
+      "n": 2,
+      "p50": 2.5782909393310547,
+      "p99": 2.991565818786621,
+      "max": 3.0
+     },
+     "oldest_exposure_age_s": 3.0
+    },
+    "hedge_completion": {
+     "maker_fills": 3,
+     "fully_hedged": 2,
+     "with_retry_or_split": 0
+    },
+    "adverse_tails_markout_bps": {
+     "1s": {
+      "n": 3,
+      "p5": -0.4973639820220923,
+      "p95": 3.0822769077812753
+     },
+     "5s": {
+      "n": 3,
+      "p5": -1.392663658719889,
+      "p95": 1.2925677355208516
+     },
+     "30s": {
+      "n": 3,
+      "p5": -14.822158809180483,
+      "p95": -0.4971414367383
+     }
+    }
+   },
+   "mid": {
+    "quotes": {
+     "matched_entry_spread_bps": {
+      "n": 0
+     },
+     "lifecycle_net_pnl_usdt": {
+      "n_quotes_with_pnl": 0,
+      "sum": null
+     },
+     "label_pnl": "EXPLORATORY, mechanics only: mark = mid, no funding",
+     "quotes_placed": 0,
+     "quotes_filled": 0,
+     "fill_rate": null,
+     "withdrawn": 0,
+     "fills_during_cancel_pending": 0,
+     "cancel_while_submitted": 0,
+     "late_fills_after_cancel": 0,
+     "note": "n < 30: counts only, no rate"
+    },
+    "message_load_per_minute": {
+     "orders": {
+      "n": 4,
+      "p50": 1.0,
+      "p99": 1.9699999999999998,
+      "max": 2.0
+     },
+     "cancels": {
+      "n": 4,
+      "p50": 0.0,
+      "p99": 0.9699999999999998,
+      "max": 1.0
+     },
+     "amends": {
+      "n": 4,
+      "p50": 0.0,
+      "p99": 0.0,
+      "max": 0.0
+     }
+    },
+    "residual_exposure": {
+     "unhedged_interval_s": {
+      "n": 0
+     },
+     "oldest_exposure_age_s": null
+    },
+    "hedge_completion": {
+     "maker_fills": 0,
+     "fully_hedged": 0,
+     "with_retry_or_split": 0
+    },
+    "adverse_tails_markout_bps": {}
+   }
+  },
+  "spread": {
+   "mid": {
+    "quotes": {
+     "matched_entry_spread_bps": {
+      "n": 5,
+      "p50": 4.9778485738461,
+      "min": 4.672130740136214,
+      "max": 5.270301849080161
+     },
+     "lifecycle_net_pnl_usdt": {
+      "n_quotes_with_pnl": 4,
+      "sum": -0.18891374947826522
+     },
+     "label_pnl": "EXPLORATORY, mechanics only: mark = mid, no funding",
+     "quotes_placed": 5,
+     "quotes_filled": 4,
+     "fill_rate": null,
+     "withdrawn": 0,
+     "fills_during_cancel_pending": 0,
+     "cancel_while_submitted": 0,
+     "late_fills_after_cancel": 0,
+     "note": "n < 30: counts only, no rate"
+    },
+    "message_load_per_minute": {
+     "orders": {
+      "n": 5,
+      "p50": 1.0,
+      "p99": 1.96,
+      "max": 2.0
+     },
+     "cancels": {
+      "n": 5,
+      "p50": 0.0,
+      "p99": 0.96,
+      "max": 1.0
+     },
+     "amends": {
+      "n": 5,
+      "p50": 0.0,
+      "p99": 0.0,
+      "max": 0.0
+     }
+    },
+    "residual_exposure": {
+     "unhedged_interval_s": {
+      "n": 4,
+      "p50": 3.0,
+      "p99": 3.2764500832557677,
+      "max": 3.2850000858306885
+     },
+     "oldest_exposure_age_s": 3.2850000858306885
+    },
+    "hedge_completion": {
+     "maker_fills": 5,
+     "fully_hedged": 4,
+     "with_retry_or_split": 1
+    },
+    "adverse_tails_markout_bps": {
+     "1s": {
+      "n": 5,
+      "p5": -3.879929102607277,
+      "p95": 2.684563758390211
+     },
+     "5s": {
+      "n": 5,
+      "p5": -3.083809997513928,
+      "p95": 1.09371116082539
+     },
+     "30s": {
+      "n": 5,
+      "p5": -14.026361601592175,
+      "p95": 17.02778107287168
+     }
+    }
+   }
+  },
+  "liquidity": {
+   "high": {
+    "quotes": {
+     "matched_entry_spread_bps": {
+      "n": 3,
+      "p50": 4.982312789596649,
+      "min": 4.672130740136214,
+      "max": 5.270301849080161
+     },
+     "lifecycle_net_pnl_usdt": {
+      "n_quotes_with_pnl": 2,
+      "sum": -0.024681349478265804
+     },
+     "label_pnl": "EXPLORATORY, mechanics only: mark = mid, no funding",
+     "quotes_placed": 3,
+     "quotes_filled": 2,
+     "fill_rate": null,
+     "withdrawn": 0,
+     "fills_during_cancel_pending": 0,
+     "cancel_while_submitted": 0,
+     "late_fills_after_cancel": 0,
+     "note": "n < 30: counts only, no rate"
+    },
+    "message_load_per_minute": {
+     "orders": {
+      "n": 2,
+      "p50": 1.5,
+      "p99": 1.99,
+      "max": 2.0
+     },
+     "cancels": {
+      "n": 2,
+      "p50": 0.0,
+      "p99": 0.0,
+      "max": 0.0
+     },
+     "amends": {
+      "n": 2,
+      "p50": 0.0,
+      "p99": 0.0,
+      "max": 0.0
+     }
+    },
+    "residual_exposure": {
+     "unhedged_interval_s": {
+      "n": 3,
+      "p50": 3.0,
+      "p99": 3.0,
+      "max": 3.0
+     },
+     "oldest_exposure_age_s": 3.0
+    },
+    "hedge_completion": {
+     "maker_fills": 3,
+     "fully_hedged": 3,
+     "with_retry_or_split": 0
+    },
+    "adverse_tails_markout_bps": {
+     "1s": {
+      "n": 3,
+      "p5": -1.3940256521076206,
+      "p95": 3.0822521805275205
+     },
+     "5s": {
+      "n": 3,
+      "p5": -1.3927379143489762,
+      "p95": 1.2924934798917644
+     },
+     "30s": {
+      "n": 3,
+      "p5": -14.822158809180483,
+      "p95": 19.218396386572927
+     }
+    }
+   },
+   "low": {
+    "quotes": {
+     "matched_entry_spread_bps": {
+      "n": 1,
+      "p50": 4.674919059246845,
+      "min": 4.674919059246845,
+      "max": 4.674919059246845
+     },
+     "lifecycle_net_pnl_usdt": {
+      "n_quotes_with_pnl": 1,
+      "sum": -0.10712409999999828
+     },
+     "label_pnl": "EXPLORATORY, mechanics only: mark = mid, no funding",
+     "quotes_placed": 1,
+     "quotes_filled": 1,
+     "fill_rate": null,
+     "withdrawn": 0,
+     "fills_during_cancel_pending": 0,
+     "cancel_while_submitted": 0,
+     "late_fills_after_cancel": 0,
+     "note": "n < 30: counts only, no rate"
+    },
+    "message_load_per_minute": {
+     "orders": {
+      "n": 0
+     },
+     "cancels": {
+      "n": 0
+     },
+     "amends": {
+      "n": 0
+     }
+    },
+    "residual_exposure": {
+     "unhedged_interval_s": {
+      "n": 1,
+      "p50": 3.2850000858306885,
+      "p99": 3.2850000858306885,
+      "max": 3.2850000858306885
+     },
+     "oldest_exposure_age_s": 3.2850000858306885
+    },
+    "hedge_completion": {
+     "maker_fills": 1,
+     "fully_hedged": 1,
+     "with_retry_or_split": 1
+    },
+    "adverse_tails_markout_bps": {
+     "1s": {
+      "n": 1
+     },
+     "5s": {
+      "n": 1
+     },
+     "30s": {
+      "n": 1
+     }
+    }
+   },
+   "mid": {
+    "quotes": {
+     "matched_entry_spread_bps": {
+      "n": 1,
+      "p50": 4.9778485738461,
+      "min": 4.9778485738461,
+      "max": 4.9778485738461
+     },
+     "lifecycle_net_pnl_usdt": {
+      "n_quotes_with_pnl": 1,
+      "sum": -0.05710830000000114
+     },
+     "label_pnl": "EXPLORATORY, mechanics only: mark = mid, no funding",
+     "quotes_placed": 1,
+     "quotes_filled": 1,
+     "fill_rate": null,
+     "withdrawn": 0,
+     "fills_during_cancel_pending": 0,
+     "cancel_while_submitted": 0,
+     "late_fills_after_cancel": 0,
+     "note": "n < 30: counts only, no rate"
+    },
+    "message_load_per_minute": {
+     "orders": {
+      "n": 3,
+      "p50": 1.0,
+      "p99": 1.0,
+      "max": 1.0
+     },
+     "cancels": {
+      "n": 3,
+      "p50": 0.0,
+      "p99": 0.98,
+      "max": 1.0
+     },
+     "amends": {
+      "n": 3,
+      "p50": 0.0,
+      "p99": 0.0,
+      "max": 0.0
+     }
+    },
+    "residual_exposure": {
+     "unhedged_interval_s": {
+      "n": 0
+     },
+     "oldest_exposure_age_s": null
+    },
+    "hedge_completion": {
+     "maker_fills": 1,
+     "fully_hedged": 0,
+     "with_retry_or_split": 0
+    },
+    "adverse_tails_markout_bps": {
+     "1s": {
+      "n": 1
+     },
+     "5s": {
+      "n": 1
+     },
+     "30s": {
+      "n": 1
+     }
+    }
+   }
+  },
+  "utc_hour": {
+   "11": {
+    "quotes": {
+     "matched_entry_spread_bps": {
+      "n": 1,
+      "p50": 4.672130740136214,
+      "min": 4.672130740136214,
+      "max": 4.672130740136214
+     },
+     "lifecycle_net_pnl_usdt": {
+      "n_quotes_with_pnl": 1,
+      "sum": 0.0024617505217341975
+     },
+     "label_pnl": "EXPLORATORY, mechanics only: mark = mid, no funding",
+     "quotes_placed": 1,
+     "quotes_filled": 1,
+     "fill_rate": null,
+     "withdrawn": 0,
+     "fills_during_cancel_pending": 0,
+     "cancel_while_submitted": 0,
+     "late_fills_after_cancel": 0,
+     "note": "n < 30: counts only, no rate"
+    },
+    "message_load_per_minute": {
+     "orders": {
+      "n": 1,
+      "p50": 1.0,
+      "p99": 1.0,
+      "max": 1.0
+     },
+     "cancels": {
+      "n": 1,
+      "p50": 0.0,
+      "p99": 0.0,
+      "max": 0.0
+     },
+     "amends": {
+      "n": 1,
+      "p50": 0.0,
+      "p99": 0.0,
+      "max": 0.0
+     }
+    },
+    "residual_exposure": {
+     "unhedged_interval_s": {
+      "n": 1,
+      "p50": 2.1565818786621094,
+      "p99": 2.1565818786621094,
+      "max": 2.1565818786621094
+     },
+     "oldest_exposure_age_s": 2.1565818786621094
+    },
+    "hedge_completion": {
+     "maker_fills": 2,
+     "fully_hedged": 1,
+     "with_retry_or_split": 0
+    },
+    "adverse_tails_markout_bps": {
+     "1s": {
+      "n": 2,
+      "p5": -0.29828486204276805,
+      "p95": 3.2811334824768075
+     },
+     "5s": {
+      "n": 2,
+      "p5": -0.39771314939056934,
+      "p95": 1.3919960228685822
+     },
+     "30s": {
+      "n": 2,
+      "p5": -0.4971414367383,
+      "p95": -0.4971414367383
+     }
+    }
+   },
+   "12": {
+    "quotes": {
+     "matched_entry_spread_bps": {
+      "n": 4,
+      "p50": 4.9800806817213745,
+      "min": 4.674919059246845,
+      "max": 5.270301849080161
+     },
+     "lifecycle_net_pnl_usdt": {
+      "n_quotes_with_pnl": 3,
+      "sum": -0.19137549999999942
+     },
+     "label_pnl": "EXPLORATORY, mechanics only: mark = mid, no funding",
+     "quotes_placed": 4,
+     "quotes_filled": 3,
+     "fill_rate": null,
+     "withdrawn": 0,
+     "fills_during_cancel_pending": 0,
+     "cancel_while_submitted": 0,
+     "late_fills_after_cancel": 0,
+     "note": "n < 30: counts only, no rate"
+    },
+    "message_load_per_minute": {
+     "orders": {
+      "n": 4,
+      "p50": 1.0,
+      "p99": 1.9699999999999998,
+      "max": 2.0
+     },
+     "cancels": {
+      "n": 4,
+      "p50": 0.0,
+      "p99": 0.9699999999999998,
+      "max": 1.0
+     },
+     "amends": {
+      "n": 4,
+      "p50": 0.0,
+      "p99": 0.0,
+      "max": 0.0
+     }
+    },
+    "residual_exposure": {
+     "unhedged_interval_s": {
+      "n": 3,
+      "p50": 3.0,
+      "p99": 3.279300084114075,
+      "max": 3.2850000858306885
+     },
+     "oldest_exposure_age_s": 3.2850000858306885
+    },
+    "hedge_completion": {
+     "maker_fills": 3,
+     "fully_hedged": 3,
+     "with_retry_or_split": 1
+    },
+    "adverse_tails_markout_bps": {
+     "1s": {
+      "n": 3,
+      "p5": -4.1782137430470705,
+      "p95": -0.5970150362571552
+     },
+     "5s": {
+      "n": 3,
+      "p5": -3.2827654812245495,
+      "p95": -0.5973122065091497
+     },
+     "30s": {
+      "n": 3,
+      "p5": -15.22009450385534,
+      "p95": 18.82046069189807
+     }
+    }
+   }
+  }
+ },
+ "hedge_chains_by_final_state": {
+  "RECONCILED": 5
+ },
+ "regime_boundaries": {
+  "volatility": [
+   0.0,
+   0.9810173149547168
+  ],
+  "spread": [
+   0.9931966032667136,
+   0.9985520994562999
+  ],
+  "liquidity": [
+   992.5999999999999,
+   1407.4
+  ]
+ },
+ "partition_check": {
+  "volatility": {
+   "quotes": true,
+   "maker_fills": true,
+   "markouts": true,
+   "minutes": true
+  },
+  "spread": {
+   "quotes": true,
+   "maker_fills": true,
+   "markouts": true,
+   "minutes": true
+  },
+  "liquidity": {
+   "quotes": true,
+   "maker_fills": true,
+   "markouts": true,
+   "minutes": true
+  },
+  "utc_hour": {
+   "quotes": true,
+   "maker_fills": true,
+   "markouts": true,
+   "minutes": true
+  }
+ },
+ "partition_ok": true,
+ "min_bucket": 30
+}

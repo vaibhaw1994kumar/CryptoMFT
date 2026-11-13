@@ -13,14 +13,18 @@ def rows(path):
     return [json.loads(l) for l in open(path) if l.strip()]
 
 
-def load(case):
-    d = RUNS / f"scn_{case}"
+ATTR = DAY / "attribution"                       # owner 13 Nov: the same cases with the layer gate in enforce and NO breaker, to show what the breaker (the profile's own value) changed
+VARIANTS = (("", RUNS, ""), (" [attribution: layer gate enforce, breaker OFF]", ATTR, "_layeronly"))
+
+
+def load(case, base=None, sfx=""):
+    d = (base or RUNS) / f"scn_{case}{sfx}"
     if not (d / "session_manifest.json").exists():
         return None
     m = json.loads((d / "session_manifest.json").read_text())
     return {"dir": d, "manifest": m, "orders": rows(d / "session_orders.jsonl"), "fills": rows(d / "session_fills.jsonl"), "signals": rows(d / "session_signals.jsonl"),
             "cov": json.loads((d / "session_ems_path_coverage.json").read_text()), "life": json.loads((d / "session_lifecycle_report.json").read_text()),
-            "pairs": rows(d / "session_pair_economics.jsonl") if (d / "session_pair_economics.jsonl").exists() else [], "trace": CASES / f"scn_{case}.jsonl"}
+            "pairs": rows(d / "session_pair_economics.jsonl") if (d / "session_pair_economics.jsonl").exists() else [], "trace": (d if sfx else CASES) / f"scn_{case}.jsonl"}
 
 
 def hedge_orders(r):
@@ -40,6 +44,8 @@ matrix = []
 
 
 def add(case, layer, count, ok, detail, evidence):
+    if ok is False and case.startswith("2c Zero fill") and "[attribution" not in case:
+        detail += " || WHY IT FAILS (owner 13 Nov, the profile's own safety values): the profile's circuit breaker is ON in this run and tripped (runs/scn_2c_*/session_safety_events.jsonl: BREAKER_TRIP, flatten, kill switch), which stops the plans this rule counts. The same case with the layer gate in enforce and the breaker OFF is the attribution row below (it passes): the layer gate itself changed nothing. Reported as a finding, not tuned away"
     matrix.append({"case": case, "covering_layer": layer, "count": count, "result": "PASS" if ok is True else "FAIL" if ok is False else "NOT COVERED", "detail": detail, "evidence": evidence})
 
 
@@ -167,8 +173,8 @@ for sz in ("1", "5", "25"):
             f"hedge IOC full {full}, partial {part}, zero {zero}, unwind orders {r['cov']['paths']['unwind_orders']}, cap binds on the print {r['cov']['paths']['participation_cap_would_bind']}; size_aware decisions {r['cov']['paths']['hedge_cap_size_aware']} (touch did NOT cover the size in {len(spans)}, abs limit bound in {sum(1 for e in dec if e['abs_limit_binds'])}, fallback {sum(1 for e in dec if e['fallback'])}); hedge price vs the maker quote price (bps, n={len(slip)}; the decision touch itself is in the cap events): "
             + (f"max {max(slip):.2f}" if slip else "none"), str(r["trace"].name))
 
-def safety(case):
-    f = RUNS / f"scn_{case}" / "session_safety_events.jsonl"
+def safety(case, base=None, sfx=""):
+    f = (base or RUNS) / f"scn_{case}{sfx}" / "session_safety_events.jsonl"
     return rows(f) if f.exists() else None
 
 
@@ -224,15 +230,15 @@ if ev is not None:
         "scn_2l_maker_outage.jsonl, runs/scn_2l_maker_outage/session_safety_events.jsonl")
 
 # ---- 2c: partial and zero IOC forced by a thinned hedge-venue book (opt-in, shows less than the capture)
-for case, title in (("2c_zero_then_fill", "2c Zero fill: the first hedge IOC of every plan finds nothing inside its limit, the retry fills"), ("2c_partial_then_fill", "2c Partial fill: the first hedge IOC finds 0.8 of 1.0, only the true residual is retried")):
-    d = RUNS / f"scn_{case}"
+for (case, title), (tag, base, sfx) in [(c, v) for c in (("2c_zero_then_fill", "2c Zero fill: the first hedge IOC of every plan finds nothing inside its limit, the retry fills"), ("2c_partial_then_fill", "2c Partial fill: the first hedge IOC finds 0.8 of 1.0, only the true residual is retried")) for v in VARIANTS]:
+    d = base / f"scn_{case}{sfx}"
     if d.exists():
-        r = load(case)
+        r = load(case, base, sfx)
         retry_ok, balanced, zero, part = hedge_chain_check(r)
         paths = r["cov"]["paths"]
         want = zero if "zero" in case else part
         ok = retry_ok and balanced and want > 0 and paths["unwind_orders"] == 0 and paths["hedge_alarm"] == 0 and r["manifest"]["residual_at_end"]["flag"] == "FLAT_NET" and r["cov"]["checks"]["pass"]
-        add(title, "hedge lifecycle, OMS, simulator (thinned hedge book, opt-in)", want, ok,
+        add(title + tag, "hedge lifecycle, OMS, simulator (thinned hedge book, opt-in)", want, ok,
             f"thinned attempts injected {thin_injected(r)}; hedge IOC full {paths['hedge_ioc_full']}, partial {paths['hedge_ioc_partial']}, zero {paths['hedge_ioc_zero']}, retries {paths['hedge_retry']}; every unfilled remainder retried exactly once for its true residual {retry_ok}; "
             f"hedged quantity equals maker quantity {balanced}; unwind orders {paths['unwind_orders']}, alarms {paths['hedge_alarm']}; residual at end {r['manifest']['residual_at_end']['flag']}. The OMS priced the hedge from ITS full view of the book; the venue-truth book had less (no depth is added)", f"scn_{case}.jsonl")
 LOT = 0.01                                              # the hedge venue's (Binance) SOLUSDT lot: the silent-carry bound of v1_9 (hedge_faults.silent_carry_bound: below_one_lot, owner 13 Nov)
@@ -261,23 +267,25 @@ def plan_unwinds(r):
     return rep
 
 
-d = RUNS / "scn_2c_zero_exhausted"
-if d.exists():
-    r = load("2c_zero_exhausted")
-    paths, ev3 = r["cov"]["paths"], safety("2c_zero_exhausted") or []
-    res, cn = r["manifest"]["residual_at_end"], r["manifest"].get("ledger_event_counts", {})
-    uw = plan_unwinds(r)
-    failed = [x for x in uw if x["hedge_attempts"] >= 3 and x["hedged"] == 0]
-    sub = [x for x in uw if x["unwind_filled"] < x["unwind_qty"]]
-    carried = float(res["total_residual_base"])
-    ok = (paths["hedge_ioc_zero"] > 0 and paths["hedge_retry"] > 0 and bool(failed) and all(x["unwind_filled"] >= x["unwind_qty"] - 1e-9 for x in failed) and carried < LOT
-          and res["open_residual_plans"] == 0 and cn.get("RESIDUAL_WITHIN_APPROVED_BOUND", 0) <= 1 and r["cov"]["checks"]["pass"])
-    losses = [round(x["loss_bps"], 2) for x in failed if x["loss_bps"] is not None]
-    add("2c Zero fill on every attempt: retries run out, the residual is unwound at the 15 bps band whatever its size, only a sub-lot remainder is carried", "hedge lifecycle, OMS unwind, simulator (thinned hedge book, opt-in)", paths["hedge_ioc_zero"], ok,
-        f"hedge IOC zero {paths['hedge_ioc_zero']}, retries {paths['hedge_retry']}, unwind intents {paths['unwind_intents']}, unwind orders {paths['unwind_orders']}, hedge alarms {paths['hedge_alarm']}, unwind-exhausted alarms {paths['unwind_exhausted_alarm']}; "
-        f"plans whose hedge failed on all attempts and were unwound: {[(x['plan'], x['maker_filled'], x['unwind_filled'], x['loss_bps'] if x['loss_bps'] is None else round(x['loss_bps'], 2)) for x in failed]} (plan, maker filled, unwind filled, loss against the maker price in bps); "
-        f"residual at end {res['flag']} ({res['total_residual_base']} SOL carried, below one lot of {LOT}; open plans {res['open_residual_plans']}); events RESIDUAL_WITHIN_APPROVED_BOUND {cn.get('RESIDUAL_WITHIN_APPROVED_BOUND', 0)} (the sub-lot remainder only), RESIDUAL_LIMIT_BREACH {cn.get('RESIDUAL_LIMIT_BREACH', 0)}. "
-        f"Owner 13 Nov: a failed hedge always unwinds (MARKET_BANDED at the touch band) whatever its size; v1_9 sets the silent-carry bound to one lot. Before the change the 0.0876 SOL plan of this case was carried to the end of the day with no action", "scn_2c_zero_exhausted.jsonl")
+for tag, base, sfx in VARIANTS:
+    d = base / f"scn_2c_zero_exhausted{sfx}"
+    if d.exists():
+        r = load("2c_zero_exhausted", base, sfx)
+        paths, ev3 = r["cov"]["paths"], safety("2c_zero_exhausted", base, sfx) or []
+        res, cn = r["manifest"]["residual_at_end"], r["manifest"].get("ledger_event_counts", {})
+        uw = plan_unwinds(r)
+        failed = [x for x in uw if x["hedge_attempts"] >= 3 and x["hedged"] == 0]
+        sub = [x for x in uw if x["unwind_filled"] < x["unwind_qty"]]
+        carried = float(res["total_residual_base"])
+        ok = (paths["hedge_ioc_zero"] > 0 and paths["hedge_retry"] > 0 and bool(failed) and all(x["unwind_filled"] >= x["unwind_qty"] - 1e-9 for x in failed) and carried < LOT
+              and res["open_residual_plans"] == 0 and cn.get("RESIDUAL_WITHIN_APPROVED_BOUND", 0) <= 1 and r["cov"]["checks"]["pass"])
+        losses = [round(x["loss_bps"], 2) for x in failed if x["loss_bps"] is not None]
+        add("2c Zero fill on every attempt: retries run out, the residual is unwound at the 15 bps band whatever its size, only a sub-lot remainder is carried" + tag, "hedge lifecycle, OMS unwind, simulator (thinned hedge book, opt-in)", paths["hedge_ioc_zero"], ok,
+            f"hedge IOC zero {paths['hedge_ioc_zero']}, retries {paths['hedge_retry']}, unwind intents {paths['unwind_intents']}, unwind orders {paths['unwind_orders']}, hedge alarms {paths['hedge_alarm']}, unwind-exhausted alarms {paths['unwind_exhausted_alarm']}; "
+            f"plans whose hedge failed on all attempts and were unwound: {[(x['plan'], x['maker_filled'], x['unwind_filled'], x['loss_bps'] if x['loss_bps'] is None else round(x['loss_bps'], 2)) for x in failed]} (plan, maker filled, unwind filled, loss against the maker price in bps); "
+            f"residual at end {res['flag']} ({res['total_residual_base']} SOL carried, below one lot of {LOT}; open plans {res['open_residual_plans']}); events RESIDUAL_WITHIN_APPROVED_BOUND {cn.get('RESIDUAL_WITHIN_APPROVED_BOUND', 0)} (the sub-lot remainder only), RESIDUAL_LIMIT_BREACH {cn.get('RESIDUAL_LIMIT_BREACH', 0)}. "
+            f"Owner 13 Nov: a failed hedge always unwinds (MARKET_BANDED at the touch band) whatever its size; v1_9 sets the silent-carry bound to one lot. Before the change the 0.0876 SOL plan of this case was carried to the end of the day with no action", "scn_2c_zero_exhausted.jsonl")
+
 
 # ---- 2c extra (owner 13 Nov): only the Binance TOUCH is thin, the hedge is larger than it, the size_aware cap spans levels
 d = RUNS / "scn_2c_thin_top"

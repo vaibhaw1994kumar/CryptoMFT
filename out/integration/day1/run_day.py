@@ -39,7 +39,7 @@ cfg.maker.participation_cap = cap               # E3 (owner 12 Nov): off unless 
 if proc_strategy or proc_risk:
     import dataclasses
     cfg.timing = dataclasses.replace(cfg.timing, processing_ms={k: v for k, v in (("strategy", proc_strategy), ("risk", proc_risk)) if v})
-replay = SessionReplay(cfg, profile, ticks=dated_ticks("2026-10-29"), recorded=True, decompose_markouts=True, mark_from_mid=True, lifecycle_report=boundaries is not None, regime_boundaries=boundaries)
+replay = SessionReplay(cfg, profile, ticks=dated_ticks("2026-10-29"), recorded=True, decompose_markouts=True, mark_from_mid=True, lifecycle_report=boundaries is not None, regime_boundaries=boundaries, profile_safety=(name == "perp_perp_maker_taker_v1_9"))      # owner 13 Nov: v1_9 runs with the profile's own safety values (layer gate enforce, the breaker block)
 events = iter_recorded_events(SESSION)
 if minutes is not None:
     first = next(events)

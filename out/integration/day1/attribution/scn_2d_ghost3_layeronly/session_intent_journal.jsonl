@@ -1,0 +1,43 @@
+{"seq": 0, "event": "intent", "intent_id": "sig1-P1", "role": "primary", "instrument": "SOL-USDT-PERP", "side": "buy", "qty": 1.0, "venues": ["BYBIT"], "worst_price": 100.57, "urgency": "normal", "deadline_ts": null, "tactic_hint": "", "reason": "maker leg", "parent_id": "", "parent_filled_qty": 0.0, "signal_id": 1, "created_ts": 1793272527.9642212}
+{"seq": 1, "event": "state", "intent_id": "sig1-P1", "from": "accepted", "to": "working", "why": "first child sent", "ts": 1793272527.9642212}
+{"seq": 2, "event": "child", "intent_id": "sig1-P1", "order_id": "93f276be-4e55-5026-9def-0499bacda8f6", "tactic": "PASSIVE", "ts": 1793272527.9642212}
+{"seq": 3, "event": "state", "intent_id": "sig1-P1", "from": "working", "to": "partially_done", "why": "fill", "ts": 1793272529.2921681}
+{"seq": 4, "event": "intent", "intent_id": "sig1-H1", "role": "hedge", "instrument": "SOL-USDT-PERP", "side": "sell", "qty": 0.08, "venues": ["BINANCE"], "worst_price": 100.62, "urgency": "urgent", "deadline_ts": null, "tactic_hint": "", "reason": "hedge after maker fill", "parent_id": "sig1-P1", "parent_filled_qty": 0.087620191459, "signal_id": 1, "created_ts": 1793272529.2921681}
+{"seq": 5, "event": "state", "intent_id": "sig1-H1", "from": "accepted", "to": "working", "why": "first child sent", "ts": 1793272529.2921681}
+{"seq": 6, "event": "child", "intent_id": "sig1-H1", "order_id": "e77186a5-df7e-5b28-8764-cfa57733c496", "tactic": "IOC_CAPPED", "ts": 1793272529.2921681}
+{"seq": 7, "event": "state", "intent_id": "sig1-P1", "from": "partially_done", "to": "done", "why": "fill", "ts": 1793272530.1355863}
+{"seq": 8, "event": "intent", "intent_id": "sig1-H2", "role": "hedge", "instrument": "SOL-USDT-PERP", "side": "sell", "qty": 0.92, "venues": ["BINANCE"], "worst_price": 100.62, "urgency": "urgent", "deadline_ts": null, "tactic_hint": "", "reason": "hedge after maker fill", "parent_id": "sig1-P1", "parent_filled_qty": 1.0, "signal_id": 1, "created_ts": 1793272530.1355863}
+{"seq": 9, "event": "state", "intent_id": "sig1-H2", "from": "accepted", "to": "working", "why": "first child sent", "ts": 1793272530.1355863}
+{"seq": 10, "event": "child", "intent_id": "sig1-H2", "order_id": "8992fd08-601f-5f0f-8c4d-0a7a890b4542", "tactic": "IOC_CAPPED", "ts": 1793272530.1355863}
+{"seq": 11, "event": "state", "intent_id": "sig1-H1", "from": "working", "to": "done", "why": "fill", "ts": 1793272532.2921681}
+{"seq": 12, "event": "state", "intent_id": "sig1-H2", "from": "working", "to": "done", "why": "fill", "ts": 1793272532.2921681}
+{"seq": 13, "event": "intent", "intent_id": "sig2-P1", "role": "primary", "instrument": "SOL-USDT-PERP", "side": "buy", "qty": 1.0, "venues": ["BYBIT"], "worst_price": 100.42, "urgency": "normal", "deadline_ts": null, "tactic_hint": "", "reason": "maker leg", "parent_id": "", "parent_filled_qty": 0.0, "signal_id": 2, "created_ts": 1793276998.1376526}
+{"seq": 14, "event": "state", "intent_id": "sig2-P1", "from": "accepted", "to": "working", "why": "first child sent", "ts": 1793276998.1376526}
+{"seq": 15, "event": "child", "intent_id": "sig2-P1", "order_id": "293cd4ed-1525-5b5f-9205-d0e653069e22", "tactic": "PASSIVE", "ts": 1793276998.1376526}
+{"seq": 16, "event": "state", "intent_id": "sig2-P1", "from": "working", "to": "done", "why": "fill", "ts": 1793276999.1046803}
+{"seq": 17, "event": "intent", "intent_id": "sig2-H1", "role": "hedge", "instrument": "SOL-USDT-PERP", "side": "sell", "qty": 1.0, "venues": ["BINANCE"], "worst_price": 100.47, "urgency": "urgent", "deadline_ts": null, "tactic_hint": "", "reason": "hedge after maker fill", "parent_id": "sig2-P1", "parent_filled_qty": 1.0, "signal_id": 2, "created_ts": 1793276999.1046803}
+{"seq": 18, "event": "state", "intent_id": "sig2-H1", "from": "accepted", "to": "working", "why": "first child sent", "ts": 1793276999.1046803}
+{"seq": 19, "event": "child", "intent_id": "sig2-H1", "order_id": "7b88dced-e951-5515-907d-e4d325bf018f", "tactic": "IOC_CAPPED", "ts": 1793276999.1046803}
+{"seq": 20, "event": "state", "intent_id": "sig2-H1", "from": "working", "to": "done", "why": "fill", "ts": 1793277002.1046803}
+{"seq": 21, "event": "intent", "intent_id": "sig3-P1", "role": "primary", "instrument": "SOL-USDT-PERP", "side": "buy", "qty": 1.0, "venues": ["BYBIT"], "worst_price": 100.51, "urgency": "normal", "deadline_ts": null, "tactic_hint": "", "reason": "maker leg", "parent_id": "", "parent_filled_qty": 0.0, "signal_id": 3, "created_ts": 1793277011.0188868}
+{"seq": 22, "event": "state", "intent_id": "sig3-P1", "from": "accepted", "to": "working", "why": "first child sent", "ts": 1793277011.0188868}
+{"seq": 23, "event": "child", "intent_id": "sig3-P1", "order_id": "6b97c1a1-eba8-56ab-842b-eb9a2319d260", "tactic": "PASSIVE", "ts": 1793277011.0188868}
+{"seq": 24, "event": "state", "intent_id": "sig3-P1", "from": "working", "to": "done", "why": "fill", "ts": 1793277011.3296049}
+{"seq": 25, "event": "intent", "intent_id": "sig3-H1", "role": "hedge", "instrument": "SOL-USDT-PERP", "side": "sell", "qty": 1.0, "venues": ["BINANCE"], "worst_price": 100.56, "urgency": "urgent", "deadline_ts": null, "tactic_hint": "", "reason": "hedge after maker fill", "parent_id": "sig3-P1", "parent_filled_qty": 1.0, "signal_id": 3, "created_ts": 1793277011.3296049}
+{"seq": 26, "event": "state", "intent_id": "sig3-H1", "from": "accepted", "to": "working", "why": "first child sent", "ts": 1793277011.3296049}
+{"seq": 27, "event": "child", "intent_id": "sig3-H1", "order_id": "847e5a03-87d7-50a6-a441-472e01d08895", "tactic": "IOC_CAPPED", "ts": 1793277011.3296049}
+{"seq": 28, "event": "retarget", "intent_id": "sig3-H1", "from": 100.49, "to": 100.38, "reason": "retry reprice"}
+{"seq": 29, "event": "child", "intent_id": "sig3-H1", "order_id": "170295eb-c5f7-5c2d-94ac-03bde352199c", "tactic": "IOC_CAPPED", "ts": 1793277014.579605}
+{"seq": 30, "event": "state", "intent_id": "sig3-H1", "from": "working", "to": "done", "why": "fill", "ts": 1793277014.614605}
+{"seq": 31, "event": "intent", "intent_id": "sig4-P1", "role": "primary", "instrument": "SOL-USDT-PERP", "side": "buy", "qty": 1.0, "venues": ["BYBIT"], "worst_price": 100.53, "urgency": "normal", "deadline_ts": null, "tactic_hint": "", "reason": "maker leg", "parent_id": "", "parent_filled_qty": 0.0, "signal_id": 4, "created_ts": 1793277182.4912252}
+{"seq": 32, "event": "state", "intent_id": "sig4-P1", "from": "accepted", "to": "working", "why": "first child sent", "ts": 1793277182.4912252}
+{"seq": 33, "event": "child", "intent_id": "sig4-P1", "order_id": "051c7de3-e105-55ec-80a8-6ffb02e3e857", "tactic": "PASSIVE", "ts": 1793277182.4912252}
+{"seq": 34, "event": "state", "intent_id": "sig4-P1", "from": "working", "to": "done", "why": "fill", "ts": 1793277182.7199168}
+{"seq": 35, "event": "intent", "intent_id": "sig4-H1", "role": "hedge", "instrument": "SOL-USDT-PERP", "side": "sell", "qty": 1.0, "venues": ["BINANCE"], "worst_price": 100.59, "urgency": "urgent", "deadline_ts": null, "tactic_hint": "", "reason": "hedge after maker fill", "parent_id": "sig4-P1", "parent_filled_qty": 1.0, "signal_id": 4, "created_ts": 1793277182.7199168}
+{"seq": 36, "event": "state", "intent_id": "sig4-H1", "from": "accepted", "to": "working", "why": "first child sent", "ts": 1793277182.7199168}
+{"seq": 37, "event": "child", "intent_id": "sig4-H1", "order_id": "11591644-a178-5dbe-a63c-6e79a8fef9c1", "tactic": "IOC_CAPPED", "ts": 1793277182.7199168}
+{"seq": 38, "event": "state", "intent_id": "sig4-H1", "from": "working", "to": "done", "why": "fill", "ts": 1793277185.7199168}
+{"seq": 39, "event": "intent", "intent_id": "sig5-P1", "role": "primary", "instrument": "SOL-USDT-PERP", "side": "buy", "qty": 1.0, "venues": ["BYBIT"], "worst_price": 100.33, "urgency": "normal", "deadline_ts": null, "tactic_hint": "", "reason": "maker leg", "parent_id": "", "parent_filled_qty": 0.0, "signal_id": 5, "created_ts": 1793277226.8861632}
+{"seq": 40, "event": "state", "intent_id": "sig5-P1", "from": "accepted", "to": "working", "why": "first child sent", "ts": 1793277226.8861632}
+{"seq": 41, "event": "child", "intent_id": "sig5-P1", "order_id": "f327b808-de7a-5773-a01c-cef5656914d6", "tactic": "PASSIVE", "ts": 1793277226.8861632}
+{"seq": 42, "event": "state", "intent_id": "sig5-P1", "from": "working", "to": "failed", "why": "plan closed", "ts": 1793277241.9004378}

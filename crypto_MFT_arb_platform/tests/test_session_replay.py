@@ -41,6 +41,32 @@ def stream():
 
 
 @unittest.skipUnless(SLICES.is_dir(), "March slices not available (the profile needs a data root)")
+class ProfileSafetyInTheReplay(unittest.TestCase):
+    """Owner 13 Nov: with profile_safety the replay runs the layer risk gate in the profile's own mode (execution.risk_reservation: enforce) and the profile's breaker block; without it every earlier replay is unchanged."""
+
+    def _replay(self, **kw):
+        profile = load_profile("perp_perp_maker_taker_v1_9")
+        cfg = apply_profile(profile, dataset="mar2024", data_root=str(SLICES), pair="SOLUSDT", start_date="2024-03-11", end_date="2024-03-11", output_dir="/tmp/x_safety")
+        cfg.arb.max_position_base = 1.0
+        return SessionReplay(cfg, profile, stream=stream(), **kw)
+
+    def test_off_by_default_the_replays_own_defaults_stand(self):
+        r = self._replay()
+        self.assertEqual(r.session.layer_risk_mode, "count")
+        self.assertIsNone(r.session.breaker)
+        self.assertEqual(r.safety_from_profile["profile_safety"], False)
+
+    def test_on_the_gate_is_enforce_and_the_breaker_is_the_profiles_block(self):
+        r = self._replay(profile_safety=True)
+        self.assertEqual(r.session.layer_risk_mode, "enforce")
+        self.assertIsNotNone(r.session.breaker)
+        b = r.safety_from_profile["breaker"]
+        self.assertEqual((b["consecutive_failures"], b["net_exposure_s"], b["unknown_order_s"], b["tripped_unwind_retries"]), (3, 5.0, 2.0, 10))
+        self.assertIn("no profile key", r.safety_from_profile["not_set_by_the_profile"])
+        self.assertEqual(self._replay(profile_safety=True, layer_risk_mode="count").session.layer_risk_mode, "count")       # an explicit setting still wins
+
+
+@unittest.skipUnless(SLICES.is_dir(), "March slices not available (the profile needs a data root)")
 class GhostHedgeInTheReplay(unittest.TestCase):
     """Owner 11 Nov: with hedge_fault_injection on, a conditional outage of the hedge venue's gateway at every maker fill, policy ghost: the hedge is held and executed at the reconnect (not rejected). Off by default."""
 

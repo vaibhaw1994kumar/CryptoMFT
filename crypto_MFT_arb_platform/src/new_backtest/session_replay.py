@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import gzip
 import json
+import dataclasses
 from dataclasses import replace
 from decimal import Decimal
 from pathlib import Path
@@ -90,11 +91,28 @@ class SessionReplay:
     """One replay on the session. `stream` is any iterable of `TimedEvent` built with `decimal_numbers=True` (the real feed or a synthetic list); consumed lazily."""
 
     def __init__(self, config, profile: dict, *, stream: Iterable | None = None, ticks: dict[str, float] | None = None, recorded: bool = False,
-                 decompose_markouts: bool = False, mark_from_mid: bool = False, hedge_fault_injection: bool = False, hedge_thin_book: tuple = (), layer_risk_mode: str = "count", reconcile_mode: str = "count", observations: bool = True, layer_route_mode: str = "count",
-                 lifecycle_report: bool = False, regime_boundaries=None, breaker_config=None) -> None:
+                 decompose_markouts: bool = False, mark_from_mid: bool = False, hedge_fault_injection: bool = False, hedge_thin_book: tuple = (), layer_risk_mode: str | None = None, reconcile_mode: str = "count", observations: bool = True, layer_route_mode: str = "count",
+                 lifecycle_report: bool = False, regime_boundaries=None, breaker_config=None, profile_safety: bool = False) -> None:
         if config.runtime != "session":
             raise ValueError("SessionReplay runs the session runtime only")
         self.config, self.profile = config, profile
+        # Safety switches from the PROFILE (owner 13 Nov): with profile_safety the layer risk gate runs in the profile's own mode (execution.risk_reservation, mandatory: enforce) and the circuit breaker is the profile's
+        # `breaker` block, instead of the replay's own defaults (count, no breaker). An explicit layer_risk_mode / breaker_config still wins. Off (the default) = every earlier replay is unchanged.
+        self.safety_from_profile: dict = {"profile_safety": profile_safety}
+        if layer_risk_mode is None:
+            layer_risk_mode = str(((profile.get("execution") or {}).get("risk_reservation")) or "count") if profile_safety else "count"
+            if layer_risk_mode == "off":
+                layer_risk_mode = "count"
+        if profile_safety and breaker_config is None and profile.get("breaker"):
+            from crypto_stat_arb.circuit_breaker import CircuitBreakerConfig
+            b = profile["breaker"]
+            breaker_config = CircuitBreakerConfig(consecutive_failures=b["consecutive_failures"], failure_rate_window_n=b["failure_rate_window_n"], failure_rate_thresh=b["failure_rate_thresh"],
+                                                  trip_on_failed_unwind=b["trip_on_failed_unwind"], net_exposure_s=b["net_exposure_s"], unknown_order_s=b["unknown_order_s"],
+                                                  trip_on_gateway_down=b["trip_on_gateway_down"], heartbeat_timeout_s=b["heartbeat_timeout_s"], tripped_unwind_retries=b["tripped_unwind_retries"],
+                                                  pause_on_gateway_down_when_flat=True)      # a gateway silent while flat PAUSES (resumes by itself); with exposure it TRIPS (manual reset): the replay's setting, not a profile key
+        self.safety_from_profile.update(layer_risk_mode=layer_risk_mode, breaker=None if breaker_config is None else dataclasses.asdict(breaker_config),
+                                        layer_route_mode=layer_route_mode, reconcile_mode=reconcile_mode,
+                                        not_set_by_the_profile="layer_route_mode and reconcile_mode have no profile key (count); risk_gate_mode is off in the session")
         # Decomposed markouts (owner 11 Nov, the 09 Nov note): captured / adverse / M / fee / net per fill and horizon, from the replay's own fills, with the mid BEFORE the event that caused the fill
         # (m(t-)) and the mid in force at each horizon. Observation only; off by default, so no other run changes.
         # Lifecycle report by regime (owner 12 Nov, v1_9_TOLERANCES.md section D): off unless asked; one sample per second of the maker venue's view book (volatility, spread, touch liquidity). regime_boundaries = a dict or the path of the
@@ -706,8 +724,8 @@ class SessionReplay:
                              "labelled fallback for a venue with no exchange mark (replay only; funding is not settled from it)"}}),
                 "sequence_gap_counter_of_the_core_book": "NOT REPORTED: synthetic sequence, gaps NOT_MEASURED",
                 "entry_gates": {"book_age_rule": "core, 500 ms, age from the last message of any kind (owner 8 Nov Q-G1)", "dead_feed_5s": "not a blocking gate; the resubscribe trigger only (Q-G2)", "price_sanity_500bps": "core, kept (Q-G3)",
-                                "time_integrity": "core, host-offset correction on (Q-G4)", "circuit_breaker": "in the core (CircuitBreaker + pre-send risk gate in TradingSession, Track A item 1, off by default); NOT SWITCHED ON in this replay (no breaker_config is passed); old-path trips are in the parity report"}, "feed": self.feed.manifest(), "ticks": self.ticks, "quantity_step": {"values": quantity_steps(), "label": published_rules()["label"], "fetched": published_rules()["fetched"], "sources": {v: r["source"] for v, r in published_rules()["venues"].items()}},
-                "config_notes": self.config_notes, "timing": {"latency_model": None if self.latency_model is None else self.latency_model.report(), "truth_books": dict(self.timing_stats)}, "release_identity": self.config.release_identity,
+                                "time_integrity": "core, host-offset correction on (Q-G4)", "circuit_breaker": ("in the core (CircuitBreaker + pre-send risk gate in TradingSession, Track A item 1, off by default); " + ("ON: the profile's breaker block (profile_safety)" if self.safety_from_profile.get("breaker") else "NOT SWITCHED ON in this replay (no breaker_config is passed)") + "; old-path trips are in the parity report")}, "feed": self.feed.manifest(), "ticks": self.ticks, "quantity_step": {"values": quantity_steps(), "label": published_rules()["label"], "fetched": published_rules()["fetched"], "sources": {v: r["source"] for v, r in published_rules()["venues"].items()}},
+                "config_notes": self.config_notes, "safety_from_profile": self.safety_from_profile, "timing": {"latency_model": None if self.latency_model is None else self.latency_model.report(), "truth_books": dict(self.timing_stats)}, "release_identity": self.config.release_identity,
                 "differences_from_backtester_loop": ["timing is shared (profile timing block through Timelines; venue-truth books built by this driver): the old text 'no timing timelines or venue-truth books' is no longer true (corrected 10 Nov)",
                                                      "STILL MISSING in the session runtime (Phase E): E0 ems/ layer (repricing, tactics, PASSIVE placements, risk gate, pairing, venue selector); E1 maker order lifetime as a timer (the OMS deadline fires only on an event or tick); "
                                                      "E2 the fault presets and the conditional scenarios other than outage_on_fill (hedge-fault injection itself is built and opt-in: hedge_fault_injection=True, ghost and partial hedge included; the manifest key hedge_fault_injection lists what it refuses); E3 participation cap and size sweep; circuit breaker: in the core but not switched on in this replay; the backtester's margin step (the core margin engine replaces it)",
