@@ -486,6 +486,7 @@ REAL_ORDER_REQUIRED: tuple[RealOrderRequirement, ...] = (
     RealOrderRequirement('oms.maker_ack_deadline', (True,), 'a sent PostOnly quote is watched from the send: an unanswered submit is queried, timed out and the kill switch trips (case 2l)'),
     RealOrderRequirement('oms.rate_limits.quote_share', (0.7,), 'new quotes use at most 70% of each rate-limit window (owner 13 Nov; ASSUMED share: no venue data); hedges, unwinds and flattens never wait behind a quote and are never refused by the limiter, cancels are unrestricted'),
     RealOrderRequirement('oms.rate_limits.quote_min_free', (2,), 'a new quote always leaves at least 2 requests of the window free (owner 13 Nov; ASSUMED)'),
+    RealOrderRequirement('oms.account_fee_check', (True,), "at live/paper start-up the account's own SOLUSDT maker/taker rate is read on both venues and the session refuses to start if one differs from the profile's fee_presets or cannot be read (owner 13 Nov; crypto_stat_arb.fees.verify_account_fee_rates, LivePaperSession). The headline VIP 5 / VIP 9 presets are PUBLIC_SCHEDULE_UNVERIFIED: expect a refusal until the presets equal the account's rates"),
     RealOrderRequirement('hedge_faults.silent_carry_bound', ('below_one_lot',), 'a failed hedge always unwinds whatever its size; only a remainder below one hedge-venue lot is carried silently'),
 )
 

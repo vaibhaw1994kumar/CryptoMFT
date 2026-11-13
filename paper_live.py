@@ -29,6 +29,7 @@ from typing import Any, Callable
 
 from .config import load_config
 from .execution import VenueExecutionAdapter
+from .fees import verify_account_fee_rates
 from .instrument_status import InstrumentStatusPoller
 from .live_feed import (
     LiveFeedSettings,
@@ -86,12 +87,21 @@ class LivePaperSession:
         queue_simulation: dict | None = None,
         session_kwargs: dict | None = None,
         strategy_builder: Callable[["LivePaperSession"], list] | None = None,
+        fee_readers: dict[str, Any] | None = None,
+        require_account_fees: bool = False,
     ) -> None:
         self.cfg, _ = load_config(Path(config_path))
         settings = settings or LiveFeedSettings(udp_enabled=False)
         settings = perpetual_feed_settings(self.cfg, settings)
         if set(settings.venues) != set(self.cfg.venues):
             raise ValueError("live paper trading requires every configured venue")
+        # Owner 13 Nov (edge calibration item 2): a session that trades an account reads that account's own SOLUSDT maker/taker rate on every venue before anything starts and refuses to start if one differs from the rate
+        # the profile books (or cannot be read). Real venue adapters are the readers by default; a paper session with credentials passes `fee_readers`; `require_account_fees` (the profile's oms.account_fee_check)
+        # makes a missing reader a refusal too. A purely simulated session with none of these has no account to read and starts as before.
+        readers = fee_readers if fee_readers is not None else (adapters if (adapters and execution_mode != ExecutionMode.INTERNAL_PAPER) else None)
+        self.account_fee_check: list[dict] | None = None
+        if require_account_fees or readers is not None:
+            self.account_fee_check = verify_account_fee_rates(self.cfg.instruments.fee_schedule, self.cfg.instrument_id, readers or {})
         self.clock_ns = clock_ns
         self.service = LiveOrderBookService(
             Path(config_path), Path(output_dir), session_id, settings,

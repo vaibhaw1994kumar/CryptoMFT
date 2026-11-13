@@ -80,6 +80,10 @@ class ArbConfig:
     # executable price for the quote's size (VWAP over the depth needed); below the entry threshold minus the hysteresis it is withdrawn (cancelled). Withdrawal only: no repricing (S0 stays off).
     quote_withdraw: bool = False
     quote_withdraw_hysteresis_bps: float = 0.5   # ASSUMED
+    # Entry hedge price (owner 13 Nov, edge calibration item 1; default "touch" = every profile up to v1_8 unchanged, "vwap" set by v1_9): "vwap" prices the hedge at the VWAP the hedge venue's book gives for the
+    # size the quote will really have (the same walk quote_validity uses, one helper), in the quote price AND the entry edge, so entry and quote_validity give the same net edge for the same book, price and size.
+    # expected_hedge_slippage_bps then stays 0 by design: the depth cost is already in the price.
+    entry_hedge_price: str = "touch"
 
     # Gates
     max_book_age_s: float = 0.50
@@ -171,7 +175,14 @@ class ArbConfig:
     adverse_horizon_s: float = 1.0               # the table's horizon read as the hedge move in the quote price and the entry rule: the one closest to the hedge arrival delay (v1_6: 0.05 s)
     adverse_requote_horizon_s: float | None = None   # the horizon the repricing rule (S0 `requote_target`) reads; None = the same as adverse_horizon_s (v1_6: 1 s, the markout horizon)
     expected_hedge_slippage_bps: float = 0.0     # hedge VWAP beyond the touch for the clip size
-    funding_holding_bps: float = 0.0             # expected funding / holding cost of the hedged pair until it is closed
+    funding_holding_bps: float = 0.0             # expected funding / holding cost of the hedged pair until it is closed (a constant; the live term below is added to it)
+    # Expected funding cost for the expected holding time (owner 13 Nov, edge calibration item 3). OFF by default (0 = the term is exactly the constant above, bit-identical). With funding_expected_holding_s > 0 the term is
+    # holding_s x (funding rate per second of the venue we are LONG on - that of the venue we are SHORT on) x 1e4 bps, from the latest predicted rates the derivative stream gave (`observe_funding_rate`); a long pays a positive rate.
+    # funding_credit: "floor_zero" (ASSUMED, conservative: a credit never raises the edge) | "allow" (a credit lowers the cost). A missing or stale rate adds 0 and is COUNTED (funding_term_unavailable).
+    # The holding time is an owner value (no basis in the data yet: the strategy has no exit for an open pair), so there is no default. The stop-quoting window before a settlement is a separate rule and is NOT BUILT.
+    funding_expected_holding_s: float = 0.0
+    funding_credit: str = "floor_zero"
+    funding_rate_max_age_s: float = 600.0        # ASSUMED: a predicted rate older than this is not used
     # PLACEHOLDER — NOT MEASURED. p_fail = 0.07 is the hedge-failure study's break-even figure, an assumed value. A replay with no
     # injected failures cannot measure a production hedge-failure rate: the zero failures seen in the Jan-2022 replays are only the
     # simulator's own depth misses and say nothing about rejects, outages or disconnects. Sensitivity (0.02 / 0.05 / 0.07 / 0.10)
@@ -216,6 +227,14 @@ class ArbConfig:
 
     def __post_init__(self) -> None:
         validate_maker_lifetime(self.maker_max_age_s)
+        if self.entry_hedge_price not in ("touch", "vwap"):
+            raise ValueError(f"arb.entry_hedge_price must be 'touch' or 'vwap', got {self.entry_hedge_price!r}")
+        if self.funding_credit not in ("floor_zero", "allow"):
+            raise ValueError(f"arb.funding_credit must be 'floor_zero' or 'allow', got {self.funding_credit!r}")
+        if self.funding_expected_holding_s < 0 or self.funding_rate_max_age_s <= 0:
+            raise ValueError("arb.funding_expected_holding_s must be >= 0 and funding_rate_max_age_s > 0")
+        if self.entry_hedge_price == "vwap" and self.profile == "legacy_v0":
+            raise ValueError("arb.entry_hedge_price 'vwap' needs a non-legacy profile (legacy_v0 stays byte-identical)")
 
 
 @dataclass
@@ -355,6 +374,7 @@ class CrossVenueArbStrategy:
         self.fill_model_v1 = fill_model_v1
 
         self.clip_binding: dict[str, int] = {"depth": 0, "inventory": 0, "clip": 0}
+        self._funding_rates: dict[str, tuple[float, float, float]] = {}       # venue -> (predicted rate per interval, interval seconds, as-of time); fed by observe_funding_rate
         self.rejects: dict[str, int] = {
             "not_ready": 0, "stale": 0, "crossed": 0, "wide_spread": 0,
             "toxic": 0, "no_edge": 0, "stale_touch": 0, "no_depth": 0,
@@ -422,25 +442,26 @@ class CrossVenueArbStrategy:
         return table.expected_move_reaching_bps(side, quote_depth_ticks=depth, vol_bps=self._adverse_features.vol_bps(taker_venue, taker_book.mid), flow=flow,
                                                 spread_bps=maker_book.spread_bps if maker_book.ready else None, horizon_s=cfg.adverse_horizon_s if horizon_s is None else horizon_s)
 
-    def _quote_limit(self, side: str, hedge_px: float, fee_bps: float, move_bps: float | None = None) -> float:
+    def _quote_limit(self, side: str, hedge_px: float, fee_bps: float, move_bps: float | None = None, funding_bps: float | None = None) -> float:
         """The most a passive bid may rest at / the least a passive ask may rest at, from the hedge-venue price `hedge_px` (the one place this is computed:
         first placement and repricing both call it).
         legacy_v0: the naive edge. Other profiles: the quote is built from the EXPECTED hedge price (touch moved by the conditional hedge-move estimate) less
         fees, edge, buffer, expected slippage, funding/holding and p_fail x loss_fail. The required edge is measured against the price we PAY (the hedge)."""
         cfg = self.config
         required_bps = fee_bps + cfg.min_net_edge_bps + cfg.safety_buffer_bps
+        funding = cfg.funding_holding_bps if funding_bps is None else funding_bps
         if move_bps is None:
             move_bps = cfg.expected_hedge_move_bps_bid if side == "bid" else cfg.expected_hedge_move_bps_ask
         if side == "bid":
             px = hedge_px * (1.0 - required_bps / 10_000.0)
             if cfg.profile != "legacy_v0":
-                extra_bps = cfg.expected_hedge_slippage_bps + cfg.funding_holding_bps + cfg.p_fail * cfg.loss_fail_bps
+                extra_bps = cfg.expected_hedge_slippage_bps + funding + cfg.p_fail * cfg.loss_fail_bps
                 expected_hedge = hedge_px * (1.0 + move_bps / 10_000.0)
                 px = expected_hedge * (1.0 - (required_bps + extra_bps) / 10_000.0)
             return px
         px = hedge_px / (1.0 - required_bps / 10_000.0)
         if cfg.profile != "legacy_v0":
-            extra_bps = cfg.expected_hedge_slippage_bps + cfg.funding_holding_bps + cfg.p_fail * cfg.loss_fail_bps
+            extra_bps = cfg.expected_hedge_slippage_bps + funding + cfg.p_fail * cfg.loss_fail_bps
             expected_hedge = hedge_px * (1.0 - move_bps / 10_000.0)
             px = expected_hedge / (1.0 - (required_bps + extra_bps) / 10_000.0)
         return px
@@ -463,7 +484,8 @@ class CrossVenueArbStrategy:
             return None, "stale_hedge_touch"
         fee_bps = maker_fees.maker_bps + taker_fees.taker_bps
         rq_h = cfg.adverse_requote_horizon_s                                 # the repricing rule reads its own horizon (None: the entry rule's)
-        px = self._quote_limit("bid" if bid else "ask", hedge_px, fee_bps, self._hedge_move_bps("bid" if bid else "ask", maker_venue, taker_venue, books, None, rq_h))
+        funding_bps = self._funding_holding_bps(maker_venue, taker_venue, "bid" if bid else "ask", now)
+        px = self._quote_limit("bid" if bid else "ask", hedge_px, fee_bps, self._hedge_move_bps("bid" if bid else "ask", maker_venue, taker_venue, books, None, rq_h), funding_bps)
         if cfg.round_quotes_to_tick:
             px = self._quote_to_tick(maker_venue, px, "bid" if bid else "ask")
             tick = cfg.venue_ticks[maker_venue]
@@ -477,7 +499,7 @@ class CrossVenueArbStrategy:
         er = edge_mod.maker_taker_expected_edge_bps(
             px, "bid" if bid else "ask", taker_book, qty, maker_fees.maker_bps, taker_fees.taker_bps,
             expected_hedge_move_bps=self._hedge_move_bps("bid" if bid else "ask", maker_venue, taker_venue, books, px, rq_h),
-            expected_hedge_slippage_bps=cfg.expected_hedge_slippage_bps, funding_holding_bps=cfg.funding_holding_bps, p_fail=cfg.p_fail, loss_fail_bps=cfg.loss_fail_bps)
+            expected_hedge_slippage_bps=cfg.expected_hedge_slippage_bps, funding_holding_bps=funding_bps, p_fail=cfg.p_fail, loss_fail_bps=cfg.loss_fail_bps)
         if er.net_bps - cfg.safety_buffer_bps < cfg.min_net_edge_bps:
             return None, "no_edge"
         return px, "ok"
@@ -499,20 +521,63 @@ class CrossVenueArbStrategy:
             return True, None, "no_hedge_price"
         if taker_book.touch_age_s(hedge_side, now) > cfg.max_touch_age_s:
             return True, None, "stale_hedge_touch"
-        walk = taker_book.walk(hedge_side, qty)
-        if walk.exhausted or walk.filled_qty + 1e-12 < qty or walk.vwap <= 0:
+        vwap_book = self._hedge_vwap_view(taker_book, hedge_side, qty)
+        if vwap_book is None:
             return True, None, "hedge_depth_unknown"
-        vwap_book = _VwapTouch(walk.vwap)
         er = edge_mod.maker_taker_expected_edge_bps(
             price, key, vwap_book, qty, maker_fees.maker_bps, taker_fees.taker_bps,
             expected_hedge_move_bps=self._hedge_move_bps(key, maker_venue, taker_venue, books, price, None),
-            expected_hedge_slippage_bps=cfg.expected_hedge_slippage_bps, funding_holding_bps=cfg.funding_holding_bps, p_fail=cfg.p_fail, loss_fail_bps=cfg.loss_fail_bps)
+            expected_hedge_slippage_bps=cfg.expected_hedge_slippage_bps, funding_holding_bps=self._funding_holding_bps(maker_venue, taker_venue, key, now), p_fail=cfg.p_fail, loss_fail_bps=cfg.loss_fail_bps)
         if er.net_bps is None:
             return True, None, "no_hedge_price"
         net = er.net_bps - cfg.safety_buffer_bps
         if net < cfg.min_net_edge_bps - cfg.quote_withdraw_hysteresis_bps:
             return False, net, "edge_below_threshold"
         return True, net, "ok"
+
+    def observe_funding_rate(self, venue: str, rate: float, interval_s: float, ts: float) -> None:
+        """The latest PREDICTED funding rate of `venue` (a fraction per settlement interval of `interval_s` seconds) from the derivative stream, as of `ts`. Never realised funding."""
+        if interval_s > 0:
+            self._funding_rates[venue] = (float(rate), float(interval_s), float(ts))
+
+    def _funding_holding_bps(self, maker_venue: str, taker_venue: str, side: str, now: float) -> float:
+        """The funding / holding deduction of the edge in bps: the configured constant, plus (only when funding_expected_holding_s > 0) the expected funding cost of holding the pair for that time. `side` "bid": we buy
+        (LONG) on the maker venue and hedge short on the taker venue; "ask": the reverse. Cost = holding_s x (rate per second of the long venue - that of the short venue) x 1e4; a positive value is a cost. A missing or
+        stale rate adds 0 and is counted (funding_term_unavailable); funding_credit floor_zero never lets a credit raise the edge. Default settings return the constant exactly."""
+        cfg = self.config
+        if cfg.funding_expected_holding_s <= 0:
+            return cfg.funding_holding_bps
+        long_v, short_v = (maker_venue, taker_venue) if side == "bid" else (taker_venue, maker_venue)
+        rates = []
+        for venue in (long_v, short_v):
+            got = self._funding_rates.get(venue)
+            if got is None or now - got[2] > cfg.funding_rate_max_age_s:
+                self.rejects["funding_term_unavailable"] = self.rejects.get("funding_term_unavailable", 0) + 1
+                return cfg.funding_holding_bps
+            rates.append(got[0] / got[1])
+        cost = cfg.funding_expected_holding_s * (rates[0] - rates[1]) * 10_000.0
+        if cost < 0 and cfg.funding_credit == "floor_zero":
+            cost = 0.0
+        return cfg.funding_holding_bps + cost
+
+    @staticmethod
+    def _hedge_vwap_view(taker_book, side: str, qty: float):
+        """THE walk that prices a hedge for `qty` on the hedge venue's book (`side` "bid": the hedge sells into the bids; "ask": it buys from the asks): a one-price stand-in carrying the VWAP, or None when the book cannot
+        fill `qty` (or `qty` is not positive). Entry (entry_hedge_price "vwap") and quote_validity both call it, so they cannot disagree about the hedge price."""
+        if qty <= 0:
+            return None
+        walk = taker_book.walk(side, qty)
+        if walk.exhausted or walk.filled_qty + 1e-12 < qty or walk.vwap <= 0:
+            return None
+        return _VwapTouch(walk.vwap)
+
+    def _entry_quote_qty(self, side: str, price: float, taker_book, hedge_px: float, maker_venue: str, taker_venue: str, inventory, pending) -> float:
+        """The size a signal at `price` will have: min(tradeable hedge depth, inventory room, max clip), the formula the signal itself uses below. 0 when a limit leaves nothing (the signal then fails its own later
+        checks, so the edge is measured at the clip size just as before)."""
+        clip = self._max_clip(price)
+        depth = self._tradeable_depth(taker_book, side, hedge_px)
+        room = self._inventory_room(maker_venue, taker_venue, inventory, pending) if side == "bid" else self._inventory_room(taker_venue, maker_venue, inventory, pending)
+        return clip if (depth <= 0 or room <= 0) else min(depth, room, clip)
 
     def _quote_to_tick(self, venue: str, price: float, side: str) -> float:
         """The quote on the venue's price grid: bids round down, asks up (1e-9 of a tick of float slack)."""
@@ -793,7 +858,16 @@ class CrossVenueArbStrategy:
             return None
 
         fee_bps = maker_fees.maker_bps + taker_fees.taker_bps
-        max_bid = self._quote_limit("bid", hedge_px, fee_bps, self._hedge_move_bps("bid", maker_venue, taker_venue, books))
+        vwap_entry = cfg.profile != "legacy_v0" and cfg.entry_hedge_price == "vwap"      # owner 13 Nov: the hedge is priced at the VWAP for the quote's size (quote price and edge), not at the touch
+        price_px = hedge_px
+        if vwap_entry:
+            est_view = self._hedge_vwap_view(taker_book, "bid", self._entry_quote_qty("bid", hedge_px, taker_book, hedge_px, maker_venue, taker_venue, inventory, pending))
+            if est_view is None:
+                self.rejects["no_depth"] += 1
+                return None
+            price_px = est_view.best_bid
+        funding_bps = self._funding_holding_bps(maker_venue, taker_venue, "bid", now)
+        max_bid = self._quote_limit("bid", price_px, fee_bps, self._hedge_move_bps("bid", maker_venue, taker_venue, books), funding_bps)
 
         # Must be a real improvement on the maker venue's book, and never cross it.
         touch_bid, touch_ask = maker_book.best_bid, maker_book.best_ask
@@ -820,10 +894,17 @@ class CrossVenueArbStrategy:
         edge_ref = "maker_price"
         if cfg.profile != "legacy_v0":
             # perp_perp_maker_taker_v1: the gate uses the conditional expected edge; the naive one is logged beside it.
+            edge_book, edge_qty = taker_book, self._max_clip(max_bid)
+            if vwap_entry:
+                edge_qty = self._entry_quote_qty("bid", max_bid, taker_book, hedge_px, maker_venue, taker_venue, inventory, pending)       # the size the signal will have, walked once: the same walk quote_validity uses
+                edge_book = self._hedge_vwap_view(taker_book, "bid", edge_qty)
+                if edge_book is None:
+                    self.rejects["no_depth"] += 1
+                    return None
             er = edge_mod.maker_taker_expected_edge_bps(
-                max_bid, "bid", taker_book, self._max_clip(max_bid), maker_fees.maker_bps, taker_fees.taker_bps,
+                max_bid, "bid", edge_book, edge_qty, maker_fees.maker_bps, taker_fees.taker_bps,
                 expected_hedge_move_bps=self._hedge_move_bps("bid", maker_venue, taker_venue, books, max_bid), expected_hedge_slippage_bps=cfg.expected_hedge_slippage_bps,
-                funding_holding_bps=cfg.funding_holding_bps, p_fail=cfg.p_fail, loss_fail_bps=cfg.loss_fail_bps)
+                funding_holding_bps=funding_bps, p_fail=cfg.p_fail, loss_fail_bps=cfg.loss_fail_bps)
             naive_bps, cond_bps, edge_ref = er.naive_bps, er.net_bps - cfg.safety_buffer_bps, er.ref_name
             net_bps = cond_bps
         self.best_edge_seen_bps = max(self.best_edge_seen_bps, net_bps)
@@ -933,7 +1014,16 @@ class CrossVenueArbStrategy:
             return None
 
         fee_bps = maker_fees.maker_bps + taker_fees.taker_bps
-        min_ask = self._quote_limit("ask", hedge_px, fee_bps, self._hedge_move_bps("ask", maker_venue, taker_venue, books))
+        vwap_entry = cfg.profile != "legacy_v0" and cfg.entry_hedge_price == "vwap"      # owner 13 Nov: see the bid path
+        price_px = hedge_px
+        if vwap_entry:
+            est_view = self._hedge_vwap_view(taker_book, "ask", self._entry_quote_qty("ask", hedge_px, taker_book, hedge_px, maker_venue, taker_venue, inventory, pending))
+            if est_view is None:
+                self.rejects["no_depth"] += 1
+                return None
+            price_px = est_view.best_ask
+        funding_bps = self._funding_holding_bps(maker_venue, taker_venue, "ask", now)
+        min_ask = self._quote_limit("ask", price_px, fee_bps, self._hedge_move_bps("ask", maker_venue, taker_venue, books), funding_bps)
 
         touch_bid, touch_ask = maker_book.best_bid, maker_book.best_ask
         joins_touch = False
@@ -958,10 +1048,17 @@ class CrossVenueArbStrategy:
         naive_bps = cond_bps = None
         edge_ref = "hedge_price"
         if cfg.profile != "legacy_v0":
+            edge_book, edge_qty = taker_book, self._max_clip(min_ask)
+            if vwap_entry:
+                edge_qty = self._entry_quote_qty("ask", min_ask, taker_book, hedge_px, maker_venue, taker_venue, inventory, pending)
+                edge_book = self._hedge_vwap_view(taker_book, "ask", edge_qty)
+                if edge_book is None:
+                    self.rejects["no_depth"] += 1
+                    return None
             er = edge_mod.maker_taker_expected_edge_bps(
-                min_ask, "ask", taker_book, self._max_clip(min_ask), maker_fees.maker_bps, taker_fees.taker_bps,
+                min_ask, "ask", edge_book, edge_qty, maker_fees.maker_bps, taker_fees.taker_bps,
                 expected_hedge_move_bps=self._hedge_move_bps("ask", maker_venue, taker_venue, books, min_ask), expected_hedge_slippage_bps=cfg.expected_hedge_slippage_bps,
-                funding_holding_bps=cfg.funding_holding_bps, p_fail=cfg.p_fail, loss_fail_bps=cfg.loss_fail_bps)
+                funding_holding_bps=funding_bps, p_fail=cfg.p_fail, loss_fail_bps=cfg.loss_fail_bps)
             naive_bps, cond_bps, edge_ref = er.naive_bps, er.net_bps - cfg.safety_buffer_bps, er.ref_name
             net_bps = cond_bps
         self.best_edge_seen_bps = max(self.best_edge_seen_bps, net_bps)
@@ -1170,6 +1267,17 @@ class ArbSessionStrategy:
         return out
 
     # -- the session's call -------------------------------------------------------------------------------------------------
+
+    def on_derivative(self, ticker) -> None:
+        """The session routes every derivative tick here (TradingSession.on_derivative): the predicted funding rate of a venue feeds the strategy's expected funding term (arb.funding_expected_holding_s; off by default,
+        then nothing is read). The interval is the tick's own (hours), else 8 h; the venue maps from the core name to the feed name."""
+        if ticker.funding_rate is None or self.strategy.config.funding_expected_holding_s <= 0:
+            return
+        feed = next((f for f, core in (self.venue_names or {}).items() if core == ticker.venue), None)
+        if feed is None:
+            return
+        hours = float(ticker.funding_interval_hours) if ticker.funding_interval_hours else 8.0
+        self.strategy.observe_funding_rate(feed, float(ticker.funding_rate), hours * 3600.0, ticker.receive_ts_ns / 1_000_000_000)
 
     def evaluate(self, books: dict, now_ns: int) -> Opportunity | None:
         now_s = now_ns / 1_000_000_000          # int / int is correctly rounded; / 1e9 is not at today's epoch

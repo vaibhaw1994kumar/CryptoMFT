@@ -1389,6 +1389,10 @@ class TradingSession:
     def on_derivative(self, ticker) -> None:
         """Venue mark/index/funding (derivatives stream): the exchange mark for
         settlements and the predicted rate for funding forecasts, never realised funding."""
+        for strategy in self.strategies:                  # owner 13 Nov: a strategy that wants the funding stream (the arb's expected funding term) gets every tick; one without the hook is never called
+            hook = getattr(strategy, "on_derivative", None)
+            if hook is not None:
+                hook(ticker)
         if ticker.mark_price is not None:
             self.exchange_marks[(ticker.venue, ticker.instrument_id)] = (ticker.receive_ts_ns, Decimal(ticker.mark_price))      # the margin check prefers a fresh exchange mark to a book mid (see _margin_marks)
         if not self.funding.configured:

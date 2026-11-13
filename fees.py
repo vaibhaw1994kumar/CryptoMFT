@@ -205,3 +205,42 @@ def tier_rows(tiers: dict[str, str], instrument_id: str) -> list[dict[str, Any]]
 
 def schedule_for(tiers: dict[str, str], instrument_id: str) -> "FeeSchedule":
     return FeeSchedule.from_config(tier_rows(tiers, instrument_id))
+
+
+class AccountFeeMismatch(RuntimeError):
+    """The account's own maker/taker rate differs from the rate the profile books, or could not be read (owner 13 Nov: a live or paper session then refuses to start)."""
+
+
+def verify_account_fee_rates(schedule: "FeeSchedule", instrument_id: str, readers: dict[str, Any], *, at_ns: int | None = None) -> list[dict[str, Any]]:
+    """Owner 13 Nov (edge calibration item 2): at live/paper start-up read the account's actual maker/taker rates for the instrument on every venue the schedule covers and compare them, exactly, with the rates the
+    profile books (`raw_rate_bps`, before the conservative policy). `readers` maps a venue name of the schedule to an object with `account_fee_rates(instrument_id) -> (maker_fraction, taker_fraction)`, the venue's own
+    fractions (0.0002 = 2 bps); the comparison is in Decimal bps, never float. Returns one row per venue/side; raises `AccountFeeMismatch` listing every difference, every venue with no reader, and every read that failed
+    (fail closed: a rate that cannot be read is not a rate that matches). Read-only; the rates are the account's own, so they go to the start-up error and the report, never into a request."""
+    rows: list[dict[str, Any]] = []
+    problems: list[str] = []
+    venues = sorted({venue for (venue, _inst) in schedule._rules})
+    for venue in venues:
+        want_maker = schedule.raw_rate_bps(venue, instrument_id, Liquidity.MAKER, at_ns)
+        want_taker = schedule.raw_rate_bps(venue, instrument_id, Liquidity.TAKER, at_ns)
+        if want_maker is None or want_taker is None:
+            continue
+        reader = readers.get(venue)
+        if reader is None:
+            problems.append(f"{venue}: no account fee reader (the account's rates are not read, so they are not verified)")
+            continue
+        try:
+            maker_fraction, taker_fraction = reader.account_fee_rates(instrument_id)
+            got_maker, got_taker = Decimal(str(maker_fraction)) * 10_000, Decimal(str(taker_fraction)) * 10_000
+        except Exception as exc:           # any failure to read or parse: the check fails closed
+            problems.append(f"{venue}: the account's fee rates could not be read ({type(exc).__name__}: {exc})")
+            continue
+        for liquidity, want, got in (("MAKER", want_maker, got_maker), ("TAKER", want_taker, got_taker)):
+            ok = want == got
+            rows.append({"venue": venue, "instrument_id": instrument_id, "liquidity": liquidity, "profile_bps": str(want), "account_bps": str(got), "equal": ok})
+            if not ok:
+                problems.append(f"{venue} {liquidity}: profile books {want} bps, the account's rate is {got} bps")
+    if not venues:
+        problems.append("the fee schedule has no venue to verify")
+    if problems:
+        raise AccountFeeMismatch("account fee rates differ from the profile's fee_presets or are unverified: " + "; ".join(problems))
+    return rows

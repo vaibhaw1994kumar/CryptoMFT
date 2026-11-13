@@ -465,6 +465,7 @@ class CredentialedTestnetTransport:
             "QUERY": CredentialPermission.READ_ACCOUNT,
             "VERIFY_ACCOUNT": CredentialPermission.READ_ACCOUNT,
             "ACCOUNT_SNAPSHOT": CredentialPermission.READ_ACCOUNT,        # owner 13 Nov: a restart's account read needs the read permission, never the trade one
+            "ACCOUNT_FEE_RATE": CredentialPermission.READ_ACCOUNT,        # owner 13 Nov: the start-up fee-rate read is a read of the account, never a trade
         }.get(str(request.get("action")), CredentialPermission.TRADE)
         return self.broker.inject(
             self.credential_id, actor=self.actor, venue=self.venue,

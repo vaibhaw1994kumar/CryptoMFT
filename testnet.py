@@ -179,6 +179,8 @@ class VenueTestnetTransport:
             raise ValueError(f"no {self.venue} symbol for {request['instrument_id']}") from exc
         if action == "ACCOUNT_SNAPSHOT":
             return (self.account_snapshot(request, key, secret_bytes),)
+        if action == "ACCOUNT_FEE_RATE":
+            return (self.account_fee_rate(request, symbol, key, secret_bytes),)
         if action == "VERIFY_ACCOUNT":
             return self.verify_account(request, symbol, key, secret_bytes)
         if action in {"SUBMIT", "REPLACE"}:
@@ -209,6 +211,9 @@ class VenueTestnetTransport:
 
     def account_snapshot(self, request, key, secret) -> dict[str, Any]:  # pragma: no cover - spot has none
         raise ValueError(f"account_snapshot is built for the perpetual transports only, not {type(self).__name__}")
+
+    def account_fee_rate(self, request, symbol, key, secret) -> dict[str, Any]:  # pragma: no cover - perpetual transports only
+        raise ValueError(f"account_fee_rate is built for the perpetual transports only, not {type(self).__name__}")
 
     def _snapshot_windows(self, since_ms: int, now_ms: int) -> list[tuple[int, int]]:
         if since_ms > now_ms:
@@ -588,6 +593,16 @@ class BinanceFuturesTestnetTransport(BinanceSpotTestnetTransport):
                 raise ConnectionError("binance futures userTrades paging did not end")
         return seen
 
+    FEE_RATE_PATH = "/fapi/v1/commissionRate"      # UNVERIFIED against the venue's docs in this session (the docs page was truncated before the section); confirmed in the testnet drill. Fails closed on any other shape.
+
+    def account_fee_rate(self, request, symbol, key, secret) -> dict[str, Any]:
+        """The account's own maker/taker commission rate for the symbol (a signed GET, read-only): fractions as text (0.0002 = 2 bps). Any status or shape other than the expected one raises."""
+        status, row = self._signed("GET", self.FEE_RATE_PATH, {"symbol": symbol}, key, secret)
+        if status != 200 or not isinstance(row, dict) or str(row.get("symbol")) != symbol or "makerCommissionRate" not in row or "takerCommissionRate" not in row:
+            message = row.get("msg") if isinstance(row, dict) else row
+            raise ConnectionError(f"binance futures {self.FEE_RATE_PATH} failed or returned an unexpected shape: {message}")
+        return {"event_type": "ACCOUNT_FEE_RATE", "maker_rate": str(row["makerCommissionRate"]), "taker_rate": str(row["takerCommissionRate"])}
+
     def account_snapshot(self, request, key, secret) -> dict[str, Any]:
         """The account as the venue holds it: orders (open ones, and every order created in the window, closed or not) keyed by the CLIENT order id, executions since `since_ns` keyed by the venue's trade id and
         tied to the client id through the order, and the one-way position per instrument (signed). Read-only. A trade whose order the venue did not list is fetched once by its venue id; if that fails too its
@@ -716,6 +731,20 @@ class BybitV5LinearTestnetTransport(BybitV5TestnetTransport):
             if not cursor:
                 return rows
         raise ConnectionError(f"bybit {path} paging did not end")
+
+    def account_fee_rate(self, request, symbol, key, secret) -> dict[str, Any]:
+        """The account's own maker/taker fee rate for the symbol: GET /v5/account/fee-rate (category, symbol; verified against the venue's docs 14 Nov 2026: result.list rows with symbol, takerFeeRate, makerFeeRate).
+        The docs do not state the unit; the rates are read as fractions (0.0002 = 2 bps) and a value that is not a fraction below 1 raises. Read-only."""
+        payload = self._signed("GET", "/v5/account/fee-rate", key, secret, params={"category": self.category, "symbol": symbol})
+        if payload.get("retCode") != 0:
+            raise ConnectionError(f"bybit /v5/account/fee-rate failed: {payload.get('retMsg')}")
+        rows = [r for r in payload.get("result", {}).get("list", []) if str(r.get("symbol")) == symbol]
+        if len(rows) != 1 or "makerFeeRate" not in rows[0] or "takerFeeRate" not in rows[0]:
+            raise ConnectionError(f"bybit /v5/account/fee-rate returned no single row for {symbol}")
+        maker, taker = str(rows[0]["makerFeeRate"]), str(rows[0]["takerFeeRate"])
+        if abs(Decimal(maker)) >= 1 or abs(Decimal(taker)) >= 1:
+            raise ConnectionError("bybit /v5/account/fee-rate returned a rate of 1 or more: not a fraction, the unit is unconfirmed")
+        return {"event_type": "ACCOUNT_FEE_RATE", "maker_rate": maker, "taker_rate": taker}
 
     def account_snapshot(self, request, key, secret) -> dict[str, Any]:
         """The account as the venue holds it (see the Binance transport): orders keyed by `orderLinkId` (the client id this platform sent; an order placed another way has none and is reported as

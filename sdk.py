@@ -294,6 +294,15 @@ class TestnetVenueAdapter:
             venue_order_id=str(native.get("venue_order_id", "")),
         )
 
+    def account_fee_rates(self, instrument_id: str) -> tuple[Decimal, Decimal]:
+        """Owner 13 Nov (edge calibration item 2): the account's own (maker, taker) fee rates for the instrument on this venue, as the venue's fractions (0.0002 = 2 bps), through the credentialed transport. Read-only.
+        A transport that cannot answer, or answers another shape, raises (the start-up check then fails closed); a spot transport has none."""
+        natives = tuple(self.transport({"action": "ACCOUNT_FEE_RATE", "instrument_id": instrument_id}))
+        row = next((n for n in natives if n.get("event_type") == "ACCOUNT_FEE_RATE"), None)
+        if row is None:
+            raise ConnectionError(f"{self.venue} returned no account fee rate")
+        return Decimal(str(row["maker_rate"])), Decimal(str(row["taker_rate"]))
+
     def account_snapshot(self, since_ns: int) -> "VenueAccountSnapshot":
         """Owner 13 Nov, exchange-side restart reconciliation: this venue's account (orders open and closed keyed by the client order id, executions since `since_ns`, positions by instrument) through the same
         credentialed transport, read-only. A transport that cannot answer raises (the OMS keeps the restart gate closed); a spot transport has no snapshot and says so."""
