@@ -113,6 +113,9 @@ arb:
                                          # by the assistant: 25% of one position, not specified by the owner; the size sweeps scale it with size)
   p_fail: 0.07                           # PLACEHOLDER — NOT MEASURED (assumed; a replay with no injected failures cannot measure it); sensitivity in the report
   loss_fail_bps: 7.8                     # SCENARIO, NOT CALIBRATED (came from a simulated hedge-failure study, not execution logs); report failure costs per scenario
+  funding_expected_holding_s: 28800      # owner 14 Nov: the expected funding cost of the pair is charged for 8 h of holding (ASSUMED; to be replaced by the measured median holding time from the stage-0 logs, owner-approved); net funding of the pair from each venue's current predicted rate (the long venue's paid minus the short venue's received), per direction; with no rate (a replay without derivative data) the term is 0 and counted (funding_term_unavailable)
+  funding_credit: floor_zero             # owner 14 Nov: funding may only LOWER the edge; a net credit counts as 0
+  funding_window_s: 30                   # owner 14 Nov: no new quote within 30 s before a funding timestamp on either venue (next funding time from the derivative stream); resting quotes are withdrawn when the window starts; quoting resumes when the stream shows the next settlement. No next-funding time = "not evaluable", counted (funding_window_not_evaluable), nothing blocked
   entry_hedge_price: vwap                # owner 13 Nov (edge calibration item 1): the hedge is priced at the VWAP the hedge-venue book gives for the quote's size, in the quote price and the entry edge (the same walk quote_validity uses); every earlier profile: touch (the ArbConfig default). expected_hedge_slippage_bps stays 0 by design.
   round_quotes_to_tick: true             # v1.1 step 9b: the quote is rounded onto the venue's price grid before the improve-the-touch check and the edge (the runner supplies arb.venue_ticks)
   join_touch_on_tick_rounding: true      # v1.2 (B0): a quote rounded onto the touch joins the back of its queue if the edge at the rounded price still passes; v1.1 refuses it
@@ -266,12 +269,14 @@ _production_limits_approved_13nov:
     quote_lifetime_s: "15 (arb.maker_max_age_s)"
     rate_limits: "oms.rate_limits: quote_share 0.7, quote_min_free 2, hedges never refused, cancels unrestricted (ASSUMED shares)"
     layer_risk_gate: "enforce (execution.risk_reservation). The proposal said count until day-1 and spot validation; the owner's later order (13 Nov) runs v1_9 in the profile's mandatory enforce mode, and the gate refused nothing in 22 runs: the later order stands"
+    funding_quiet_window: "ENFORCED (owner 14 Nov): arb.funding_window_s 30: no new quote within 30 s before a funding timestamp on either venue, resting quotes withdrawn at the window start (reason funding_window), quoting resumes when the stream shows the next settlement (after at most arb.funding_window_after_s 30, ASSUMED); no next-funding time = not evaluable, counted"
+    funding_in_edge: "arb.funding_expected_holding_s 28800 (8 h, ASSUMED) with funding_credit floor_zero (owner 14 Nov)"
+    account_fee_check_at_startup: "oms.account_fee_check + fees.verify_account_fee_rates: a session that sends real orders refuses to start when either venue's account rates cannot be read or differ from the profile (owner 14 Nov); Binance endpoint path confirmed in the testnet drill; replays keep the profile fees, labelled"
     breaker: "the profile's breaker block (trips, flatten, dust rules of 13 Nov)"
     restart_gate_and_snapshot: "oms.restart_reconcile_gate + account_snapshot adapters built; a session setting, not a profile key"
   NOT_BUILT_APPROVED:
     new_maker_orders_per_second: "2/s per venue sustained, 5/s peak: no per-second order limiter exists; the venue window limiter (70% share) is the only rate rule"
     daily_loss_stop: "kill switch at -5 USDT on 1 SOL clips (realised + marked): no code"
-    funding_quiet_window: "no new quote in the 30 s before a funding timestamp: no code"
     clock_offset_gate: "stop quoting when the clock offset is unknown or its uncertainty is above 5 ms: no code"
     margin_warning_stop: "stop new quotes on a margin WARNING state or free margin below 10x the hard-cap initial margin: no code (margin BREACH and a missing mark are enforced)"
     missing_mark_kill_after_60s: "kill after 60 s of paused missing marks: no code (the pause is enforced)"

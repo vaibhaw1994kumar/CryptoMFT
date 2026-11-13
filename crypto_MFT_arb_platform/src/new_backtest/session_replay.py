@@ -153,6 +153,8 @@ class SessionReplay:
         raw, self.config_notes = raw_config_from_profile(profile, pair=config.pair, venues=venues, ticks=self.ticks, quantity_steps={v: quantity_steps()[v] for v in venues}, size_base=size,
                                                          seed=config.seed, venue_cap_base=float(config.arb.max_venue_imbalance_base) or None)
         self.app_config, self.raw_config = config_from_raw(raw)
+        self.config_notes["fees"] = "PROFILE_FEES: a replay books the profile's fee_presets; no account rates are read (a live or paper session that sends real orders refuses to start unless the account's rates equal them)"        # owner 14 Nov
+        self.config_notes["funding_window"] = "evaluated only where the run has derivative data (next funding times); without it every evaluation counts funding_window_not_evaluable and nothing is blocked"
         self.config_notes["real_order_requirements"] = check_real_order_profile(profile) or "met"     # owner 13 Nov: a profile used with real orders must meet crypto_stat_arb.config.REAL_ORDER_REQUIRED; a backtest of an older profile may not, and says so here
         self.instrument_id = self.app_config.instrument_id
         self.feed = CanonicalFeed(self.instrument_id, venue_names=self.names, delta_semantics={v: s.delta_semantics for v, s in self.venue_specs.items()},
