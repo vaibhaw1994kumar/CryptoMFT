@@ -197,6 +197,8 @@ class CircuitBreaker:
         self.manual_resets = 0                       # r12: the breaker is only ever cleared by an explicit reset() call
         self._unknown_orders: dict[int, _UnknownOrder] = {}
         self._net_nonzero_since: float | None = None
+        self.dust_base = 0.0                         # the net exposure right now when it is below the dust threshold (owner 13 Nov), else 0
+        self.max_dust_base = 0.0
         self.trips: list[BreakerTrip] = []
         self._unwind_attempts_while_tripped = 0
 
@@ -238,8 +240,14 @@ class CircuitBreaker:
         if not self._tripped and self.config.trip_on_failed_unwind:
             self._trip(ts, "failed_unwind: all attempts exhausted", net_abs, pending_hedges)
 
-    def on_net_update(self, ts: float, net_abs: float, pending_hedges: int) -> None:
-        if net_abs > 1e-10:
+    def on_net_update(self, ts: float, net_abs: float, pending_hedges: int, dust_below: float = 0.0) -> None:
+        """`dust_below` (owner 13 Nov; the hedge venue's lot, 0 = off): a net exposure below it is untradeable dust. It is still counted (dust_base, the summary, the end-of-day report) but never starts the
+        net-exposure timer, so a remainder the failed-hedge rule carries on purpose cannot trip the breaker. A net AT or above one lot held past net_exposure_s trips as before."""
+        dust = 0.0 < net_abs < dust_below - 1e-12
+        self.dust_base = net_abs if dust else 0.0
+        if dust:
+            self.max_dust_base = max(self.max_dust_base, net_abs)
+        if net_abs > 1e-10 and not dust:
             if self._net_nonzero_since is None:
                 self._net_nonzero_since = ts
         else:
@@ -344,6 +352,7 @@ class CircuitBreaker:
         self._hedge_window.clear()
         self._unknown_orders.clear()
         self._net_nonzero_since = None
+        self.dust_base = 0.0
         self._unwind_attempts_while_tripped = 0
 
     # ── Internal ──────────────────────────────────────────────────────────────
@@ -389,6 +398,7 @@ class CircuitBreaker:
 
     def _summary_base(self) -> dict:
         return {
+            **({"dust_residual_base": self.dust_base, "max_dust_residual_base": self.max_dust_base} if self.max_dust_base > 0 else {}),       # only when a dust residual was ever seen: every older result keeps its exact keys
             "tripped": self._tripped,
             "trip_count": len(self.trips),
             "manual_reset_only": True, "manual_resets": self.manual_resets,

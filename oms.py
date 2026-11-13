@@ -318,6 +318,8 @@ class OMS:
         self.hedge_gate = None                # E0 step (c): a callable(child, ts_ns) the session sets; it only OBSERVES the hedge child against the risk gate (count: what it would refuse); a hedge is never blocked, it reduces exposure
         self.observer = None                  # E0 step (a): an ems IntentObserver (observation only: the OMS never reads it back); None = off
         self.restart_default_lookback_ns = 24 * 3_600 * 1_000_000_000      # the account snapshot's window when there is nothing persisted to start from (no plan, no execution): the last 24 hours; and the longest gap since the last persisted state that is reconciled automatically (a longer one keeps the gate closed)
+        self._unwind_dust: dict[str, dict[str, Any]] = {}                   # owner 13 Nov: plans whose unwind remainder is below every venue's minimum: DUST, recorded once, never retried
+        self._unwind_skip: dict[tuple[str, str], dict[str, Any]] = {}      # (plan, venue) -> the unavailable-venue state: reason, next retry time, delay (1 s doubling to 30 s)
         self._quote_plans: set[str] = set()                                # CR-MQ part 2 (owner 13 Nov): plans that are a market-making quote (one post-only child, no hedge); marked at creation, rebuilt from the plan store
         self._hedge_specs: dict[str, dict[str, Any]] = {}                  # FILL_TRIGGERED: the declared hedge leg of a plan (no ChildOrder until a maker fill)
         self.hedge_chains: dict[str, dict[str, HedgeLifecycle]] = {}       # parent_id -> chain_id -> chain
@@ -811,7 +813,7 @@ class OMS:
         """A new book on ``venue``: retry its open flatten plans now, not on the timer."""
         retried = 0
         for plan in list(self.plans.values()):
-            if plan.inherited_base and plan.state != PlanState.CLOSED and plan.opportunity.buy_venue == venue:
+            if plan.inherited_base and plan.state != PlanState.CLOSED and plan.opportunity.buy_venue == venue and plan.parent_id not in self._unwind_dust:
                 self._finalize_plan(plan, now_ns, self._books)
                 retried += 1
         return retried
@@ -1429,6 +1431,8 @@ class OMS:
         policy = self.residual_policy
         if self._residual_within_bound(plan):
             return True
+        if plan.parent_id in self._unwind_dust:
+            return True                                                    # DUST (owner 13 Nov): recorded once, accepted as carried, never retried
         if self.risk.kill_switch and not policy.allow_risk_reducing_under_stop:
             self._residual_event(
                 plan, "UNWIND_BLOCKED_BY_STRATEGY_STOP", ts_ns,
@@ -1450,17 +1454,28 @@ class OMS:
             urgency = UnwindUrgency.AGGRESSIVE
         venues = self._unwind_venues(plan)
         attempts_allowed = self._unwind_attempts_allowed(plan)
+        dust_seen: list[tuple[str, Decimal]] = []
         for venue in venues:
             if plan.unwind_attempts >= attempts_allowed:
                 break
             book = books.get((venue, plan.opportunity.instrument_id))
+            skip_key = (plan.parent_id, venue)
             if book is None or not book.is_tradable:
-                self._residual_event(
-                    plan, "UNWIND_VENUE_SKIPPED", ts_ns,
-                    venue=venue,
-                    reason=("book_unavailable" if book is None else "book_not_tradable"),
-                )
+                # owner 13 Nov: a venue that is unavailable is retried with a backoff (1 s, doubling to 30 s), not on every event, and logged once per STATE CHANGE (plus a counter), not once per event
+                reason = "book_unavailable" if book is None else "book_not_tradable"
+                state = self._unwind_skip.get(skip_key)
+                if state is not None and ts_ns < state["next_ns"]:
+                    self.realism_counters["unwind_venue_skip_retries_suppressed"] = self.realism_counters.get("unwind_venue_skip_retries_suppressed", 0) + 1
+                    continue
+                delay = 1_000_000_000 if state is None else min(30_000_000_000, state["delay_ns"] * 2)
+                if state is None or state["reason"] != reason:
+                    self.realism_counters["unwind_venue_skips"] = self.realism_counters.get("unwind_venue_skips", 0) + 1
+                    self._residual_event(plan, "UNWIND_VENUE_SKIPPED", ts_ns, venue=venue, reason=reason, retry_after_ns=delay)
+                self._unwind_skip[skip_key] = {"reason": reason, "delay_ns": delay, "next_ns": ts_ns + delay}
                 continue
+            if skip_key in self._unwind_skip:                                # the venue is back: one record of the state change
+                del self._unwind_skip[skip_key]
+                self._residual_event(plan, "UNWIND_VENUE_AVAILABLE", ts_ns, venue=venue)
             if plan.inherited_base:
                 # Retrying a flatten against the same (already consumed) book
                 # only burns attempts: wait for that venue's next update.
@@ -1474,10 +1489,14 @@ class OMS:
             spec = self.instruments.get(venue, plan.opportunity.instrument_id, ts_ns)
             reference_price = book.best_ask if plan.residual_base < 0 else book.best_bid
             if quantity < spec.min_quantity or quantity * reference_price < spec.min_notional:
-                self._residual_event(
-                    plan, "UNWIND_VENUE_SKIPPED", ts_ns, venue=venue,
-                    reason="residual_below_venue_minimum", quantity=quantity,
-                )
+                if plan.inherited_base:
+                    dust_seen.append((venue, quantity))                      # a flatten (a breaker trip, a liquidation): below this venue's minimum; if no venue can take it, it is DUST (below)
+                else:
+                    state = self._unwind_skip.get(skip_key)                  # an arb residual above the bound but below the minimum: still an alarm case (the 5 s hold and the kill switch), but logged ONCE per state change, not on every retry
+                    if state is None or state["reason"] != "residual_below_venue_minimum":
+                        self._unwind_skip[skip_key] = {"reason": "residual_below_venue_minimum", "delay_ns": 0, "next_ns": 0}
+                        self.realism_counters["unwind_venue_skips"] = self.realism_counters.get("unwind_venue_skips", 0) + 1
+                        self._residual_event(plan, "UNWIND_VENUE_SKIPPED", ts_ns, venue=venue, reason="residual_below_venue_minimum", quantity=quantity)
                 continue
             side = Side.SELL if plan.residual_base > 0 else Side.BUY
             price, order_type, tif, post_only = self._unwind_price(
@@ -1617,6 +1636,13 @@ class OMS:
                 return True
             if order.state in LIVE_ORDER_STATES:
                 return False
+        if plan.inherited_base and dust_seen and len(dust_seen) == len(venues):
+            if plan.parent_id not in self._unwind_dust:                      # every venue refuses the quantity as below its minimum: DUST, recorded once and never retried
+                self._unwind_dust[plan.parent_id] = {"residual_base": plan.residual_base, "venues": [v for v, _ in dust_seen], "ts_ns": ts_ns}
+                self.realism_counters["unwind_dust_plans"] = self.realism_counters.get("unwind_dust_plans", 0) + 1
+                self._residual_event(plan, "UNWIND_DUST", ts_ns, venues=[v for v, _ in dust_seen], tradeable_quantity=[str(q) for _, q in dust_seen],
+                                     note="residual below the venue minimum quantity or notional: counted in the exposure, not retried")
+            return True
         return self._residual_within_bound(plan)
 
     def _release_and_close(self, plan: ParentPlan, ts_ns: int) -> ParentPlan:

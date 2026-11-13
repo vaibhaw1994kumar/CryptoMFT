@@ -431,6 +431,11 @@ class TradingSession:
         self._breaker_attempt = 0
         self._breaker_last_attempt_ns = 0
         self._breaker_alarmed: set[str] = set()
+        self._breaker_unavailable_streak = 0
+        self._breaker_backoff_ns = 1_000_000_000          # owner 13 Nov: a flatten retry because a venue is unavailable waits 1 s, doubling to 30 s (reset by any other outcome)
+        self._breaker_dust: dict[str, Any] | None = None  # the flatten remainder below the venue's minimum (owner 13 Nov): recorded once, never retried, the trip stays latched until a manual reset
+        self.breaker_dust_events: list[dict[str, Any]] = []
+        self.breaker_flatten_counters: dict[str, int] = {"dust_recorded": 0, "unavailable_retries": 0}
         self.signals_blocked_by_breaker = 0
         self._last_good_marks: dict[tuple[str, str], tuple[int, Decimal]] = {}
         self.margin_price_paused = False                  # a missing margin price pauses new risk (margin.missing_price_action 'pause'); resumes when the price is back
@@ -781,7 +786,7 @@ class TradingSession:
                 mon.record_heartbeat(now)                      # start-up grace: a venue is not 'down' before its first message
         net, pending, open_orders, reconciled = self._breaker_inputs()
         self._breaker_ingest(net, pending)
-        b.on_net_update(now, net, pending)
+        b.on_net_update(now, net, pending, dust_below=self._hedge_venue_lot(now_ns))
         b.check_unknown_orders(now, net, pending)
         b.on_gateway_status(now, net, pending, open_orders, reconciled)
         b.maybe_simulated_operator_reset(now, net, pending, open_orders)
@@ -795,6 +800,14 @@ class TradingSession:
         elif self._breaker_trip_handled:
             self._breaker_trip_handled, self._breaker_attempt = False, 0
 
+    def _hedge_venue_lot(self, now_ns: int) -> float:
+        """One lot of the hedge venue (the venue that is not the maker venue): a net exposure below it is untradeable dust (owner 13 Nov). 0.0 when the venue pair or the instrument is not known."""
+        venues = [v for v in self.cfg.venues if v not in self.maker_venues] or list(self.cfg.venues[-1:])
+        try:
+            return float(self.oms.instruments.get(venues[0], self.cfg.instrument_id, now_ns).quantity_step)
+        except (KeyError, ValueError, IndexError):
+            return 0.0
+
     def _breaker_on_trip(self, now_ns: int, net: float) -> None:
         """A TRIP: new risk is already blocked. Cancel every resting PASSIVE order (the hedge and unwind children stay), then flatten the NET base with a risk-flatten plan that the OMS prices at the touch plus the
         unwind band and retries on every new book; when the retry budget is gone with exposure open the plan becomes a persistent ALARM (no more sends). A manual `reset_breaker` is the only way out."""
@@ -803,11 +816,14 @@ class TradingSession:
         if first:
             self._breaker_trip_handled = True
             trip = b.trips[-1] if b.trips else None
-            self.ledger.record("BREAKER_TRIP", now_ns, cause=trip.cause if trip else "", net_base=net, flatten_mode="net", **self.alert_context(now_ns))
+            self.ledger.record("BREAKER_TRIP", now_ns, cause=trip.cause if trip else "", net_base=net, flatten_mode="net", **self.alert_context(now_ns),
+                               **({"dust_residual_base": b.dust_base} if b.dust_base > 0 else {}))
         else:
             flatten_open = any(p.inherited_base and p.state != PlanState.CLOSED for p in self.oms.plans.values())
-            if net <= 1e-10 or flatten_open or now_ns - self._breaker_last_attempt_ns < 1_000_000_000:
+            if net <= 1e-10 or flatten_open or now_ns - self._breaker_last_attempt_ns < self._breaker_backoff_ns:
                 return
+            if self._breaker_dust is not None and abs(net - self._breaker_dust["net_base"]) < 1e-12:
+                return                                                     # the remainder is dust and has not changed: recorded once, not retried
             self._breaker_attempt += 1
         self._breaker_last_attempt_ns = now_ns
         resting = [RestingChild(o.order_id, o.venue, "PASSIVE") for plan in self.oms.plans.values() for o in plan.children
@@ -825,17 +841,46 @@ class TradingSession:
                                      retry_budget=b.config.tripped_unwind_retries, available=available, touch=touch)
         if any(step.kind == "CANCEL" for step in steps):
             self.oms._cancel_orders("breaker trip", now_ns, venue=None, preserve_risk_reducing=True, ledger_event="BREAKER_TRIP_CANCEL")
+        if any(step.kind == "ALARM" and step.reason in ("VENUE_DOWN_CANNOT_FLATTEN", "NO_AVAILABLE_VENUE_TO_FLATTEN_ON") for step in steps):
+            self._breaker_backoff_ns = min(30_000_000_000, 1_000_000_000 * 2 ** self._breaker_unavailable_streak)      # the venue is unavailable: the next retry waits 1 s, then 2, 4, ... capped at 30 s (not every event)
+            self._breaker_unavailable_streak += 1
+            self.breaker_flatten_counters["unavailable_retries"] += 1
+        else:
+            self._breaker_backoff_ns, self._breaker_unavailable_streak = 1_000_000_000, 0
         for step in steps:
             if step.kind == "FLATTEN":
                 qty = net_d if abs(float(net_d) - step.qty) < 1e-9 else Decimal(str(step.qty))
+                if self._flatten_is_dust(step, qty, touch, now_ns, net):
+                    continue
                 exposure = abs(qty) if step.side == "sell" else -abs(qty)
                 self.ledger.record("BREAKER_FLATTEN", now_ns, venue=step.venue, side=step.side, quantity=abs(qty), tactic=step.tactic, worst_price=step.worst_price, attempt=self._breaker_attempt)
                 self.oms.open_flatten_plan(step.venue, self.cfg.instrument_id, exposure, now_ns, reason="circuit breaker trip: flatten the net")
             elif step.kind == "ALARM" and step.reason not in self._breaker_alarmed:
                 self._breaker_alarmed.add(step.reason)
-                alarm = {"ts_ns": now_ns, "reason": step.reason, "venue": step.venue, "quantity": step.qty}
+                alarm = {"ts_ns": now_ns, "reason": step.reason, "venue": step.venue, "quantity": step.qty,
+                         **({"dust": {k: str(v) for k, v in self._breaker_dust.items()}} if self._breaker_dust is not None else {})}
                 self.breaker_alarms.append(alarm)
                 self.ledger.record("BREAKER_ALARM", now_ns, **{k: v for k, v in alarm.items() if k != "ts_ns"}, **self.alert_context(now_ns))
+
+    def _flatten_is_dust(self, step, qty: Decimal, touch: dict[str, tuple[float, float]], now_ns: int, net: float) -> bool:
+        """Owner 13 Nov: a flatten remainder below the venue's minimum quantity or notional cannot be sent. It is marked DUST and recorded ONCE (BREAKER_FLATTEN_DUST, with the minimums and the lot); it is not
+        retried, and the trip stays latched until the manual reset. Counted in the exposure and shown in the alarm payload and the end-of-day report."""
+        instrument_id = self.cfg.instrument_id
+        rounded = self.oms.instruments.round_quantity(step.venue, instrument_id, abs(qty), now_ns)
+        spec = self.oms.instruments.get(step.venue, instrument_id, now_ns)
+        px = touch.get(step.venue, (0.0, 0.0))[1 if step.side == "buy" else 0]
+        if not (rounded < spec.min_quantity or rounded * Decimal(str(px)) < spec.min_notional):
+            self._breaker_dust = None
+            return False
+        if self._breaker_dust is None or abs(net - self._breaker_dust["net_base"]) >= 1e-12:
+            self._breaker_dust = {"venue": step.venue, "side": step.side, "residual_base": abs(qty), "tradeable_quantity": rounded, "min_quantity": spec.min_quantity, "min_notional": spec.min_notional,
+                                  "lot": spec.quantity_step, "net_base": net, "since_ts_ns": now_ns}
+            self.breaker_flatten_counters["dust_recorded"] += 1
+            record = {k: (str(v) if isinstance(v, Decimal) else v) for k, v in self._breaker_dust.items() if k != "since_ts_ns"}
+            if len(self.breaker_dust_events) < 100:
+                self.breaker_dust_events.append({"ts_ns": now_ns, **record})
+            self.ledger.record("BREAKER_FLATTEN_DUST", now_ns, **record, note="below the venue minimum: DUST, counted in the exposure, not retried; the trip stays latched until a manual reset")
+        return True
 
     def reset_breaker(self, now_ns: int, operator_id: str = "") -> None:
         """The manual reset, an operator action: the only way a TRIPPED breaker (or a persistent flatten alarm) is cleared."""
@@ -846,6 +891,7 @@ class TradingSession:
         self._breaker_state_logged = "OK"
         self._breaker_trip_handled, self._breaker_attempt = False, 0
         self._breaker_alarmed.clear()
+        self._breaker_dust, self._breaker_backoff_ns, self._breaker_unavailable_streak = None, 1_000_000_000, 0
 
     def alert_context(self, now_ns: int) -> dict[str, object]:
         """The OMS's alert context (confirmed residual, pending hedge quantity, oldest exposure age, why execution is blocked) with the session's own blockers put first: a tripped or paused breaker, the margin price pause."""
@@ -926,6 +972,8 @@ class TradingSession:
 
     def breaker_report(self) -> dict[str, Any]:
         return {"breaker": self.breaker.summary() if self.breaker is not None else None, "breaker_alarms": list(self.breaker_alarms), "signals_blocked_by_breaker": self.signals_blocked_by_breaker,
+                **({"breaker_flatten": {"counters": dict(self.breaker_flatten_counters), "dust_events": list(self.breaker_dust_events), "dust_now": None if self._breaker_dust is None else {k: str(v) for k, v in self._breaker_dust.items()}}}
+                   if (self.breaker_flatten_counters["dust_recorded"] or self.breaker_flatten_counters["unavailable_retries"]) else {}),
                 "margin_price_paused": self.margin_price_paused, "signals_blocked_by_margin_price": self.signals_blocked_by_margin_price,
                 "risk_gate_mode": self.risk_gate_mode, "risk_gate_refusals_by_reason": dict(sorted(self.gate_counts.items())),
                 "layer_risk_mode": self.layer_risk_mode, "layer_route_mode": self.layer_route_mode, "hedge_gate_would_refuse_by_reason": dict(sorted(self.hedge_gate_would_refuse.items()))}
