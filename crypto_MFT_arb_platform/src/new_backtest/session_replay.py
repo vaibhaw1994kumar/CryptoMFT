@@ -654,6 +654,10 @@ class SessionReplay:
             doc["warning"] = "NON_ZERO_RESIDUAL_AT_END_OF_DAY"
         if snap.get("lot_residual_alarm") is not None:
             doc["lot_residual_alarm"] = snap["lot_residual_alarm"]
+        bf = self.session.breaker_report()
+        dust_seen = (bf.get("breaker") or {}).get("max_dust_residual_base")
+        if bf.get("breaker_flatten", {}).get("dust_now") or dust_seen:       # owner 13 Nov: dust (below one lot / below the venue minimum) is counted and shown here, key only when there was any
+            doc["breaker_dust"] = {"max_dust_residual_base": dust_seen, "flatten_dust_now": (bf.get("breaker_flatten") or {}).get("dust_now"), "counters": (bf.get("breaker_flatten") or {}).get("counters")}
         return doc
 
     def result(self) -> dict[str, Any]:

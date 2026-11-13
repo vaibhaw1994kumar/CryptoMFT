@@ -198,6 +198,8 @@ write_result(result, out)
 safety = [e for e in replay.session.ledger.events if e["event_type"].startswith(("BREAKER_", "KILL_SWITCH", "UNWIND_", "HEDGE_ALARM", "MARGIN_PRICE", "NEW_RISK_HELD", "RECONCILIATION", "QUOTE_SKIPPED"))]
 if safety:                                   # the safety events of the run in full (payloads included), next to the standard outputs
     (out / "session_safety_events.jsonl").write_text("".join(json.dumps({k: (str(v) if not isinstance(v, (int, float, bool, type(None), list, dict)) else v) for k, v in e.items()}, sort_keys=True, default=str) + "\n" for e in safety))
+else:
+    (out / "session_safety_events.jsonl").unlink(missing_ok=True)      # a rerun with no safety events must not leave the previous run's file behind
 sigs = result["signals"]
 trace = stage_trace(replay.session.ledger.events, [(s["ts"], "signal-trigger", "book") for s in sigs])
 cases_dir = Path("/Users/vaibhav/Documents/Newproject/out/integration/ems_cases")

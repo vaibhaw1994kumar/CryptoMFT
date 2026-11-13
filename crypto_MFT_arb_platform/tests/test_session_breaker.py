@@ -131,6 +131,121 @@ class PauseVersusTrip(unittest.TestCase):
         self.assertEqual(s.breaker_report()["breaker_alarms"][0]["quantity"], 5.0)
 
 
+class DustAndFlattenRules(unittest.TestCase):
+    """Owner 13 Nov. (1) The net-exposure trigger ignores a residual below one lot of the hedge venue (untradeable dust: still counted, shown in the summary); one lot or more held past the time limit trips as before.
+    (2) After a trip, a flatten remainder below the venue minimum is DUST: recorded once, not retried, the trip stays latched until a manual reset; a venue that is unavailable is retried with a backoff (1 s doubling to 30 s)
+    and logged once per state change plus a counter, never once per event."""
+    net_cfg = CircuitBreakerConfig(net_exposure_s=5.0)
+
+    def test_the_trigger_ignores_dust_and_trips_at_one_lot(self):
+        from crypto_stat_arb.circuit_breaker import CircuitBreaker
+        b = CircuitBreaker(self.net_cfg, A, B)
+        for t in range(0, 40):
+            b.on_net_update(float(t), 0.0076, 0, dust_below=0.01)                       # 0.0076 SOL carried for 40 s: no trip
+        self.assertFalse(b.is_tripped())
+        self.assertEqual((b.dust_base, b.max_dust_base), (0.0076, 0.0076))
+        self.assertEqual(b.summary()["dust_residual_base"], 0.0076)                       # counted in the exposure report
+        b2 = CircuitBreaker(self.net_cfg, A, B)
+        for t in (0.0, 3.0, 5.0):
+            b2.on_net_update(t, 0.01, 0, dust_below=0.01)
+        self.assertFalse(b2.is_tripped())                                                 # not yet past the 5 s limit
+        b2.on_net_update(6.0, 0.01, 0, dust_below=0.01)
+        self.assertTrue(b2.is_tripped())                                                  # 0.01 SOL (one lot) held past the limit trips
+        self.assertIn("net_exposure", b2.trips[-1].cause)
+        b3 = CircuitBreaker(self.net_cfg, A, B)
+        b3.on_net_update(0.0, 0.0076, 0)
+        b3.on_net_update(6.0, 0.0076, 0)
+        self.assertTrue(b3.is_tripped())                                                  # without a dust threshold the old rule stands
+        self.assertNotIn("dust_residual_base", CircuitBreaker(self.net_cfg, A, B).summary())      # every older result keeps its exact keys
+
+    def test_in_the_session_a_part_lot_net_does_not_trip_and_one_lot_does(self):
+        s = session(self.net_cfg)
+        with_books(s)
+        s._breaker_step(1 * S)
+        s.ledger.positions[(A, INSTR)] = Decimal("0.0004")                                # below the hedge venue's lot (0.001)
+        for t in range(2, 30):
+            s._breaker_step(t * S)
+        self.assertEqual(s.breaker.state(), "OK")
+        s.ledger.positions[(A, INSTR)] = Decimal("0.001")                                 # one lot
+        s._breaker_step(30 * S)
+        s._breaker_step(36 * S)
+        self.assertEqual(s.breaker.state(), "TRIPPED")
+        self.assertIn("net_exposure", events(s, "BREAKER_TRIP")[0]["cause"])
+
+    def test_a_flatten_remainder_below_the_minimum_is_dust_recorded_once_never_retried_and_latched_until_reset(self):
+        cfg = CircuitBreakerConfig(trip_on_gateway_down=True, pause_on_gateway_down_when_flat=True, heartbeat_timeout_s=2.0)
+        s = session(cfg)
+        with_books(s)
+        s._breaker_step(1 * S)
+        s.ledger.positions[(A, INSTR)] = Decimal("0.0004")
+        for k in range(0, 400):                                                           # every 100 ms for 40 s: an event-rate retry would show here
+            s._breaker_step(20 * S + k * S // 10)
+        self.assertEqual(s.breaker.state(), "TRIPPED")
+        self.assertEqual(len(events(s, "BREAKER_FLATTEN_DUST")), 1)
+        dust = events(s, "BREAKER_FLATTEN_DUST")[0]
+        self.assertEqual((dust["venue"], dust["residual_base"]), (A, "0.0004"))
+        for key in ("min_quantity", "min_notional", "lot"):
+            self.assertIn(key, dust)
+        self.assertEqual(events(s, "BREAKER_FLATTEN", "RISK_FLATTEN_OPENED", "UNWIND_VENUE_SKIPPED", "BREAKER_ALARM"), [])      # no flatten plan, no per-event skip, no alarm for dust
+        self.assertEqual(s.breaker_flatten_counters["dust_recorded"], 1)
+        self.assertEqual(events(s, "BREAKER_TRIP")[0]["dust_residual_base"], 0.0004)
+        self.assertEqual(s.breaker_report()["breaker_flatten"]["dust_now"]["residual_base"], "0.0004")      # shown in the report
+        s.reset_breaker(70 * S, "operator-1")
+        self.assertIsNone(s._breaker_dust)                                                # a manual reset clears it
+
+    def test_an_unavailable_venue_is_retried_with_a_doubling_backoff_and_the_alarm_is_logged_once(self):
+        cfg = CircuitBreakerConfig(trip_on_gateway_down=True, pause_on_gateway_down_when_flat=True, heartbeat_timeout_s=2.0, tripped_unwind_retries=50)
+        s = session(cfg)                                                                  # no books: no venue can be flattened on
+        s._breaker_step(1 * S)
+        s.ledger.positions[(A, INSTR)] = Decimal("5")
+        times = []
+        for k in range(0, 1200):                                                          # every 100 ms from 20 s to 140 s
+            t = 20 * S + k * S // 10
+            before = s.breaker_flatten_counters["unavailable_retries"]
+            s._breaker_step(t)
+            if s.breaker_flatten_counters["unavailable_retries"] != before:
+                times.append(round((t - 20 * S) / S, 1))
+        gaps = [round(b - a, 1) for a, b in zip(times, times[1:])]
+        self.assertEqual(gaps[:5], [1.0, 2.0, 4.0, 8.0, 16.0])                            # 1 s doubling
+        self.assertTrue(all(g <= 30.1 for g in gaps) and 30.0 in gaps)                    # capped at 30 s
+        self.assertLess(len(times), 15)                                                   # not on every event (1200 steps)
+        self.assertEqual(len(events(s, "BREAKER_ALARM")), 1)
+
+    def test_an_unavailable_flatten_venue_logs_one_event_per_state_change_not_one_per_event(self):
+        s = session()
+        s.oms.open_flatten_plan(A, INSTR, Decimal("5"), 10 * S, "test")                    # no book on A
+        self.assertEqual(len(events(s, "UNWIND_VENUE_SKIPPED")), 1)
+        for k in range(1, 3000):                                                          # a retry on every book event for 3 s
+            s.oms.retry_flatten(A, 10 * S + k * S // 1000)
+        self.assertEqual(len(events(s, "UNWIND_VENUE_SKIPPED")), 1)
+        self.assertEqual(s.oms.realism_counters["unwind_venue_skips"], 1)
+        self.assertGreater(s.oms.realism_counters["unwind_venue_skip_retries_suppressed"], 2000)
+        (key,) = [k for k in s.oms._unwind_skip]
+        delays = []
+        for _ in range(8):                                                                # retried when due: the delay doubles, capped at 30 s
+            due = s.oms._unwind_skip[key]["next_ns"]
+            s.oms.retry_flatten(A, due)
+            delays.append(s.oms._unwind_skip[key]["delay_ns"] // S)
+        self.assertEqual(delays, [4, 8, 16, 30, 30, 30, 30, 30])           # (the retries due inside the 3 s loop already took it 1 s -> 2 s -> 4 s)
+        self.assertEqual(len(events(s, "UNWIND_VENUE_SKIPPED")), 1)                       # still one: the state did not change
+        with_books(s)                                                                     # the venue is back
+        s.oms.retry_flatten(A, s.oms._unwind_skip[key]["next_ns"])
+        self.assertEqual(len(events(s, "UNWIND_VENUE_AVAILABLE")), 1)
+        self.assertTrue(any(o.order_role == "UNWIND" for p in s.oms.plans.values() for o in p.children))
+
+    def test_a_flatten_plan_below_every_minimum_is_dust_once_and_is_not_retried(self):
+        s = session()
+        with_books(s)
+        plan = s.oms.open_flatten_plan(A, INSTR, Decimal("0.0004"), 10 * S, "test")
+        self.assertEqual(len(events(s, "UNWIND_DUST")), 1)
+        self.assertEqual(events(s, "UNWIND_VENUE_SKIPPED"), [])
+        self.assertEqual(s.oms.realism_counters["unwind_dust_plans"], 1)
+        for k in range(1, 500):
+            s.oms.retry_flatten(A, 10 * S + k * S // 100)
+        self.assertEqual((len(events(s, "UNWIND_DUST")), len(events(s, "UNWIND_VENUE_SKIPPED"))), (1, 0))
+        self.assertEqual([o for o in plan.children if o.order_role == "UNWIND"], [])
+
+
 class FedFromTheHedgeEvents(unittest.TestCase):
     def hedge(self, s, chain, to, frm="SUBMITTED", ts=2 * S):
         s.ledger.record("HEDGE_STATE", ts, parent_id="p", chain_id=chain, from_state=frm, to_state=to, reason="test")
