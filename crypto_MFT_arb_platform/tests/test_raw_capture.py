@@ -11,7 +11,7 @@ ROOT = Path(__file__).parents[1]
 
 
 def sample_envelopes():
-    with (ROOT / "data" / "samples" / "raw_depth.jsonl").open(encoding="utf-8") as handle:
+    with (ROOT / "tests" / "fixtures" / "raw_depth.jsonl").open(encoding="utf-8") as handle:
         return [json.loads(line) for line in handle if line.strip()]
 
 

@@ -166,7 +166,7 @@ class CredentialSecurityTests(unittest.TestCase):
                 mode=RuntimeMode.TESTNET, adapters=adapters,
                 credential_ids=tuple(adapters),
             )
-            result = runtime.run(load_events(ROOT / "data/samples/two_venue_books.jsonl"))
+            result = runtime.run(load_events(ROOT / "tests/fixtures/two_venue_books.jsonl"))
             self.assertEqual(result.opportunity_count, 1)
             self.assertEqual({venue for venue, _ in observed}, set(config.venues))
             self.assertTrue(all(secret == b"not-a-real-secret-v1" for _, secret in observed))

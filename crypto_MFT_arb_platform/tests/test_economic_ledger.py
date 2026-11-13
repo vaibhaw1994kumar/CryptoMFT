@@ -334,7 +334,7 @@ class ReconciliationTests(unittest.TestCase):
 
     def test_backtest_writes_a_reconciled_economic_report(self):
         with tempfile.TemporaryDirectory() as directory:
-            result = run_backtest(ROOT / "config/research.json", ROOT / "data/samples/two_venue_books.jsonl",
+            result = run_backtest(ROOT / "config/research.json", ROOT / "tests/fixtures/two_venue_books.jsonl",
                                   Path(directory))
             report = json.loads((Path(directory) / "economic_reconciliation.json").read_text())
             self.assertTrue((Path(directory) / "economic_events.jsonl").exists())

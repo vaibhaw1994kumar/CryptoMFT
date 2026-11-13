@@ -1,0 +1,19 @@
+{
+  "adapter_version": "binance-depth-v1",
+  "asks": [{"price": "60000.00", "quantity": "1.000"}],
+  "bids": [{"price": "59999.90", "quantity": "1.000"}],
+  "checksum": "",
+  "event_id": "69d1ca11-ec7a-5fd9-b497-6661addfa366",
+  "event_type": "BOOK_SNAPSHOT",
+  "exchange_ts_ns": 1000000000,
+  "instrument_id": "BTC-USDT-SPOT",
+  "native": {"E": 1000, "T": 999, "asks": [["60000.00", "1.000"]], "bids": [["59999.90", "1.000"]], "lastUpdateId": 100, "s": "BTCUSDT"},
+  "quality_flags": [],
+  "raw_ref": "bd3eaf65-c7b0-53d9-aa38-59f0917853a0",
+  "receive_ts_ns": 1000100000,
+  "schema_version": "1.2.0",
+  "sequence": 100,
+  "sequence_start": 100,
+  "source_ts_ns": 999000000,
+  "venue": "BINANCE"
+}

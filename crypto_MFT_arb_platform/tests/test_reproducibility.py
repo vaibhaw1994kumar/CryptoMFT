@@ -11,7 +11,7 @@ ROOT = Path(__file__).parents[1]
 class ReproducibilityTests(unittest.TestCase):
     def test_same_inputs_produce_identical_results(self):
         config = ROOT / "config" / "research.json"
-        events = ROOT / "data" / "samples" / "two_venue_books.jsonl"
+        events = ROOT / "tests" / "fixtures" / "two_venue_books.jsonl"
         with tempfile.TemporaryDirectory() as directory:
             tmp_path = Path(directory)
             first = run_backtest(config, events, tmp_path / "first")

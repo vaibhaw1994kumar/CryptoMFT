@@ -67,10 +67,11 @@ def test_default_config_remains_usable_for_library_consumers() -> None:
 
 def test_custom_strategy_example_executes() -> None:
     namespace: dict[str, object] = {}
+    example = __import__("pathlib").Path(__file__).resolve().parents[1] / "fixtures" / "custom_strategy_example.py"
     exec(
         compile(
-            open("examples/custom_strategy.py", encoding="utf-8").read(),
-            "examples/custom_strategy.py",
+            example.read_text(encoding="utf-8"),
+            str(example),
             "exec",
         ),
         namespace,

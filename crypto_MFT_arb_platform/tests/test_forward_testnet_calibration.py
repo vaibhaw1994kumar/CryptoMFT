@@ -361,7 +361,7 @@ class EventTimingReplayTests(unittest.TestCase):
     def test_missing_event_timing_log_is_a_silent_noop(self):
         with tempfile.TemporaryDirectory() as directory:
             summary = run_backtest(
-                CONFIG, ROOT / "data" / "samples" / "two_venue_books.jsonl",
+                CONFIG, ROOT / "tests" / "fixtures" / "two_venue_books.jsonl",
                 Path(directory) / "out",
                 event_timing_log=Path(directory) / "does_not_exist.jsonl",
             )
@@ -370,7 +370,7 @@ class EventTimingReplayTests(unittest.TestCase):
     def test_replay_uses_recorded_live_processing_time_per_event(self):
         with tempfile.TemporaryDirectory() as directory:
             base = Path(directory)
-            events_path = ROOT / "data" / "samples" / "two_venue_books.jsonl"
+            events_path = ROOT / "tests" / "fixtures" / "two_venue_books.jsonl"
             rows = [
                 json.loads(line)
                 for line in events_path.read_text().splitlines() if line.strip()
@@ -401,7 +401,7 @@ class EventTimingReplayTests(unittest.TestCase):
         # as it would live under the same real delay.
         with tempfile.TemporaryDirectory() as directory:
             base = Path(directory)
-            events_path = ROOT / "data" / "samples" / "two_venue_books.jsonl"
+            events_path = ROOT / "tests" / "fixtures" / "two_venue_books.jsonl"
             rows = [
                 json.loads(line)
                 for line in events_path.read_text().splitlines() if line.strip()

@@ -10,7 +10,7 @@ from trading_platform_poc.config import (
 
 
 def test_loads_project_configuration() -> None:
-    config = AppConfig.from_yaml(__import__("pathlib").Path("config.yaml"))
+    config = AppConfig.from_yaml(__import__("pathlib").Path(__file__).resolve().parents[1] / "fixtures" / "project_config.yaml")
 
     assert config.symbol == "BTCUSDT"
     assert config.risk.max_order_notional == Decimal("1000")

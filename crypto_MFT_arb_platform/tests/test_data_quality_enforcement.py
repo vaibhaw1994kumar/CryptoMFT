@@ -13,8 +13,8 @@ from crypto_stat_arb.runner import enforce_data_quality, run_backtest
 
 ROOT = Path(__file__).parents[1]
 CONFIG = ROOT / "config/research.json"
-CLEAN = ROOT / "data/samples/two_venue_books.jsonl"
-REJECTED = ROOT / "data/evidence/quality_gate/controlled_gap/canonical_events.jsonl"   # gap + crossed book
+CLEAN = ROOT / "tests/fixtures/two_venue_books.jsonl"
+REJECTED = ROOT / "tests/fixtures/controlled_gap_canonical_events.jsonl"   # gap + crossed book
 
 
 def cli(*args: str) -> subprocess.CompletedProcess:

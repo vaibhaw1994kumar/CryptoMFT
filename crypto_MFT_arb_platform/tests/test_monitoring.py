@@ -100,7 +100,7 @@ class PipelineMonitoringTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             summary = run_backtest(
                 root / "config/research.json",
-                root / "data/samples/two_venue_books.jsonl",
+                root / "tests/fixtures/two_venue_books.jsonl",
                 Path(directory),
             )
             report = json.loads(

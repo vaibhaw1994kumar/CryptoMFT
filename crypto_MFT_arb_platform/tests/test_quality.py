@@ -92,7 +92,7 @@ class QualityGateTests(unittest.TestCase):
             output = Path(directory) / "run"
             summary = run_backtest(
                 ROOT / "config" / "research.json",
-                ROOT / "data" / "samples" / "two_venue_books.jsonl",
+                ROOT / "tests" / "fixtures" / "two_venue_books.jsonl",
                 output,
             )
             report = json.loads((output / "data_quality_report.json").read_text())

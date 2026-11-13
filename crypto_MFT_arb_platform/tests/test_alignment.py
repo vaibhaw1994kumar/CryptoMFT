@@ -95,7 +95,7 @@ class CrossVenueAlignmentTests(unittest.TestCase):
     def test_alignment_pipeline_is_reproducible(self):
         rows = [
             json.loads(line)
-            for line in (ROOT / "data" / "samples" / "two_venue_books.jsonl").read_text().splitlines()
+            for line in (ROOT / "tests" / "fixtures" / "two_venue_books.jsonl").read_text().splitlines()
         ]
         with tempfile.TemporaryDirectory() as directory:
             base = Path(directory)

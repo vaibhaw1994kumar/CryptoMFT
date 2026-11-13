@@ -78,7 +78,7 @@ class BasicTCATests(unittest.TestCase):
     def test_published_sample_has_recomputable_weighted_slippage(self):
         root = Path(__file__).resolve().parents[1]
         sample = json.loads(
-            (root / "data/samples/orders/basic_tca_report.json").read_text()
+            (root / "tests/fixtures/basic_tca_report.json").read_text()
         )
         quote = Decimal(sample["summary"]["slippage_quote"])
         benchmark = Decimal(sample["summary"]["benchmark_notional"])
@@ -91,12 +91,12 @@ class BasicTCATests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as first_dir, tempfile.TemporaryDirectory() as second_dir:
             first_summary = run_backtest(
                 root / "config/research.json",
-                root / "data/samples/two_venue_books.jsonl",
+                root / "tests/fixtures/two_venue_books.jsonl",
                 Path(first_dir),
             )
             run_backtest(
                 root / "config/research.json",
-                root / "data/samples/two_venue_books.jsonl",
+                root / "tests/fixtures/two_venue_books.jsonl",
                 Path(second_dir),
             )
             first = json.loads((Path(first_dir) / "tca_report.json").read_text())

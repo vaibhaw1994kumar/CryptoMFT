@@ -552,7 +552,7 @@ class PerpetualConfigTests(unittest.TestCase):
                   "rate": "0.0001", "mark_price": "60000", "source": "SIMULATED"}]
             config = self.write(directory, lambda raw: raw.update(funding={"rates": rates, "settle_lag_ms": 0}))
             events = Path(directory) / "events.jsonl"
-            events.write_text((ROOT / "data/samples/two_venue_books.jsonl").read_text().replace(
+            events.write_text((ROOT / "tests/fixtures/two_venue_books.jsonl").read_text().replace(
                 "BTC-USDT-SPOT", PERP), encoding="utf-8")
             out = Path(directory) / "out"
             result = run_backtest(config, events, out)

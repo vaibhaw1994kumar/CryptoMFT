@@ -1,0 +1,19 @@
+{
+  "adapter_version": "bybit-depth-v1",
+  "asks": [{"price": "60060.10", "quantity": "1.000"}],
+  "bids": [{"price": "60060.00", "quantity": "1.000"}],
+  "checksum": "",
+  "event_id": "397d3940-26c2-51f2-bf52-2f336787de37",
+  "event_type": "BOOK_SNAPSHOT",
+  "exchange_ts_ns": 1000000000,
+  "instrument_id": "BTC-USDT-SPOT",
+  "native": {"cts": 999, "data": {"a": [["60060.10", "1.000"]], "b": [["60060.00", "1.000"]], "s": "BTCUSDT", "seq": 100, "u": 900}, "topic": "orderbook.50.BTCUSDT", "ts": 1000, "type": "snapshot"},
+  "quality_flags": [],
+  "raw_ref": "fbd63bef-c5ff-5857-b18b-2de7e7ed9f87",
+  "receive_ts_ns": 1000300000,
+  "schema_version": "1.2.0",
+  "sequence": 900,
+  "sequence_start": 900,
+  "source_ts_ns": 999000000,
+  "venue": "BYBIT"
+}

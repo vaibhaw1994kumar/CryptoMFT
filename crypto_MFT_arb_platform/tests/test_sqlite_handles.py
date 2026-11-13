@@ -29,7 +29,7 @@ class SqliteHandleTests(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as directory, \
                 mock.patch.object(structured_logging.sqlite3, "connect", tracking_connect):
-            run_backtest(ROOT / "config/research.json", ROOT / "data/samples/two_venue_books.jsonl",
+            run_backtest(ROOT / "config/research.json", ROOT / "tests/fixtures/two_venue_books.jsonl",
                          Path(directory) / "run")
             self.assertTrue(opened)
             still_open = []

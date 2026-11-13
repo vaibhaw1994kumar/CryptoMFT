@@ -13,8 +13,8 @@ from crypto_stat_arb.runner import run_backtest
 
 ROOT = Path(__file__).parents[1]
 CONFIG = ROOT / "config/research.json"
-CLEAN = ROOT / "data/samples/two_venue_books.jsonl"
-GAPPED = ROOT / "data/evidence/quality_gate/controlled_gap/canonical_events.jsonl"
+CLEAN = ROOT / "tests/fixtures/two_venue_books.jsonl"
+GAPPED = ROOT / "tests/fixtures/controlled_gap_canonical_events.jsonl"
 MS = 1_000_000
 REQUIRED = {
     "dataset", "venues", "instrument_metadata", "replay_ordering", "message_counts", "sequence_and_recovery",

@@ -11,7 +11,7 @@ class StructuredLoggingTests(unittest.TestCase):
     def test_published_failed_trace_contains_complete_correlation_chain(self):
         root = Path(__file__).resolve().parents[1]
         sample = json.loads(
-            (root / "data/samples/logs/failed_opportunity_trace.json").read_text()
+            (root / "tests/fixtures/failed_opportunity_trace.json").read_text()
         )
         self.assertEqual(sample["record_count"], len(sample["records"]))
         self.assertEqual(sample["terminal_outcome"], "REJECTED")
@@ -32,7 +32,7 @@ class StructuredLoggingTests(unittest.TestCase):
             output = Path(directory) / "run"
             run_backtest(
                 root / "config/research.json",
-                root / "data/samples/two_venue_books.jsonl",
+                root / "tests/fixtures/two_venue_books.jsonl",
                 output,
             )
             store = StructuredLogStore(
@@ -67,7 +67,7 @@ class StructuredLoggingTests(unittest.TestCase):
             output = temporary / "run"
             summary = run_backtest(
                 config_path,
-                root / "data/samples/two_venue_books.jsonl",
+                root / "tests/fixtures/two_venue_books.jsonl",
                 output,
             )
             trace_rows = [

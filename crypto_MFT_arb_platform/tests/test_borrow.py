@@ -327,7 +327,7 @@ class ConfigAndBacktestTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             out = Path(directory) / "out"
             result = run_backtest(self.write(directory, lambda raw: raw["risk"].update(borrow=borrow)),
-                                  ROOT / "data/samples/two_venue_books.jsonl", out)
+                                  ROOT / "tests/fixtures/two_venue_books.jsonl", out)
             files = {name: json.loads((out / name).read_text())
                      for name in ("economic_reconciliation.json", "borrow_report.json", "account_state.json",
                                   "kill_switch_status.json", "rms_reconciliation_report.json")}

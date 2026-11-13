@@ -40,7 +40,7 @@ class AdapterPipelineTests(unittest.TestCase):
             output = Path(directory) / "canonical.jsonl"
             manifest = normalize_raw_file(
                 ROOT / "config" / "research.json",
-                ROOT / "data" / "samples" / "raw_depth.jsonl",
+                ROOT / "tests" / "fixtures" / "raw_depth.jsonl",
                 output,
             )
             self.assertEqual(manifest["normalized_records"], 2)

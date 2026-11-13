@@ -118,7 +118,7 @@ class ReportsUseTheDictionaryTests(unittest.TestCase):
     def test_backtest_reports_agree_with_the_metric_functions(self):
         with tempfile.TemporaryDirectory() as directory:
             out = Path(directory)
-            summary = run_backtest(ROOT / "config/research.json", ROOT / "data/samples/two_venue_books.jsonl", out)
+            summary = run_backtest(ROOT / "config/research.json", ROOT / "tests/fixtures/two_venue_books.jsonl", out)
             report = json.loads((out / "metrics_report.json").read_text())
             tca = json.loads((out / "tca_report.json").read_text())["summary"]
             monitoring = json.loads((out / "pipeline_monitoring.json").read_text())["strategy_execution"]["pnl"]

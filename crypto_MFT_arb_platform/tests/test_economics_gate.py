@@ -20,7 +20,7 @@ class EconomicsGateTests(unittest.TestCase):
     def setUpClass(cls):
         cls.tmp = tempfile.TemporaryDirectory()
         cls.run_dir = Path(cls.tmp.name) / "run"
-        run_backtest(ROOT / "config/research.json", ROOT / "data/samples/two_venue_books.jsonl", cls.run_dir)
+        run_backtest(ROOT / "config/research.json", ROOT / "tests/fixtures/two_venue_books.jsonl", cls.run_dir)
 
     @classmethod
     def tearDownClass(cls):

@@ -20,7 +20,7 @@ ROOT = Path(__file__).resolve().parents[1]
 class StrategySDKAcceptanceTests(unittest.TestCase):
     def setUp(self):
         self.config, _ = load_config(ROOT / "config/research.json")
-        self.events = load_events(ROOT / "data/samples/two_venue_books.jsonl")
+        self.events = load_events(ROOT / "tests/fixtures/two_venue_books.jsonl")
 
     @staticmethod
     def requests(runtime):

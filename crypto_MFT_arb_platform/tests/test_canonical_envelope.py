@@ -19,7 +19,7 @@ ROOT = Path(__file__).parents[1]
 class CanonicalEnvelopeTests(unittest.TestCase):
     def load_sample(self, venue: str) -> MarketEvent:
         row = json.loads(
-            (ROOT / "data" / "samples" / "canonical" / f"{venue}_book_snapshot.json").read_text()
+            (ROOT / "tests" / "fixtures" / f"{venue}_book_snapshot.json").read_text()
         )
         return MarketEvent.from_dict(row)
 

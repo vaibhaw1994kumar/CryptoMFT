@@ -17,7 +17,7 @@ ROOT = Path(__file__).parents[1]
 def sample_lines() -> list[str]:
     return [
         line + "\n"
-        for line in (ROOT / "data" / "samples" / "raw_depth.jsonl").read_text().splitlines()
+        for line in (ROOT / "tests" / "fixtures" / "raw_depth.jsonl").read_text().splitlines()
         if line.strip()
     ]
 

@@ -429,7 +429,7 @@ class LatencyConfigAndBacktestTests(unittest.TestCase):
             output = Path(directory)
             summary = run_backtest(
                 ROOT / "config" / "research.json",
-                ROOT / "data" / "samples" / "two_venue_books.jsonl", output,
+                ROOT / "tests" / "fixtures" / "two_venue_books.jsonl", output,
             )
             report = json.loads((output / "latency_report.json").read_text())
             rows = [
