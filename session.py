@@ -816,9 +816,13 @@ class TradingSession:
         if first:
             self._breaker_trip_handled = True
             trip = b.trips[-1] if b.trips else None
-            self.ledger.record("BREAKER_TRIP", now_ns, cause=trip.cause if trip else "", net_base=net, flatten_mode="net", **self.alert_context(now_ns),
+            escalated = self.oms.escalate_open_chains(now_ns, "breaker trip")          # a chain with no order in flight unwinds NOW through its own path; the flatten below covers only what no open plan manages
+            self.ledger.record("BREAKER_TRIP", now_ns, cause=trip.cause if trip else "", net_base=net, flatten_mode="net", chains_escalated=len(escalated), **self.alert_context(now_ns),
                                **({"dust_residual_base": b.dust_base} if b.dust_base > 0 else {}))
-        else:
+        managed = self.oms.open_plan_position_by_venue()
+        net_d = sum(self.ledger.positions.values(), Decimal(0)) - sum(managed.values(), Decimal(0))      # the net no open plan manages: the only exposure the breaker flattens
+        net = abs(float(net_d))
+        if not first:
             flatten_open = any(p.inherited_base and p.state != PlanState.CLOSED for p in self.oms.plans.values())
             if net <= 1e-10 or flatten_open or now_ns - self._breaker_last_attempt_ns < self._breaker_backoff_ns:
                 return
@@ -836,8 +840,8 @@ class TradingSession:
             if ok:
                 touch[venue] = (float(book.best_bid), float(book.best_ask))
                 mid[venue] = (touch[venue][0] + touch[venue][1]) / 2
-        net_d = sum(self.ledger.positions.values(), Decimal(0))
-        steps = plan_flatten_on_trip(resting, self._base_by_venue(), mid, band_bps=float(self.oms.residual_policy.unwind_price_slippage_bps), attempt=self._breaker_attempt,
+        base_unmanaged = {v: q - float(managed.get(v, Decimal(0))) for v, q in self._base_by_venue().items()}
+        steps = plan_flatten_on_trip(resting, base_unmanaged, mid, band_bps=float(self.oms.residual_policy.unwind_price_slippage_bps), attempt=self._breaker_attempt,
                                      retry_budget=b.config.tripped_unwind_retries, available=available, touch=touch)
         if any(step.kind == "CANCEL" for step in steps):
             self.oms._cancel_orders("breaker trip", now_ns, venue=None, preserve_risk_reducing=True, ledger_event="BREAKER_TRIP_CANCEL")
@@ -854,7 +858,7 @@ class TradingSession:
                     continue
                 exposure = abs(qty) if step.side == "sell" else -abs(qty)
                 self.ledger.record("BREAKER_FLATTEN", now_ns, venue=step.venue, side=step.side, quantity=abs(qty), tactic=step.tactic, worst_price=step.worst_price, attempt=self._breaker_attempt)
-                self.oms.open_flatten_plan(step.venue, self.cfg.instrument_id, exposure, now_ns, reason="circuit breaker trip: flatten the net")
+                self.oms.open_flatten_plan(step.venue, self.cfg.instrument_id, exposure, now_ns, reason="circuit breaker trip: flatten the net", shadow=True)
             elif step.kind == "ALARM" and step.reason not in self._breaker_alarmed:
                 self._breaker_alarmed.add(step.reason)
                 alarm = {"ts_ns": now_ns, "reason": step.reason, "venue": step.venue, "quantity": step.qty,

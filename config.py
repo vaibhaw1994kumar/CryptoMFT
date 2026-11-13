@@ -484,6 +484,8 @@ class RealOrderRequirement:
 # REAL orders (live, paper against a venue, testnet drills) must have ON. Backtests of the older profiles are unaffected; v1_9 and every later profile meet them.
 REAL_ORDER_REQUIRED: tuple[RealOrderRequirement, ...] = (
     RealOrderRequirement('oms.maker_ack_deadline', (True,), 'a sent PostOnly quote is watched from the send: an unanswered submit is queried, timed out and the kill switch trips (case 2l)'),
+    RealOrderRequirement('oms.rate_limits.quote_share', (0.7,), 'new quotes use at most 70% of each rate-limit window (owner 13 Nov; ASSUMED share: no venue data); hedges, unwinds and flattens never wait behind a quote and are never refused by the limiter, cancels are unrestricted'),
+    RealOrderRequirement('oms.rate_limits.quote_min_free', (2,), 'a new quote always leaves at least 2 requests of the window free (owner 13 Nov; ASSUMED)'),
     RealOrderRequirement('hedge_faults.silent_carry_bound', ('below_one_lot',), 'a failed hedge always unwinds whatever its size; only a remainder below one hedge-venue lot is carried silently'),
 )
 
@@ -603,7 +605,8 @@ def raw_config_from_profile(
         },
         "oms": {"timeouts": {"maker_ack_deadline": bool((profile.get("oms") or {}).get("maker_ack_deadline", False))},
                 "residual": {"max_residual_base": residual_cap, "max_residual_age_ms": 5_000, "hedge_venue_priority": [names[-1], names[0]], "unwind_price_slippage_bps": str(hedge.get("unwind_band_bps", 15.0)),
-                             "max_unwind_attempts": int(hedge.get("unwind_max_attempts", 3)), "hold_new_risk_on_breach": True, "kill_after_ms": 30_000}},
+                             "max_unwind_attempts": int(hedge.get("unwind_max_attempts", 3)), "hold_new_risk_on_breach": True, "kill_after_ms": 30_000},
+                **({"rate_limits": dict((profile.get("oms") or {})["rate_limits"])} if (profile.get("oms") or {}).get("rate_limits") else {})},      # owner 13 Nov: oms.rate_limits (quote_share, quote_min_free) from the profile; absent = the core defaults, so every older profile is unchanged
         "instruments": [{"instrument_id": instrument_id, "venue": n, "symbol": pair, "base": base, "quote": quote, "tick_size": str(ticks[v]), "quantity_step": str(quantity_steps[v]),
                          "min_quantity": str(quantity_steps[v]), "min_notional": "1", "taker_fee_bps": str(taker[n]), "product_type": "PERP", "leverage": "10", "contract_type": "LINEAR",
                          "settlement_asset": quote, "funding_interval_hours": 8, "funding_anchor": "1970-01-01T00:00:00Z"} for v, n in zip(venues, names)],

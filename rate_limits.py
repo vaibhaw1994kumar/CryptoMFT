@@ -69,6 +69,7 @@ class Bucket:
     status: str                                  # DOCUMENTED | ASSUMED
     _spent: deque = field(default_factory=deque)  # (ts_ns, cost)
     used: int = 0
+    peak_used: int = 0                            # the most the window ever held (owner 13 Nov: the report names the limits that bound; observation only, nothing reads it)
 
     def _expire(self, now_ns: int) -> None:
         while self._spent and self._spent[0][0] <= now_ns - self.interval_ns:
@@ -93,6 +94,8 @@ class Bucket:
     def charge(self, now_ns: int, cost: int) -> None:
         self._spent.append((now_ns, cost))
         self.used += cost
+        if self.used > self.peak_used:
+            self.peak_used = self.used
 
 
 @dataclass(frozen=True)
@@ -163,7 +166,8 @@ class ScopedRateLimiter:
                 bucket._expire(now_ns)
             rows.append({"key": "|".join(key), "scope": bucket.scope, "name": bucket.name, "limit": bucket.limit,
                          "interval_ns": bucket.interval_ns, "used": bucket.used, "status": bucket.status,
-                         "utilization": bucket.used / bucket.limit if bucket.limit else 1.0})
+                         "utilization": bucket.used / bucket.limit if bucket.limit else 1.0,
+                         "peak_used": bucket.peak_used, "peak_utilization": bucket.peak_used / bucket.limit if bucket.limit else 1.0})
         return {"quote_share": self.quote_share, "quote_min_free": self.quote_min_free,
                 "buckets": rows, "throttled_by_status": dict(self.throttled),
                 "cancels_delayed": self.cancels_delayed, "over_limit_sent": self.over_limit_sent,

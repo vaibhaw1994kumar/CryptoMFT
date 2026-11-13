@@ -318,6 +318,7 @@ class OMS:
         self.hedge_gate = None                # E0 step (c): a callable(child, ts_ns) the session sets; it only OBSERVES the hedge child against the risk gate (count: what it would refuse); a hedge is never blocked, it reduces exposure
         self.observer = None                  # E0 step (a): an ems IntentObserver (observation only: the OMS never reads it back); None = off
         self.restart_default_lookback_ns = 24 * 3_600 * 1_000_000_000      # the account snapshot's window when there is nothing persisted to start from (no plan, no execution): the last 24 hours; and the longest gap since the last persisted state that is reconciled automatically (a longer one keeps the gate closed)
+        self._flatten_shadow: set[str] = set()                              # owner 13 Nov: breaker flatten plans whose inherited exposure is already carried by other plans: only their OWN fills count toward the residual
         self._unwind_dust: dict[str, dict[str, Any]] = {}                   # owner 13 Nov: plans whose unwind remainder is below every venue's minimum: DUST, recorded once, never retried
         self._unwind_skip: dict[tuple[str, str], dict[str, Any]] = {}      # (plan, venue) -> the unavailable-venue state: reason, next retry time, delay (1 s doubling to 30 s)
         self._quote_plans: set[str] = set()                                # CR-MQ part 2 (owner 13 Nov): plans that are a market-making quote (one post-only child, no hedge); marked at creation, rebuilt from the plan store
@@ -819,7 +820,7 @@ class OMS:
         return retried
 
     def open_flatten_plan(
-        self, venue: str, instrument_id: str, exposure: Decimal, now_ns: int, reason: str,
+        self, venue: str, instrument_id: str, exposure: Decimal, now_ns: int, reason: str, *, shadow: bool = False,
     ) -> ParentPlan:
         """Close ``exposure`` (signed base) on ``venue`` with reduce-only unwinds.
 
@@ -846,6 +847,9 @@ class OMS:
             transitions=[{"ts_ns": now_ns, "state": PlanState.HEDGE_UNWIND.value, "reason": reason}],
         )
         self.plans[plan.parent_id] = plan
+        if shadow:
+            self._flatten_shadow.add(plan.parent_id)
+            self._persist(plan, now_ns, "FLATTEN_SHADOW")
         self._recompute_plan_economics(plan, now_ns)
         self.ledger.record(
             "RISK_FLATTEN_OPENED", now_ns, parent_id=plan.parent_id, venue=venue,
@@ -1079,10 +1083,10 @@ class OMS:
             # actually holds because legs did not pair up.
             "total_residual_base": str(abs(
                 self.carried_residual_base()
-                + sum((plan.residual_base for plan in open_residuals), Decimal("0"))
+                + sum((self._counted_residual(plan) for plan in open_residuals), Decimal("0"))
             )),
             "open_residual_base": str(sum(
-                (abs(plan.residual_base) for plan in open_residuals), Decimal("0")
+                (abs(self._counted_residual(plan)) for plan in open_residuals), Decimal("0")
             )),
             "unwind_children": sum(
                 order.order_role == "UNWIND"
@@ -1145,11 +1149,50 @@ class OMS:
             return sum(mids, start=Decimal("0")) / len(mids)
         return (plan.opportunity.buy_price + plan.opportunity.sell_price) / Decimal("2")
 
+    def _counted_residual(self, plan: ParentPlan) -> Decimal:
+        """What a plan adds to the residual totals. A breaker flatten plan (`_flatten_shadow`) inherited an exposure that other plans already carry (or that the ledger holds as dust): counting its inherited base
+        again double-counted it (0.0076 SOL read as 0.0152 in the 2c run), so only its own fills count. A liquidation flatten inherits exposure no plan holds and counts in full."""
+        return plan.residual_base - plan.inherited_base if plan.parent_id in self._flatten_shadow else plan.residual_base
+
+    def open_plan_position_by_venue(self) -> dict[str, Decimal]:
+        """Signed base per venue that the OPEN plans (not closed, not a breaker flatten) still manage: their own fills, plus the exposure a liquidation flatten inherited. The breaker's flatten leaves it to them
+        (a hedge chain that is retrying or unwinding closes it once): flattening it too exited the same exposure twice in the 2c rehearsal."""
+        out: dict[str, Decimal] = {}
+        for plan in self.plans.values():
+            if plan.state == PlanState.CLOSED or plan.parent_id in self._flatten_shadow:
+                continue
+            for order in plan.children:
+                if order.filled_quantity:
+                    out[order.venue] = out.get(order.venue, Decimal("0")) + (order.filled_quantity if order.side == Side.BUY else -order.filled_quantity)
+            if plan.inherited_base:
+                venue = plan.opportunity.buy_venue
+                out[venue] = out.get(venue, Decimal("0")) + plan.inherited_base
+        return out
+
+    def escalate_open_chains(self, now_ns: int, reason: str) -> list[str]:
+        """On a breaker trip: every hedge chain that has no order in flight (not sent, rejected, waiting to retry, partly filled) is escalated NOW, so its own deterministic unwind closes the exposure once instead of
+        waiting out the retries. A chain with an order in flight or unknown stays as it is (the order may still fill). Returns the chain ids escalated."""
+        moved: list[str] = []
+        for parent_id, chains in list(self.hedge_chains.items()):
+            plan = self.plans.get(parent_id)
+            if plan is None or plan.state == PlanState.CLOSED:
+                continue
+            for chain in list(chains.values()):
+                if chain.state in (HedgeState.MAKER_FILLED, HedgeState.HEDGE_PENDING, HedgeState.REJECTED, HedgeState.RETRYING, HedgeState.PARTIALLY_FILLED) and chain.exposure_closed_ts is None:
+                    self._hedge_retry_due.pop(chain.chain_id, None)
+                    self._hedge_held.pop(chain.chain_id, None)
+                    self._hedge_move(plan, chain, HedgeState.ESCALATED, now_ns, reason)
+                    moved.append(chain.chain_id)
+        if moved:
+            self.ledger.record("HEDGE_CHAINS_ESCALATED", now_ns, chain_ids=moved, reason=reason)
+            self._hedge_progress_all(now_ns)
+        return moved
+
     def carried_residual_base(self, exclude: ParentPlan | None = None) -> Decimal:
         """Signed residual left open by closed plans (derived, so restart-safe)."""
         return sum(
             (
-                plan.residual_base for plan in self.plans.values()
+                self._counted_residual(plan) for plan in self.plans.values()
                 if plan.state == PlanState.CLOSED and plan is not exclude and plan.parent_id not in self._quote_plans      # a quote's fills are inventory (the pair cap), not an arb residual
             ),
             Decimal("0"),
@@ -3551,6 +3594,8 @@ class OMS:
             for ev in self.plan_store.events(parent_id):
                 if ev["event_type"] == "QUOTE_PLAN":
                     self._quote_plans.add(parent_id)
+                elif ev["event_type"] == "FLATTEN_SHADOW":
+                    self._flatten_shadow.add(parent_id)
                 elif ev["event_type"] == "HEDGE_SPEC":
                     spec = ev["payload"]
                 elif ev["event_type"] == "HEDGE_CHAIN":
