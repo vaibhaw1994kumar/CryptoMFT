@@ -1,0 +1,2 @@
+{"ts": 1793277012.406322, "order_id": "95a0fd50-6091-5e07-80da-c6c9ca7e761c", "child_id": "95a0fd50-6091-5e07-80da-c6c9ca7e761c", "intent_id": "sig2-P1", "role": "primary", "venue": "BYBIT", "side": "buy", "qty": 1.0, "cum_avg_price": 100.46, "seq": 0, "cap": 100.46}
+{"ts": 1793277012.441322, "order_id": "2f55b2ba-f006-54bc-a41d-8acfe9a891b8", "child_id": "2f55b2ba-f006-54bc-a41d-8acfe9a891b8", "intent_id": "sig2-H1", "role": "hedge", "venue": "BINANCE", "side": "sell", "qty": 1.0, "cum_avg_price": 100.52, "seq": 1, "cap": 100.47}

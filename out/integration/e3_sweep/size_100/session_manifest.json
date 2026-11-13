@@ -1,0 +1,2662 @@
+{
+ "label": "EXPLORATORY: session runtime, not a result to quote",
+ "runtime": "session",
+ "profile": "perp_perp_maker_taker_v1_9",
+ "pair": "SOLUSDT",
+ "days": [
+  "2026-10-29",
+  "2026-10-29"
+ ],
+ "size_base": 100.0,
+ "fee_presets": {
+  "bybit": "bybit_perp_vip5",
+  "binance": "binance_perp_vip9"
+ },
+ "events": {
+  "book": 2191597,
+  "trade": 2732060
+ },
+ "positions": {
+  "BYBIT:SOL-USDT-PERP": "361.300000000000",
+  "BINANCE:SOL-USDT-PERP": "-361.30"
+ },
+ "cash_by_venue": {
+  "BYBIT": "-35373.709017200000000000",
+  "BINANCE": "35381.107189090"
+ },
+ "equity_at_book_mids": "-3.440828110000000000",
+ "residual_at_end": {
+  "net_position_base": "0E-12",
+  "flag": "FLAT_NET",
+  "carried_residual_base": "0.00",
+  "open_residual_base": "0",
+  "total_residual_base": "0.00",
+  "open_residual_plans": 0,
+  "limit_breaches": 0
+ },
+ "participation": {
+  "cap_on": true,
+  "prints_it_binds_on": 0.0,
+  "excess_fill_qty": 0.0
+ },
+ "ledger_event_counts": {
+  "FEED_CONTROL_STATE_TRANSITION": 263,
+  "FEED_CONTROL_VENUE_CANCEL": 131,
+  "MARGIN_STATE_TRANSITION": 68,
+  "OPPORTUNITY": 11,
+  "PLAN_STATE_TRANSITION": 84,
+  "ROUTE_ELIGIBILITY": 11,
+  "PRE_TRADE_VALIDATION": 11,
+  "PACKAGE_RISK_RESERVED": 10,
+  "PACKAGE_DISPATCH_STARTED": 10,
+  "CHILD_DISPATCH_STARTED": 154,
+  "ORDER_LIFECYCLE": 762,
+  "ORDER_STATE_UPDATE_APPLIED": 601,
+  "ORDER_REPORT_DEADLINE_SET": 156,
+  "CHILD_DISPATCH_IN_FLIGHT": 154,
+  "CHILD_DISPATCH_COMPLETED": 154,
+  "PACKAGE_DISPATCH_COMPLETED": 10,
+  "PACKAGE_DISPATCH_THROTTLED": 10,
+  "CHILD_REPORT_OBSERVED": 449,
+  "FILL": 288,
+  "HEDGE_CHAIN_OPENED": 144,
+  "HEDGE_STATE": 576,
+  "HEDGE_CAP_SIZE_AWARE": 144,
+  "HEDGE_TOUCH_PAST_PLANNED_LIMIT": 104,
+  "HEDGE_SUBMIT": 144,
+  "LEGGING_LIMIT_BOUND": 13,
+  "LEGGING_LIMIT_CLEARED": 13,
+  "RMS_INTERNAL_RECONCILIATION": 11,
+  "PACKAGE_RISK_RELEASED": 10,
+  "PLAN_CLOSED": 11,
+  "HEDGE_LOT_RESIDUAL": 4,
+  "MARGIN_BUFFER_ALERT": 25,
+  "MARGIN_PRICE_PAUSE": 1,
+  "MARGIN_PRICE_RESUME": 1,
+  "ORDER_LIFETIME_EXPIRED": 1,
+  "WORKING_ORDER_CANCEL_BEFORE_CLOSE": 1,
+  "PACKAGE_RISK_REJECTED": 1,
+  "LATE_REPORT_FOR_CLOSED_PLAN": 5,
+  "KILL_SWITCH_STATE_TRANSITION": 3,
+  "BOOK_INTEGRITY_CANCEL_ALL": 1,
+  "KILL_SWITCH_CANCEL_ALL_COMPLETE": 1
+ },
+ "strategy_counters": {
+  "evaluations": 2185641,
+  "signals": 11,
+  "best_edge_seen_bps": 1.1047337268370996,
+  "rejects": {
+   "stale": 9958,
+   "no_edge": 1775410,
+   "stale_touch": 27,
+   "maker_limit": 376483,
+   "cross_venue_skew": 42868,
+   "funding_window_not_evaluable": 2185641,
+   "funding_term_unavailable": 1777766,
+   "participation_size_capped": 2328,
+   "participation": 2318,
+   "tick_rounding_joined_touch": 10
+  }
+ },
+ "execution_layer": {
+  "layer": {
+   "config": {
+    "pairing": "maker_taker",
+    "primary": {
+     "tactic": "PASSIVE",
+     "placement": "deep",
+     "price_rule": "conditional_edge",
+     "reprice": {
+      "enabled": false,
+      "source": "TRADER_SET",
+      "band_down_bps": null,
+      "band_up_bps": null,
+      "debounce_ms": null,
+      "jump_bps": null,
+      "min_interval_ms": null,
+      "max_age_s": null,
+      "queue_hold": true,
+      "amend_first": true
+     }
+    },
+    "hedge": {
+     "tactic": "IOC_CAPPED",
+     "cap": "size_aware",
+     "slack_bps_floor": 5.0,
+     "max_slip_bps": 15.0,
+     "vol_k": 0.0,
+     "latency_s": 0.0
+    },
+    "maker_maker": {},
+    "unwind": {
+     "tactic": "MARKET_BANDED"
+    },
+    "price_cap_required": true,
+    "one_hedge_child": "enforce",
+    "risk_reservation": "enforce"
+   },
+   "config_sha256": "1d81e6cde44a4e2a54f636e0b560fdc12446fbf0e7fc3e03fe5270fcb4e2cf49",
+   "intents": 154,
+   "intents_by_state": {
+    "done": 152,
+    "failed": 2
+   },
+   "counts": {
+    "intents_primary": 10,
+    "reservations_made": 10,
+    "children": 154,
+    "children_PASSIVE": 10,
+    "route_decisions": 154,
+    "intents_hedge": 144,
+    "children_IOC_CAPPED": 144,
+    "max_live_hedge_children": 1,
+    "reservations_open_at_end": 0
+   },
+   "journal_entries": 622,
+   "fills_journaled": 288,
+   "one_hedge_child_mode": "enforce",
+   "risk_reservation_mode": "enforce",
+   "violations": [],
+   "risk_refusals": [],
+   "reservations_open": 0,
+   "reservations_released": 10,
+   "reservations_leaked": []
+  },
+  "observer_counts": {
+   "primary_children": 10,
+   "cap_looser_than_opportunity_price": 143,
+   "hedge_children": 144,
+   "orders_without_intent": 0
+  },
+  "layer_rule_errors": {},
+  "layer_rule_error_samples": [],
+  "observation_only": true,
+  "observation": {
+   "counts": {
+    "maker_place": 10,
+    "maker_fill": 144,
+    "hedge_arrival": 144
+   },
+   "rows_kept": 298,
+   "rows_dropped": 0,
+   "maker_fill_causes": {
+    "trade": 110,
+    "trade_confirmed_cross_before": 1,
+    "trade_confirmed_cross_after": 32,
+    "trade_after_front": 1
+   },
+   "maker_fill_uncertainty_flags": {
+    "ambiguous_trade_depth": 27,
+    "netting_without_proof": 27
+   },
+   "consume_liquidity_by_venue": {
+    "BYBIT": true,
+    "BINANCE": true
+   },
+   "note": "observation only: nothing in the run reads these rows; consume_liquidity True = an own hedge fill removes the walked quantity from the book it walked"
+  },
+  "exec_reconciliation": {
+   "checked": true,
+   "ok": true,
+   "fills_journaled": 288,
+   "fill_kinds": {
+    "child": 288
+   },
+   "notional": 70757.29500000006,
+   "problems": {},
+   "problems_more": {},
+   "overfills": [],
+   "overfill_count": 0,
+   "per_venue": {
+    "BINANCE": {
+     "base_journal": -361.2999999999999,
+     "base_ledger": -361.3,
+     "cash_journal": 35381.10718908996,
+     "cash_ledger": 35381.10718909,
+     "ok": true
+    },
+    "BYBIT": {
+     "base_journal": 361.30000000000007,
+     "base_ledger": 361.3,
+     "cash_journal": -35373.70901719998,
+     "cash_ledger": -35373.7090172,
+     "ok": true
+    }
+   },
+   "cash_pnl_journal": 7.398171889981313,
+   "cash_pnl_engine": 7.398171889995865,
+   "fees_journal": 9.552828109999986,
+   "fees_engine": 9.552828109999986,
+   "mode": "count",
+   "reservations_leaked": [],
+   "funding_not_modelled": true
+  }
+ },
+ "markout_decomposed": {
+  "label": "EXPLORATORY: decomposed markouts (captured C, adverse D, M = C + D, fee, net) per fill and horizon, bps of the mid at the fill, positive = good for us; mid at the fill = the mid before the event that caused it",
+  "by_venue_role": {
+   "BYBIT|maker": {
+    "1s": {
+     "n": 144,
+     "captured_bps": -0.17695968225600087,
+     "adverse_bps": -1.3580525094575329,
+     "fee_bps": -1.0,
+     "net_bps": -2.535012191713534,
+     "notional_weighted_net_bps": -1.7951504246938514,
+     "m_bps": -1.5350121917135338,
+     "stats": {
+      "captured_bps": {
+       "status": "ok",
+       "n": 144,
+       "mean": -0.1769596822559983,
+       "median": 0.5137954066685971,
+       "p5": -3.623000879871289,
+       "p95": 4.310393421600775,
+       "blocks": 1,
+       "ci95": null,
+       "ci_status": "insufficient_blocks"
+      },
+      "adverse_bps": {
+       "status": "ok",
+       "n": 144,
+       "mean": -1.3580525094575335,
+       "median": -1.0280133641742601,
+       "p5": -5.137954066690352,
+       "p95": 2.0880096048452508,
+       "blocks": 1,
+       "ci95": null,
+       "ci_status": "insufficient_blocks"
+      },
+      "fee_bps": {
+       "status": "ok",
+       "n": 144,
+       "mean": -0.9999999999999998,
+       "median": -0.9999999999999998,
+       "p5": -1.0,
+       "p95": -0.9999999999999998,
+       "blocks": 1,
+       "ci95": null,
+       "ci_status": "insufficient_blocks"
+      },
+      "net_bps": {
+       "status": "ok",
+       "n": 144,
+       "mean": -2.5350121917135318,
+       "median": -3.5878577713374753,
+       "p5": -5.656697883789693,
+       "p95": 3.4794453446439064,
+       "blocks": 1,
+       "ci95": null,
+       "ci_status": "insufficient_blocks"
+      },
+      "m_bps": {
+       "status": "ok",
+       "n": 144,
+       "mean": -1.5350121917135315,
+       "median": -2.5878577713374753,
+       "p5": -4.656697883789693,
+       "p95": 4.479445344643906,
+       "blocks": 1,
+       "ci95": null,
+       "ci_status": "insufficient_blocks"
+      }
+     },
+     "support": {
+      "kept": 144,
+      "excluded": {}
+     }
+    },
+    "5s": {
+     "n": 144,
+     "captured_bps": -0.17695968225600087,
+     "adverse_bps": -8.847716736534377,
+     "fee_bps": -1.0,
+     "net_bps": -10.024676418790378,
+     "notional_weighted_net_bps": -2.905720814898574,
+     "m_bps": -9.024676418790378,
+     "stats": {
+      "captured_bps": {
+       "status": "ok",
+       "n": 144,
+       "mean": -0.1769596822559983,
+       "median": 0.5137954066685971,
+       "p5": -3.623000879871289,
+       "p95": 4.310393421600775,
+       "blocks": 1,
+       "ci95": null,
+       "ci_status": "insufficient_blocks"
+      },
+      "adverse_bps": {
+       "status": "ok",
+       "n": 144,
+       "mean": -8.847716736534359,
+       "median": -5.178716581338137,
+       "p5": -24.835722046878363,
+       "p95": 3.0834061359783274,
+       "blocks": 1,
+       "ci95": null,
+       "ci_status": "insufficient_blocks"
+      },
+      "fee_bps": {
+       "status": "ok",
+       "n": 144,
+       "mean": -0.9999999999999998,
+       "median": -0.9999999999999998,
+       "p5": -1.0,
+       "p95": -0.9999999999999998,
+       "blocks": 1,
+       "ci95": null,
+       "ci_status": "insufficient_blocks"
+      },
+      "net_bps": {
+       "status": "ok",
+       "n": 144,
+       "mean": -10.024676418790357,
+       "median": -5.660844923204765,
+       "p5": -26.351821192053453,
+       "p95": 6.246147059771225,
+       "blocks": 1,
+       "ci95": null,
+       "ci_status": "insufficient_blocks"
+      },
+      "m_bps": {
+       "status": "ok",
+       "n": 144,
+       "mean": -9.024676418790357,
+       "median": -4.660844923204765,
+       "p5": -25.351821192053453,
+       "p95": 7.246147059771225,
+       "blocks": 1,
+       "ci95": null,
+       "ci_status": "insufficient_blocks"
+      }
+     },
+     "support": {
+      "kept": 144,
+      "excluded": {}
+     }
+    },
+    "30s": {
+     "n": 144,
+     "captured_bps": -0.17695968225600087,
+     "adverse_bps": 5.163922213129103,
+     "fee_bps": -1.0,
+     "net_bps": 3.986962530873102,
+     "notional_weighted_net_bps": 13.893874847636281,
+     "m_bps": 4.986962530873102,
+     "stats": {
+      "captured_bps": {
+       "status": "ok",
+       "n": 144,
+       "mean": -0.1769596822559983,
+       "median": 0.5137954066685971,
+       "p5": -3.623000879871289,
+       "p95": 4.310393421600775,
+       "blocks": 1,
+       "ci95": null,
+       "ci_status": "insufficient_blocks"
+      },
+      "adverse_bps": {
+       "status": "ok",
+       "n": 144,
+       "mean": 5.163922213129106,
+       "median": 4.1120534566941185,
+       "p5": -12.417861023439182,
+       "p95": 22.606997893438717,
+       "blocks": 1,
+       "ci95": null,
+       "ci_status": "insufficient_blocks"
+      },
+      "fee_bps": {
+       "status": "ok",
+       "n": 144,
+       "mean": -0.9999999999999998,
+       "median": -0.9999999999999998,
+       "p5": -1.0,
+       "p95": -0.9999999999999998,
+       "blocks": 1,
+       "ci95": null,
+       "ci_status": "insufficient_blocks"
+      },
+      "net_bps": {
+       "status": "ok",
+       "n": 144,
+       "mean": 3.9869625308731074,
+       "median": 5.682086867129039,
+       "p5": -13.934602649006624,
+       "p95": 22.120793300107312,
+       "blocks": 1,
+       "ci95": null,
+       "ci_status": "insufficient_blocks"
+      },
+      "m_bps": {
+       "status": "ok",
+       "n": 144,
+       "mean": 4.986962530873107,
+       "median": 6.682086867129039,
+       "p5": -12.934602649006624,
+       "p95": 23.120793300107312,
+       "blocks": 1,
+       "ci95": null,
+       "ci_status": "insufficient_blocks"
+      }
+     },
+     "support": {
+      "kept": 144,
+      "excluded": {}
+     }
+    }
+   },
+   "BINANCE|taker": {
+    "1s": {
+     "n": 144,
+     "captured_bps": -0.5147920456757089,
+     "adverse_bps": 1.901393644862388,
+     "fee_bps": -1.6999999999999955,
+     "net_bps": -0.3133984008133164,
+     "notional_weighted_net_bps": 0.41549281016268447,
+     "m_bps": 1.3866015991866791,
+     "stats": {
+      "captured_bps": {
+       "status": "ok",
+       "n": 144,
+       "mean": -0.5147920456757087,
+       "median": -0.5154964561854118,
+       "p5": -0.5221414128677258,
+       "p95": -0.49738870927726064,
+       "blocks": 1,
+       "ci95": null,
+       "ci_status": "insufficient_blocks"
+      },
+      "adverse_bps": {
+       "status": "ok",
+       "n": 144,
+       "mean": 1.901393644862387,
+       "median": 2.0690011896767424,
+       "p5": -5.795894793328685,
+       "p95": 5.135315565141187,
+       "blocks": 1,
+       "ci95": null,
+       "ci_status": "insufficient_blocks"
+      },
+      "fee_bps": {
+       "status": "ok",
+       "n": 144,
+       "mean": -1.7000000000000002,
+       "median": -1.7,
+       "p5": -1.7000000000000002,
+       "p95": -1.7,
+       "blocks": 1,
+       "ci95": null,
+       "ci_status": "insufficient_blocks"
+      },
+      "net_bps": {
+       "status": "ok",
+       "n": 144,
+       "mean": -0.3133984008133218,
+       "median": -0.14824910774317823,
+       "p5": -8.01803620619641,
+       "p95": 2.9217840086275055,
+       "blocks": 1,
+       "ci95": null,
+       "ci_status": "insufficient_blocks"
+      },
+      "m_bps": {
+       "status": "ok",
+       "n": 144,
+       "mean": 1.3866015991866782,
+       "median": 1.5517508922568217,
+       "p5": -6.318036206196411,
+       "p95": 4.621784008627506,
+       "blocks": 1,
+       "ci95": null,
+       "ci_status": "insufficient_blocks"
+      }
+     },
+     "support": {
+      "kept": 144,
+      "excluded": {}
+     }
+    },
+    "5s": {
+     "n": 144,
+     "captured_bps": -0.5147920456757089,
+     "adverse_bps": 8.452841331231438,
+     "fee_bps": -1.6999999999999955,
+     "net_bps": 6.238049285555734,
+     "notional_weighted_net_bps": 0.6449410353723413,
+     "m_bps": 7.93804928555573,
+     "stats": {
+      "captured_bps": {
+       "status": "ok",
+       "n": 144,
+       "mean": -0.5147920456757087,
+       "median": -0.5154964561854118,
+       "p5": -0.5221414128677258,
+       "p95": -0.49738870927726064,
+       "blocks": 1,
+       "ci95": null,
+       "ci_status": "insufficient_blocks"
+      },
+      "adverse_bps": {
+       "status": "ok",
+       "n": 144,
+       "mean": 8.452841331231438,
+       "median": 4.664138232111263,
+       "p5": -5.2299646208277615,
+       "p95": 18.624864193697825,
+       "blocks": 1,
+       "ci95": null,
+       "ci_status": "insufficient_blocks"
+      },
+      "fee_bps": {
+       "status": "ok",
+       "n": 144,
+       "mean": -1.7000000000000002,
+       "median": -1.7,
+       "p5": -1.7000000000000002,
+       "p95": -1.7,
+       "blocks": 1,
+       "ci95": null,
+       "ci_status": "insufficient_blocks"
+      },
+      "net_bps": {
+       "status": "ok",
+       "n": 144,
+       "mean": 6.23804928555573,
+       "median": 2.4463712532491364,
+       "p5": -7.440470168937033,
+       "p95": 16.407506854984447,
+       "blocks": 1,
+       "ci95": null,
+       "ci_status": "insufficient_blocks"
+      },
+      "m_bps": {
+       "status": "ok",
+       "n": 144,
+       "mean": 7.9380492855557305,
+       "median": 4.146371253249137,
+       "p5": -5.740470168937033,
+       "p95": 18.107506854984447,
+       "blocks": 1,
+       "ci95": null,
+       "ci_status": "insufficient_blocks"
+      }
+     },
+     "support": {
+      "kept": 144,
+      "excluded": {}
+     }
+    },
+    "30s": {
+     "n": 144,
+     "captured_bps": -0.5147920456757089,
+     "adverse_bps": -4.246619815511708,
+     "fee_bps": -1.6999999999999955,
+     "net_bps": -6.461411861187413,
+     "notional_weighted_net_bps": -15.477047016738405,
+     "m_bps": -4.761411861187417,
+     "stats": {
+      "captured_bps": {
+       "status": "ok",
+       "n": 144,
+       "mean": -0.5147920456757087,
+       "median": -0.5154964561854118,
+       "p5": -0.5221414128677258,
+       "p95": -0.49738870927726064,
+       "blocks": 1,
+       "ci95": null,
+       "ci_status": "insufficient_blocks"
+      },
+      "adverse_bps": {
+       "status": "ok",
+       "n": 144,
+       "mean": -4.246619815511715,
+       "median": -5.136898340783005,
+       "p5": -24.649514712680027,
+       "p95": 15.517508922568219,
+       "blocks": 1,
+       "ci95": null,
+       "ci_status": "insufficient_blocks"
+      },
+      "fee_bps": {
+       "status": "ok",
+       "n": 144,
+       "mean": -1.7000000000000002,
+       "median": -1.7,
+       "p5": -1.7000000000000002,
+       "p95": -1.7,
+       "blocks": 1,
+       "ci95": null,
+       "ci_status": "insufficient_blocks"
+      },
+      "net_bps": {
+       "status": "ok",
+       "n": 144,
+       "mean": -6.461411861187423,
+       "median": -7.350588174860722,
+       "p5": -26.863046269193706,
+       "p95": 13.300258625148299,
+       "blocks": 1,
+       "ci95": null,
+       "ci_status": "insufficient_blocks"
+      },
+      "m_bps": {
+       "status": "ok",
+       "n": 144,
+       "mean": -4.761411861187423,
+       "median": -5.650588174860721,
+       "p5": -25.163046269193707,
+       "p95": 15.000258625148298,
+       "blocks": 1,
+       "ci95": null,
+       "ci_status": "insufficient_blocks"
+      }
+     },
+     "support": {
+      "kept": 144,
+      "excluded": {}
+     }
+    }
+   }
+  },
+  "excluded_counts": {
+   "1s": {},
+   "5s": {},
+   "30s": {}
+  },
+  "fills_skipped_no_mid_before": 0,
+  "rows": 864,
+  "age_rule": "off (no mid_max_age_s)"
+ },
+ "markout_summary": {
+  "1s": {
+   "count": 288.0,
+   "qty_weighted_markout_bps": 0.07875515159352893,
+   "adverse_rate": 0.4791666666666667
+  },
+  "5s": {
+   "count": 288.0,
+   "qty_weighted_markout_bps": 0.39130714556195517,
+   "adverse_rate": 0.3923611111111111
+  },
+  "30s": {
+   "count": 288.0,
+   "qty_weighted_markout_bps": 0.37181372329426604,
+   "adverse_rate": 0.4583333333333333
+  }
+ },
+ "markout_by_venue_role": {
+  "binance/taker": {
+   "1s": {
+    "count": 144.0,
+    "qty_weighted_markout_bps": 2.2531429083054886,
+    "adverse_rate": 0.18055555555555555
+   },
+   "5s": {
+    "count": 144.0,
+    "qty_weighted_markout_bps": 2.4338103563826055,
+    "adverse_rate": 0.0625
+   },
+   "30s": {
+    "count": 144.0,
+    "qty_weighted_markout_bps": -13.692694090868647,
+    "adverse_rate": 0.5833333333333334
+   }
+  },
+  "bybit/maker": {
+   "1s": {
+    "count": 144.0,
+    "qty_weighted_markout_bps": -2.0956326051184293,
+    "adverse_rate": 0.7777777777777778
+   },
+   "5s": {
+    "count": 144.0,
+    "qty_weighted_markout_bps": -1.651196065258694,
+    "adverse_rate": 0.7222222222222222
+   },
+   "30s": {
+    "count": 144.0,
+    "qty_weighted_markout_bps": 14.436321537457165,
+    "adverse_rate": 0.3333333333333333
+   }
+  }
+ },
+ "gate_events": [
+  {
+   "event_type": "HEDGE_TOUCH_PAST_PLANNED_LIMIT",
+   "ts_ns": 1793276999104680226,
+   "parent_id": "ae08adcc-3fe3-5c09-b5e0-10de7ad2e397",
+   "chain_id": "5c23b188-bc39-539d-a9f2-1e882767685d",
+   "reason": "touch_past_planned_limit"
+  },
+  {
+   "event_type": "HEDGE_TOUCH_PAST_PLANNED_LIMIT",
+   "ts_ns": 1793307121392786218,
+   "parent_id": "efd0bfae-427c-5c09-b49a-13b04a766333",
+   "chain_id": "f7095ec9-39bc-5393-a5b1-d051bc54081f",
+   "reason": "touch_past_planned_limit"
+  },
+  {
+   "event_type": "HEDGE_TOUCH_PAST_PLANNED_LIMIT",
+   "ts_ns": 1793307121392786223,
+   "parent_id": "efd0bfae-427c-5c09-b49a-13b04a766333",
+   "chain_id": "f3cd5750-9ab4-545f-a919-3bc763e22bb3",
+   "reason": "touch_past_planned_limit"
+  },
+  {
+   "event_type": "HEDGE_TOUCH_PAST_PLANNED_LIMIT",
+   "ts_ns": 1793307121392786228,
+   "parent_id": "efd0bfae-427c-5c09-b49a-13b04a766333",
+   "chain_id": "27b586c6-0042-5a5a-9c32-5355b71cb819",
+   "reason": "touch_past_planned_limit"
+  },
+  {
+   "event_type": "HEDGE_TOUCH_PAST_PLANNED_LIMIT",
+   "ts_ns": 1793307121392786233,
+   "parent_id": "efd0bfae-427c-5c09-b49a-13b04a766333",
+   "chain_id": "5ec9b387-0015-5ac8-8d38-53ca39b764d0",
+   "reason": "touch_past_planned_limit"
+  },
+  {
+   "event_type": "HEDGE_TOUCH_PAST_PLANNED_LIMIT",
+   "ts_ns": 1793307121411669894,
+   "parent_id": "efd0bfae-427c-5c09-b49a-13b04a766333",
+   "chain_id": "12fe2a6f-70c2-5ee6-9f4b-40c4f3d823b0",
+   "reason": "touch_past_planned_limit"
+  },
+  {
+   "event_type": "HEDGE_TOUCH_PAST_PLANNED_LIMIT",
+   "ts_ns": 1793307121411669899,
+   "parent_id": "efd0bfae-427c-5c09-b49a-13b04a766333",
+   "chain_id": "335fed6a-8662-5de7-aef1-b8b1472eeb79",
+   "reason": "touch_past_planned_limit"
+  },
+  {
+   "event_type": "HEDGE_TOUCH_PAST_PLANNED_LIMIT",
+   "ts_ns": 1793307121411669904,
+   "parent_id": "efd0bfae-427c-5c09-b49a-13b04a766333",
+   "chain_id": "75682905-253d-5586-8337-611af3e2dd73",
+   "reason": "touch_past_planned_limit"
+  },
+  {
+   "event_type": "HEDGE_TOUCH_PAST_PLANNED_LIMIT",
+   "ts_ns": 1793307121411669909,
+   "parent_id": "efd0bfae-427c-5c09-b49a-13b04a766333",
+   "chain_id": "29612e32-3e25-59cc-8013-a70d0e4051dd",
+   "reason": "touch_past_planned_limit"
+  },
+  {
+   "event_type": "HEDGE_TOUCH_PAST_PLANNED_LIMIT",
+   "ts_ns": 1793307121411669914,
+   "parent_id": "efd0bfae-427c-5c09-b49a-13b04a766333",
+   "chain_id": "a77dfc45-69c3-5ba8-84b6-c9c1be89501f",
+   "reason": "touch_past_planned_limit"
+  },
+  {
+   "event_type": "HEDGE_TOUCH_PAST_PLANNED_LIMIT",
+   "ts_ns": 1793307121665867626,
+   "parent_id": "efd0bfae-427c-5c09-b49a-13b04a766333",
+   "chain_id": "efc943fc-e3ef-5c6b-8537-591337b2ecbd",
+   "reason": "touch_past_planned_limit"
+  },
+  {
+   "event_type": "HEDGE_TOUCH_PAST_PLANNED_LIMIT",
+   "ts_ns": 1793307121665867631,
+   "parent_id": "efd0bfae-427c-5c09-b49a-13b04a766333",
+   "chain_id": "81a82ce2-41e9-5f2e-97db-56d4a9a8368e",
+   "reason": "touch_past_planned_limit"
+  },
+  {
+   "event_type": "HEDGE_TOUCH_PAST_PLANNED_LIMIT",
+   "ts_ns": 1793307122051381647,
+   "parent_id": "efd0bfae-427c-5c09-b49a-13b04a766333",
+   "chain_id": "bb47580a-6610-521a-8469-5a54c0739db9",
+   "reason": "touch_past_planned_limit"
+  },
+  {
+   "event_type": "HEDGE_TOUCH_PAST_PLANNED_LIMIT",
+   "ts_ns": 1793307122051381652,
+   "parent_id": "efd0bfae-427c-5c09-b49a-13b04a766333",
+   "chain_id": "c5b5ad0d-f51a-5dbe-a0c6-67b3bcc93cf1",
+   "reason": "touch_past_planned_limit"
+  },
+  {
+   "event_type": "HEDGE_TOUCH_PAST_PLANNED_LIMIT",
+   "ts_ns": 1793307122051381657,
+   "parent_id": "efd0bfae-427c-5c09-b49a-13b04a766333",
+   "chain_id": "66d7ac7d-2d2d-5696-a036-9b8b12083da9",
+   "reason": "touch_past_planned_limit"
+  },
+  {
+   "event_type": "HEDGE_TOUCH_PAST_PLANNED_LIMIT",
+   "ts_ns": 1793307122051381662,
+   "parent_id": "efd0bfae-427c-5c09-b49a-13b04a766333",
+   "chain_id": "cebfc542-90ff-5bb8-a1cb-ad6aadb563b6",
+   "reason": "touch_past_planned_limit"
+  },
+  {
+   "event_type": "HEDGE_TOUCH_PAST_PLANNED_LIMIT",
+   "ts_ns": 1793307122052345779,
+   "parent_id": "efd0bfae-427c-5c09-b49a-13b04a766333",
+   "chain_id": "6e7f79d7-4102-59bf-a625-7e51550adeeb",
+   "reason": "touch_past_planned_limit"
+  },
+  {
+   "event_type": "HEDGE_TOUCH_PAST_PLANNED_LIMIT",
+   "ts_ns": 1793307122052345784,
+   "parent_id": "efd0bfae-427c-5c09-b49a-13b04a766333",
+   "chain_id": "19c4dd6c-de38-5def-909f-c631d35b3bdb",
+   "reason": "touch_past_planned_limit"
+  },
+  {
+   "event_type": "HEDGE_TOUCH_PAST_PLANNED_LIMIT",
+   "ts_ns": 1793307122052345789,
+   "parent_id": "efd0bfae-427c-5c09-b49a-13b04a766333",
+   "chain_id": "4ed13078-662e-5aad-9c35-b9ddf6457d4f",
+   "reason": "touch_past_planned_limit"
+  },
+  {
+   "event_type": "HEDGE_TOUCH_PAST_PLANNED_LIMIT",
+   "ts_ns": 1793307122052345794,
+   "parent_id": "efd0bfae-427c-5c09-b49a-13b04a766333",
+   "chain_id": "f53f6685-751d-5262-a42a-a2139326b2dd",
+   "reason": "touch_past_planned_limit"
+  },
+  {
+   "event_type": "HEDGE_TOUCH_PAST_PLANNED_LIMIT",
+   "ts_ns": 1793307122052345799,
+   "parent_id": "efd0bfae-427c-5c09-b49a-13b04a766333",
+   "chain_id": "81afe01d-40a1-59f5-a30a-eef27c1cb35e",
+   "reason": "touch_past_planned_limit"
+  },
+  {
+   "event_type": "HEDGE_TOUCH_PAST_PLANNED_LIMIT",
+   "ts_ns": 1793307122173419441,
+   "parent_id": "efd0bfae-427c-5c09-b49a-13b04a766333",
+   "chain_id": "1978c9f2-ae76-535a-bd7e-2b105fdc945f",
+   "reason": "touch_past_planned_limit"
+  },
+  {
+   "event_type": "HEDGE_TOUCH_PAST_PLANNED_LIMIT",
+   "ts_ns": 1793307122173419446,
+   "parent_id": "efd0bfae-427c-5c09-b49a-13b04a766333",
+   "chain_id": "3b10c048-c83b-580a-9eed-4fc4236e73c1",
+   "reason": "touch_past_planned_limit"
+  },
+  {
+   "event_type": "HEDGE_TOUCH_PAST_PLANNED_LIMIT",
+   "ts_ns": 1793307122173419451,
+   "parent_id": "efd0bfae-427c-5c09-b49a-13b04a766333",
+   "chain_id": "31f9bbf6-c59f-5f7f-8adb-eedbbcb02a9d",
+   "reason": "touch_past_planned_limit"
+  },
+  {
+   "event_type": "HEDGE_TOUCH_PAST_PLANNED_LIMIT",
+   "ts_ns": 1793307122173419456,
+   "parent_id": "efd0bfae-427c-5c09-b49a-13b04a766333",
+   "chain_id": "d8ab7cb0-df4b-5156-8cf9-5ac5922dd6d8",
+   "reason": "touch_past_planned_limit"
+  },
+  {
+   "event_type": "HEDGE_TOUCH_PAST_PLANNED_LIMIT",
+   "ts_ns": 1793307122173419461,
+   "parent_id": "efd0bfae-427c-5c09-b49a-13b04a766333",
+   "chain_id": "b6310add-6021-57ce-ad12-d47fc5fbd0cd",
+   "reason": "touch_past_planned_limit"
+  },
+  {
+   "event_type": "HEDGE_TOUCH_PAST_PLANNED_LIMIT",
+   "ts_ns": 1793307122173419466,
+   "parent_id": "efd0bfae-427c-5c09-b49a-13b04a766333",
+   "chain_id": "d7eba5af-f17e-5d31-92ed-a93d9891bf3a",
+   "reason": "touch_past_planned_limit"
+  },
+  {
+   "event_type": "HEDGE_TOUCH_PAST_PLANNED_LIMIT",
+   "ts_ns": 1793307122173419471,
+   "parent_id": "efd0bfae-427c-5c09-b49a-13b04a766333",
+   "chain_id": "91706a3b-be94-5dff-bf85-50c61b01b826",
+   "reason": "touch_past_planned_limit"
+  },
+  {
+   "event_type": "HEDGE_TOUCH_PAST_PLANNED_LIMIT",
+   "ts_ns": 1793307122173419476,
+   "parent_id": "efd0bfae-427c-5c09-b49a-13b04a766333",
+   "chain_id": "26262547-cb91-56d4-9660-9e96e63beb61",
+   "reason": "touch_past_planned_limit"
+  },
+  {
+   "event_type": "HEDGE_TOUCH_PAST_PLANNED_LIMIT",
+   "ts_ns": 1793307122173419481,
+   "parent_id": "efd0bfae-427c-5c09-b49a-13b04a766333",
+   "chain_id": "b410a9ac-850b-5e55-bc0e-6b05912a264e",
+   "reason": "touch_past_planned_limit"
+  },
+  {
+   "event_type": "HEDGE_TOUCH_PAST_PLANNED_LIMIT",
+   "ts_ns": 1793307122173419486,
+   "parent_id": "efd0bfae-427c-5c09-b49a-13b04a766333",
+   "chain_id": "708ecf8c-e059-5b2b-923a-a602a0ba3d5c",
+   "reason": "touch_past_planned_limit"
+  },
+  {
+   "event_type": "HEDGE_TOUCH_PAST_PLANNED_LIMIT",
+   "ts_ns": 1793307122173419491,
+   "parent_id": "efd0bfae-427c-5c09-b49a-13b04a766333",
+   "chain_id": "e740426d-42eb-5b5d-9dfe-5c32531c9e8f",
+   "reason": "touch_past_planned_limit"
+  },
+  {
+   "event_type": "HEDGE_TOUCH_PAST_PLANNED_LIMIT",
+   "ts_ns": 1793307122173419496,
+   "parent_id": "efd0bfae-427c-5c09-b49a-13b04a766333",
+   "chain_id": "c6a64838-ab12-52e9-be6b-464236e51d3c",
+   "reason": "touch_past_planned_limit"
+  },
+  {
+   "event_type": "HEDGE_TOUCH_PAST_PLANNED_LIMIT",
+   "ts_ns": 1793307122173419501,
+   "parent_id": "efd0bfae-427c-5c09-b49a-13b04a766333",
+   "chain_id": "cd01b0f5-1d0d-54d4-a4ab-89fc3fa6552f",
+   "reason": "touch_past_planned_limit"
+  },
+  {
+   "event_type": "HEDGE_TOUCH_PAST_PLANNED_LIMIT",
+   "ts_ns": 1793307122173419506,
+   "parent_id": "efd0bfae-427c-5c09-b49a-13b04a766333",
+   "chain_id": "64379758-8ef4-55cb-91af-254242c4cfdb",
+   "reason": "touch_past_planned_limit"
+  },
+  {
+   "event_type": "HEDGE_TOUCH_PAST_PLANNED_LIMIT",
+   "ts_ns": 1793307122173419511,
+   "parent_id": "efd0bfae-427c-5c09-b49a-13b04a766333",
+   "chain_id": "f682aba4-3c29-59c1-bd3d-ea0b08436631",
+   "reason": "touch_past_planned_limit"
+  },
+  {
+   "event_type": "HEDGE_TOUCH_PAST_PLANNED_LIMIT",
+   "ts_ns": 1793307122173419516,
+   "parent_id": "efd0bfae-427c-5c09-b49a-13b04a766333",
+   "chain_id": "f42b1384-3058-5f84-a6c0-35b1b20e8cb1",
+   "reason": "touch_past_planned_limit"
+  },
+  {
+   "event_type": "HEDGE_TOUCH_PAST_PLANNED_LIMIT",
+   "ts_ns": 1793307122173419521,
+   "parent_id": "efd0bfae-427c-5c09-b49a-13b04a766333",
+   "chain_id": "8473f281-eb90-5b60-8fd3-1862d6aaa500",
+   "reason": "touch_past_planned_limit"
+  },
+  {
+   "event_type": "HEDGE_TOUCH_PAST_PLANNED_LIMIT",
+   "ts_ns": 1793307122173419526,
+   "parent_id": "efd0bfae-427c-5c09-b49a-13b04a766333",
+   "chain_id": "6143033c-4c48-5707-b220-6f9ee2e32293",
+   "reason": "touch_past_planned_limit"
+  },
+  {
+   "event_type": "HEDGE_TOUCH_PAST_PLANNED_LIMIT",
+   "ts_ns": 1793307122173419531,
+   "parent_id": "efd0bfae-427c-5c09-b49a-13b04a766333",
+   "chain_id": "b97a7b96-34e3-50e6-9e23-4d8a23215608",
+   "reason": "touch_past_planned_limit"
+  },
+  {
+   "event_type": "HEDGE_TOUCH_PAST_PLANNED_LIMIT",
+   "ts_ns": 1793307122173419536,
+   "parent_id": "efd0bfae-427c-5c09-b49a-13b04a766333",
+   "chain_id": "c17bc556-aa5e-56d9-a07c-274e50ead058",
+   "reason": "touch_past_planned_limit"
+  },
+  {
+   "event_type": "HEDGE_TOUCH_PAST_PLANNED_LIMIT",
+   "ts_ns": 1793307122173419541,
+   "parent_id": "efd0bfae-427c-5c09-b49a-13b04a766333",
+   "chain_id": "0bddd323-347a-5e46-b53b-d72553a1762f",
+   "reason": "touch_past_planned_limit"
+  },
+  {
+   "event_type": "HEDGE_TOUCH_PAST_PLANNED_LIMIT",
+   "ts_ns": 1793307122173419546,
+   "parent_id": "efd0bfae-427c-5c09-b49a-13b04a766333",
+   "chain_id": "b33586bb-c0f9-5e99-95d6-fa19eb931ceb",
+   "reason": "touch_past_planned_limit"
+  },
+  {
+   "event_type": "HEDGE_TOUCH_PAST_PLANNED_LIMIT",
+   "ts_ns": 1793307122173419551,
+   "parent_id": "efd0bfae-427c-5c09-b49a-13b04a766333",
+   "chain_id": "2aca26a4-74fe-5626-9c1a-65abc3912c19",
+   "reason": "touch_past_planned_limit"
+  },
+  {
+   "event_type": "HEDGE_TOUCH_PAST_PLANNED_LIMIT",
+   "ts_ns": 1793307122173419556,
+   "parent_id": "efd0bfae-427c-5c09-b49a-13b04a766333",
+   "chain_id": "215943a3-3c19-5942-85d9-e4f9fffc042b",
+   "reason": "touch_past_planned_limit"
+  },
+  {
+   "event_type": "HEDGE_TOUCH_PAST_PLANNED_LIMIT",
+   "ts_ns": 1793307122173419561,
+   "parent_id": "efd0bfae-427c-5c09-b49a-13b04a766333",
+   "chain_id": "a28c0753-2d81-5b01-a270-ef5bb17d3290",
+   "reason": "touch_past_planned_limit"
+  },
+  {
+   "event_type": "HEDGE_TOUCH_PAST_PLANNED_LIMIT",
+   "ts_ns": 1793307122173419566,
+   "parent_id": "efd0bfae-427c-5c09-b49a-13b04a766333",
+   "chain_id": "1b5e9286-ecfe-5813-b121-8113ac2f9cd0",
+   "reason": "touch_past_planned_limit"
+  },
+  {
+   "event_type": "HEDGE_TOUCH_PAST_PLANNED_LIMIT",
+   "ts_ns": 1793307122173419571,
+   "parent_id": "efd0bfae-427c-5c09-b49a-13b04a766333",
+   "chain_id": "d0ef154a-1acd-5cc0-8734-6501e68c54fb",
+   "reason": "touch_past_planned_limit"
+  },
+  {
+   "event_type": "HEDGE_TOUCH_PAST_PLANNED_LIMIT",
+   "ts_ns": 1793307122173419576,
+   "parent_id": "efd0bfae-427c-5c09-b49a-13b04a766333",
+   "chain_id": "735a3021-e424-57e2-b74a-71fb1ac07ebd",
+   "reason": "touch_past_planned_limit"
+  },
+  {
+   "event_type": "HEDGE_TOUCH_PAST_PLANNED_LIMIT",
+   "ts_ns": 1793307964148837160,
+   "parent_id": "78c814fa-7ca1-57a4-97ab-9a24e3a94eec",
+   "chain_id": "ced2e12c-2317-5a59-9fbc-a20b66e752ac",
+   "reason": "touch_past_planned_limit"
+  },
+  {
+   "event_type": "HEDGE_TOUCH_PAST_PLANNED_LIMIT",
+   "ts_ns": 1793307964148837165,
+   "parent_id": "78c814fa-7ca1-57a4-97ab-9a24e3a94eec",
+   "chain_id": "91059342-2e6d-52bf-9462-14759429eb3b",
+   "reason": "touch_past_planned_limit"
+  },
+  {
+   "event_type": "HEDGE_TOUCH_PAST_PLANNED_LIMIT",
+   "ts_ns": 1793307964148837170,
+   "parent_id": "78c814fa-7ca1-57a4-97ab-9a24e3a94eec",
+   "chain_id": "8bce2199-82e8-5658-8024-8c641b064e14",
+   "reason": "touch_past_planned_limit"
+  },
+  {
+   "event_type": "HEDGE_TOUCH_PAST_PLANNED_LIMIT",
+   "ts_ns": 1793307964148837175,
+   "parent_id": "78c814fa-7ca1-57a4-97ab-9a24e3a94eec",
+   "chain_id": "7610eba7-4ce6-5ab1-81bd-f350f2e732ed",
+   "reason": "touch_past_planned_limit"
+  },
+  {
+   "event_type": "HEDGE_TOUCH_PAST_PLANNED_LIMIT",
+   "ts_ns": 1793307964148837180,
+   "parent_id": "78c814fa-7ca1-57a4-97ab-9a24e3a94eec",
+   "chain_id": "ef6bb4a0-0408-5a77-8132-7366fb9968f8",
+   "reason": "touch_past_planned_limit"
+  },
+  {
+   "event_type": "HEDGE_TOUCH_PAST_PLANNED_LIMIT",
+   "ts_ns": 1793307964148837185,
+   "parent_id": "78c814fa-7ca1-57a4-97ab-9a24e3a94eec",
+   "chain_id": "2695925d-afca-5d55-bb59-b242303372bb",
+   "reason": "touch_past_planned_limit"
+  },
+  {
+   "event_type": "HEDGE_TOUCH_PAST_PLANNED_LIMIT",
+   "ts_ns": 1793307964972385483,
+   "parent_id": "78c814fa-7ca1-57a4-97ab-9a24e3a94eec",
+   "chain_id": "82db2888-f128-5b4e-b428-3b7be7dfd293",
+   "reason": "touch_past_planned_limit"
+  },
+  {
+   "event_type": "HEDGE_TOUCH_PAST_PLANNED_LIMIT",
+   "ts_ns": 1793307964972385488,
+   "parent_id": "78c814fa-7ca1-57a4-97ab-9a24e3a94eec",
+   "chain_id": "63a11600-074a-5284-baee-b987be38b3bf",
+   "reason": "touch_past_planned_limit"
+  },
+  {
+   "event_type": "HEDGE_TOUCH_PAST_PLANNED_LIMIT",
+   "ts_ns": 1793307964972385493,
+   "parent_id": "78c814fa-7ca1-57a4-97ab-9a24e3a94eec",
+   "chain_id": "8c402cb6-1e99-5456-8553-eb847ae4837c",
+   "reason": "touch_past_planned_limit"
+  },
+  {
+   "event_type": "HEDGE_TOUCH_PAST_PLANNED_LIMIT",
+   "ts_ns": 1793307964972385498,
+   "parent_id": "78c814fa-7ca1-57a4-97ab-9a24e3a94eec",
+   "chain_id": "9f42b7a3-f1a6-5567-a315-4e496844bc8d",
+   "reason": "touch_past_planned_limit"
+  },
+  {
+   "event_type": "HEDGE_TOUCH_PAST_PLANNED_LIMIT",
+   "ts_ns": 1793307964973313077,
+   "parent_id": "78c814fa-7ca1-57a4-97ab-9a24e3a94eec",
+   "chain_id": "d6d0ad07-a146-5cde-abca-dcd8f9f95115",
+   "reason": "touch_past_planned_limit"
+  },
+  {
+   "event_type": "HEDGE_TOUCH_PAST_PLANNED_LIMIT",
+   "ts_ns": 1793307964973313082,
+   "parent_id": "78c814fa-7ca1-57a4-97ab-9a24e3a94eec",
+   "chain_id": "3c545d56-54df-5f40-ba26-c34a70f5d380",
+   "reason": "touch_past_planned_limit"
+  },
+  {
+   "event_type": "HEDGE_TOUCH_PAST_PLANNED_LIMIT",
+   "ts_ns": 1793307964973313087,
+   "parent_id": "78c814fa-7ca1-57a4-97ab-9a24e3a94eec",
+   "chain_id": "d44b3589-6f93-5344-901d-7ea5bbef0e39",
+   "reason": "touch_past_planned_limit"
+  },
+  {
+   "event_type": "HEDGE_TOUCH_PAST_PLANNED_LIMIT",
+   "ts_ns": 1793307964973313092,
+   "parent_id": "78c814fa-7ca1-57a4-97ab-9a24e3a94eec",
+   "chain_id": "015b9658-412e-53dd-8bba-6c23b3a0891f",
+   "reason": "touch_past_planned_limit"
+  },
+  {
+   "event_type": "HEDGE_TOUCH_PAST_PLANNED_LIMIT",
+   "ts_ns": 1793307964973313097,
+   "parent_id": "78c814fa-7ca1-57a4-97ab-9a24e3a94eec",
+   "chain_id": "abc2ddd4-824f-54b0-91f9-d18db3a44b5d",
+   "reason": "touch_past_planned_limit"
+  },
+  {
+   "event_type": "HEDGE_TOUCH_PAST_PLANNED_LIMIT",
+   "ts_ns": 1793307965744221193,
+   "parent_id": "78c814fa-7ca1-57a4-97ab-9a24e3a94eec",
+   "chain_id": "c26a6e9f-3760-5610-bf1b-f062d60d4546",
+   "reason": "touch_past_planned_limit"
+  },
+  {
+   "event_type": "HEDGE_TOUCH_PAST_PLANNED_LIMIT",
+   "ts_ns": 1793307965744221198,
+   "parent_id": "78c814fa-7ca1-57a4-97ab-9a24e3a94eec",
+   "chain_id": "2c86d048-4afe-5749-93e8-fcc50aaadda9",
+   "reason": "touch_past_planned_limit"
+  },
+  {
+   "event_type": "HEDGE_TOUCH_PAST_PLANNED_LIMIT",
+   "ts_ns": 1793307965744221203,
+   "parent_id": "78c814fa-7ca1-57a4-97ab-9a24e3a94eec",
+   "chain_id": "2da1e56e-0346-56c8-bb1c-5ce709ad24fa",
+   "reason": "touch_past_planned_limit"
+  },
+  {
+   "event_type": "HEDGE_TOUCH_PAST_PLANNED_LIMIT",
+   "ts_ns": 1793307965744221208,
+   "parent_id": "78c814fa-7ca1-57a4-97ab-9a24e3a94eec",
+   "chain_id": "63cda995-4d81-5915-ac7c-7be06e55285a",
+   "reason": "touch_past_planned_limit"
+  },
+  {
+   "event_type": "HEDGE_TOUCH_PAST_PLANNED_LIMIT",
+   "ts_ns": 1793307965744221213,
+   "parent_id": "78c814fa-7ca1-57a4-97ab-9a24e3a94eec",
+   "chain_id": "9f5c9b6e-d432-5efc-847f-e689fd2c57f3",
+   "reason": "touch_past_planned_limit"
+  },
+  {
+   "event_type": "HEDGE_TOUCH_PAST_PLANNED_LIMIT",
+   "ts_ns": 1793307965745163104,
+   "parent_id": "78c814fa-7ca1-57a4-97ab-9a24e3a94eec",
+   "chain_id": "7109c763-1283-537f-a0c5-dc5d3ad218a8",
+   "reason": "touch_past_planned_limit"
+  },
+  {
+   "event_type": "HEDGE_TOUCH_PAST_PLANNED_LIMIT",
+   "ts_ns": 1793307965745163109,
+   "parent_id": "78c814fa-7ca1-57a4-97ab-9a24e3a94eec",
+   "chain_id": "b07746cb-e829-5649-93c4-f2badba00c1b",
+   "reason": "touch_past_planned_limit"
+  },
+  {
+   "event_type": "HEDGE_TOUCH_PAST_PLANNED_LIMIT",
+   "ts_ns": 1793307965745163114,
+   "parent_id": "78c814fa-7ca1-57a4-97ab-9a24e3a94eec",
+   "chain_id": "12274c6f-571f-5edf-aacb-0550f044a527",
+   "reason": "touch_past_planned_limit"
+  },
+  {
+   "event_type": "HEDGE_TOUCH_PAST_PLANNED_LIMIT",
+   "ts_ns": 1793307965770445857,
+   "parent_id": "78c814fa-7ca1-57a4-97ab-9a24e3a94eec",
+   "chain_id": "3c179e95-20a0-5ce4-a97c-b849f200304b",
+   "reason": "touch_past_planned_limit"
+  },
+  {
+   "event_type": "HEDGE_TOUCH_PAST_PLANNED_LIMIT",
+   "ts_ns": 1793310575291223037,
+   "parent_id": "57f4d085-d75a-53e1-a3f0-7a040fd9ed25",
+   "chain_id": "42663beb-1313-57ef-ab63-b26639c2556c",
+   "reason": "touch_past_planned_limit"
+  },
+  {
+   "event_type": "HEDGE_TOUCH_PAST_PLANNED_LIMIT",
+   "ts_ns": 1793310575291223042,
+   "parent_id": "57f4d085-d75a-53e1-a3f0-7a040fd9ed25",
+   "chain_id": "30444eb5-c302-50c2-8b4b-acb6ca92f552",
+   "reason": "touch_past_planned_limit"
+  },
+  {
+   "event_type": "HEDGE_TOUCH_PAST_PLANNED_LIMIT",
+   "ts_ns": 1793310575291223047,
+   "parent_id": "57f4d085-d75a-53e1-a3f0-7a040fd9ed25",
+   "chain_id": "5e8456a2-68b8-56e0-a5ee-946ad5197346",
+   "reason": "touch_past_planned_limit"
+  },
+  {
+   "event_type": "HEDGE_TOUCH_PAST_PLANNED_LIMIT",
+   "ts_ns": 1793310575292622201,
+   "parent_id": "57f4d085-d75a-53e1-a3f0-7a040fd9ed25",
+   "chain_id": "7fc28fef-7318-52b8-b634-3f9b24d5454f",
+   "reason": "touch_past_planned_limit"
+  },
+  {
+   "event_type": "HEDGE_TOUCH_PAST_PLANNED_LIMIT",
+   "ts_ns": 1793310575292622206,
+   "parent_id": "57f4d085-d75a-53e1-a3f0-7a040fd9ed25",
+   "chain_id": "c13f0c6a-100f-59f1-9d3b-d1df50c374e1",
+   "reason": "touch_past_planned_limit"
+  },
+  {
+   "event_type": "HEDGE_TOUCH_PAST_PLANNED_LIMIT",
+   "ts_ns": 1793310575296542331,
+   "parent_id": "57f4d085-d75a-53e1-a3f0-7a040fd9ed25",
+   "chain_id": "4ad6524b-63b8-5371-9c69-901f9e923cf3",
+   "reason": "touch_past_planned_limit"
+  },
+  {
+   "event_type": "HEDGE_TOUCH_PAST_PLANNED_LIMIT",
+   "ts_ns": 1793310575301699916,
+   "parent_id": "57f4d085-d75a-53e1-a3f0-7a040fd9ed25",
+   "chain_id": "534d7993-9eb4-538e-8ccd-bf500e5883ba",
+   "reason": "touch_past_planned_limit"
+  },
+  {
+   "event_type": "HEDGE_TOUCH_PAST_PLANNED_LIMIT",
+   "ts_ns": 1793310575301699921,
+   "parent_id": "57f4d085-d75a-53e1-a3f0-7a040fd9ed25",
+   "chain_id": "65728c17-94a6-536d-8e52-4a3cebb992e1",
+   "reason": "touch_past_planned_limit"
+  },
+  {
+   "event_type": "HEDGE_TOUCH_PAST_PLANNED_LIMIT",
+   "ts_ns": 1793310575302293366,
+   "parent_id": "57f4d085-d75a-53e1-a3f0-7a040fd9ed25",
+   "chain_id": "1eaf71b5-4b28-560b-abb3-479d88fd43ce",
+   "reason": "touch_past_planned_limit"
+  },
+  {
+   "event_type": "HEDGE_TOUCH_PAST_PLANNED_LIMIT",
+   "ts_ns": 1793310575302293371,
+   "parent_id": "57f4d085-d75a-53e1-a3f0-7a040fd9ed25",
+   "chain_id": "f2a72b54-25b8-53a7-80a6-3cbec6f7d547",
+   "reason": "touch_past_planned_limit"
+  },
+  {
+   "event_type": "HEDGE_TOUCH_PAST_PLANNED_LIMIT",
+   "ts_ns": 1793310575302293376,
+   "parent_id": "57f4d085-d75a-53e1-a3f0-7a040fd9ed25",
+   "chain_id": "41df71cd-7f69-53e7-a0a3-d05d0f16f67c",
+   "reason": "touch_past_planned_limit"
+  },
+  {
+   "event_type": "HEDGE_TOUCH_PAST_PLANNED_LIMIT",
+   "ts_ns": 1793310575302293381,
+   "parent_id": "57f4d085-d75a-53e1-a3f0-7a040fd9ed25",
+   "chain_id": "54bb6443-8464-55ae-a309-13144948cd80",
+   "reason": "touch_past_planned_limit"
+  },
+  {
+   "event_type": "HEDGE_TOUCH_PAST_PLANNED_LIMIT",
+   "ts_ns": 1793310575302293386,
+   "parent_id": "57f4d085-d75a-53e1-a3f0-7a040fd9ed25",
+   "chain_id": "41d9084c-b64c-518d-bead-86218708ee93",
+   "reason": "touch_past_planned_limit"
+  },
+  {
+   "event_type": "HEDGE_TOUCH_PAST_PLANNED_LIMIT",
+   "ts_ns": 1793310575303292634,
+   "parent_id": "57f4d085-d75a-53e1-a3f0-7a040fd9ed25",
+   "chain_id": "35b068bd-5a8b-5244-bd71-a67693afecc2",
+   "reason": "touch_past_planned_limit"
+  },
+  {
+   "event_type": "HEDGE_TOUCH_PAST_PLANNED_LIMIT",
+   "ts_ns": 1793310575303292639,
+   "parent_id": "57f4d085-d75a-53e1-a3f0-7a040fd9ed25",
+   "chain_id": "2beefe66-1e98-5a37-8a78-a5bfc2a7e14b",
+   "reason": "touch_past_planned_limit"
+  },
+  {
+   "event_type": "HEDGE_TOUCH_PAST_PLANNED_LIMIT",
+   "ts_ns": 1793310575303292644,
+   "parent_id": "57f4d085-d75a-53e1-a3f0-7a040fd9ed25",
+   "chain_id": "4b283301-d112-555c-8e51-9661a883fb7b",
+   "reason": "touch_past_planned_limit"
+  },
+  {
+   "event_type": "HEDGE_TOUCH_PAST_PLANNED_LIMIT",
+   "ts_ns": 1793310575303292649,
+   "parent_id": "57f4d085-d75a-53e1-a3f0-7a040fd9ed25",
+   "chain_id": "d96bd8fb-a731-586c-9590-b315d40b8427",
+   "reason": "touch_past_planned_limit"
+  },
+  {
+   "event_type": "HEDGE_TOUCH_PAST_PLANNED_LIMIT",
+   "ts_ns": 1793310575303292654,
+   "parent_id": "57f4d085-d75a-53e1-a3f0-7a040fd9ed25",
+   "chain_id": "766bf918-12dd-51a2-8243-3dacde811e6b",
+   "reason": "touch_past_planned_limit"
+  },
+  {
+   "event_type": "HEDGE_TOUCH_PAST_PLANNED_LIMIT",
+   "ts_ns": 1793310575303292659,
+   "parent_id": "57f4d085-d75a-53e1-a3f0-7a040fd9ed25",
+   "chain_id": "f5463e1b-7632-520a-8aae-25508c2ae2e9",
+   "reason": "touch_past_planned_limit"
+  },
+  {
+   "event_type": "HEDGE_TOUCH_PAST_PLANNED_LIMIT",
+   "ts_ns": 1793310575303292664,
+   "parent_id": "57f4d085-d75a-53e1-a3f0-7a040fd9ed25",
+   "chain_id": "08c80f70-04cc-571c-8f9d-f1c224c7ed06",
+   "reason": "touch_past_planned_limit"
+  },
+  {
+   "event_type": "HEDGE_TOUCH_PAST_PLANNED_LIMIT",
+   "ts_ns": 1793310575303292669,
+   "parent_id": "57f4d085-d75a-53e1-a3f0-7a040fd9ed25",
+   "chain_id": "8db13679-2a1c-5268-82f3-483e1d2f4d4e",
+   "reason": "touch_past_planned_limit"
+  },
+  {
+   "event_type": "HEDGE_TOUCH_PAST_PLANNED_LIMIT",
+   "ts_ns": 1793310575303292674,
+   "parent_id": "57f4d085-d75a-53e1-a3f0-7a040fd9ed25",
+   "chain_id": "4b02f252-babc-58db-8191-0b71b222f403",
+   "reason": "touch_past_planned_limit"
+  },
+  {
+   "event_type": "HEDGE_TOUCH_PAST_PLANNED_LIMIT",
+   "ts_ns": 1793310575303292679,
+   "parent_id": "57f4d085-d75a-53e1-a3f0-7a040fd9ed25",
+   "chain_id": "127bd030-b4c9-53db-9394-074426ac2da9",
+   "reason": "touch_past_planned_limit"
+  },
+  {
+   "event_type": "HEDGE_TOUCH_PAST_PLANNED_LIMIT",
+   "ts_ns": 1793310575303292684,
+   "parent_id": "57f4d085-d75a-53e1-a3f0-7a040fd9ed25",
+   "chain_id": "95f94fcf-2612-55ba-a636-e8e4ea303b61",
+   "reason": "touch_past_planned_limit"
+  },
+  {
+   "event_type": "HEDGE_TOUCH_PAST_PLANNED_LIMIT",
+   "ts_ns": 1793310575303292689,
+   "parent_id": "57f4d085-d75a-53e1-a3f0-7a040fd9ed25",
+   "chain_id": "b9b48ab9-a58b-54ef-8346-8ab082325d77",
+   "reason": "touch_past_planned_limit"
+  },
+  {
+   "event_type": "HEDGE_TOUCH_PAST_PLANNED_LIMIT",
+   "ts_ns": 1793310575303292694,
+   "parent_id": "57f4d085-d75a-53e1-a3f0-7a040fd9ed25",
+   "chain_id": "180bb159-1bd9-57b9-9478-980d3a3a9f8e",
+   "reason": "touch_past_planned_limit"
+  },
+  {
+   "event_type": "HEDGE_TOUCH_PAST_PLANNED_LIMIT",
+   "ts_ns": 1793310575303292699,
+   "parent_id": "57f4d085-d75a-53e1-a3f0-7a040fd9ed25",
+   "chain_id": "492b6270-3fdb-5d3a-808f-a0556f648c6d",
+   "reason": "touch_past_planned_limit"
+  },
+  {
+   "event_type": "HEDGE_TOUCH_PAST_PLANNED_LIMIT",
+   "ts_ns": 1793310575303292704,
+   "parent_id": "57f4d085-d75a-53e1-a3f0-7a040fd9ed25",
+   "chain_id": "70de1b5d-76ec-54b5-a0ef-bc8016cfea18",
+   "reason": "touch_past_planned_limit"
+  },
+  {
+   "event_type": "HEDGE_TOUCH_PAST_PLANNED_LIMIT",
+   "ts_ns": 1793310575303292709,
+   "parent_id": "57f4d085-d75a-53e1-a3f0-7a040fd9ed25",
+   "chain_id": "fa01e0d8-6de0-5b98-b515-ef6d9796c059",
+   "reason": "touch_past_planned_limit"
+  },
+  {
+   "event_type": "HEDGE_TOUCH_PAST_PLANNED_LIMIT",
+   "ts_ns": 1793310575303292714,
+   "parent_id": "57f4d085-d75a-53e1-a3f0-7a040fd9ed25",
+   "chain_id": "7509d101-a313-5b62-b7d1-e79a9bd784a8",
+   "reason": "touch_past_planned_limit"
+  },
+  {
+   "event_type": "HEDGE_TOUCH_PAST_PLANNED_LIMIT",
+   "ts_ns": 1793310575303292719,
+   "parent_id": "57f4d085-d75a-53e1-a3f0-7a040fd9ed25",
+   "chain_id": "98c3cf79-cf1e-5365-a906-d8914008de18",
+   "reason": "touch_past_planned_limit"
+  },
+  {
+   "event_type": "ORDER_LIFETIME_EXPIRED",
+   "ts_ns": 1793310621472286752,
+   "parent_id": "03bf3455-17e8-5329-ab06-6faa31770e07"
+  }
+ ],
+ "grid_snaps": {
+  "price": 0,
+  "quantity": 11
+ },
+ "fills_by_source": {
+  "BYBIT": {
+   "trade": 110,
+   "trade_confirmed_cross_before": 1,
+   "trade_confirmed_cross_after": 32,
+   "trade_after_front": 1
+  },
+  "BINANCE": {}
+ },
+ "manifest": {
+  "invalid_book_policy": {
+   "invalid_book_policy": "RESUBSCRIBE_AFTER_ASSUMED_DELAY",
+   "resync_delay_s": 5.0,
+   "resync_delay_label": "ASSUMED",
+   "resyncs": [
+    {
+     "venue": "BINANCE",
+     "invalid_since_ns": 1793277309374455753,
+     "resync_at_ns": 1793277309476895989,
+     "wait_ns": 102440236,
+     "reason": "GAP_DETECTED:sequence_gap:11956917222403->11956918466436-11956918474008",
+     "by": "DATA_SNAPSHOT",
+     "state_after": "VALID"
+    },
+    {
+     "venue": "BINANCE",
+     "invalid_since_ns": 1793306519546572540,
+     "resync_at_ns": 1793306519805322609,
+     "wait_ns": 258750069,
+     "reason": "GAP_DETECTED:sequence_gap:11961225188164->11961226850637-11961226890856",
+     "by": "DATA_SNAPSHOT",
+     "state_after": "VALID"
+    },
+    {
+     "venue": "BINANCE",
+     "invalid_since_ns": 1793317607690834169,
+     "resync_at_ns": 1793317607938944192,
+     "wait_ns": 248110023,
+     "reason": "GAP_DETECTED:sequence_gap:11963150500356->11963151913372-11963151926820",
+     "by": "DATA_SNAPSHOT",
+     "state_after": "VALID"
+    }
+   ],
+   "resync_unavailable_count": 0,
+   "resyncs_by_source": {
+    "DATA_SNAPSHOT": 3
+   },
+   "suspension_intervals_ns": [
+    [
+     1793267812413779778,
+     1793267812740792672,
+     "BINANCE:SYNCING"
+    ],
+    [
+     1793267850144247103,
+     1793267850197974429,
+     "BYBIT:STALE"
+    ],
+    [
+     1793267901111875458,
+     1793267901398447836,
+     "BYBIT:STALE"
+    ],
+    [
+     1793268003278831511,
+     1793268003281303493,
+     "BYBIT:STALE"
+    ],
+    [
+     1793268019760216715,
+     1793268020098565440,
+     "BYBIT:STALE"
+    ],
+    [
+     1793268533223177713,
+     1793268533418644629,
+     "BYBIT:STALE"
+    ],
+    [
+     1793268582339392038,
+     1793268582498661242,
+     "BYBIT:STALE"
+    ],
+    [
+     1793268744968162973,
+     1793268745078156160,
+     "BYBIT:STALE"
+    ],
+    [
+     1793269422224797693,
+     1793269422320781159,
+     "BYBIT:STALE"
+    ],
+    [
+     1793269666898564177,
+     1793269666940404027,
+     "BYBIT:STALE"
+    ],
+    [
+     1793269678860451695,
+     1793269679078557566,
+     "BYBIT:STALE"
+    ],
+    [
+     1793269988770592259,
+     1793269988838360965,
+     "BYBIT:STALE"
+    ],
+    [
+     1793272234433244880,
+     1793272234456428227,
+     "BINANCE:STALE"
+    ],
+    [
+     1793273088577315178,
+     1793273088598610185,
+     "BYBIT:STALE"
+    ],
+    [
+     1793273234621277478,
+     1793273234637919735,
+     "BYBIT:STALE"
+    ],
+    [
+     1793273531761203399,
+     1793273532038453211,
+     "BYBIT:STALE"
+    ],
+    [
+     1793273815545245627,
+     1793273815634325138,
+     "BYBIT:STALE"
+    ],
+    [
+     1793273818339096421,
+     1793273818559168306,
+     "BYBIT:STALE"
+    ],
+    [
+     1793273834283231962,
+     1793273834379324811,
+     "BYBIT:STALE"
+    ],
+    [
+     1793273871449401701,
+     1793273871457920017,
+     "BYBIT:STALE"
+    ],
+    [
+     1793273888121093607,
+     1793273888359828343,
+     "BYBIT:STALE"
+    ],
+    [
+     1793274292529589531,
+     1793274292597897812,
+     "BYBIT:STALE"
+    ],
+    [
+     1793274379955182725,
+     1793274379978074971,
+     "BYBIT:STALE"
+    ],
+    [
+     1793274482625258756,
+     1793274482659661924,
+     "BYBIT:STALE"
+    ],
+    [
+     1793275102701305147,
+     1793275102878007079,
+     "BYBIT:STALE"
+    ],
+    [
+     1793275241135076989,
+     1793275241138652354,
+     "BYBIT:STALE"
+    ],
+    [
+     1793275772997395014,
+     1793275773218590832,
+     "BYBIT:STALE"
+    ],
+    [
+     1793275814053115417,
+     1793275814158340845,
+     "BYBIT:STALE"
+    ],
+    [
+     1793276334915307946,
+     1793276334998187911,
+     "BYBIT:STALE"
+    ],
+    [
+     1793276466835064321,
+     1793276466917958616,
+     "BYBIT:STALE"
+    ],
+    [
+     1793276657639305676,
+     1793276657658682163,
+     "BYBIT:STALE"
+    ],
+    [
+     1793276664911320908,
+     1793276664938500238,
+     "BYBIT:STALE"
+    ],
+    [
+     1793276743035233103,
+     1793276743077933130,
+     "BYBIT:STALE"
+    ],
+    [
+     1793276746829579853,
+     1793276747118499947,
+     "BYBIT:STALE"
+    ],
+    [
+     1793276747687107844,
+     1793276747918045515,
+     "BYBIT:STALE"
+    ],
+    [
+     1793276850921038940,
+     1793276851038365379,
+     "BYBIT:STALE"
+    ],
+    [
+     1793276871171197874,
+     1793276871461117195,
+     "BYBIT:STALE"
+    ],
+    [
+     1793276968841307072,
+     1793276968900159450,
+     "BYBIT:STALE"
+    ],
+    [
+     1793277305329224925,
+     1793277309374455753,
+     "BINANCE:STALE"
+    ],
+    [
+     1793277309374455753,
+     1793277309476895989,
+     "BINANCE:GAP_DETECTED"
+    ],
+    [
+     1793277576870308499,
+     1793277577018390582,
+     "BYBIT:STALE"
+    ],
+    [
+     1793278632754402443,
+     1793278632958673741,
+     "BYBIT:STALE"
+    ],
+    [
+     1793279436726742796,
+     1793279436744108978,
+     "BINANCE:STALE"
+    ],
+    [
+     1793279647918574125,
+     1793279647938971887,
+     "BYBIT:STALE"
+    ],
+    [
+     1793279672580306223,
+     1793279672638317597,
+     "BYBIT:STALE"
+    ],
+    [
+     1793280085152506139,
+     1793280085178815601,
+     "BYBIT:STALE"
+    ],
+    [
+     1793280584274303280,
+     1793280584337954676,
+     "BYBIT:STALE"
+    ],
+    [
+     1793281517483741042,
+     1793281517604041935,
+     "BYBIT:STALE"
+    ],
+    [
+     1793284385617034289,
+     1793284385744665993,
+     "BYBIT:STALE"
+    ],
+    [
+     1793284577818962159,
+     1793284577949567814,
+     "BINANCE:STALE"
+    ],
+    [
+     1793284608638796195,
+     1793284608881192525,
+     "BINANCE:STALE"
+    ],
+    [
+     1793291983120296721,
+     1793291983138736022,
+     "BYBIT:STALE"
+    ],
+    [
+     1793295676745129302,
+     1793295676800892159,
+     "BYBIT:STALE"
+    ],
+    [
+     1793301586242796219,
+     1793301586248487820,
+     "BYBIT:STALE"
+    ],
+    [
+     1793301591912346707,
+     1793301592157917663,
+     "BYBIT:STALE"
+    ],
+    [
+     1793304249160247732,
+     1793304255854936952,
+     "BYBIT:STALE"
+    ],
+    [
+     1793304338325804339,
+     1793304338454781752,
+     "BYBIT:STALE"
+    ],
+    [
+     1793304409278526490,
+     1793304409510475965,
+     "BYBIT:STALE"
+    ],
+    [
+     1793304409939903784,
+     1793304413429711984,
+     "BINANCE:STALE"
+    ],
+    [
+     1793304413930952644,
+     1793304414081428470,
+     "BYBIT:STALE"
+    ],
+    [
+     1793304414516406117,
+     1793304417325243522,
+     "BINANCE:STALE"
+    ],
+    [
+     1793304802113434250,
+     1793304803648801450,
+     "BINANCE:STALE"
+    ],
+    [
+     1793305978430450489,
+     1793305978509466052,
+     "BYBIT:STALE"
+    ],
+    [
+     1793306000305806200,
+     1793306000376398843,
+     "BINANCE:STALE"
+    ],
+    [
+     1793306042981086020,
+     1793306043146214048,
+     "BYBIT:STALE"
+    ],
+    [
+     1793306045988355122,
+     1793306046206198120,
+     "BYBIT:STALE"
+    ],
+    [
+     1793306049104280393,
+     1793306049547829733,
+     "BYBIT:STALE"
+    ],
+    [
+     1793306049969685203,
+     1793306051714348304,
+     "BINANCE:STALE"
+    ],
+    [
+     1793306051714348304,
+     1793306052341426983,
+     "BYBIT:STALE"
+    ],
+    [
+     1793306052832876701,
+     1793306054847630287,
+     "BINANCE:STALE"
+    ],
+    [
+     1793306482220283285,
+     1793306484755087933,
+     "BYBIT:STALE"
+    ],
+    [
+     1793306486120805191,
+     1793306486264220090,
+     "BINANCE:STALE"
+    ],
+    [
+     1793306486764462722,
+     1793306487018436812,
+     "BYBIT:STALE"
+    ],
+    [
+     1793306506368709646,
+     1793306507150355287,
+     "BINANCE:STALE"
+    ],
+    [
+     1793306510291561673,
+     1793306511594152986,
+     "BYBIT:STALE"
+    ],
+    [
+     1793306512115117998,
+     1793306519546572540,
+     "BINANCE:STALE"
+    ],
+    [
+     1793306519546572540,
+     1793306519805322609,
+     "BINANCE:GAP_DETECTED"
+    ],
+    [
+     1793306549741794049,
+     1793306552540802952,
+     "BYBIT:STALE"
+    ],
+    [
+     1793306553038748697,
+     1793306554875272982,
+     "BINANCE:STALE"
+    ],
+    [
+     1793306554875272982,
+     1793306556313988858,
+     "BYBIT:STALE"
+    ],
+    [
+     1793306556987271958,
+     1793306557300229656,
+     "BINANCE:STALE"
+    ],
+    [
+     1793306557770160802,
+     1793306557876922451,
+     "BYBIT:STALE"
+    ],
+    [
+     1793306558291662428,
+     1793306559666697402,
+     "BINANCE:STALE"
+    ],
+    [
+     1793306561535664176,
+     1793306561744966693,
+     "BYBIT:STALE"
+    ],
+    [
+     1793306594407587412,
+     1793306594596668049,
+     "BINANCE:STALE"
+    ],
+    [
+     1793306597658802507,
+     1793306601428211434,
+     "BINANCE:STALE"
+    ],
+    [
+     1793306605170437224,
+     1793306607854340830,
+     "BINANCE:STALE"
+    ],
+    [
+     1793306608354706780,
+     1793306611165966031,
+     "BYBIT:STALE"
+    ],
+    [
+     1793306611422127172,
+     1793306613973426168,
+     "BINANCE:STALE"
+    ],
+    [
+     1793306613973426168,
+     1793306617174453565,
+     "BYBIT:STALE"
+    ],
+    [
+     1793306617674595608,
+     1793306620714515987,
+     "BINANCE:STALE"
+    ],
+    [
+     1793306621213992880,
+     1793306623229031306,
+     "BYBIT:STALE"
+    ],
+    [
+     1793306624274103660,
+     1793306624660715468,
+     "BINANCE:STALE"
+    ],
+    [
+     1793306625165910075,
+     1793306631454975106,
+     "BYBIT:STALE"
+    ],
+    [
+     1793306636327384001,
+     1793306637797705954,
+     "BYBIT:STALE"
+    ],
+    [
+     1793306712769420242,
+     1793306713504204597,
+     "BINANCE:STALE"
+    ],
+    [
+     1793306727077436665,
+     1793306727323929951,
+     "BINANCE:STALE"
+    ],
+    [
+     1793306730164301529,
+     1793306731302453816,
+     "BINANCE:STALE"
+    ],
+    [
+     1793306732704887085,
+     1793306733079619362,
+     "BINANCE:STALE"
+    ],
+    [
+     1793306821539359566,
+     1793306825531405750,
+     "BYBIT:STALE"
+    ],
+    [
+     1793306826058112376,
+     1793306832922621594,
+     "BINANCE:STALE"
+    ],
+    [
+     1793306836678208590,
+     1793306840396284521,
+     "BINANCE:STALE"
+    ],
+    [
+     1793306840396284521,
+     1793306845544687354,
+     "BYBIT:STALE"
+    ],
+    [
+     1793306846044696254,
+     1793306850778216389,
+     "BINANCE:STALE"
+    ],
+    [
+     1793306851180707853,
+     1793306855843456050,
+     "BYBIT:STALE"
+    ],
+    [
+     1793306856342948279,
+     1793306858755416462,
+     "BINANCE:STALE"
+    ],
+    [
+     1793306858755416462,
+     1793306863173024726,
+     "BYBIT:STALE"
+    ],
+    [
+     1793306863676805821,
+     1793306866984226462,
+     "BINANCE:STALE"
+    ],
+    [
+     1793306867447229706,
+     1793306870669243636,
+     "BYBIT:STALE"
+    ],
+    [
+     1793306872536259660,
+     1793306874478356985,
+     "BYBIT:STALE"
+    ],
+    [
+     1793306875598069785,
+     1793306877382295389,
+     "BYBIT:STALE"
+    ],
+    [
+     1793306878594889978,
+     1793306880744472883,
+     "BYBIT:STALE"
+    ],
+    [
+     1793306882409479912,
+     1793306884656306615,
+     "BYBIT:STALE"
+    ],
+    [
+     1793306886983111177,
+     1793306889801033997,
+     "BYBIT:STALE"
+    ],
+    [
+     1793306891065800354,
+     1793306891165915975,
+     "BINANCE:STALE"
+    ],
+    [
+     1793306893113205489,
+     1793306893198579398,
+     "BYBIT:STALE"
+    ],
+    [
+     1793306893693495675,
+     1793306896894063157,
+     "BINANCE:STALE"
+    ],
+    [
+     1793306897407199267,
+     1793306899782313717,
+     "BYBIT:STALE"
+    ],
+    [
+     1793306900321720281,
+     1793306901161595082,
+     "BINANCE:STALE"
+    ],
+    [
+     1793306902994630799,
+     1793306903848321175,
+     "BINANCE:STALE"
+    ],
+    [
+     1793306905376620747,
+     1793306905616453773,
+     "BINANCE:STALE"
+    ],
+    [
+     1793306906646801033,
+     1793306907142032725,
+     "BINANCE:STALE"
+    ],
+    [
+     1793307036148079827,
+     1793307036230215619,
+     "BINANCE:STALE"
+    ],
+    [
+     1793307604312887070,
+     1793307604419419161,
+     "BYBIT:STALE"
+    ],
+    [
+     1793307617459653701,
+     1793307617760843166,
+     "BYBIT:STALE"
+    ],
+    [
+     1793307620208188958,
+     1793307620520575438,
+     "BYBIT:STALE"
+    ],
+    [
+     1793308361063631554,
+     1793308361709373355,
+     "BYBIT:STALE"
+    ],
+    [
+     1793308531294001443,
+     1793308531376062477,
+     "BYBIT:STALE"
+    ],
+    [
+     1793311659848638728,
+     1793311659935967092,
+     "BYBIT:STALE"
+    ],
+    [
+     1793311714985717180,
+     1793311715024924294,
+     "BYBIT:STALE"
+    ],
+    [
+     1793313671164833777,
+     1793313671319110070,
+     "BYBIT:STALE"
+    ],
+    [
+     1793314097813840191,
+     1793314097916847649,
+     "BYBIT:STALE"
+    ],
+    [
+     1793317607690834169,
+     1793317607938944192,
+     "BINANCE:GAP_DETECTED"
+    ]
+   ],
+   "suspended_seconds_by_day": {
+    "2026-10-29": {
+     "BINANCE:GAP_DETECTED": 0.609300328,
+     "BINANCE:STALE": 69.965665972,
+     "BINANCE:SYNCING": 0.327012894,
+     "BYBIT:STALE": 75.350911736
+    }
+   },
+   "suspended_seconds_total_by_day": {
+    "2026-10-29": 146.25289093
+   }
+  },
+  "coverage": {
+   "venues": {
+    "bybit": {
+     "first_ns": 1793267812413779778,
+     "last_ns": 1793318400860505684
+    },
+    "binance": {
+     "first_ns": 1793267812740792672,
+     "last_ns": 1793318400871813666
+    }
+   },
+   "common_window_ns": [
+    1793267812740792672,
+    1793318400860505684
+   ],
+   "common_window_hours": 14.052255475836667,
+   "excluded_span": [
+    {
+     "venue_with_data_until": "binance",
+     "excluded_from_ns": 1793318400860505684,
+     "excluded_to_ns": 1793318400871813666,
+     "excluded_seconds": 0.011307982
+    }
+   ],
+   "label": "DATA_LIMITATION: the span after one venue's data ends is excluded from the comparison and from the suspended seconds; it is not a suspension"
+  },
+  "suspended_seconds_two_ways": {
+   "any_message_age (the rule), common hours only": {
+    "2026-10-29": 145.925878036
+   },
+   "book_change_age_only (older reading), common hours only": {
+    "2026-10-29": 216.7870303
+   },
+   "any_message_age, whole run (incl. the span after a venue's data ends: a data limitation, not a suspension)": {
+    "2026-10-29": 146.25289093
+   }
+  },
+  "price_sanity_core_stats": {
+   "BYBIT": {
+    "price_jumps": 0,
+    "confirmed_price_moves": 0,
+    "wide_spreads": 0,
+    "crossed_or_locked": 0,
+    "stale_transitions": 90,
+    "invalid_levels": 0,
+    "resyncs": 2,
+    "snapshots": 3,
+    "deltas_applied": 1711851
+   },
+   "BINANCE": {
+    "price_jumps": 0,
+    "confirmed_price_moves": 0,
+    "wide_spreads": 0,
+    "crossed_or_locked": 0,
+    "stale_transitions": 39,
+    "invalid_levels": 0,
+    "resyncs": 3,
+    "snapshots": 4,
+    "deltas_applied": 479733
+   }
+  },
+  "time_integrity_blocks": 0,
+  "model_choices": {
+   "consume_liquidity_on_own_taker_fills": {
+    "BYBIT": true,
+    "BINANCE": true,
+    "status": "DELIBERATE_MODEL_CHOICE (owner 12 Nov): an own hedge or unwind fill removes the walked quantity from the book it walked; the public view book is not changed by it (every level on both venues, tested)"
+   }
+  },
+  "mark_source": {
+   "exchange_mark_ticks": 0,
+   "MARK_FROM_MID_ticks": 809026,
+   "venues_with_exchange_marks": [],
+   "label": "the margin check marks a position with the venue's exchange mark when the recorded derivatives stream has one (age at most mark_max_age, 5 s ASSUMED), else with the last good mark or valid book mid (kept for up to 5 s; after that the price is missing and new risk is paused, not the kill switch); MARK_FROM_MID is the replay's labelled fallback for a venue with no exchange mark (replay only; funding is not settled from it)"
+  },
+  "sequence_gap_counter_of_the_core_book": "NOT REPORTED: synthetic sequence, gaps NOT_MEASURED",
+  "entry_gates": {
+   "book_age_rule": "core, 500 ms, age from the last message of any kind (owner 8 Nov Q-G1)",
+   "dead_feed_5s": "not a blocking gate; the resubscribe trigger only (Q-G2)",
+   "price_sanity_500bps": "core, kept (Q-G3)",
+   "time_integrity": "core, host-offset correction on (Q-G4)",
+   "circuit_breaker": "in the core (CircuitBreaker + pre-send risk gate in TradingSession, Track A item 1, off by default); ON: the profile's breaker block (profile_safety); old-path trips are in the parity report"
+  },
+  "feed": {
+   "adapter_version": "research-feed-canonical-v1",
+   "sequence_numbers": "SYNTHETIC",
+   "sequence_gaps": {
+    "status": "NOT_MEASURED",
+    "count": null,
+    "reason": "the files carry no update ids; the sequence is constructed contiguous by the converter, so a gap can never show and zero would mean nothing"
+   },
+   "trade_ids": "TRADE_ID_CONSTRUCTED where the record has no id",
+   "resync_snapshots": "SIMULATED: the data's own state at the resync time, repaired of a cross; not an exchange snapshot",
+   "counts": {
+    "snapshots": 0,
+    "delta_messages": 0,
+    "delta_records": 0,
+    "trades": 0,
+    "levels_changed": 0,
+    "crossed_messages": 0,
+    "crossed_snapshots": 0,
+    "resync_snapshots": 0
+   }
+  },
+  "ticks": {
+   "bybit": 0.01,
+   "binance": 0.01
+  },
+  "quantity_step": {
+   "values": {
+    "binance": 0.01,
+    "bybit": 0.1
+   },
+   "label": "PUBLISHED_CURRENT_RULES_NOT_HISTORICAL",
+   "fetched": "2026-11-08",
+   "sources": {
+    "binance": "https://fapi.binance.com/fapi/v1/exchangeInfo",
+    "bybit": "https://api.bybit.com/v5/market/instruments-info?category=linear&symbol=SOLUSDT"
+   }
+  },
+  "config_notes": {
+   "silent_carry_bound": "below_one_lot: residual bound 0.01 base (risk.max_residual_base and oms.residual.max_residual_base)",
+   "book_sanity": "core defaults (500 bps mid jump and spread), KEPT (owner 8 Nov, Q-G3); the backtester has no price-sanity gate; triggers are counted in the manifest",
+   "time": "core defaults except feed age = max_book_age_s and correct_host_offset true (owner 8 Nov, Q-G4); replay receive stamps are the backtester's",
+   "quality": "core defaults (preflight limits are not used by the session)",
+   "monitoring": "core defaults",
+   "oms.timeouts": "core defaults",
+   "risk.limits": "notional and gross limits set far above any clip: the backtester's own limits are position and margin based",
+   "tick_and_step": "the dated grid passed by the caller (not read from the profile's venue_ticks)",
+   "resync_delay_s": "5.0 ASSUMED (profile setting; read by the replay driver, not part of AppConfig)",
+   "fees": "PROFILE_FEES: a replay books the profile's fee_presets; no account rates are read (a live or paper session that sends real orders refuses to start unless the account's rates equal them)",
+   "funding_window": "evaluated only where the run has derivative data (next funding times); without it every evaluation counts funding_window_not_evaluable and nothing is blocked",
+   "real_order_requirements": "met"
+  },
+  "safety_from_profile": {
+   "profile_safety": true,
+   "layer_risk_mode": "enforce",
+   "breaker": {
+    "consecutive_failures": 3,
+    "failure_rate_window_s": null,
+    "failure_rate_thresh": 0.05,
+    "failure_rate_window_n": 20,
+    "trip_on_failed_unwind": true,
+    "net_exposure_s": 5.0,
+    "unknown_order_s": 2.0,
+    "trip_on_gateway_down": true,
+    "heartbeat_timeout_s": 10.0,
+    "ack_latency_k_factor": 5.0,
+    "ack_latency_window": 50,
+    "tripped_unwind_retries": 10,
+    "pause_on_gateway_down_when_flat": true,
+    "simulated_operator_reset_s": null
+   },
+   "layer_route_mode": "count",
+   "reconcile_mode": "count",
+   "not_set_by_the_profile": "layer_route_mode and reconcile_mode have no profile key (count); risk_gate_mode is off in the session"
+  },
+  "timing": {
+   "latency_model": {
+    "source": "timelines:profile",
+    "stage_map": {
+     "entry": "entry",
+     "cancel": "cancel",
+     "submit_reject": "ack_report",
+     "cancel_report": "cancel_report"
+    },
+    "zero_stages": {
+     "strategy": 11,
+     "risk": 11,
+     "submit_ack": 154,
+     "fill": 144
+    },
+    "zero_stages_label": "ASSUMED_ZERO (owner 8 Nov: realistic values come later as a new profile version, once measured)",
+    "timelines": {
+     "binance.ack_report": {
+      "mean_ms": 36.0,
+      "jitter_ms": 8.0,
+      "draws": 0,
+      "source": "ASSUMED:latency_preset"
+     },
+     "binance.cancel": {
+      "mean_ms": 40.0,
+      "jitter_ms": 8.0,
+      "draws": 0,
+      "source": "ASSUMED:floor_ms"
+     },
+     "binance.cancel_report": {
+      "mean_ms": 36.0,
+      "jitter_ms": 8.0,
+      "draws": 0,
+      "source": "ASSUMED:latency_preset"
+     },
+     "binance.entry": {
+      "mean_ms": 40.0,
+      "jitter_ms": 8.0,
+      "draws": 144,
+      "source": "ASSUMED:floor_ms"
+     },
+     "binance.feed": {
+      "mean_ms": 36.0,
+      "jitter_ms": 8.0,
+      "draws": 0,
+      "source": "ASSUMED:latency_preset"
+     },
+     "binance.fill_report": {
+      "mean_ms": 36.0,
+      "jitter_ms": 8.0,
+      "draws": 0,
+      "source": "ASSUMED:latency_preset"
+     },
+     "bybit.ack_report": {
+      "mean_ms": 2.0,
+      "jitter_ms": 2.5,
+      "draws": 5,
+      "source": "ASSUMED:latency_preset"
+     },
+     "bybit.cancel": {
+      "mean_ms": 6.0,
+      "jitter_ms": 2.5,
+      "draws": 7,
+      "source": "ASSUMED:latency_preset"
+     },
+     "bybit.cancel_report": {
+      "mean_ms": 2.0,
+      "jitter_ms": 2.5,
+      "draws": 2,
+      "source": "ASSUMED:latency_preset"
+     },
+     "bybit.entry": {
+      "mean_ms": 6.0,
+      "jitter_ms": 2.5,
+      "draws": 10,
+      "source": "ASSUMED:latency_preset"
+     },
+     "bybit.feed": {
+      "mean_ms": 2.0,
+      "jitter_ms": 2.5,
+      "draws": 0,
+      "source": "ASSUMED:latency_preset"
+     },
+     "bybit.fill_report": {
+      "mean_ms": 2.0,
+      "jitter_ms": 2.5,
+      "draws": 144,
+      "source": "ASSUMED:latency_preset"
+     }
+    }
+   },
+   "truth_books": {}
+  },
+  "release_identity": {
+   "profile": "perp_perp_maker_taker_v1_9",
+   "profile_status": "WORKING",
+   "profile_sha256": "f798ac62497da2f26b93c845b383ea5f47dd6d7409e6122c3f733d7b857be8cb",
+   "profile_path": "/Users/vaibhav/Documents/Newproject/out/integration/e3_sweep/snap/crypto_MFT_arb_platform/profiles/perp_perp_maker_taker_v1_9.yaml",
+   "decision_status": {
+    "block_on_toxic": "OFF_BY_HOLDOUT_GATE_SCORE_EXPLORATORY_SHA256_e1db1d0cf6c847ec8162ef891f7c4b27dbcedb38f45d7c8de18814c2897b256f",
+    "march_stamps": "ASSUMED_CONSTRUCTED_LOCAL_TS_NOT_TRUSTED_PRESET_FEED_DELAY_APPLIED",
+    "net_ceiling_multiple": "DECISION_PENDING_CALIBRATION",
+    "fill_headroom_base": "DECISION_PENDING_CALIBRATION",
+    "breaker": "DECISION_PENDING_CALIBRATION",
+    "unwind_band_bps": "DECISION_PENDING_CALIBRATION",
+    "unwind_max_attempts": "DECISION_PENDING_CALIBRATION",
+    "residual_limit": "DECISION_PENDING_CALIBRATION",
+    "unwind_band_core": "DECISION_PENDING_CALIBRATION",
+    "hedge_unknown_escalation": "DECISION_PENDING_CALIBRATION",
+    "p_fail": "SCENARIO_NOT_CALIBRATED",
+    "loss_fail_bps": "SCENARIO_NOT_CALIBRATED",
+    "fees": "PUBLIC_SCHEDULE_UNVERIFIED_BYBIT_VIP5_BINANCE_VIP9",
+    "requote": "TRADER_SET_NOT_FITTED_OFF_BY_DEFAULT",
+    "queue_parameters": "SPOT_PRIOR_PERP_UNVALIDATED",
+    "hedge_move": "PROBE_ARRIVAL_ESTIMATE_45MS_PINNED_BY_SHA256_EXPLORATORY",
+    "adverse_table": "MARKET_DATA_LABELS_TRAIN_ONLY_PINNED_BY_SHA256_EXPLORATORY",
+    "s1_label_resolution": "BELOW_DATA_RESOLUTION_50MS_MARCH_2024_BYBIT_RECEIVE_TIME_CONSTRUCTED_BINANCE_BEST_BID_ASK",
+    "data_manifest": "REQUIRED_AT_RUN",
+    "unknown_queue_fit": "PER_DAY_FILE_FROM_STRICTLY_EARLIER_DAYS"
+   },
+   "code": {
+    "sha256_sources": "5f7bad0341fac8a3b5bd2ada622b45ac32e51a692ec861ef0e1e7aa001a32640",
+    "n_files": 98,
+    "git_rev": "dc00db7",
+    "git_dirty": true
+   },
+   "data": {
+    "manifests_sha256": null,
+    "manifest_files": [],
+    "day_listing_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "files_listed": 0
+   },
+   "fee_snapshot_sha256": "485b47f4075ca74bb53090ea2328a600db639609304a01dc480d3e9ea750f995",
+   "fee_schedule": {
+    "source": "core crypto_stat_arb.fees.FEE_TIERS",
+    "rows": [
+     {
+      "instrument_id": "SOL-USDT-PERP",
+      "effective_from": "1970-01-01T00:00:00Z",
+      "venue": "BYBIT",
+      "maker_fee_bps": "1.0",
+      "taker_fee_bps": "3.2",
+      "fee_source": "PUBLIC_SCHEDULE_UNVERIFIED",
+      "conservative_unverified": true,
+      "tier": "bybit_perp_vip5: linear VIP 5 (owner-confirmed tier), public schedule as given by the owner 7 Nov 2026, account SOLUSDT rates not read"
+     },
+     {
+      "instrument_id": "SOL-USDT-PERP",
+      "effective_from": "1970-01-01T00:00:00Z",
+      "venue": "BINANCE",
+      "maker_fee_bps": "0.0",
+      "taker_fee_bps": "1.7",
+      "fee_source": "PUBLIC_SCHEDULE_UNVERIFIED",
+      "conservative_unverified": true,
+      "tier": "binance_perp_vip9: USD-M VIP 9 (owner-confirmed tier), public schedule as given by the owner 7 Nov 2026, account SOLUSDT rates not read; with BNB the taker is 1.53 (recorded, not built: a BNB fee needs a BNB price)"
+     }
+    ],
+    "rows_sha256": "96fbfe34366e775230fc4f2a3c7440f97486a2c31bab0111f0a6b3d3a3f33f8a"
+   },
+   "funding_source": "core",
+   "margin_source": "core",
+   "ledger_source": "core",
+   "runtime": "session",
+   "resync_delay_s": 5.0,
+   "resync_delay_label": "ASSUMED",
+   "funding_modelled": false,
+   "fee_presets": {
+    "bybit": "bybit_perp_vip5",
+    "binance": "binance_perp_vip9"
+   },
+   "instrument_master_sha256": null,
+   "calibration_file": "/Users/vaibhav/Documents/Newproject/out/integration/e3_sweep/snap/crypto_MFT_arb_platform/config/lifecycle_calibration_perp_bybit.json",
+   "calibration_cutoff": "2026-11-01T19:55:22Z",
+   "calibration": {
+    "file": "/Users/vaibhav/Documents/Newproject/out/integration/e3_sweep/snap/crypto_MFT_arb_platform/config/lifecycle_calibration_perp_bybit.json",
+    "file_sha256": "4984335f71e91afff6b9a42432c2694c08b1b782e6b6ed2bcaebbc31ef83d5c0",
+    "content_sha256": "93d66954c9bb9140e84d9290172c3e70660d29c18be607e6bed5eb345a1726bb",
+    "product": "perp",
+    "venue": "bybit",
+    "schema": "lifecycle_calibration_perp/v1",
+    "networks_with_data": [
+     "testnet"
+    ]
+   },
+   "git": {
+    "outer": {
+     "repo": "/Users/vaibhav/Documents/Newproject/out/integration/e3_sweep/snap",
+     "branch": "integration-2026-11-01",
+     "commit": "dc00db799c72cfd5a72ee31eaf585eed27ac4e39",
+     "dirty": true,
+     "tracked_files_changed": 10
+    },
+    "core": {
+     "repo": "/Users/vaibhav/Documents/Newproject/out/integration/e3_sweep/snap/crypto_MFT_arb_platform/src/crypto_stat_arb",
+     "branch": "integration-2026-11-01",
+     "commit": "dc00db799c72cfd5a72ee31eaf585eed27ac4e39",
+     "dirty": true,
+     "tracked_files_changed": 10
+    }
+   },
+   "seed": 7,
+   "latency_preset": "singapore",
+   "execution": {
+    "config": {
+     "pairing": "maker_taker",
+     "primary": {
+      "tactic": "PASSIVE",
+      "placement": "deep",
+      "price_rule": "conditional_edge",
+      "reprice": {
+       "enabled": false,
+       "source": "TRADER_SET",
+       "band_down_bps": null,
+       "band_up_bps": null,
+       "debounce_ms": null,
+       "jump_bps": null,
+       "min_interval_ms": null,
+       "max_age_s": null,
+       "queue_hold": true,
+       "amend_first": true
+      }
+     },
+     "hedge": {
+      "tactic": "IOC_CAPPED",
+      "cap": "size_aware",
+      "slack_bps_floor": 5.0,
+      "max_slip_bps": 15.0,
+      "vol_k": 0.0,
+      "latency_s": 0.0
+     },
+     "maker_maker": {},
+     "unwind": {
+      "tactic": "MARKET_BANDED"
+     },
+     "price_cap_required": true,
+     "one_hedge_child": "enforce",
+     "risk_reservation": "enforce"
+    },
+    "config_sha256": "1d81e6cde44a4e2a54f636e0b560fdc12446fbf0e7fc3e03fe5270fcb4e2cf49"
+   },
+   "dataset_settings": {
+    "dataset": "mar2024",
+    "applied": {
+     "maker": {
+      "dedupe_window_s": 0.15,
+      "evidence_window_ms": 50.0
+     }
+    }
+   },
+   "latency_sensitivity": null,
+   "hedge_move_calibration": {
+    "file": "/Users/vaibhav/Documents/Newproject/out/integration/e3_sweep/snap/crypto_MFT_arb_platform/config/hedge_move_arrival45ms_mar2024_train_0301_0307_v1.json",
+    "sha256": "c369b1b97af87dd7cecf146cce0583361be0d026a1d6dc6e3fed0d32506e8de7",
+    "days": [
+     "2024-03-01",
+     "2024-03-02",
+     "2024-03-03",
+     "2024-03-04",
+     "2024-03-05",
+     "2024-03-06",
+     "2024-03-07"
+    ],
+    "horizon_s": 0.045,
+    "n": {
+     "bid": 2037,
+     "ask": 2450680
+    },
+    "method": "PROBE: one 1 SOL Bybit bid per 15 s slot at the strategy's quote depth (qv2_probe.py, v1.1 fill rules, 00:00-02:00 UTC slice of each day); bid = the Binance mid move (bps) from each simulated probe fill to fill + 45 ms, mean over all fills. The 45 ms is an ASSUMED hedge arrival delay (the singapore preset gives about 31-52 ms for a hedge), NOT measured on mainnet. The probe is bid-only: the ask value is the market-data value, carried over unchanged and unused while maker_passive_side is bid"
+   },
+   "adverse_table": {
+    "file": "/Users/vaibhav/Documents/Newproject/out/integration/e3_sweep/snap/crypto_MFT_arb_platform/config/adverse_table_mar2024_train_0301_0307_fullday_v1.json",
+    "sha256": "9c06b5c983e7d56cbaeacbd6eb188a6f42fa79246fd78e99febafbe090198854",
+    "days": [
+     "2024-03-01",
+     "2024-03-02",
+     "2024-03-03",
+     "2024-03-04",
+     "2024-03-05",
+     "2024-03-06",
+     "2024-03-07"
+    ],
+    "dims": [
+     "depth",
+     "flow"
+    ],
+    "shrink_k": 1000.0,
+    "events": 4724361,
+    "version": "adverse_table_v1",
+    "horizon_s": 0.05,
+    "requote_horizon_s": 1.0
+   }
+  },
+  "differences_from_backtester_loop": [
+   "timing is shared (profile timing block through Timelines; venue-truth books built by this driver): the old text 'no timing timelines or venue-truth books' is no longer true (corrected 10 Nov)",
+   "STILL MISSING in the session runtime (Phase E): E0 ems/ layer (repricing, tactics, PASSIVE placements, risk gate, pairing, venue selector); E1 maker order lifetime as a timer (the OMS deadline fires only on an event or tick); E2 the fault presets and the conditional scenarios other than outage_on_fill (hedge-fault injection itself is built and opt-in: hedge_fault_injection=True, ghost and partial hedge included; the manifest key hedge_fault_injection lists what it refuses); E3 participation cap and size sweep; circuit breaker: in the core but not switched on in this replay; the backtester's margin step (the core margin engine replaces it)",
+   "message-end cross invalidates the core book",
+   "sequence SYNTHETIC, gaps NOT_MEASURED"
+  ]
+ },
+ "run": {
+  "profile": "perp_perp_maker_taker_v1_9",
+  "minutes_limit": null,
+  "wall_s": 1874.3,
+  "session": "e9b81728a3054812a48035a1b3e02d42",
+  "labels": [
+   "EXPLORATORY",
+   "recorder quality REJECTED; host clock UNKNOWN",
+   "funding not included (no derivatives files locally); mark = mid",
+   "S1 table out-of-period (SOL, fitted March 2024)",
+   "no own orders on the venues: simulated fills show mechanics only",
+   "size 100.0 SOL clip, net ceiling 100.0 SOL + headroom, 500.0 SOL gross per venue (owner 11 Nov; sweep settings), participation cap off",
+   "processing time strategy 0.0 ms + risk 0.0 ms (ASSUMED_ZERO)",
+   "marks: the recorded derivatives stream when present, else MARK_FROM_MID (replay only)"
+  ]
+ }
+}

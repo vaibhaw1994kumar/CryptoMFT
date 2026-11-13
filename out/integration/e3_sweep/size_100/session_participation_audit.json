@@ -1,0 +1,57 @@
+{
+ "label": "EXPLORATORY: own passive fills vs the public volume printed at the same level over the day",
+ "levels": [
+  {
+   "venue": "BYBIT",
+   "price": "100.42",
+   "own_filled": 36.7,
+   "public_traded": 13317.10000000019,
+   "own_over_public": 0.0027558552537714277
+  },
+  {
+   "venue": "BYBIT",
+   "price": "100.46",
+   "own_filled": 49.9,
+   "public_traded": 17646.100000000144,
+   "own_over_public": 0.0028278203115702388
+  },
+  {
+   "venue": "BYBIT",
+   "price": "95.79",
+   "own_filled": 15.700000000000001,
+   "public_traded": 8020.200000000035,
+   "own_over_public": 0.0019575571681504115
+  },
+  {
+   "venue": "BYBIT",
+   "price": "96.64",
+   "own_filled": 42.3,
+   "public_traded": 12452.300000000252,
+   "own_over_public": 0.0033969628100832087
+  },
+  {
+   "venue": "BYBIT",
+   "price": "97.25",
+   "own_filled": 119.30000000000001,
+   "public_traded": 11432.400000000142,
+   "own_over_public": 0.010435254189846274
+  },
+  {
+   "venue": "BYBIT",
+   "price": "97.31",
+   "own_filled": 96.29999999999993,
+   "public_traded": 19436.60000000013,
+   "own_over_public": 0.0049545702437668775
+  },
+  {
+   "venue": "BYBIT",
+   "price": "97.41",
+   "own_filled": 1.1,
+   "public_traded": 17396.500000000073,
+   "own_over_public": 6.323110970597508e-05
+  }
+ ],
+ "excess": [],
+ "levels_checked": 7,
+ "ok": true
+}

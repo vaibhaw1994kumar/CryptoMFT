@@ -391,10 +391,28 @@ if tot:
         f"it sits on the maker_fill rows of maker_observations.jsonl, an observation-only file, so no existing output changed. Agreement with real fills is a Track C result and is NOT claimed", "runs/scn_*/maker_observations.jsonl")
 
 # ---- cases covered at unit / OMS level only, and the ones not covered
+def _case_2i():
+    """Owner 14 Nov: S0 in the session runtime, rules of v1_9_TOLERANCES.md section O (written before the runs). Reads runs/scn_2i_* (session_s0_audit.json). A run with no amend request cannot pass the amend rules (rule 6)."""
+    names = [n for n in ("2i_s0", "2i_s0_B", "2i_s0_reject", "2i_s0_timeout", "2i_s0_disconnect", "2i_s0_dup_filled") if (RUNS / f"scn_{n}" / "session_s0_audit.json").exists()]
+    if not names:
+        return ("OMS amend lineage + session controller", "no 2i run found (run scenarios.py 2i_s0)", "NOT COVERED")
+    audits = {n: json.loads((RUNS / f"scn_{n}" / "session_s0_audit.json").read_text()) for n in names}
+    amends = {n: a["amend_requests"] for n, a in audits.items()}
+    bad = [n for n, a in audits.items() if a["two_live_orders"] or a["duplicate_fills_booked_twice"] or a["lineage_overfill"] or a["lineage_overfill_alarms"] or not a["hedged_equals_filled"]]
+    held = (f"invariant rules 1-3 (two live orders 0, duplicate fills 0, lineage overfill 0, hedged = filled) hold in {len(names) - len(bad)} of {len(names)} runs"
+            + (f"; BREAK in {bad}" if bad else ""))
+    detail = f"amend requests per run: {amends}. {held}. Unit/OMS level: tests/test_oms_amend.py (11 lineage cases) and tests/test_s0_session.py (controller: amend, band, min interval, reject, timeout, no room, no target)."
+    if bad:
+        return ("session controller + OMS amend lineage", detail, "FAIL")
+    if not any(amends.values()):
+        return ("session controller + OMS amend lineage", detail + " NO amend request was made on the capture windows (rule 6: NOT COVERED, never PASS by emptiness): the arb's quotes rest on or near the touch, where a repricing target either sits inside the band or does not exist, so the amend path (paths a-j) is exercised by the synthetic stream tests only, not by the real capture. Reason recorded, not claimed.", "NOT COVERED")
+    return ("session controller + OMS amend lineage", detail, "PASS")
+
+
 unit = {
     "2g Restart with open orders, inside a replay": ("session, OMS, plan store", "NOT COVERED at replay level (owner 13 Nov: reason accepted): the replay driver holds about 30 references to one session object, and a faithful restart rebuilds the session from the plan store and re-subscribes the books. Covered instead at OMS level, against a scripted venue: see the next row", "NOT COVERED"),
     **({} if tot else {"2h New-level vs queued fills": ("simulator", "field built (maker_observations.jsonl maker_fill rows) but no run has been made with it yet", "NOT COVERED")}),
-    "2i Amend paths (S0 profile v1_9s)": ("OMS amend lineage", "OMS level: tests/test_oms_amend.py (11 cases, evidence case7_amend_*.jsonl). No strategy in the arb replay calls request_amend. Owner 13 Nov: to be covered by the MM replays after CR-MQ part 2 (amend on real paths, quote plans: execute_quote, pairing none); recorded here, not claimed", "NOT COVERED"),
+    "2i Amend paths (S0 profile v1_9s)": _case_2i(),
 }
 ev10 = CASES / "case10_exchange_side_restart_reconciliation_missed_fill.jsonl"
 if ev10.exists():

@@ -786,7 +786,7 @@ class SessionRuntimeSwitch(unittest.TestCase):
         from new_backtest.profiles import PROFILES_DIR, apply_profile, load_profile
         for n in sorted(p.stem for p in PROFILES_DIR.glob("*.yaml")):
             cfg = apply_profile(load_profile(n), **self.KW)
-            self.assertEqual(cfg.runtime, "session" if n in ("perp_perp_maker_taker_v1_5", "perp_perp_maker_taker_v1_6", "perp_perp_maker_taker_v1_7", "perp_perp_maker_taker_v1_8", "perp_perp_maker_taker_v1_9") else "backtester", n)      # v1_9 is v1_7 plus the size-aware hedge cap; v1_6 (S1) is v1_5 plus the table; v1_7 is v1_6 with the toxic gate off; v1_8 is v1_7 plus quote withdrawal
+            self.assertEqual(cfg.runtime, "session" if n in ("perp_perp_maker_taker_v1_5", "perp_perp_maker_taker_v1_6", "perp_perp_maker_taker_v1_7", "perp_perp_maker_taker_v1_8", "perp_perp_maker_taker_v1_9", "perp_perp_maker_taker_v1_9s") else "backtester", n)      # v1_9 is v1_7 plus the size-aware hedge cap; v1_6 (S1) is v1_5 plus the table; v1_7 is v1_6 with the toxic gate off; v1_8 is v1_7 plus quote withdrawal
             self.assertEqual(cfg.release_identity["runtime"], cfg.runtime)
 
     def test_v1_5_is_v1_4_plus_the_runtime_and_nothing_else(self):

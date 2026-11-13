@@ -47,6 +47,17 @@ CASES = {
     "2m_processing": dict(profile="perp_perp_maker_taker_v1_9", window=A, processing_ms={"strategy": 5.0, "risk": 5.0}),
     "2m_p99": dict(profile="perp_perp_maker_taker_v1_9", window=A, latency_q=0.99),                 # every order delay fixed at the testnet p99 of its stage, both venues (feed unchanged)
     "2m_p999": dict(profile="perp_perp_maker_taker_v1_9", window=A, latency_q=0.999),               # the same at the p99.9 (of n about 390: effectively the sample maximum)
+    # S0 repricing in the session runtime (owner 14 Nov, case 2i on the arb): the control is v1_9 (S0 off), the others v1_9s (S0 on, ASSUMED values). Injected faults on the AMEND request: every Nth is rejected by the
+    # venue / never answered (timeout) / lost in a Bybit outage (disconnect); duplicate_filled doubles every Filled report. arb_overrides: settings the case changes on the profile, labelled in the result.
+    "2i_control_v19": dict(profile="perp_perp_maker_taker_v1_9", window=A),
+    "2i_s0": dict(profile="perp_perp_maker_taker_v1_9s", window=A),
+    "2i_s0_reject": dict(profile="perp_perp_maker_taker_v1_9s", window=A, amend_reject_every=3),
+    "2i_s0_timeout": dict(profile="perp_perp_maker_taker_v1_9s", window=A, amend_timeout_every=3),
+    "2i_s0_disconnect": dict(profile="perp_perp_maker_taker_v1_9s", window=A, maker_outage=[("11:20:00", "11:21:00"), ("12:00:00", "12:01:00")]),
+    "2i_control_v19_B": dict(profile="perp_perp_maker_taker_v1_9", window=B),
+    "2i_s0_B": dict(profile="perp_perp_maker_taker_v1_9s", window=B),
+    "2i_s0_debug": dict(profile="perp_perp_maker_taker_v1_9s", window=("12:29", "12:31"), debug_requote=True),
+    "2i_s0_dup_filled": dict(profile="perp_perp_maker_taker_v1_9s", window=A, duplicate_filled=True),
     "2n_size1": dict(profile="perp_perp_maker_taker_v1_9", window=A, size=1.0, gross=5.0, cap=True),
     "2n_size5": dict(profile="perp_perp_maker_taker_v1_9", window=A, size=5.0, gross=25.0, cap=True),
     "2n_size25": dict(profile="perp_perp_maker_taker_v1_9", window=A, size=25.0, gross=125.0, cap=True),
@@ -68,7 +79,9 @@ profile = dict(load_profile(st["profile"]))
 cfg = apply_profile(profile, dataset="mar2024", data_root="", pair="SOLUSDT", start_date="2026-10-29", end_date="2026-10-29", output_dir=str(out))
 cfg.arb.max_position_base = st.get("size", 1.0)
 cfg.arb.max_venue_imbalance_base = st.get("gross", 5.0)
-cfg.maker.participation_cap = bool(st.get("cap", False))
+cfg.maker.participation_cap = bool(st.get("cap", False)) or bool(cfg.maker.participation_cap)      # the profile's value (v1_9: on, owner 13 Nov) or the case's
+for k, v in (st.get("arb_overrides") or {}).items():
+    setattr(cfg.arb, k, v)
 if st.get("processing_ms"):
     cfg.timing = dataclasses.replace(cfg.timing, processing_ms=st["processing_ms"])
 for venue, ms in (st.get("cancel_ms") or {}).items():
@@ -95,7 +108,7 @@ if st.get("latency_q"):
                                             fill_report=spec(fill, vt.fill_report), cancel=spec(at(grids["cancel_rest_rtt_ms"]) / 2, vt.cancel), cancel_report=spec(at(grids["cancel_rest_rtt_ms"]) / 2, vt.cancel_report))
     cfg.timing = dataclasses.replace(cfg.timing, venues=venues)
 kw = {}
-if st["profile"] == "perp_perp_maker_taker_v1_9":
+if st["profile"] in ("perp_perp_maker_taker_v1_9", "perp_perp_maker_taker_v1_9s"):
     if layer_only:
         kw["layer_risk_mode"] = "enforce"
     else:
@@ -114,7 +127,7 @@ if st.get("maker_outage"):
     kw["hedge_fault_injection"] = True
 replay = SessionReplay(cfg, profile, ticks=dated_ticks("2026-10-29"), recorded=True, decompose_markouts=True, mark_from_mid=True, lifecycle_report=True, regime_boundaries=BND, **kw)
 
-if st.get("profile") == "perp_perp_maker_taker_v1_9":
+if st.get("profile") in ("perp_perp_maker_taker_v1_9", "perp_perp_maker_taker_v1_9s"):
     assert replay.session.oms.maker_ack_deadline, "v1_9 carries oms.maker_ack_deadline (owner 13 Nov)"      # from the profile now, not set here
 if st.get("thin_view_top"):                   # the bot sees the same thin touch (the market's touch IS thin): the size_aware cap is taken from this view, every deeper level is the real one
     import copy
@@ -141,6 +154,21 @@ if st.get("rate_limit"):                      # a lowered limit: 6 requests per 
     replay.session.oms.router.scoped_limits = ScopedRateLimiter({("BYBIT", "PERP"): [Row("HTTP", "IP", 6), Row("/v5/order/create", "UID_ENDPOINT", 6), Row("/v5/order/cancel", "UID_ENDPOINT", 6)],
                                                                  ("BINANCE", "PERP"): [Row("REQUEST_WEIGHT", "IP", 6), Row("ORDERS", "ACCOUNT", 6)]})
 
+if st.get("amend_reject_every") or st.get("amend_timeout_every"):          # the venue rejects / never answers every Nth amend request (the request itself is lost: the old order stays as it was)
+    from crypto_stat_arb.execution import ExecutionEventType
+    from crypto_stat_arb.simulation.queue_adapter import QueueAwareVenueAdapter
+    _real_replace = QueueAwareVenueAdapter._replace_own
+    _n = [0]
+
+    def _faulty_replace(self, request, book):
+        _n[0] += 1
+        if st.get("amend_reject_every") and _n[0] % st["amend_reject_every"] == 0:
+            return (self._callback(request, ExecutionEventType.REJECTED, reason="amend_rejected_injected"),)
+        if st.get("amend_timeout_every") and _n[0] % st["amend_timeout_every"] == 0:
+            return ()
+        return _real_replace(self, request, book)
+    QueueAwareVenueAdapter._replace_own = _faulty_replace
+
 if st.get("duplicate_filled"):                # every venue "Filled" / "Partial" report is delivered twice, the second under a new update id
     from crypto_stat_arb.execution import ExecutionEventType
     from crypto_stat_arb.oms import OMS
@@ -152,6 +180,26 @@ if st.get("duplicate_filled"):                # every venue "Filled" / "Partial"
             real(self, dataclasses.replace(update, update_id=update.update_id + "-dup"))
         return result
     OMS.ingest_order_update = doubled
+
+if st.get("debug_requote"):                    # diagnosis only (owner 14 Nov): print what requote_target saw whenever it answered "no target" for a resting quote
+    _strat = replay.strategy
+    _real_rt = _strat.requote_target
+
+    def _rt(maker_venue, side, qty, books, now):
+        target, why = _real_rt(maker_venue, side, qty, books, now)
+        if target is None:
+            taker = next(v for v in books if v != maker_venue)
+            mb, tb = books[maker_venue], books[taker]
+            cfg = _strat.config
+            bid = side == "buy"
+            fee = _strat.venues[maker_venue].fees.maker_bps + _strat.venues[taker].fees.taker_bps
+            view = _strat._hedge_vwap_view(tb, "bid" if bid else "ask", qty)
+            px_dbg = None if view is None else _strat._quote_limit("bid" if bid else "ask", view.best_bid if bid else view.best_ask, fee, _strat._hedge_move_bps("bid" if bid else "ask", maker_venue, taker, books, None, cfg.adverse_requote_horizon_s), _strat._funding_holding_bps(maker_venue, taker, "bid" if bid else "ask", now))
+            print("REQUOTE_NONE", json.dumps({"now": now, "side": side, "qty": qty, "why": why, "maker_bid": mb.best_bid, "maker_ask": mb.best_ask, "hedge_bid": tb.best_bid, "hedge_ask": tb.best_ask,
+                                              "hedge_vwap": None if view is None else view.best_bid, "limit_px_unrounded": px_dbg, "fee_bps": fee, "move_bps": _strat._hedge_move_bps("bid" if bid else "ask", maker_venue, taker, books, None, cfg.adverse_requote_horizon_s),
+                                              "min_net_edge": cfg.min_net_edge_bps, "buffer": cfg.safety_buffer_bps, "tick": cfg.venue_ticks.get(maker_venue)}), flush=True)
+        return target, why
+    _strat.requote_target = _rt
 
 t0, t1 = hms(st["window"][0] + ":00"), hms(st["window"][1] + ":00")
 gap = None if not st.get("gap") else (hms(st["gap"][0]), hms(st["gap"][1]))
@@ -200,6 +248,8 @@ if safety:                                   # the safety events of the run in f
     (out / "session_safety_events.jsonl").write_text("".join(json.dumps({k: (str(v) if not isinstance(v, (int, float, bool, type(None), list, dict)) else v) for k, v in e.items()}, sort_keys=True, default=str) + "\n" for e in safety))
 else:
     (out / "session_safety_events.jsonl").unlink(missing_ok=True)      # a rerun with no safety events must not leave the previous run's file behind
+from new_backtest.session_replay import s0_audit
+(out / "session_s0_audit.json").write_text(json.dumps(s0_audit(replay.session.ledger.events, replay.session.oms.plans, replay.session.reprice_counters), indent=1, default=str))       # owner 14 Nov: the counts for case 2i (a-j)
 sigs = result["signals"]
 trace = stage_trace(replay.session.ledger.events, [(s["ts"], "signal-trigger", "book") for s in sigs])
 cases_dir = Path("/Users/vaibhav/Documents/Newproject/out/integration/ems_cases")

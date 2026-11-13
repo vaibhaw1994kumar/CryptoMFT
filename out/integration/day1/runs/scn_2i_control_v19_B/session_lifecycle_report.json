@@ -1,0 +1,95 @@
+{
+ "label": "EXPLORATORY: lifecycle report by regime (definitions: v1_9_TOLERANCES.md section D)",
+ "total": {
+  "quotes": {
+   "matched_entry_spread_bps": {
+    "n": 0
+   },
+   "lifecycle_net_pnl_usdt": {
+    "n_quotes_with_pnl": 0,
+    "sum": null
+   },
+   "label_pnl": "EXPLORATORY, mechanics only: mark = mid, no funding",
+   "quotes_placed": 0,
+   "quotes_filled": 0,
+   "fill_rate": null,
+   "withdrawn": 0,
+   "fills_during_cancel_pending": 0,
+   "cancel_while_submitted": 0,
+   "late_fills_after_cancel": 0,
+   "note": "n < 30: counts only, no rate"
+  },
+  "message_load_per_minute": {
+   "orders": {
+    "n": 0
+   },
+   "cancels": {
+    "n": 0
+   },
+   "amends": {
+    "n": 0
+   }
+  },
+  "residual_exposure": {
+   "unhedged_interval_s": {
+    "n": 0
+   },
+   "oldest_exposure_age_s": null
+  },
+  "hedge_completion": {
+   "maker_fills": 0,
+   "fully_hedged": 0,
+   "with_retry_or_split": 0
+  },
+  "adverse_tails_markout_bps": {}
+ },
+ "by_regime": {
+  "volatility": {},
+  "spread": {},
+  "liquidity": {},
+  "utc_hour": {}
+ },
+ "hedge_chains_by_final_state": {},
+ "regime_boundaries": {
+  "volatility": [
+   0.0,
+   0.9810173149547168
+  ],
+  "spread": [
+   0.9931966032667136,
+   0.9985520994562999
+  ],
+  "liquidity": [
+   992.5999999999999,
+   1407.4
+  ]
+ },
+ "partition_check": {
+  "volatility": {
+   "quotes": true,
+   "maker_fills": true,
+   "markouts": true,
+   "minutes": true
+  },
+  "spread": {
+   "quotes": true,
+   "maker_fills": true,
+   "markouts": true,
+   "minutes": true
+  },
+  "liquidity": {
+   "quotes": true,
+   "maker_fills": true,
+   "markouts": true,
+   "minutes": true
+  },
+  "utc_hour": {
+   "quotes": true,
+   "maker_fills": true,
+   "markouts": true,
+   "minutes": true
+  }
+ },
+ "partition_ok": true,
+ "min_bucket": 30
+}

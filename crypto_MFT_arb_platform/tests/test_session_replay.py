@@ -48,6 +48,7 @@ class ProfileSafetyInTheReplay(unittest.TestCase):
         profile = load_profile("perp_perp_maker_taker_v1_9")
         cfg = apply_profile(profile, dataset="mar2024", data_root=str(SLICES), pair="SOLUSDT", start_date="2024-03-11", end_date="2024-03-11", output_dir="/tmp/x_safety")
         cfg.arb.max_position_base = 1.0
+        cfg.arb.participation_max = 0.0                                              # v1_9 limits a new quote to 10% of the prints at its level; these synthetic streams have none and the test is about something else (tests/test_e3_participation.py covers the limit)
         return SessionReplay(cfg, profile, stream=stream(), **kw)
 
     def test_off_by_default_the_replays_own_defaults_stand(self):
@@ -65,6 +66,7 @@ class ProfileSafetyInTheReplay(unittest.TestCase):
         profile = load_profile("perp_perp_maker_taker_v1_8")
         cfg = apply_profile(profile, dataset="mar2024", data_root=str(SLICES), pair="SOLUSDT", start_date="2024-03-11", end_date="2024-03-11", output_dir="/tmp/x_safety8")
         cfg.arb.max_position_base = 1.0
+        cfg.arb.participation_max = 0.0                                              # v1_9 limits a new quote to 10% of the prints at its level; these synthetic streams have none and the test is about something else (tests/test_e3_participation.py covers the limit)
         older = SessionReplay(cfg, profile, stream=stream()).session.router.scoped_limits
         self.assertEqual((older.quote_share, older.quote_min_free), (0.8, 2))
         self.assertEqual(check_real_order_profile(load_profile("perp_perp_maker_taker_v1_9")), [])
@@ -88,6 +90,7 @@ class GhostHedgeInTheReplay(unittest.TestCase):
         profile = load_profile("perp_perp_maker_taker_v1_5")
         cfg = apply_profile(profile, dataset="mar2024", data_root=str(SLICES), pair="SOLUSDT", start_date="2024-03-11", end_date="2024-03-11", output_dir="/tmp/x_ghost")
         cfg.arb.max_position_base = 1.0
+        cfg.arb.participation_max = 0.0                                              # v1_9 limits a new quote to 10% of the prints at its level; these synthetic streams have none and the test is about something else (tests/test_e3_participation.py covers the limit)
         if faults is not None:
             cfg.hedge_faults = faults
         return SessionReplay(cfg, profile, stream=stream(), **kw)
@@ -130,6 +133,7 @@ class SessionReplayEndToEnd(unittest.TestCase):
         cls.profile = load_profile("perp_perp_maker_taker_v1_5")
         cfg = apply_profile(cls.profile, dataset="mar2024", data_root=str(SLICES), pair="SOLUSDT", start_date="2024-03-11", end_date="2024-03-11", output_dir="/tmp/x_d5_syn")
         cfg.arb.max_position_base = 1.0
+        cfg.arb.participation_max = 0.0                                              # v1_9 limits a new quote to 10% of the prints at its level; these synthetic streams have none and the test is about something else (tests/test_e3_participation.py covers the limit)
         cls.replay = SessionReplay(cfg, cls.profile, stream=stream())
         cls.result = cls.replay.run()
 
@@ -226,6 +230,7 @@ class SessionReplayEndToEnd(unittest.TestCase):
         real = sr.TradingSession
         cfg = apply_profile(self.profile, dataset="mar2024", data_root=str(SLICES), pair="SOLUSDT", start_date="2024-03-11", end_date="2024-03-11", output_dir="/tmp/x_e0a_off")
         cfg.arb.max_position_base = 1.0
+        cfg.arb.participation_max = 0.0                                              # v1_9 limits a new quote to 10% of the prints at its level; these synthetic streams have none and the test is about something else (tests/test_e3_participation.py covers the limit)
         with mock.patch.object(sr, "TradingSession", lambda *a, **k: real(*a, **{**k, "intent_journal": False})):
             off = SessionReplay(cfg, self.profile, stream=stream()).run()
         self.assertIsNone(off["execution_layer"])
@@ -339,6 +344,7 @@ class RecordedReplayAndDecomposedMarkouts(unittest.TestCase):
         profile = load_profile("perp_perp_maker_taker_v1_5")
         cfg = apply_profile(profile, dataset="mar2024", data_root=str(SLICES), pair="SOLUSDT", start_date="2024-03-11", end_date="2024-03-11", output_dir="/tmp/x_d5_rec")
         cfg.arb.max_position_base = 1.0
+        cfg.arb.participation_max = 0.0                                              # v1_9 limits a new quote to 10% of the prints at its level; these synthetic streams have none and the test is about something else (tests/test_e3_participation.py covers the limit)
         return SessionReplay(cfg, profile, recorded=True, **kw)
 
     def test_the_recorded_run_trades_and_the_decomposed_option_changes_nothing_else(self):
@@ -430,6 +436,7 @@ class LayerRiskGateInTheReplay(unittest.TestCase):
         profile = load_profile("perp_perp_maker_taker_v1_5")
         cfg = apply_profile(profile, dataset="mar2024", data_root=str(SLICES), pair="SOLUSDT", start_date="2024-03-11", end_date="2024-03-11", output_dir="/tmp/x_layer_gate")
         cfg.arb.max_position_base = 1.0
+        cfg.arb.participation_max = 0.0                                              # v1_9 limits a new quote to 10% of the prints at its level; these synthetic streams have none and the test is about something else (tests/test_e3_participation.py covers the limit)
         return SessionReplay(cfg, profile, stream=stream(), **kw)
 
     def _tight(self, cap=0.5):
@@ -810,6 +817,7 @@ class EmsNoteQuoteValidity(unittest.TestCase):
         profile = load_profile("perp_perp_maker_taker_v1_5")
         cfg = apply_profile(profile, dataset="mar2024", data_root=str(SLICES), pair="SOLUSDT", start_date="2024-03-11", end_date="2024-03-11", output_dir="/tmp/x_qv")
         cfg.arb.max_position_base = 1.0
+        cfg.arb.participation_max = 0.0                                              # v1_9 limits a new quote to 10% of the prints at its level; these synthetic streams have none and the test is about something else (tests/test_e3_participation.py covers the limit)
         cfg.arb.quote_withdraw = on
         if hysteresis is not None:
             cfg.arb.quote_withdraw_hysteresis_bps = hysteresis
@@ -923,6 +931,7 @@ class EmsNoteHedgeCapBasisInTheReplay(unittest.TestCase):
         profile = load_profile("perp_perp_maker_taker_v1_5")
         cfg = apply_profile(profile, dataset="mar2024", data_root=str(SLICES), pair="SOLUSDT", start_date="2024-03-11", end_date="2024-03-11", output_dir="/tmp/x_cap")
         cfg.arb.max_position_base = 1.0
+        cfg.arb.participation_max = 0.0                                              # v1_9 limits a new quote to 10% of the prints at its level; these synthetic streams have none and the test is about something else (tests/test_e3_participation.py covers the limit)
         if basis is not None:
             cfg.execution.hedge["cap_basis"] = basis
         ev = [snap_sized(1.0, "bybit", 100.00, 100.30), snap_sized(1.0, "binance", 100.30, 100.31, bid_size="0.4")]
@@ -1015,6 +1024,7 @@ class EmsNoteNoOffTickPrice(unittest.TestCase):
             profile = load_profile(name)
             cfg = apply_profile(profile, dataset="mar2024", data_root=str(SLICES), pair="SOLUSDT", start_date="2024-03-11", end_date="2024-03-11", output_dir="/tmp/x_tick")
             cfg.arb.max_position_base = 1.0
+            cfg.arb.participation_max = 0.0                                              # v1_9 limits a new quote to 10% of the prints at its level; these synthetic streams have none and the test is about something else (tests/test_e3_participation.py covers the limit)
             result = SessionReplay(cfg, profile, stream=stream()).run()
             self.assertTrue(result["orders"], name)
             for o in result["orders"]:
@@ -1044,6 +1054,7 @@ class ProcessingTimeSetting(unittest.TestCase):
             profile = load_profile("perp_perp_maker_taker_v1_5")
             cfg = apply_profile(profile, dataset="mar2024", data_root=str(SLICES), pair="SOLUSDT", start_date="2024-03-11", end_date="2024-03-11", output_dir="/tmp/x_pt")
             cfg.arb.max_position_base = 1.0
+            cfg.arb.participation_max = 0.0                                              # v1_9 limits a new quote to 10% of the prints at its level; these synthetic streams have none and the test is about something else (tests/test_e3_participation.py covers the limit)
             if ms:
                 cfg.timing = dataclasses.replace(cfg.timing, processing_ms=ms)
             rep = SessionReplay(cfg, profile, stream=stream())
@@ -1125,6 +1136,7 @@ class LifecycleReportByRegime(unittest.TestCase):
         def run(on):
             cfg = apply_profile(profile, dataset="mar2024", data_root=str(SLICES), pair="SOLUSDT", start_date="2024-03-11", end_date="2024-03-11", output_dir="/tmp/x_lc")
             cfg.arb.max_position_base = 1.0
+            cfg.arb.participation_max = 0.0                                              # v1_9 limits a new quote to 10% of the prints at its level; these synthetic streams have none and the test is about something else (tests/test_e3_participation.py covers the limit)
             return SessionReplay(cfg, profile, stream=stream(), decompose_markouts=True, lifecycle_report=on).run()
         off, on = run(False), run(True)
         self.assertNotIn("_lifecycle", off)
@@ -1154,6 +1166,7 @@ class RecoveryAfterAFeedGap(unittest.TestCase):
         profile = load_profile("perp_perp_maker_taker_v1_7")
         cfg = apply_profile(profile, dataset="mar2024", data_root=str(SLICES), pair="SOLUSDT", start_date="2024-03-11", end_date="2024-03-11", output_dir="/tmp/x_gap")
         cfg.arb.max_position_base = 1.0
+        cfg.arb.participation_max = 0.0                                              # v1_9 limits a new quote to 10% of the prints at its level; these synthetic streams have none and the test is about something else (tests/test_e3_participation.py covers the limit)
         cfg.arb.maker_max_age_s = 1.0                                               # a quote that nobody hits lives 1 s, so a new quote is due about once a second when quoting is allowed
         ev, book_ts, t = [snap(1.0, "bybit", 100.00, 100.30), snap(1.0, "binance", 100.30, 100.31)], {"bybit": [1.0], "binance": [1.0]}, 1.1
         while t < 14.0:
@@ -1309,6 +1322,7 @@ class SizeAwareCapInTheReplay(unittest.TestCase):
         profile = load_profile(profile_name)
         cfg = apply_profile(profile, dataset="mar2024", data_root=str(SLICES), pair="SOLUSDT", start_date="2024-03-11", end_date="2024-03-11", output_dir="/tmp/x_sacap")
         cfg.arb.max_position_base = 1.0
+        cfg.arb.participation_max = 0.0                                              # v1_9 limits a new quote to 10% of the prints at its level; these synthetic streams have none and the test is about something else (tests/test_e3_participation.py covers the limit)
         asks = bin_asks or [("100.31", "50")]
         ev = [snap(1.0, "bybit", 100.00, 100.30), snap_levels(1.0, "binance", bin_bids, asks)]
         t = 1.1

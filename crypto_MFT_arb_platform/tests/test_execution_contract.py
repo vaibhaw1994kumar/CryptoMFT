@@ -512,5 +512,28 @@ class TacticSetTests(unittest.TestCase):
                 h.send_maker(1.0, price=100.0)
 
 
+class EscalateBeforeSend(unittest.TestCase):
+    """A hedge intent refused before any child was sent (an instrument rule: minimum notional on a dust partial fill) is escalated by the OMS; the layer settles it as failed-not-sent instead of an illegal accepted -> escalated move that ended a whole replay."""
+
+    def test_escalating_an_intent_that_never_worked_settles_it_failed_and_releases_everything(self):
+        xl = layer(risk_reservation="enforce")
+        p = prim(xl, 1, 1.0)
+        xl.child_sent(p, 10, 10, "PASSIVE", 1.0)
+        xl.note_filled(p, 0.01)
+        h = xl.open_intent(role=Role.HEDGE, side="sell", qty=0.01, venues=(BINANCE,), worst_price=98.0, now=2.0, signal_id=1, parent=p, parent_filled_qty=0.01)
+        self.assertEqual(h.state, S.ACCEPTED)
+        xl.escalate(h, 3.0, "not at the venue and no retry budget")
+        self.assertEqual(h.state, S.FAILED)
+        xl.settle_signal(1, 4.0)
+        self.assertEqual(xl.leaked_reservations(), [])
+
+    def test_a_working_intent_still_escalates_as_before(self):
+        xl = layer()
+        p, h = hedged(xl)
+        xl.child_sent(h, 21, 21, "IOC_CAPPED", 2.0)
+        xl.escalate(h, 3.0, "ioc unfilled")
+        self.assertEqual(h.state, S.ESCALATED)
+
+
 if __name__ == "__main__":  # pragma: no cover
     unittest.main()

@@ -1,0 +1,22 @@
+{
+ "label": "EXPLORATORY: own passive fills vs the public volume printed at the same level over the day",
+ "levels": [
+  {
+   "venue": "BYBIT",
+   "price": "100.42",
+   "own_filled": 1.0,
+   "public_traded": 13317.10000000019,
+   "own_over_public": 7.509142380848576e-05
+  },
+  {
+   "venue": "BYBIT",
+   "price": "100.46",
+   "own_filled": 1.0,
+   "public_traded": 17646.100000000144,
+   "own_over_public": 5.666974572285048e-05
+  }
+ ],
+ "excess": [],
+ "levels_checked": 2,
+ "ok": true
+}

@@ -1,0 +1,8 @@
+{"seq": 0, "event": "intent", "intent_id": "sig1-P1", "role": "primary", "instrument": "SOL-USDT-PERP", "side": "buy", "qty": 1.0, "venues": ["BYBIT"], "worst_price": 100.42, "urgency": "normal", "deadline_ts": null, "tactic_hint": "", "reason": "maker leg", "parent_id": "", "parent_filled_qty": 0.0, "signal_id": 1, "created_ts": 1793276998.1376526}
+{"seq": 1, "event": "state", "intent_id": "sig1-P1", "from": "accepted", "to": "working", "why": "first child sent", "ts": 1793276998.1376526}
+{"seq": 2, "event": "child", "intent_id": "sig1-P1", "order_id": "396d4ace-433e-5987-a000-47deff54e3ad", "tactic": "PASSIVE", "ts": 1793276998.1376526}
+{"seq": 3, "event": "state", "intent_id": "sig1-P1", "from": "working", "to": "failed", "why": "plan closed", "ts": 1793276998.1794412}
+{"seq": 4, "event": "intent", "intent_id": "sig2-P1", "role": "primary", "instrument": "SOL-USDT-PERP", "side": "buy", "qty": 1.0, "venues": ["BYBIT"], "worst_price": 100.46, "urgency": "normal", "deadline_ts": null, "tactic_hint": "", "reason": "maker leg", "parent_id": "", "parent_filled_qty": 0.0, "signal_id": 2, "created_ts": 1793277012.1315093}
+{"seq": 5, "event": "state", "intent_id": "sig2-P1", "from": "accepted", "to": "working", "why": "first child sent", "ts": 1793277012.1315093}
+{"seq": 6, "event": "child", "intent_id": "sig2-P1", "order_id": "95a0fd50-6091-5e07-80da-c6c9ca7e761c", "tactic": "PASSIVE", "ts": 1793277012.1315093}
+{"seq": 7, "event": "state", "intent_id": "sig2-P1", "from": "working", "to": "failed", "why": "plan closed", "ts": 1793277012.1686919}

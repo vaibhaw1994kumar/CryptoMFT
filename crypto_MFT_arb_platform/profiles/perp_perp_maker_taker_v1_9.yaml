@@ -115,6 +115,8 @@ arb:
   loss_fail_bps: 7.8                     # SCENARIO, NOT CALIBRATED (came from a simulated hedge-failure study, not execution logs); report failure costs per scenario
   funding_expected_holding_s: 28800      # owner 14 Nov: the expected funding cost of the pair is charged for 8 h of holding (ASSUMED; to be replaced by the measured median holding time from the stage-0 logs, owner-approved); net funding of the pair from each venue's current predicted rate (the long venue's paid minus the short venue's received), per direction; with no rate (a replay without derivative data) the term is 0 and counted (funding_term_unavailable)
   funding_credit: floor_zero             # owner 14 Nov: funding may only LOWER the edge; a net credit counts as 0
+  participation_max: 0.10                # E3 (owner 13 Nov): a NEW quote's size is capped at this share of the public volume printed at its price level on the maker venue over the last participation_window_s; a cap below the minimum clip refuses the quote (reject participation). ASSUMED 10% of the last 60 s, owner to approve. Hedges are never touched. Earlier profiles: off
+  participation_window_s: 60
   funding_window_s: 30                   # owner 14 Nov: no new quote within 30 s before a funding timestamp on either venue (next funding time from the derivative stream); resting quotes are withdrawn when the window starts; quoting resumes when the stream shows the next settlement. No next-funding time = "not evaluable", counted (funding_window_not_evaluable), nothing blocked
   entry_hedge_price: vwap                # owner 13 Nov (edge calibration item 1): the hedge is priced at the VWAP the hedge-venue book gives for the quote's size, in the quote price and the entry edge (the same walk quote_validity uses); every earlier profile: touch (the ArbConfig default). expected_hedge_slippage_bps stays 0 by design.
   round_quotes_to_tick: true             # v1.1 step 9b: the quote is rounded onto the venue's price grid before the improve-the-touch check and the edge (the runner supplies arb.venue_ticks)
@@ -144,6 +146,7 @@ maker:
   through_print_volume_limited: false    # ... but the fill is limited by the print's volume (ONE budget per print). The full version (fill_through_prints without this) is refused at startup. Turn BOTH on together only on the owner's instruction
   depletion_ledger: true                 # v1_2 (owner Phase B, step 4): both arrival orders of one execution (depth decrease / print) give the same queue ahead and the same fills when the print is at least as large as the decrease; netted pairs with no other proof are counted. v1.1: false
   evidence_window_ms: 20.0
+  participation_cap: true                # E3 (owner 13 Nov): one budget per public print across every own order and every rule: own fills never exceed the volume of the print that caused them. Earlier profiles: off (default)
   share_trade_volume: true               # MANDATORY
   dedupe_trade_depth: true               # MANDATORY
   exchange_time_eligibility: true        # MANDATORY (causal fills)
@@ -270,6 +273,8 @@ _production_limits_approved_13nov:
     rate_limits: "oms.rate_limits: quote_share 0.7, quote_min_free 2, hedges never refused, cancels unrestricted (ASSUMED shares)"
     layer_risk_gate: "enforce (execution.risk_reservation). The proposal said count until day-1 and spot validation; the owner's later order (13 Nov) runs v1_9 in the profile's mandatory enforce mode, and the gate refused nothing in 22 runs: the later order stands"
     funding_quiet_window: "ENFORCED (owner 14 Nov): arb.funding_window_s 30: no new quote within 30 s before a funding timestamp on either venue, resting quotes withdrawn at the window start (reason funding_window), quoting resumes when the stream shows the next settlement (after at most arb.funding_window_after_s 30, ASSUMED); no next-funding time = not evaluable, counted"
+    participation_limit: "arb.participation_max 0.10 of the volume printed at the quote's price level over the last arb.participation_window_s 60 (ASSUMED, owner to approve); a new quote cut below the minimum clip is refused (reject participation); hedges never blocked (owner 13 Nov, E3)"
+    participation_cap_simulator: "maker.participation_cap true: one budget per public print across every own order (the simulator cannot fill more than was printed)"
     funding_in_edge: "arb.funding_expected_holding_s 28800 (8 h, ASSUMED) with funding_credit floor_zero (owner 14 Nov)"
     account_fee_check_at_startup: "oms.account_fee_check + fees.verify_account_fee_rates: a session that sends real orders refuses to start when either venue's account rates cannot be read or differ from the profile (owner 14 Nov); Binance endpoint path confirmed in the testnet drill; replays keep the profile fees, labelled"
     breaker: "the profile's breaker block (trips, flatten, dust rules of 13 Nov)"

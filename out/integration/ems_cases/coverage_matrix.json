@@ -104,6 +104,78 @@
   "evidence": "runs/scn_2f_rate_limit/session_ems_path_coverage.json"
  },
  {
+  "case": "J2/J3 checks, 2i_control_v19",
+  "covering_layer": "execution layer, router",
+  "count": 4,
+  "result": "PASS",
+  "detail": "off_tick=0, tactic_violations=0",
+  "evidence": "runs/scn_2i_control_v19/session_ems_path_coverage.json"
+ },
+ {
+  "case": "J2/J3 checks, 2i_control_v19_B",
+  "covering_layer": "execution layer, router",
+  "count": 0,
+  "result": "PASS",
+  "detail": "off_tick=0, tactic_violations=0",
+  "evidence": "runs/scn_2i_control_v19_B/session_ems_path_coverage.json"
+ },
+ {
+  "case": "J2/J3 checks, 2i_s0",
+  "covering_layer": "execution layer, router",
+  "count": 3,
+  "result": "PASS",
+  "detail": "off_tick=0, tactic_violations=0",
+  "evidence": "runs/scn_2i_s0/session_ems_path_coverage.json"
+ },
+ {
+  "case": "J2/J3 checks, 2i_s0_B",
+  "covering_layer": "execution layer, router",
+  "count": 0,
+  "result": "PASS",
+  "detail": "off_tick=0, tactic_violations=0",
+  "evidence": "runs/scn_2i_s0_B/session_ems_path_coverage.json"
+ },
+ {
+  "case": "J2/J3 checks, 2i_s0_debug",
+  "covering_layer": "execution layer, router",
+  "count": 2,
+  "result": "PASS",
+  "detail": "off_tick=0, tactic_violations=0",
+  "evidence": "runs/scn_2i_s0_debug/session_ems_path_coverage.json"
+ },
+ {
+  "case": "J2/J3 checks, 2i_s0_disconnect",
+  "covering_layer": "execution layer, router",
+  "count": 2,
+  "result": "PASS",
+  "detail": "off_tick=0, tactic_violations=0",
+  "evidence": "runs/scn_2i_s0_disconnect/session_ems_path_coverage.json"
+ },
+ {
+  "case": "J2/J3 checks, 2i_s0_dup_filled",
+  "covering_layer": "execution layer, router",
+  "count": 2,
+  "result": "PASS",
+  "detail": "off_tick=0, tactic_violations=0",
+  "evidence": "runs/scn_2i_s0_dup_filled/session_ems_path_coverage.json"
+ },
+ {
+  "case": "J2/J3 checks, 2i_s0_reject",
+  "covering_layer": "execution layer, router",
+  "count": 2,
+  "result": "PASS",
+  "detail": "off_tick=0, tactic_violations=0",
+  "evidence": "runs/scn_2i_s0_reject/session_ems_path_coverage.json"
+ },
+ {
+  "case": "J2/J3 checks, 2i_s0_timeout",
+  "covering_layer": "execution layer, router",
+  "count": 2,
+  "result": "PASS",
+  "detail": "off_tick=0, tactic_violations=0",
+  "evidence": "runs/scn_2i_s0_timeout/session_ems_path_coverage.json"
+ },
+ {
   "case": "J2/J3 checks, 2j_duplicate_filled",
   "covering_layer": "execution layer, router",
   "count": 13,
@@ -378,9 +450,9 @@
  {
   "case": "2h New-level vs queued fills: every maker fill carries queue_class",
   "covering_layer": "simulator observation rows",
-  "count": 161,
+  "count": 164,
   "result": "PASS",
-  "detail": "maker fills with the field 161 in 23 runs (scn_2a_quote_withdraw, scn_2c_partial_then_fill, scn_2c_thin_top, scn_2c_zero_exhausted, scn_2c_zero_exhausted_layeronly, scn_2c_zero_then_fill, scn_2c_zero_then_fill_layeronly, scn_2d_ghost3, scn_2d_ghost30, scn_2e_feed_gap, scn_2f_rate_limit, scn_2j_duplicate_filled, scn_2k_breaker_pause, scn_2k_breaker_trip, scn_2l_maker_outage, scn_2m_p99, scn_2m_p999, scn_2m_processing, scn_2n_size1, scn_2n_size25, scn_2n_size5, scn_H1a, scn_H1b): {'queued': 161}. The class is read from the placement of the same order (new_level: no displayed size at our price when we placed, queued: behind displayed size, unknown: queue not known); it sits on the maker_fill rows of maker_observations.jsonl, an observation-only file, so no existing output changed. Agreement with real fills is a Track C result and is NOT claimed",
+  "detail": "maker fills with the field 164 in 25 runs (scn_2a_quote_withdraw, scn_2c_partial_then_fill, scn_2c_thin_top, scn_2c_zero_exhausted, scn_2c_zero_exhausted_layeronly, scn_2c_zero_then_fill, scn_2c_zero_then_fill_layeronly, scn_2d_ghost3, scn_2d_ghost30, scn_2e_feed_gap, scn_2f_rate_limit, scn_2i_control_v19, scn_2i_s0, scn_2j_duplicate_filled, scn_2k_breaker_pause, scn_2k_breaker_trip, scn_2l_maker_outage, scn_2m_p99, scn_2m_p999, scn_2m_processing, scn_2n_size1, scn_2n_size25, scn_2n_size5, scn_H1a, scn_H1b): {'queued': 164}. The class is read from the placement of the same order (new_level: no displayed size at our price when we placed, queued: behind displayed size, unknown: queue not known); it sits on the maker_fill rows of maker_observations.jsonl, an observation-only file, so no existing output changed. Agreement with real fills is a Track C result and is NOT claimed",
   "evidence": "runs/scn_*/maker_observations.jsonl"
  },
  {
@@ -401,10 +473,10 @@
  },
  {
   "case": "2i Amend paths (S0 profile v1_9s)",
-  "covering_layer": "OMS amend lineage",
+  "covering_layer": "session controller + OMS amend lineage",
   "count": null,
   "result": "NOT COVERED",
-  "detail": "OMS level: tests/test_oms_amend.py (11 cases, evidence case7_amend_*.jsonl). No strategy in the arb replay calls request_amend. Owner 13 Nov: to be covered by the MM replays after CR-MQ part 2 (amend on real paths, quote plans: execute_quote, pairing none); recorded here, not claimed",
+  "detail": "amend requests per run: {'2i_s0': 0, '2i_s0_B': 0, '2i_s0_reject': 0, '2i_s0_timeout': 0, '2i_s0_disconnect': 0, '2i_s0_dup_filled': 0}. invariant rules 1-3 (two live orders 0, duplicate fills 0, lineage overfill 0, hedged = filled) hold in 6 of 6 runs. Unit/OMS level: tests/test_oms_amend.py (11 lineage cases) and tests/test_s0_session.py (controller: amend, band, min interval, reject, timeout, no room, no target). NO amend request was made on the capture windows (rule 6: NOT COVERED, never PASS by emptiness): the arb's quotes rest on or near the touch, where a repricing target either sits inside the band or does not exist, so the amend path (paths a-j) is exercised by the synthetic stream tests only, not by the real capture. Reason recorded, not claimed.",
   "evidence": "see detail"
  }
 ]

@@ -36,7 +36,7 @@ cfg = apply_profile(profile, dataset="mar2024", data_root="", pair="SOLUSDT", st
 cfg.arb.max_position_base = size                # the clip and the net ceiling (1 SOL by default, + the profile's fill headroom)
 gross = gross_cli if gross_cli is not None else (cfg.arb.max_venue_imbalance_base or 5.0)
 cfg.arb.max_venue_imbalance_base = gross        # owner 11 Nov: 5 SOL gross per venue (the net stays at the ceiling above); the core's per-venue risk limit follows it
-cfg.maker.participation_cap = cap               # E3 (owner 12 Nov): off unless --cap
+cfg.maker.participation_cap = cap or bool(cfg.maker.participation_cap)               # E3 (owner 12 Nov): the profile's value (v1_9: on, owner 13 Nov), or --cap
 if proc_strategy or proc_risk:
     import dataclasses
     cfg.timing = dataclasses.replace(cfg.timing, processing_ms={k: v for k, v in (("strategy", proc_strategy), ("risk", proc_risk)) if v})
@@ -47,7 +47,14 @@ if minutes is not None:
     t0 = first.receive_ts_ns
     events = itertools.chain([first], itertools.takewhile(lambda e: e.receive_ts_ns - t0 <= minutes * 60e9, events))
 t = time.time()
-result = replay.run_recorded(events)
+import collections as _c
+traded = _c.defaultdict(float)                       # E3: the public volume printed at each (venue, price), summed from the capture itself (read only)
+def _tally(it):
+    for e in it:
+        if hasattr(e, "trade_id") and hasattr(e, "aggressor_side"):
+            traded[(e.venue, str(e.price))] += float(e.quantity)
+        yield e
+result = replay.run_recorded(_tally(events))
 result["run"] = {"profile": name, "minutes_limit": minutes, "wall_s": round(time.time() - t, 1), "session": SESSION.name,
                  "labels": ["EXPLORATORY", "recorder quality REJECTED; host clock UNKNOWN", "funding not included (no derivatives files locally); mark = mid", "S1 table out-of-period (SOL, fitted March 2024)",
                             "no own orders on the venues: simulated fills show mechanics only", f"size {size} SOL clip, net ceiling {size} SOL + headroom, {gross} SOL gross per venue (owner 11 Nov; sweep settings), participation cap {'ON' if cap else 'off'}", f"processing time strategy {proc_strategy} ms + risk {proc_risk} ms" + (" (ASSUMED sensitivity)" if proc_strategy or proc_risk else " (ASSUMED_ZERO)"), "marks: the recorded derivatives stream when present, else MARK_FROM_MID (replay only)"]}
@@ -75,5 +82,8 @@ doc = {"label": "EXPLORATORY: every counter of the run; counts are complete (not
                              "oms_realism_counters": dict(sess.oms.realism_counters)},
        "safety_from_profile": getattr(replay, "safety_from_profile", None)}
 (out / "session_limits_and_stops.json").write_text(json.dumps(doc, indent=1, default=str))
+from new_backtest.session_replay import participation_audit
+audit = participation_audit(replay.session.ledger_fill_rows() if hasattr(replay.session, "ledger_fill_rows") else [e for e in led if e["event_type"] == "FILL"], dict(traded))
+(out / "session_participation_audit.json").write_text(json.dumps({"label": "EXPLORATORY: own passive fills vs the public volume printed at the same level over the day", **audit}, indent=1))
 print(json.dumps({"profile": name, "wall_s": result["run"]["wall_s"], "events": result["events"], "signals": len(result["signals"]), "orders": len(result["orders"]), "fills": len(result["fills"]),
                   "positions": result["positions"], "ledger_events": sum(result["ledger_event_counts"].values())}, indent=1))
