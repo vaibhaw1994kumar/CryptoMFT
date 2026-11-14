@@ -52,10 +52,13 @@ class Tactic:
 VOLATILITY_BUCKETS = ("low", "normal", "high")
 # every reason code choose_tactic can return, in the order its rules are tried
 TACTIC_CHOICE_REASONS = (
-    "BREAKER_FLATTEN", "BREAKER_FLATTEN_MARKET_NOT_ALLOWED", "BOOK_STALE_NO_AGGRESSION", "TIME_TO_LIMIT_FLATTEN", "TIME_TO_LIMIT_WIDE_SPREAD_CAPPED", "TIME_TO_LIMIT_MARKET_NOT_ALLOWED",
+    "BREAKER_FLATTEN", "BREAKER_FLATTEN_MARKET_NOT_ALLOWED", "BOOK_STALE_NO_AGGRESSION", "TIME_TO_LIMIT_FLATTEN", "TIME_TO_LIMIT_WIDE_SPREAD_CAPPED", "TIME_TO_LIMIT_MARKET_NOT_ALLOWED", "GAP_NO_MARKET_HEDGE",
     "INVENTORY_AT_LIMIT_CAPPED", "SPREAD_WIDE_STAY_PASSIVE", "INVENTORY_PRESSURE_REDUCE", "INVENTORY_AGED", "HIGH_VOL_WITH_INVENTORY", "DEFAULT_PASSIVE",
     "LQ_WAIT_CHEAPER", "LQ_DEPTH_COVERS", "LQ_PARTIAL_RESIDUAL",              # CR-LQ: only with TacticChoiceConfig.liquidity_aware (default off)
+    "LQ_DEPTH_LIMITED",                                                        # CR-LQ with TacticChoiceConfig.gap_aware: the gap or the flicker made the book cover less than it shows
 )
+# the gap statuses of a MarketState.gap_status (VenueState.gap_depth)
+GAP_STATUSES = ("GAP", "NO_GAP_WITHIN_CAPTURE", "FEED_FAULT", "NOT_EVALUABLE")
 # the only reasons that may ever produce MARKET_BANDED (owner 9 Nov): emergencies, never a normal exit and never a quote
 MARKET_BANDED_REASONS = ("BREAKER_FLATTEN", "TIME_TO_LIMIT_FLATTEN")
 
@@ -74,7 +77,12 @@ class MarketState:
     order_qty                      base quantity of the order the choice is for
     executable_depth_within_cap    base quantity on the opposite side inside the IOC price cap (core OrderBook.walk(side, qty, limit_price=cap).filled_qty, or the live book's equivalent)
     expected_fill_time_s           expected wait of a resting post-only order at the chosen price (queue ahead / traded rate at that level)
-    expected_wait_cost_bps         expected adverse drift over expected_fill_time_s (a markout table by coin and book age), in basis points"""
+    expected_wait_cost_bps         expected adverse drift over expected_fill_time_s (a markout table by coin and book age), in basis points
+    Depth quality (owner 14 Nov), all four OPTIONAL (None = unknown), of the side of the book the order would CONSUME, from VenueState.gap_depth / flicker; read only with TacticChoiceConfig.gap_aware:
+    depth_to_first_gap             base quantity resting before the first near-empty stretch (None when there is none within the captured depth, or the status is not GAP)
+    gap_distance_bps               where that stretch starts, in basis points from the touch
+    gap_status                     one of GAP_STATUSES; FEED_FAULT means a gap seen with a feed sequence gap: it is a data fault, never a cliff, and no rule reads its depth
+    flicker                        unexplained depth decrease of the best levels divided by the volume printed against them over a rolling window (APPROXIMATE: L2 depth at 100 ms updates)"""
     book_age_s: float
     spread_bps: float
     volatility_bucket: str
@@ -86,6 +94,10 @@ class MarketState:
     executable_depth_within_cap: float | None = None
     expected_fill_time_s: float | None = None
     expected_wait_cost_bps: float | None = None
+    depth_to_first_gap: float | None = None
+    gap_distance_bps: float | None = None
+    gap_status: str | None = None
+    flicker: float | None = None
 
 
 @dataclass(frozen=True)
@@ -105,6 +117,10 @@ class TacticChoiceConfig:
     depth_margin: float = 1.0                 # ASSUMED: the book covers the order when executable depth >= order_qty * depth_margin (1.0 = exactly the order)
     taker_fee_bps: float = 5.5                # ASSUMED: crossing cost = spread_bps / 2 + taker_fee_bps - maker_fee_bps (the caller sets the venue's own fees)
     maker_fee_bps: float = 2.0                # ASSUMED: a rebate is a negative number
+    # Depth quality (owner 14 Nov). Off by default: with False no gap or flicker field is read and choose_tactic is exactly the choice above. No arb profile sets it, and the arb hedge does not call choose_tactic.
+    gap_aware: bool = False
+    flicker_weight: float = 0.0               # executable depth is multiplied by (1 - min(1, flicker_weight * flicker)). 0 = no discount. NOT CALIBRATED: on the 2026-10-29 capture the flicker ratio has median 24 (Binance) / 53 (Bybit) and p95 345 / 786, so a weight of 1 would discount every book to nothing; set it only from a measured scale (see out/integration/dq/factor_tables.md)
+    gap_exempt_breaker: bool = True           # OWNER QUESTION: True = the circuit breaker's flatten (rule 1) is never replaced by the gap rule (an emergency is not blocked); False = it is capped like rule 3
 
 
 @dataclass(frozen=True)
@@ -128,6 +144,11 @@ def choose_tactic(state: MarketState, cfg: TacticChoiceConfig | None = None, *, 
       8. high volatility and pressure >= pressure_low         -> IOC_CAPPED     HIGH_VOL_WITH_INVENTORY
       9. otherwise                                            -> PASSIVE        DEFAULT_PASSIVE               (a quote)
 
+    Depth quality (cfg.gap_aware, default False; with False no gap or flicker field is read): a market-style answer (MARKET_BANDED) is replaced by IOC_CAPPED GAP_NO_MARKET_HEDGE when the book has a gap
+    (gap_status GAP) and the size resting before it is smaller than the order (depth_to_first_gap < order_qty). Rule 3 only by default: the breaker's flatten (rule 1) is exempt while gap_exempt_breaker is True.
+    A FEED_FAULT, NO_GAP_WITHIN_CAPTURE or NOT_EVALUABLE status never blocks anything. In the CR-LQ depth check the executable depth is multiplied by (1 - min(1, flicker_weight * flicker)) and never exceeds the size
+    before the gap; a covered quantity reduced that way is reported as LQ_DEPTH_LIMITED. NOTE: the arb hedge dispatch does not call choose_tactic (tactic_choice is refused with pairing maker_taker), so this rule does not reach arb hedges.
+
     CR-LQ (cfg.liquidity_aware, default False; with False nothing below changes): the answer of rules 6 to 9 is then checked by _liquidity_adjusted against the book depth in the cap and the expected wait of a resting order, adding the reasons
     LQ_WAIT_CHEAPER, LQ_DEPTH_COVERS and LQ_PARTIAL_RESIDUAL (a covered part and a residual quantity on the TacticChoice). Rules 1 to 5 are untouched, so MARKET_BANDED stays emergency-only.
 
@@ -149,8 +170,16 @@ def choose_tactic(state: MarketState, cfg: TacticChoiceConfig | None = None, *, 
         v = getattr(state, name)
         if v is not None and (not isinstance(v, (int, float)) or isinstance(v, bool) or math.isnan(v) or v < 0):
             raise ValueError(f"{name} must be a number >= 0 or None, not {v!r}")
-    if not isinstance(cfg.liquidity_aware, bool):
-        raise ValueError(f"liquidity_aware must be a bool, not {cfg.liquidity_aware!r}")
+    for name in ("depth_to_first_gap", "gap_distance_bps", "flicker"):
+        v = getattr(state, name)
+        if v is not None and (not isinstance(v, (int, float)) or isinstance(v, bool) or math.isnan(v) or v < 0):
+            raise ValueError(f"{name} must be a number >= 0 or None, not {v!r}")
+    if state.gap_status is not None and state.gap_status not in GAP_STATUSES:
+        raise ValueError(f"gap_status must be one of {GAP_STATUSES} or None, not {state.gap_status!r}")
+    if not isinstance(cfg.liquidity_aware, bool) or not isinstance(cfg.gap_aware, bool) or not isinstance(cfg.gap_exempt_breaker, bool):
+        raise ValueError(f"liquidity_aware, gap_aware and gap_exempt_breaker must be bools, not {cfg.liquidity_aware!r}, {cfg.gap_aware!r}, {cfg.gap_exempt_breaker!r}")
+    if cfg.gap_aware and (not isinstance(cfg.flicker_weight, (int, float)) or isinstance(cfg.flicker_weight, bool) or math.isnan(cfg.flicker_weight) or cfg.flicker_weight < 0):
+        raise ValueError(f"TacticChoiceConfig.flicker_weight is not a usable number: {cfg.flicker_weight!r}")
     if cfg.liquidity_aware:
         for name in ("max_wait_s", "depth_margin", "taker_fee_bps", "maker_fee_bps"):
             v = getattr(cfg, name)
@@ -158,7 +187,11 @@ def choose_tactic(state: MarketState, cfg: TacticChoiceConfig | None = None, *, 
                 raise ValueError(f"TacticChoiceConfig.{name} is not a usable number: {v!r}")
     held = state.inventory_pressure > 0
     if state.breaker_flatten:
-        return TacticChoice("MARKET_BANDED", "BREAKER_FLATTEN") if allow_market_banded else TacticChoice("IOC_CAPPED", "BREAKER_FLATTEN_MARKET_NOT_ALLOWED")
+        if not allow_market_banded:
+            return TacticChoice("IOC_CAPPED", "BREAKER_FLATTEN_MARKET_NOT_ALLOWED")
+        if cfg.gap_aware and not cfg.gap_exempt_breaker and _gap_blocks_market(state):
+            return TacticChoice("IOC_CAPPED", "GAP_NO_MARKET_HEDGE")
+        return TacticChoice("MARKET_BANDED", "BREAKER_FLATTEN")
     if state.book_age_s > cfg.max_book_age_s:
         return TacticChoice("PASSIVE", "BOOK_STALE_NO_AGGRESSION")
     if held and ttl is not None and ttl <= cfg.flatten_lead_s:
@@ -166,6 +199,8 @@ def choose_tactic(state: MarketState, cfg: TacticChoiceConfig | None = None, *, 
             return TacticChoice("IOC_CAPPED", "TIME_TO_LIMIT_MARKET_NOT_ALLOWED")
         if state.spread_bps > cfg.market_spread_max_bps:
             return TacticChoice("IOC_CAPPED", "TIME_TO_LIMIT_WIDE_SPREAD_CAPPED")
+        if cfg.gap_aware and _gap_blocks_market(state):
+            return TacticChoice("IOC_CAPPED", "GAP_NO_MARKET_HEDGE")
         return TacticChoice("MARKET_BANDED", "TIME_TO_LIMIT_FLATTEN")
     if state.inventory_pressure >= cfg.pressure_hard:
         return TacticChoice("IOC_CAPPED", "INVENTORY_AT_LIMIT_CAPPED")
@@ -195,9 +230,20 @@ def _liquidity_adjusted(soft: TacticChoice, state: MarketState, cfg: TacticChoic
     depth, qty = state.executable_depth_within_cap, state.order_qty
     if soft.tactic != "IOC_CAPPED" or depth is None or qty is None:
         return soft
-    usable = depth / cfg.depth_margin
+    raw = usable = depth / cfg.depth_margin
+    if cfg.gap_aware:
+        if state.flicker is not None:
+            usable *= 1.0 - min(1.0, cfg.flicker_weight * state.flicker)
+        if state.gap_status == "GAP" and state.depth_to_first_gap is not None:
+            usable = min(usable, state.depth_to_first_gap)
+    partial = "LQ_DEPTH_LIMITED" if usable < raw - 1e-12 else "LQ_PARTIAL_RESIDUAL"
     if usable >= qty:
         return TacticChoice("IOC_CAPPED", "LQ_DEPTH_COVERS")
     if usable <= 0:
-        return TacticChoice("PASSIVE", "LQ_PARTIAL_RESIDUAL", covered_qty=0.0, residual_qty=qty)
-    return TacticChoice("IOC_CAPPED", "LQ_PARTIAL_RESIDUAL", covered_qty=usable, residual_qty=qty - usable)
+        return TacticChoice("PASSIVE", partial, covered_qty=0.0, residual_qty=qty)
+    return TacticChoice("IOC_CAPPED", partial, covered_qty=usable, residual_qty=qty - usable)
+
+
+def _gap_blocks_market(state: MarketState) -> bool:
+    """True when the book has a known gap and what rests before it is smaller than the order: a market-style order would walk into the hole. Unknown (None) or a FEED_FAULT never blocks."""
+    return (state.gap_status == "GAP" and state.depth_to_first_gap is not None and state.order_qty is not None and state.depth_to_first_gap < state.order_qty)

@@ -5,7 +5,7 @@
 There is no speculative-IOC or scheduled tactic."""
 from __future__ import annotations
 
-from .base import MARKET_BANDED_REASONS, TACTIC_CHOICE_REASONS, MarketState, Tactic, TacticChoice, TacticChoiceConfig, choose_tactic
+from .base import GAP_STATUSES, MARKET_BANDED_REASONS, TACTIC_CHOICE_REASONS, MarketState, Tactic, TacticChoice, TacticChoiceConfig, choose_tactic
 from .ioc import IocCapped
 from .market_banded import MarketBanded
 from .passive import PLACEMENTS, Passive, placement_price

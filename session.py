@@ -352,6 +352,8 @@ class TradingSession:
         self._reprice_states: dict[str, Any] = {}                    # plan (parent) id -> RepriceState: one quote, its start time kept across amends
         self._reprice_pending: dict[str, tuple[str, str]] = {}       # plan id -> (the order id the request was made on, "AMEND" | "CANCEL")
         self.reprice_counters: dict[str, int] = {}
+        self.feed_gap_hook = None                                   # depth quality (owner 14 Nov): called (venue, now_s) when a venue's core book counts a new sequence gap; whoever owns the VenueStates sets it. None: nothing happens
+        self._seen_gaps: dict[tuple, int] = {}
         if self._reprice_cfg.enabled:
             self.oms.amend_enabled = True
         self.ledger.journal = self.financing_journal
@@ -507,6 +509,11 @@ class TradingSession:
         if apply_book:
             self.books[(event.venue, event.instrument_id)].apply(event)
         self._schedule_resync(now)                      # also when the caller applied the book itself (apply_book=False)
+        if self.feed_gap_hook is not None:
+            gaps = self.books[(event.venue, event.instrument_id)].stats.gaps
+            if gaps > self._seen_gaps.get((event.venue, event.instrument_id), 0):
+                self._seen_gaps[(event.venue, event.instrument_id)] = gaps
+                self.feed_gap_hook(event.venue, now / 1e9)
         self.oms.on_book_update(event.venue, event.instrument_id, now)
         if self.markouts is not None:                    # the backtester's trigger: resolve when THIS venue's touch changed (not on every update), so both read the same mid at the same moments
             mb = self.books[(event.venue, event.instrument_id)]

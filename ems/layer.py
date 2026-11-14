@@ -130,6 +130,19 @@ class ExecutionLayer:
         self.reservations = ReservationBook()
         self._limits_fn: Callable[[], RiskLimits] | None = None
         self._base_fn: Callable[[], dict[str, float]] | None = None
+        self._evidence_fn: Callable[[str, str, float], dict | None] | None = None      # depth quality (owner 14 Nov): (venue, side the order consumes, now) -> the gap-depth / flicker record. None: nothing is added to any journal record
+
+    def set_evidence_provider(self, fn: Callable[[str, str, float], dict | None] | None) -> None:
+        """Routing evidence: with a provider set, every intent and every child the journal records also carries `depth_quality` (the provider's answer per venue, APPROXIMATE). Observation only: nothing reads it back,
+        and with no provider the records have no such key at all, so every existing journal is unchanged."""
+        self._evidence_fn = fn
+
+    def _evidence(self, venues, side: str, now: float) -> dict | None:
+        if self._evidence_fn is None:
+            return None
+        consumed = "ask" if side == "buy" else "bid"                       # a buy takes the asks, a sell the bids
+        out = {v: ev for v in venues for ev in (self._evidence_fn(v, consumed, now),) if ev is not None}
+        return out or None
 
     def suggest_tactic(self, state, cfg=None):
         """Gap F: the tactic choose_tactic picks for this market state, or None while execution.tactic_choice is off (it never changes what the layer sends; the caller decides what to do with the answer)."""
@@ -198,7 +211,11 @@ class ExecutionLayer:
         self.intents[iid] = it
         self._by_signal.setdefault(signal_id, []).append(iid)
         if len(self.journal) < JOURNAL_MAX:
-            self.journal.append({"seq": len(self.journal), "event": "intent", **it.as_record()})
+            rec = {"seq": len(self.journal), "event": "intent", **it.as_record()}
+            ev = self._evidence(venues, side, now)
+            if ev is not None:
+                rec["depth_quality"] = ev                              # routing evidence (owner 14 Nov): present only when a provider is set
+            self.journal.append(rec)
         self.counts["intents_" + role] += 1
         if role == Role.HEDGE:
             self._live[iid] = set()
@@ -346,8 +363,11 @@ class ExecutionLayer:
         self.counts["children"] += 1
         self.counts["children_" + tactic] += 1
         if len(self.journal) < JOURNAL_MAX:
-            self.journal.append({"seq": len(self.journal), "event": "child", "intent_id": intent.intent_id, "order_id": order_id,
-                                 "tactic": tactic, "ts": now})
+            rec = {"seq": len(self.journal), "event": "child", "intent_id": intent.intent_id, "order_id": order_id, "tactic": tactic, "ts": now}
+            ev = self._evidence(intent.venues, intent.side, now)
+            if ev is not None:
+                rec["depth_quality"] = ev
+            self.journal.append(rec)
         if intent.role == Role.HEDGE:
             live = self._live[intent.intent_id]
             live.add(order_id)
