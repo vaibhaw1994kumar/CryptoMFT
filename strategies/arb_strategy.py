@@ -388,6 +388,10 @@ class CrossVenueArbStrategy:
         self.fill_model_v1 = fill_model_v1
 
         self.clip_binding: dict[str, int] = {"depth": 0, "inventory": 0, "clip": 0}
+        self.participation_samples: list[tuple] = []                              # observation only: (time, price, size, public volume at the level over the window); filled only when participation_sample_cap > 0
+        self.participation_sample_cap = 0
+        self.participation_ticks: dict[str, float] = {}                           # venue -> the instrument's own tick (set by the session shim); empty: the strategy's price is looked up as it is
+        self._last_part_key = None
         self._next_funding: dict[str, float] = {}                                   # venue -> the next funding timestamp (seconds) the derivative stream last gave
         self._funding_rates: dict[str, tuple[float, float, float]] = {}       # venue -> (predicted rate per interval, interval seconds, as-of time); fed by observe_funding_rate
         self.rejects: dict[str, int] = {
@@ -611,13 +615,22 @@ class CrossVenueArbStrategy:
             return None
         return _VwapTouch(walk.vwap)
 
-    def _participation_qty(self, state, price: float, qty: float, now: float) -> tuple[float, bool]:
+    def _participation_qty(self, state, price: float, qty: float, now: float, venue: str = "", side: str = "bid") -> tuple[float, bool]:
         """The quote size after the participation limit and whether the limit cut it: participation_max x the public volume printed at `price` on the maker venue in the last participation_window_s. Off (0): unchanged."""
         cfg = self.config
         if cfg.participation_max <= 0:
             return qty, False
         state.track_level_volume(cfg.participation_window_s)
-        limit = cfg.participation_max * state.level_volume(price, now, cfg.participation_window_s)
+        tick = self.participation_ticks.get(venue)
+        if tick:                                    # the level is the price the ORDER will have on the venue's own grid (a bid rounds down, an ask up): the strategy may quote on a finer grid than the venue prints on
+            n = price / tick
+            price = round((math.floor(n + 1e-9) if side == "bid" else math.ceil(n - 1e-9)) * tick, 9)
+        seen = state.level_volume(price, now, cfg.participation_window_s)
+        key = (round(price, 9), int(now))
+        if self.participation_sample_cap and key != self._last_part_key and len(self.participation_samples) < self.participation_sample_cap:      # observation only (owner 14 Nov): one row per (price, second) of a candidate that reached this check
+            self._last_part_key = key
+            self.participation_samples.append((round(now, 3), price, qty, seen))
+        limit = cfg.participation_max * seen
         if limit >= qty - 1e-12:
             return qty, False
         self.rejects["participation_size_capped"] = self.rejects.get("participation_size_capped", 0) + 1
@@ -989,7 +1002,7 @@ class CrossVenueArbStrategy:
             return None
 
         qty = min(hedge_depth, inv_cap, self._max_clip(max_bid))
-        qty, part_cut = self._participation_qty(states[maker_venue], max_bid, qty, now)
+        qty, part_cut = self._participation_qty(states[maker_venue], max_bid, qty, now, maker_venue, "bid")
         if qty * max_bid < cfg.min_clip_notional:
             self.rejects["participation" if part_cut else "clip_too_small"] = self.rejects.get("participation" if part_cut else "clip_too_small", 0) + 1
             return None
@@ -1144,7 +1157,7 @@ class CrossVenueArbStrategy:
             return None
 
         qty = min(hedge_depth, inv_cap, self._max_clip(min_ask))
-        qty, part_cut = self._participation_qty(states[maker_venue], min_ask, qty, now)
+        qty, part_cut = self._participation_qty(states[maker_venue], min_ask, qty, now, maker_venue, "ask")
         if qty * min_ask < cfg.min_clip_notional:
             self.rejects["participation" if part_cut else "clip_too_small"] = self.rejects.get("participation" if part_cut else "clip_too_small", 0) + 1
             return None
@@ -1265,6 +1278,11 @@ class ArbSessionStrategy:
         self.entry_gate_blocked = 0
         self.view_books = view_books          # a runtime that owns persistent float view books (touch ages, message-atomic repair) passes them; else a mirror of the core books is built per decision
         self.ledger, self.oms, self.states = ledger, oms, states
+        for feed, core in (venue_names or {v: v.upper() for v in strategy.venue_names}).items():           # the venue's own tick, for the participation limit's price level
+            try:
+                strategy.participation_ticks[feed] = float(instruments.get(core, instrument_id).tick_size)
+            except Exception:
+                pass
         if strategy.config.participation_max > 0:               # E3: the per-level public volume is tracked from the first print, not from the first decision
             for st in (states or {}).values():
                 st.track_level_volume(strategy.config.participation_window_s)
