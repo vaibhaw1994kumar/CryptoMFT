@@ -1,0 +1,5 @@
+{"opportunity_id": "b0c5821f-6d61-5775-b74c-5f4df05bb61f", "ts": 1793272527.9642212, "buy_venue": "bybit", "sell_venue": "binance", "qty": 5.0, "buy_price": 100.573, "sell_price": 100.62, "net_edge_bps": 1.059698168036871}
+{"opportunity_id": "6be8849b-7d41-5b97-a63b-35b35fafdc78", "ts": 1793276998.1376529, "buy_venue": "bybit", "sell_venue": "binance", "qty": 5.0, "buy_price": 100.42, "sell_price": 100.47, "net_edge_bps": 1.0318611279695145}
+{"opportunity_id": "68ac8e4e-3090-5678-ae0d-2b434ecb86b3", "ts": 1793277011.018887, "buy_venue": "bybit", "sell_venue": "binance", "qty": 5.0, "buy_price": 100.513, "sell_price": 100.56, "net_edge_bps": 1.0624878276695384}
+{"opportunity_id": "4634802c-bb84-502d-b807-834f0ad2c356", "ts": 1793277011.6135669, "buy_venue": "bybit", "sell_venue": "binance", "qty": 5.0, "buy_price": 100.493, "sell_price": 100.54, "net_edge_bps": 1.0634184544758736}
+{"opportunity_id": "687a1cf1-2064-5369-bc4f-2103403aafee", "ts": 1793277011.753695, "buy_venue": "bybit", "sell_venue": "binance", "qty": 5.0, "buy_price": 100.483, "sell_price": 100.53, "net_edge_bps": 1.0638839068006487}

@@ -1,0 +1,16 @@
+{
+ "profile": "perp_perp_maker_taker_v1_9",
+ "wall_s": 1440.4,
+ "events": {
+  "book": 2191597,
+  "trade": 2732060
+ },
+ "signals": 8,
+ "orders": 48,
+ "fills": 80,
+ "positions": {
+  "BYBIT:SOL-USDT-PERP": "124.987620191459",
+  "BINANCE:SOL-USDT-PERP": "-124.98"
+ },
+ "ledger_events": 1708
+}

@@ -144,5 +144,42 @@ class WholeReplayAudit(unittest.TestCase):
         self.assertFalse(none["ok"])
 
 
+class ParticipationLevelGrid(unittest.TestCase):
+    """The first 1 SOL quote of the 2026-10-29 replay was refused because the limit looked up volume at the strategy's 0.001 price (100.573) while Bybit prints on the 0.01 grid (the order went out at 100.57): zero volume at a price that can never print. The level is the price the ORDER will have on the venue's grid."""
+
+    def test_the_level_is_the_price_on_the_venues_own_tick_grid(self):
+        from test_entry_hedge_vwap import DEEP_TOUCH, NOW, books, strategy
+        from crypto_stat_arb.simulation.venue_state import VenueState
+        from crypto_stat_arb.strategies.arb_strategy import InventoryBook
+        p = strategy("touch", min_clip_notional=1.0).__class__  # noqa: F841 (keeps the import path honest)
+        probe = strategy("touch")
+        st0 = VenueState("bybit")
+        sig = probe._evaluate_maker_taker("bybit", "binance", books(DEEP_TOUCH), {"bybit": st0, "binance": VenueState("binance")}, InventoryBook(), NOW)
+        price = sig.buy_price                                                                       # on the strategy's 0.001 grid, not on 0.01
+        level = round(int(price / 0.01 + 1e-9) * 0.01, 9)                                           # a bid rounds DOWN to the venue grid
+        self.assertNotAlmostEqual(price, level, places=6)
+        def run(ticks):
+            strat = strategy("touch", participation_max=0.10, participation_window_s=60.0, min_clip_notional=1.0)
+            strat.participation_ticks = ticks
+            st = VenueState("bybit"); st.track_level_volume(60.0)
+            st.on_trade(NOW - 5.0, level, 100.0, -1)                                                # 100 SOL printed on the venue's grid level
+            return strat, strat._evaluate_maker_taker("bybit", "binance", books(DEEP_TOUCH), {"bybit": st, "binance": VenueState("binance")}, InventoryBook(), NOW)
+        strat, with_grid = run({"bybit": 0.01})
+        self.assertIsNotNone(with_grid)                                                             # volume found at the grid level: not refused
+        strat, without = run({})
+        self.assertIsNone(without)                                                                  # the old lookup (price as the strategy quotes it): zero volume, refused
+        self.assertEqual(strat.rejects["participation"], 1)
+
+    def test_the_shim_sets_the_instruments_tick(self):
+        from types import SimpleNamespace
+        from decimal import Decimal
+        from test_entry_hedge_vwap import strategy
+        from crypto_stat_arb.strategies.arb_strategy import ArbSessionStrategy
+        strat = strategy("touch")
+        instruments = SimpleNamespace(get=lambda venue, instrument_id: SimpleNamespace(tick_size=Decimal("0.01")))
+        ArbSessionStrategy(strat, ledger=None, oms=None, states={}, instruments=instruments, instrument_id="X", venue_names={"bybit": "BYBIT", "binance": "BINANCE"})
+        self.assertEqual(strat.participation_ticks, {"bybit": 0.01, "binance": 0.01})
+
+
 if __name__ == "__main__":
     unittest.main()

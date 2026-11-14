@@ -24,6 +24,10 @@ def _opt(flag, default, cast=float):
 size, gross_cli = _opt("--size", 1.0), _opt("--gross", None)       # owner 13 Nov: without --gross the profile's own gross per venue is used (v1_9: 2.0, approved production limit), else 5.0
 proc_strategy, proc_risk = _opt("--processing-strategy-ms", 0.0), _opt("--processing-risk-ms", 0.0)      # owner 12 Nov: the decision and risk processing time (default 0: nothing changes)
 boundaries = _opt("--regime-boundaries", None, str)                                                      # the training-day boundaries file: with it the lifecycle report is written (session_lifecycle_report.json)
+part_max = _opt("--participation-max", None)                  # owner 14 Nov (E3 follow-up): override arb.participation_max for an observation run (1.0 = the limit almost never binds)
+samples = "--samples" in argv                                  # record one row per (price, second) of every candidate that reaches the participation check: session_participation_samples.jsonl
+if samples:
+    argv.remove("--samples")
 cap = "--cap" in argv
 if cap:
     argv.remove("--cap")
@@ -33,6 +37,8 @@ name, out = argv[0], Path(argv[1])
 minutes = float(argv[2]) if len(argv) > 2 else None
 profile = load_profile(name)
 cfg = apply_profile(profile, dataset="mar2024", data_root="", pair="SOLUSDT", start_date="2026-10-29", end_date="2026-10-29", output_dir=str(out))
+if part_max is not None:
+    cfg.arb.participation_max = part_max
 cfg.arb.max_position_base = size                # the clip and the net ceiling (1 SOL by default, + the profile's fill headroom)
 gross = gross_cli if gross_cli is not None else (cfg.arb.max_venue_imbalance_base or 5.0)
 cfg.arb.max_venue_imbalance_base = gross        # owner 11 Nov: 5 SOL gross per venue (the net stays at the ceiling above); the core's per-venue risk limit follows it
@@ -41,6 +47,8 @@ if proc_strategy or proc_risk:
     import dataclasses
     cfg.timing = dataclasses.replace(cfg.timing, processing_ms={k: v for k, v in (("strategy", proc_strategy), ("risk", proc_risk)) if v})
 replay = SessionReplay(cfg, profile, ticks=dated_ticks("2026-10-29"), recorded=True, decompose_markouts=True, mark_from_mid=True, lifecycle_report=boundaries is not None, regime_boundaries=boundaries, profile_safety=(name == "perp_perp_maker_taker_v1_9"))      # owner 13 Nov: v1_9 runs with the profile's own safety values (layer gate enforce, the breaker block)
+if samples:
+    replay.strategy.participation_sample_cap = 400_000
 events = iter_recorded_events(SESSION)
 if minutes is not None:
     first = next(events)
@@ -82,6 +90,7 @@ doc = {"label": "EXPLORATORY: every counter of the run; counts are complete (not
                              "oms_realism_counters": dict(sess.oms.realism_counters)},
        "safety_from_profile": getattr(replay, "safety_from_profile", None)}
 (out / "session_limits_and_stops.json").write_text(json.dumps(doc, indent=1, default=str))
+(out / "session_participation_samples.jsonl").write_text("".join(json.dumps({"ts": r[0], "price": r[1], "qty": r[2], "volume_in_window": r[3]}) + "\n" for r in replay.strategy.participation_samples)) if replay.strategy.participation_samples else None
 from new_backtest.session_replay import participation_audit
 audit = participation_audit(replay.session.ledger_fill_rows() if hasattr(replay.session, "ledger_fill_rows") else [e for e in led if e["event_type"] == "FILL"], dict(traded))
 (out / "session_participation_audit.json").write_text(json.dumps({"label": "EXPLORATORY: own passive fills vs the public volume printed at the same level over the day", **audit}, indent=1))
