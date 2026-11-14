@@ -25,6 +25,9 @@ size, gross_cli = _opt("--size", 1.0), _opt("--gross", None)       # owner 13 No
 proc_strategy, proc_risk = _opt("--processing-strategy-ms", 0.0), _opt("--processing-risk-ms", 0.0)      # owner 12 Nov: the decision and risk processing time (default 0: nothing changes)
 boundaries = _opt("--regime-boundaries", None, str)                                                      # the training-day boundaries file: with it the lifecycle report is written (session_lifecycle_report.json)
 part_max = _opt("--participation-max", None)                  # owner 14 Nov (E3 follow-up): override arb.participation_max for an observation run (1.0 = the limit almost never binds)
+depth_quality = "--depth-quality" in argv                       # owner 14 Nov: VenueStateConfig.depth_quality on (gap depth and flicker journaled with every intent and child); observation only, off by default
+if depth_quality:
+    argv.remove("--depth-quality")
 samples = "--samples" in argv                                  # record one row per (price, second) of every candidate that reaches the participation check: session_participation_samples.jsonl
 if samples:
     argv.remove("--samples")
@@ -39,6 +42,8 @@ profile = load_profile(name)
 cfg = apply_profile(profile, dataset="mar2024", data_root="", pair="SOLUSDT", start_date="2026-10-29", end_date="2026-10-29", output_dir=str(out))
 if part_max is not None:
     cfg.arb.participation_max = part_max
+if depth_quality:
+    cfg.venue_state.depth_quality = True
 cfg.arb.max_position_base = size                # the clip and the net ceiling (1 SOL by default, + the profile's fill headroom)
 gross = gross_cli if gross_cli is not None else (cfg.arb.max_venue_imbalance_base or 5.0)
 cfg.arb.max_venue_imbalance_base = gross        # owner 11 Nov: 5 SOL gross per venue (the net stays at the ceiling above); the core's per-venue risk limit follows it

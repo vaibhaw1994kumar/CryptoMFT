@@ -1,0 +1,335 @@
+{
+ "label": "EXPLORATORY: ONE DAY, PROXY (hypothetical hedge walks and public prints; no real fill, no simulator fill)",
+ "split_ts": 1793293106.6427965,
+ "train_hours": 7.02617472688357,
+ "holdout_hours": 7.026174726949797,
+ "rules": "FACTOR_STUDY_RULES.md",
+ "counts": {
+  "feed_gaps_binance": 3,
+  "grid_view_not_ready": 181,
+  "markout_flicker_warmup": 14,
+  "markout_rows": 295100,
+  "slip_feed_fault": 4,
+  "slip_rows": 302256
+ },
+ "tables": [
+  {
+   "factor": "hedge slippage change, Q=5: gap_blocks",
+   "order": [
+    "clear",
+    "blocks"
+   ],
+   "halves": {
+    "train": {
+     "clear": {
+      "n": 50511,
+      "mean": 2.568615225723662e-05
+     },
+     "blocks": {
+      "n": 0,
+      "mean": null
+     },
+     "testable": false
+    },
+    "holdout": {
+     "clear": {
+      "n": 50241,
+      "mean": -4.1156855480626094e-05
+     },
+     "blocks": {
+      "n": 0,
+      "mean": null
+     },
+     "testable": false
+    }
+   },
+   "KEPT": false,
+   "why_not": "not testable (a bucket under 200 samples in a half) or not monotonic in both halves",
+   "outcome": "dS(Q=5) = S(t+0.2s) - S(t), bps, positive = worse"
+  },
+  {
+   "factor": "hedge slippage change, Q=5: flicker",
+   "order": [
+    "F0",
+    "F1",
+    "F2"
+   ],
+   "halves": {
+    "train": {
+     "F0": {
+      "n": 0,
+      "mean": null
+     },
+     "F1": {
+      "n": 25256,
+      "mean": 5.137128748273303e-05
+     },
+     "F2": {
+      "n": 25255,
+      "mean": 5.437347733929223e-17
+     },
+     "testable": false
+    },
+    "holdout": {
+     "F0": {
+      "n": 0,
+      "mean": null
+     },
+     "F1": {
+      "n": 35959,
+      "mean": -4.778323888088804e-05
+     },
+     "F2": {
+      "n": 14282,
+      "mean": -2.447304924270293e-05
+     },
+     "testable": false
+    }
+   },
+   "KEPT": false,
+   "why_not": "not testable (a bucket under 200 samples in a half) or not monotonic in both halves",
+   "outcome": "dS(Q=5) = S(t+0.2s) - S(t), bps, positive = worse"
+  },
+  {
+   "factor": "hedge slippage change, Q=25: gap_blocks",
+   "order": [
+    "clear",
+    "blocks"
+   ],
+   "halves": {
+    "train": {
+     "clear": {
+      "n": 50511,
+      "mean": 9.221046459027533e-06
+     },
+     "blocks": {
+      "n": 0,
+      "mean": null
+     },
+     "testable": false
+    },
+    "holdout": {
+     "clear": {
+      "n": 50241,
+      "mean": 0.0001363530805557208
+     },
+     "blocks": {
+      "n": 0,
+      "mean": null
+     },
+     "testable": false
+    }
+   },
+   "KEPT": false,
+   "why_not": "not testable (a bucket under 200 samples in a half) or not monotonic in both halves",
+   "outcome": "dS(Q=25) = S(t+0.2s) - S(t), bps, positive = worse"
+  },
+  {
+   "factor": "hedge slippage change, Q=25: flicker",
+   "order": [
+    "F0",
+    "F1",
+    "F2"
+   ],
+   "halves": {
+    "train": {
+     "F0": {
+      "n": 0,
+      "mean": null
+     },
+     "F1": {
+      "n": 25256,
+      "mean": 0.00014040738881224187
+     },
+     "F2": {
+      "n": 25255,
+      "mean": -0.00012197049036428593
+     },
+     "testable": false
+    },
+    "holdout": {
+     "F0": {
+      "n": 0,
+      "mean": null
+     },
+     "F1": {
+      "n": 35959,
+      "mean": 0.0002290595981435389
+     },
+     "F2": {
+      "n": 14282,
+      "mean": -9.706196397168101e-05
+     },
+     "testable": false
+    }
+   },
+   "KEPT": false,
+   "why_not": "not testable (a bucket under 200 samples in a half) or not monotonic in both halves",
+   "outcome": "dS(Q=25) = S(t+0.2s) - S(t), bps, positive = worse"
+  },
+  {
+   "factor": "hedge slippage change, Q=100: gap_blocks",
+   "order": [
+    "clear",
+    "blocks"
+   ],
+   "halves": {
+    "train": {
+     "clear": {
+      "n": 50511,
+      "mean": 5.633430475632492e-05
+     },
+     "blocks": {
+      "n": 0,
+      "mean": null
+     },
+     "testable": false
+    },
+    "holdout": {
+     "clear": {
+      "n": 50241,
+      "mean": -0.00013848351450295566
+     },
+     "blocks": {
+      "n": 0,
+      "mean": null
+     },
+     "testable": false
+    }
+   },
+   "KEPT": false,
+   "why_not": "not testable (a bucket under 200 samples in a half) or not monotonic in both halves",
+   "outcome": "dS(Q=100) = S(t+0.2s) - S(t), bps, positive = worse"
+  },
+  {
+   "factor": "hedge slippage change, Q=100: flicker",
+   "order": [
+    "F0",
+    "F1",
+    "F2"
+   ],
+   "halves": {
+    "train": {
+     "F0": {
+      "n": 0,
+      "mean": null
+     },
+     "F1": {
+      "n": 25256,
+      "mean": 0.00042581552405220193
+     },
+     "F2": {
+      "n": 25255,
+      "mean": -0.00031316154456209394
+     },
+     "testable": false
+    },
+    "holdout": {
+     "F0": {
+      "n": 0,
+      "mean": null
+     },
+     "F1": {
+      "n": 35959,
+      "mean": 0.00010120235393727349
+     },
+     "F2": {
+      "n": 14282,
+      "mean": -0.000741960908652389
+     },
+     "testable": false
+    }
+   },
+   "KEPT": false,
+   "why_not": "not testable (a bucket under 200 samples in a half) or not monotonic in both halves",
+   "outcome": "dS(Q=100) = S(t+0.2s) - S(t), bps, positive = worse"
+  },
+  {
+   "factor": "maker markout +5 s at the touch: own-side depth_to_first_gap",
+   "order": [
+    "NONE",
+    "FAR",
+    "NEAR"
+   ],
+   "halves": {
+    "train": {
+     "NONE": {
+      "n": 96701,
+      "mean": -0.4766804865339932
+     },
+     "FAR": {
+      "n": 0,
+      "mean": null
+     },
+     "NEAR": {
+      "n": 0,
+      "mean": null
+     },
+     "testable": false
+    },
+    "holdout": {
+     "NONE": {
+      "n": 198371,
+      "mean": -0.6215135247419133
+     },
+     "FAR": {
+      "n": 0,
+      "mean": null
+     },
+     "NEAR": {
+      "n": 0,
+      "mean": null
+     },
+     "testable": false
+    }
+   },
+   "KEPT": false,
+   "why_not": "not testable (a bucket under 200 samples in a half) or not monotonic in both halves",
+   "outcome": "markout of the passive side at +5 s, bps, positive = favourable (proxy: public prints at the touch)",
+   "train_median_gap_depth": null
+  },
+  {
+   "factor": "maker markout +5 s at the touch: own-side flicker",
+   "order": [
+    "F0",
+    "F1",
+    "F2"
+   ],
+   "halves": {
+    "train": {
+     "F0": {
+      "n": 0,
+      "mean": null
+     },
+     "F1": {
+      "n": 48351,
+      "mean": -0.5086171495256554
+     },
+     "F2": {
+      "n": 48350,
+      "mean": -0.44474316301155553
+     },
+     "testable": false
+    },
+    "holdout": {
+     "F0": {
+      "n": 0,
+      "mean": null
+     },
+     "F1": {
+      "n": 145629,
+      "mean": -0.6956998665391667
+     },
+     "F2": {
+      "n": 52770,
+      "mean": -0.4217901002775986
+     },
+     "testable": false
+    }
+   },
+   "KEPT": false,
+   "why_not": "not testable (a bucket under 200 samples in a half) or not monotonic in both halves",
+   "outcome": "markout of the passive side at +5 s, bps, positive = favourable (proxy: public prints at the touch)"
+  }
+ ]
+}

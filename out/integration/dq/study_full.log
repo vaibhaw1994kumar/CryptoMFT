@@ -1,0 +1,43 @@
+500000 events, t=9288s, wall 74s, rows 55548/17141
+1000000 events, t=16354s, wall 137s, rows 97911/39754
+1500000 events, t=21205s, wall 205s, rows 126999/75207
+2000000 events, t=27791s, wall 291s, rows 166515/104482
+2500000 events, t=35644s, wall 396s, rows 213627/131088
+3000000 events, t=38732s, wall 460s, rows 231825/169380
+3500000 events, t=39992s, wall 500s, rows 238725/202404
+4000000 events, t=43071s, wall 555s, rows 257193/240586
+4500000 events, t=46943s, wall 621s, rows 280419/270655
+{
+ "label": "EXPLORATORY: ONE DAY, PROXY (hypothetical hedge walks and public prints; no real fill, no simulator fill)",
+ "capture": "e9b81728a3054812a48035a1b3e02d42",
+ "events": 4923657,
+ "wall_s": 676.0,
+ "first_ts": 1793267812.4137797,
+ "last_ts": 1793318400.8718135,
+ "grid_s": 1.0,
+ "outcome_delta_s": 0.2,
+ "markout_s": 5.0,
+ "sizes": [
+  5.0,
+  25.0,
+  100.0
+ ],
+ "counts": {
+  "markout_flicker_warmup": 14,
+  "markout_rows": 295100,
+  "slip_rows": 302256,
+  "grid_view_not_ready": 181,
+  "feed_gaps_binance": 3,
+  "slip_feed_fault": 4
+ },
+ "settings": {
+  "dq_feed_fault_window_s": 2.0,
+  "dq_flicker_min_volume": 1.0,
+  "dq_flicker_window_s": 10.0,
+  "dq_gap_level_size": 0.0,
+  "dq_gap_scan_levels": 200,
+  "dq_gap_stretch_bps": 3.0,
+  "dq_match_window_s": 0.05,
+  "dq_top_levels": 5
+ }
+}

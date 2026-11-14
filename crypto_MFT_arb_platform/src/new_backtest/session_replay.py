@@ -258,6 +258,10 @@ class SessionReplay:
             self.strategy.rejects = TracedRejects(self.strategy.rejects, self.strategy, self.reject_trace)
         self.session.strategies.append(self.shim)
         self.session.strategy = self.shim
+        if getattr(config.venue_state, "depth_quality", False):         # owner 14 Nov: gap depth and flicker per venue (off by default; nothing below exists with it off)
+            self.session.feed_gap_hook = lambda venue, now_s: self.states[self._feed_venue(venue)].note_feed_gap(now_s)
+            if self.session.intent_observer is not None:
+                self.session.intent_observer.layer.set_evidence_provider(self._depth_evidence)
         self._stream = stream
         self.events = {"book": 0, "trade": 0}
         self.last_ns = 0
@@ -469,6 +473,11 @@ class SessionReplay:
 
     def _feed_venue(self, core_name: str) -> str:
         return next(v for v, n in self.names.items() if n == core_name)
+
+    def _depth_evidence(self, venue: str, side: str, now_s: float) -> dict | None:
+        """The routing evidence the layer journals with a decision: the gap depth and flicker of `side` of one venue's book (the side the order consumes), from the venue's own VenueState."""
+        fv = self._feed_venue(venue)
+        return self.states[fv].depth_quality(self.views[fv], now_s, side)
 
     def _dead_feed_gate(self, now_s: float) -> bool:
         """The profile's MANDATORY timing.dead_feed_s gate on the view books' absolute age, the same rule as the backtester's `_dead_feed_blocks` (`timing.dead_feed_blocks`)."""

@@ -1,0 +1,34 @@
+{
+ "capture": "e9b81728a3054812a48035a1b3e02d42",
+ "counts": {
+  "feed_gaps_binance": 3,
+  "grid_view_not_ready": 181,
+  "markout_flicker_warmup": 14,
+  "markout_rows": 295100,
+  "slip_feed_fault": 4,
+  "slip_rows": 302256
+ },
+ "events": 4923657,
+ "first_ts": 1793267812.4137797,
+ "grid_s": 1.0,
+ "label": "EXPLORATORY: ONE DAY, PROXY (hypothetical hedge walks and public prints; no real fill, no simulator fill)",
+ "last_ts": 1793318400.8718135,
+ "markout_s": 5.0,
+ "outcome_delta_s": 0.2,
+ "settings": {
+  "dq_feed_fault_window_s": 2.0,
+  "dq_flicker_min_volume": 1.0,
+  "dq_flicker_window_s": 10.0,
+  "dq_gap_level_size": 0.0,
+  "dq_gap_scan_levels": 200,
+  "dq_gap_stretch_bps": 3.0,
+  "dq_match_window_s": 0.05,
+  "dq_top_levels": 5
+ },
+ "sizes": [
+  5.0,
+  25.0,
+  100.0
+ ],
+ "wall_s": 676.0
+}
