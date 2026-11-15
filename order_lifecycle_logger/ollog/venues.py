@@ -227,6 +227,17 @@ class BybitClient(_Base):
         return self._result(obj.get("retCode") == 0, status, ts, tr, order_id=(obj.get("result") or {}).get("orderId"),
                             ex_time_ms=obj.get("time"), code=str(obj.get("retCode")), msg=str(obj.get("retMsg", "")))
 
+    async def amend(self, symbol: str, order_id: str | None, client_id: str, price: Decimal, qty: Decimal | None = None, side: str = "Buy") -> RestResult:
+        """Change the price (and optionally the size) of a resting order: POST /v5/order/amend. UNVERIFIED against the live API (written from the v5 docs; run it on testnet first). The order keeps its PostOnly flag."""
+        ident = {"orderId": order_id} if order_id else {"orderLinkId": client_id}
+        payload = {"category": self.category, "symbol": symbol, **ident, "price": fmt(price)}
+        if qty is not None:
+            payload["qty"] = fmt(qty)
+        body = json.dumps(payload, separators=(",", ":"))
+        status, obj, ts, tr = await self._http("POST", f"{self.cfg['rest']}/v5/order/amend", self._headers(body), body)
+        return self._result(obj.get("retCode") == 0, status, ts, tr, order_id=(obj.get("result") or {}).get("orderId"),
+                            ex_time_ms=obj.get("time"), code=str(obj.get("retCode")), msg=str(obj.get("retMsg", "")))
+
     async def open_orders(self, symbol: str) -> list[dict]:
         query = urlencode({"category": self.category, "symbol": symbol, "limit": 50})
         _, obj, *_ = await self._http("GET", f"{self.cfg['rest']}/v5/order/realtime?{query}", self._headers(query))
@@ -359,6 +370,19 @@ class BinanceClient(_Base):
                             ex_time_ms=obj.get("transactTime") or obj.get("updateTime"),
                             code=str(obj.get("code", "")), msg=str(obj.get("msg", "")))
 
+    async def amend(self, symbol: str, order_id: str | None, client_id: str, price: Decimal, qty: Decimal | None = None, side: str = "Buy") -> RestResult:
+        """Change the price and size of a resting USD-M futures LIMIT order: PUT /fapi/v1/order (side, quantity and price are all required by the venue, so `qty` is required here). UNVERIFIED against the live API (written from the docs; run it on testnet first)."""
+        if self.market != "binance_futures":
+            raise VenueError("amend is for the perpetual markets only")
+        if qty is None:
+            raise VenueError("Binance futures amend needs the quantity")
+        ident = {"orderId": order_id} if order_id else {"origClientOrderId": client_id}
+        params = {"symbol": symbol, "side": side.upper(), "quantity": fmt(qty), "price": fmt(price), **ident}
+        status, obj, ts, tr = await self._http("PUT", self._signed_url(self._order_path, params), self._key_header)
+        ok = status == 200 and "orderId" in obj
+        return self._result(ok, status, ts, tr, order_id=str(obj["orderId"]) if ok else None, ex_time_ms=obj.get("updateTime"),
+                            code=str(obj.get("code", "")), msg=str(obj.get("msg", "")))
+
     async def open_orders(self, symbol: str) -> list[dict]:
         path = self._p("/api/v3/openOrders", "/fapi/v1/openOrders")
         status, obj, *_ = await self._http("GET", self._signed_url(path, {"symbol": symbol}), self._key_header)
@@ -409,6 +433,183 @@ class BinanceClient(_Base):
         while True:
             await asyncio.sleep(20 * 60)
             await self._http("PUT", f"{self.cfg['rest']}{self._listen_path}?{urlencode({'listenKey': self._listen_key})}", self._key_header)
+
+
+class PaperClient:
+    """PAPER venue for the perp probe v2 (owner 15 Nov 2026): the private side (orders, acks, fills, cancels, amends, positions) is SIMULATED against a LIVE PUBLIC capture; nothing is sent to any venue, no keys are used.
+    A PostOnly order that would cross is refused like the venue does (a stream Rejected on Bybit, Expired on Binance); a resting order joins the back of the queue at its price (the capture book's size there) and fills when
+    prints at its price take that queue away (the rest of it) or when a print goes THROUGH its price (all of it). This is a crude queue model for testing the runner's plumbing, limits and logging: it is NOT fill evidence."""
+    stream_variants = 1
+    stream_variant = 0
+
+    def __init__(self, market: str, capture, instruments: dict, seed: int = 1, latency_ms: tuple[float, float] = (15.0, 60.0), maker_fee_bps: float = 2.0, taker_fee_bps: float = 5.5):
+        import random
+        self.market, self.capture, self._instruments = market, capture, instruments
+        self.rng = random.Random(f"paper:{seed}:{market}")
+        self.latency_ms, self.maker_fee_bps, self.taker_fee_bps = latency_ms, maker_fee_bps, taker_fee_bps
+        self.offset_ms = 0
+        self.stream_alive, self.stream_error = False, None
+        self._on_event = None
+        self.orders: dict[str, dict] = {}
+        self.position: dict[str, Decimal] = {}
+        self._n = 0
+        self.log: list[dict] = []
+        capture.trade_hooks.append(self._on_trade)
+
+    # ---- plumbing the runner expects -------------------------------------------------------------------------------
+    async def server_time_ms(self):
+        t0 = stamp()
+        t1 = stamp()
+        return int(time.time() * 1000), t0[0], t1[0]
+
+    async def instruments(self) -> dict:
+        return self._instruments
+
+    async def start_stream(self, on_event, timeout: float = 10.0) -> None:
+        self._on_event, self.stream_alive = on_event, True
+
+    async def restart_stream(self, on_event, timeout: float = 10.0) -> None:
+        await self.start_stream(on_event, timeout)
+
+    async def close(self) -> None:
+        self.stream_alive = False
+
+    # ---- events ------------------------------------------------------------------------------------------------------
+    def _emit(self, kind: str, o: dict, status: str, delay_s: float = 0.0, reason: str = "", fill: tuple[Decimal, Decimal] | None = None) -> None:
+        ms = int(time.time() * 1000)
+        if self.market.startswith("bybit"):
+            raw = {"orderStatus": status, "symbol": o["symbol"], "orderId": o["oid"], "orderLinkId": o["cid"], "price": str(o["price"]), "createdTime": str(o["created_ms"]), "updatedTime": str(ms),
+                   "cumExecQty": str(o["filled"]), "avgPrice": str(o["avg"]), "cumExecFee": str(o["fee"]), "category": "linear"}
+        else:
+            raw = {"e": "ORDER_TRADE_UPDATE", "E": ms, "T": ms, "o": {"s": o["symbol"], "c": o["cid"], "i": o["oid"], "x": {"new": "NEW", "cancelled": "CANCELED", "rejected": "REJECTED", "expired": "EXPIRED", "trade": "TRADE"}.get(kind, "AMENDMENT"),
+                   "X": status, "z": str(o["filled"]), "L": str(fill[1]) if fill else "0", "l": str(fill[0]) if fill else "0", "T": ms, "n": str(o["fee"]), "p": str(o["price"])}}
+        from .models import UserEvent as UE
+        def deliver() -> None:
+            if self._on_event is not None and self.stream_alive:
+                w, m = stamp()
+                self._on_event(UE(self.market, kind, o["symbol"], o["oid"], o["cid"], ms, ms, status, reason, recv_wall_ns=w, recv_mono_ns=m, raw=raw))
+        try:
+            asyncio.get_running_loop().call_later(delay_s, deliver)
+        except RuntimeError:
+            deliver()
+
+    def _lat(self) -> float:
+        return self.rng.uniform(*self.latency_ms) / 1000.0
+
+    def _result(self, ok: bool, t0, oid=None, code="", msg="") -> RestResult:
+        t1 = stamp()
+        return RestResult(ok=ok, order_id=oid, ex_time_ms=int(time.time() * 1000), code=code, msg=msg, http_status=200, t_send_wall_ns=t0[0], t_send_mono_ns=t0[1], t_ret_wall_ns=t1[0], t_ret_mono_ns=t1[1])
+
+    def _touch(self, symbol: str):
+        bids, asks = self.capture.books[symbol].top(20)
+        return bids, asks
+
+    def _size_at(self, levels, price: Decimal) -> Decimal:
+        for p, sz in levels:
+            if abs(p - float(price)) < 1e-12:
+                return Decimal(str(sz))
+        return Decimal(0)
+
+    # ---- orders ------------------------------------------------------------------------------------------------------
+    async def place(self, symbol: str, price: Decimal, qty: Decimal, client_id: str, side: str = "Buy") -> RestResult:
+        t0 = stamp()
+        await asyncio.sleep(self._lat())
+        self._n += 1
+        o = {"symbol": symbol, "side": side, "price": price, "qty": qty, "filled": Decimal(0), "avg": Decimal(0), "fee": Decimal(0), "cid": client_id, "oid": f"P{self._n:08d}", "created_ms": int(time.time() * 1000), "live": True}
+        bids, asks = self._touch(symbol)
+        crosses = bool(bids and asks) and ((side == "Buy" and float(price) >= asks[0][0]) or (side == "Sell" and float(price) <= bids[0][0]))
+        self.orders[client_id] = o
+        if crosses:
+            o["live"] = False
+            self._emit("rejected" if self.market.startswith("bybit") else "expired", o, "Rejected" if self.market.startswith("bybit") else "EXPIRED", self._lat(), reason="EC_PostOnlyWillTakeLiquidity")
+        else:
+            o["ahead"] = self._size_at(bids if side == "Buy" else asks, price)
+            self._emit("new", o, "New" if self.market.startswith("bybit") else "NEW", self._lat())
+        self.log.append({"op": "place", "cid": client_id, "price": str(price), "crosses": crosses})
+        return self._result(True, t0, o["oid"])
+
+    async def cancel(self, symbol: str, order_id: str | None, client_id: str) -> RestResult:
+        t0 = stamp()
+        await asyncio.sleep(self._lat())
+        o = self.orders.get(client_id)
+        if o is None or not o["live"]:
+            return self._result(False, t0, None, "PAPER_ORDER_GONE", "order already filled, cancelled or never rested")
+        o["live"] = False
+        self._emit("cancelled", o, "Cancelled" if self.market.startswith("bybit") else "CANCELED", self._lat())
+        self.log.append({"op": "cancel", "cid": client_id})
+        return self._result(True, t0, o["oid"])
+
+    async def amend(self, symbol: str, order_id: str | None, client_id: str, price: Decimal, qty: Decimal | None = None, side: str = "Buy") -> RestResult:
+        t0 = stamp()
+        await asyncio.sleep(self._lat())
+        o = self.orders.get(client_id)
+        if o is None or not o["live"]:
+            return self._result(False, t0, None, "PAPER_ORDER_GONE", "order already filled, cancelled or never rested")
+        bids, asks = self._touch(symbol)
+        if bids and asks and ((o["side"] == "Buy" and float(price) >= asks[0][0]) or (o["side"] == "Sell" and float(price) <= bids[0][0])):
+            return self._result(False, t0, o["oid"], "PAPER_POSTONLY_AMEND", "amend would take liquidity; the order stays where it is")
+        o["price"] = price
+        o["ahead"] = self._size_at(bids if o["side"] == "Buy" else asks, price)                    # an amend of the price loses the queue place
+        self._emit("new" if self.market.startswith("bybit") else "amended", o, "New" if self.market.startswith("bybit") else "NEW", self._lat())
+        self.log.append({"op": "amend", "cid": client_id, "price": str(price)})
+        return self._result(True, t0, o["oid"])
+
+    async def open_orders(self, symbol: str) -> list[dict]:
+        return [{"order_id": o["oid"], "client_id": o["cid"]} for o in self.orders.values() if o["live"] and o["symbol"] == symbol]
+
+    async def position_size(self, symbol: str) -> Decimal:
+        return self.position.get(symbol, Decimal(0))
+
+    async def market_close(self, symbol: str, side: str, qty: Decimal, client_id: str) -> RestResult:
+        t0 = stamp()
+        await asyncio.sleep(self._lat())
+        bids, asks = self._touch(symbol)
+        if not bids or not asks:
+            return self._result(False, t0, None, "PAPER_NO_BOOK", "no book")
+        px = Decimal(str(asks[0][0] if side == "Buy" else bids[0][0]))
+        self._n += 1
+        o = {"symbol": symbol, "side": side, "price": px, "qty": qty, "filled": qty, "avg": px, "fee": px * qty * Decimal(str(self.taker_fee_bps)) / Decimal(10000), "cid": client_id, "oid": f"P{self._n:08d}", "created_ms": int(time.time() * 1000), "live": False}
+        self.orders[client_id] = o
+        self.position[symbol] = self.position.get(symbol, Decimal(0)) + (qty if side == "Buy" else -qty)
+        self._emit("trade", o, "Filled" if self.market.startswith("bybit") else "FILLED", self._lat(), fill=(qty, px))
+        self.log.append({"op": "market_close", "cid": client_id})
+        return self._result(True, t0, o["oid"])
+
+    # ---- fills from the live public prints ------------------------------------------------------------------------------
+    def _on_trade(self, symbol: str, price: float, size: float, side: str, ts_s: float) -> None:
+        taker_sell = str(side).lower().startswith("s")
+        for o in list(self.orders.values()):
+            if not o["live"] or o["symbol"] != symbol:
+                continue
+            buy = o["side"] == "Buy"
+            if buy != taker_sell:                       # a resting buy is hit by a sell aggressor, a resting sell by a buy aggressor
+                continue
+            px = float(o["price"])
+            through = price < px - 1e-12 if buy else price > px + 1e-12
+            at = abs(price - px) <= 1e-12
+            if not through and not at:
+                continue
+            remaining = o["qty"] - o["filled"]
+            if through:
+                take = remaining
+            else:
+                o["ahead"] -= Decimal(str(size))
+                if o["ahead"] >= 0:
+                    continue
+                take = min(-o["ahead"], remaining)
+                o["ahead"] = Decimal(0)
+            if take <= 0:
+                continue
+            fill_px = o["price"]
+            o["avg"] = (o["avg"] * o["filled"] + fill_px * take) / (o["filled"] + take)
+            o["filled"] += take
+            o["fee"] += fill_px * take * Decimal(str(self.maker_fee_bps)) / Decimal(10000)
+            self.position[symbol] = self.position.get(symbol, Decimal(0)) + (take if buy else -take)
+            done = o["filled"] >= o["qty"]
+            o["live"] = not done
+            by = self.market.startswith("bybit")
+            self._emit("trade", o, ("Filled" if done else "PartiallyFilled") if by else ("FILLED" if done else "PARTIALLY_FILLED"), self._lat(), fill=(take, fill_px))
+            self.log.append({"op": "fill", "cid": o["cid"], "qty": str(take)})
 
 
 def make_client(market: str, session, key: str | None = None, secret: str | None = None, ws_connect=None, network: str = "testnet"):

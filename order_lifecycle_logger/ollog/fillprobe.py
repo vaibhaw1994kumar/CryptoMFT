@@ -20,10 +20,10 @@ from pathlib import Path
 
 from .capture import BinanceCapture, BybitCapture, TardisWriter, stream_url
 from .endpoints import LABEL, MARKETS, PUBLIC_WS, assert_testnet_url
-from .probe import ProbeConfig, ProbeRunner
+from .probe import PerpProbeConfig, PerpProbeRunner, ProbeConfig, ProbeRunner
 from .recorder import Recorder, utc_tag
 from .runner import HARD_MAX_ORDERS, Budget
-from .venues import make_client, ssl_context
+from .venues import PaperClient, make_client, ssl_context
 
 PERP_MARKETS = ("bybit_linear", "binance_futures")
 
@@ -66,6 +66,14 @@ def add_arguments(s) -> None:
     s.add_argument("--check-every-s", type=float, default=30.0, help="REST depth reconciliation interval (0 = off)")
     s.add_argument("--max-consecutive-errors", type=int, default=5)
     s.add_argument("--seed", type=int, default=1)
+    s.add_argument("--plan", choices=("v1", "perp_v2"), default="v1", help="v1 = the at-touch join probe; perp_v2 = the perp queue-validation probe (touch and one tick back, cancels, amends, sharp-move orders, inventory and loss caps, kill switch)")
+    s.add_argument("--paper", action="store_true", help="perp_v2 only: the private side is SIMULATED (PaperClient) against the live public capture; no keys, nothing is sent to any venue")
+    s.add_argument("--max-open", type=int, default=2, help="perp_v2: orders open at once per coin and venue (mainnet ceiling 2)")
+    s.add_argument("--mean-gap-s", type=float, default=90.0, help="perp_v2: mean pause between one worker's orders")
+    s.add_argument("--loss-cap-day", type=Decimal, default=Decimal(20), help="perp_v2: quote loss per UTC day that pauses the run until the next day (mainnet ceiling 20)")
+    s.add_argument("--loss-cap-total", type=Decimal, default=Decimal(200), help="perp_v2: quote loss that stops the run (mainnet ceiling 200)")
+    s.add_argument("--stop-file", default=None, help="perp_v2: a file whose existence stops the run (manual kill switch)")
+    s.add_argument("--fast-streams", action="store_true", help="also record the top of book streams (Binance bookTicker, Bybit orderbook.1, about 10 ms) to capture/<venue>/bbo/; default off")
     s.add_argument("--confirm-mainnet", default=None, help="mainnet orders only: the exact confirmation phrase printed by --help of mainnet.py")
     s.add_argument("--out", default=str(Path(__file__).resolve().parent.parent / "fillprobe_runs"))
 
@@ -79,8 +87,18 @@ async def run_fillprobe(args) -> int:
         raise SystemExit(f"fillprobe covers the perpetual markets only; unknown/unsupported: {bad}")
     symbols = [x.strip() for x in args.coins_list.split(",") if x.strip()]
     keys: dict = {}
-    if not args.capture_only:
-        if network == "mainnet":
+    v2 = getattr(args, "plan", "v1") == "perp_v2"
+    paper = bool(getattr(args, "paper", False))
+    if paper and not v2:
+        raise SystemExit("--paper needs --plan perp_v2")
+    if not args.capture_only and not paper:
+        if network == "mainnet" and v2:
+            from .mainnet import violations_v2
+            v = violations_v2(markets, symbols, args.max_orders, args.max_notional, args.max_net_notional, args.loss_cap_day, args.loss_cap_total, args.max_open, args.confirm_mainnet, os.environ.get("OLLOG_MAINNET"))
+            if v:
+                print("mainnet ORDER run refused (nothing was sent):\n  " + "\n  ".join(v), file=sys.stderr)
+                return 2
+        elif network == "mainnet":
             from .mainnet import violations
             v = violations(markets, symbols, args.max_orders, args.max_notional, args.max_net_notional, args.confirm_mainnet, os.environ.get("OLLOG_MAINNET"))
             if v:
@@ -111,17 +129,22 @@ async def run_fillprobe(args) -> int:
             "started_wall": started}
     async with aiohttp.ClientSession(connector=aiohttp.TCPConnector(ssl=ssl_context()), timeout=aiohttp.ClientTimeout(total=15)) as session:
         tables, captures, writers, cap_tasks = {}, {}, {}, []
+        msyms = {m: list(symbols) for m in markets}
         for m in markets:
             c = make_client(m, session, network=network)
             tables[m] = await c.instruments()
             miss = [s for s in symbols if s not in tables[m]]
-            if miss:
+            if miss and v2:                                                    # perp_v2: a market that lacks a coin (Binance USD-M has no MNTUSDT) runs without it; the gap is recorded
+                print(f"{m}: not tradable, left out: {miss}", file=sys.stderr)
+                msyms[m] = [s for s in symbols if s in tables[m]]
+                meta.setdefault("left_out", {})[m] = miss
+            elif miss:
                 print(f"{m}: not tradable (post-only, USDT, TRADING): {miss}", file=sys.stderr)
                 return 1
             cls = BybitCapture if m == "bybit_linear" else BinanceCapture
             writers[m] = TardisWriter(out / "capture", cls.venue)
-            captures[m] = cls(symbols, writers[m], note, check, guard, _table(network, m)["rest"],
-                              stream_url(m, symbols, _public_ws(network, m)), session=session)
+            captures[m] = cls(msyms[m], writers[m], note, check, guard, _table(network, m)["rest"],
+                              stream_url(m, msyms[m], _public_ws(network, m), bool(getattr(args, "fast_streams", False))), session=session, fast_streams=bool(getattr(args, "fast_streams", False)))
             cap_tasks.append(asyncio.create_task(captures[m].run(args.check_every_s)))
         flusher = asyncio.create_task(_flush_loop(writers.values(), stop))
         try:
@@ -136,6 +159,29 @@ async def run_fillprobe(args) -> int:
                     await asyncio.wait_for(stop.wait(), args.duration_s)
                 except asyncio.TimeoutError:
                     pass
+            elif v2:
+                from .mainnet import LIMITS_V2
+                cfg = PerpProbeConfig(max_open=args.max_open, mean_gap_s=args.mean_gap_s, max_notional=args.max_notional, max_net_notional=args.max_net_notional, loss_cap_day=args.loss_cap_day,
+                                      loss_cap_total=args.loss_cap_total, stop_file=args.stop_file, preflight=not args.no_preflight and not paper, flatten=not args.no_flatten,
+                                      max_consecutive_errors=args.max_consecutive_errors, seed=args.seed, tag=format(int(time.time()) % (36 ** 6), "x").rjust(6, "0"))
+                budget = Budget(args.max_orders, LIMITS_V2["max_orders"])
+                recs = []
+                for m in markets:
+                    rec = Recorder(out, m, "PAPER-simulated-orders" if paper else ("MAINNET-real-orders" if network == "mainnet" else None))
+                    rec.meta({"tool": "ollog fillprobe perp_v2", "network": network, "paper": bool(paper), "market": m, "symbols": msyms[m],
+                              "instruments": {s: {"tick": str(tables[m][s].tick), "step": str(tables[m][s].step), "min_qty": str(tables[m][s].min_qty), "min_notional": str(tables[m][s].min_notional)} for s in msyms[m]}})
+                    client = PaperClient(m, captures[m], tables[m], seed=args.seed) if paper else make_client(m, session, *keys[m], network=network)
+                    runners.append(PerpProbeRunner(client, rec, msyms[m], tables[m], cfg, budget, stop, captures[m]))
+                    recs.append(rec)
+                    print(f"  {m}: {rec.dir}" + ("  [PAPER: simulated orders, nothing is sent]" if paper else ""))
+                if args.duration_s and paper:
+                    loop.call_later(args.duration_s, stop.set)                      # a paper run is bounded by --duration-s
+                results = await asyncio.gather(*(r.run() for r in runners), return_exceptions=True)
+                for r, rec, res in zip(runners, recs, results):
+                    rec.close()
+                    tail = f" ({type(res).__name__}: {res})" if isinstance(res, BaseException) else ""
+                    print(f"{r.market}: {r.stats['orders']} orders, {r.stats['filled_orders']} filled, {r.stats['amends']} amends, {r.stats['taker_unwinds']} taker unwinds, {r.stats['errors']} errors; stopped: {r.stop_reason}{tail}")
+                await asyncio.sleep(2.0)
             else:
                 cfg = ProbeConfig(hold_min_s=args.hold_min_s, hold_max_s=args.hold_max_s, spacing_s=args.spacing_s, max_notional=args.max_notional,
                                   max_net_notional=args.max_net_notional, flatten=not args.no_flatten, preflight=not args.no_preflight, max_consecutive_errors=args.max_consecutive_errors,
@@ -188,7 +234,7 @@ async def _flush_loop(writers, stop) -> None:
 async def _wait_valid(captures, symbols, timeout: float, stop) -> bool:
     t0 = time.monotonic()
     while time.monotonic() - t0 < timeout and not stop.is_set():
-        if all(c.valid.get(s) for c in captures.values() for s in symbols):
+        if all(c.valid.get(s) for c in captures.values() for s in c.symbols):
             return True
         await asyncio.sleep(0.5)
     return False

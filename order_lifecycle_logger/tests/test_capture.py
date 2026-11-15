@@ -320,3 +320,34 @@ def test_bybit_delta_covers_the_sequence_range_since_the_previous_message(tmp_pa
     assert r["match"] and r["levels_ambiguous"] == 1
     r = c.compare("SOLUSDT", 105, [["100", "6"]], [["101", "8"]])                              # an untouched level that is wrong
     assert not r["match"] and r["levels_unexplained"] == 1
+
+
+def test_fast_streams_record_the_top_of_book_apart_and_are_off_by_default(tmp_path):
+    # Binance bookTicker and Bybit orderbook.1 go to the bbo stream only with fast_streams; the update id going backwards is counted and noted
+    for fast in (False, True):
+        root = tmp_path / str(fast)
+        root.mkdir()
+        cb, wb, notes_b, _ = mk(BinanceCapture, root, fast_streams=fast)
+        cy, wy, notes_y, _ = mk(BybitCapture, root, fast_streams=fast)
+
+        async def go():
+            for u in (100, 101, 99):
+                await cb.handle({"data": {"e": "bookTicker", "u": u, "s": "SOLUSDT", "b": "100.00", "B": "5", "a": "100.01", "A": "7", "T": 1_793_000_000_100, "E": 1_793_000_000_101}}, RECV)
+            await cy.handle({"topic": "orderbook.1.SOLUSDT", "type": "snapshot", "ts": 1_793_000_000_100, "cts": 1_793_000_000_095, "data": {"s": "SOLUSDT", "b": [["100.0", "5"]], "a": [["100.02", "4"]], "u": 7, "seq": 70}}, RECV)
+            await cy.handle({"topic": "orderbook.1.SOLUSDT", "type": "delta", "ts": 1_793_000_000_110, "cts": 1_793_000_000_105, "data": {"s": "SOLUSDT", "b": [["100.0", "6"]], "a": [], "u": 8, "seq": 80}}, RECV)
+        asyncio.run(go())
+        wb.close(); wy.close()
+        got_b, got_y = read(root, "binance", "bbo", "SOLUSDT") if fast else [], read(root, "bybit", "bbo", "SOLUSDT") if fast else []
+        if not fast:
+            assert not list(root.glob("*/bbo")) and cb.counts["bbo"] == 0 and cy.counts["bbo"] == 0
+            continue
+        assert [r["update_id"] for r in got_b] == [100, 101, 99] and got_b[0]["bid"] == 100.0 and got_b[0]["ask_size"] == 7.0
+        assert any(n["type"] == "bbo_u_regression" for n in notes_b)
+        assert [(r["bid"], r["bid_size"], r["ask"], r["ask_size"]) for r in got_y] == [(100.0, 5.0, 100.02, 4.0), (100.0, 6.0, 100.02, 4.0)]      # a one-sided delta keeps the other side
+        assert not cy.books["SOLUSDT"].top()[0]                                                                                                       # the level-50 book is untouched by level 1
+
+
+def test_stream_url_adds_bookticker_only_when_asked():
+    syms = ["SOLUSDT"]
+    d, t = capture.stream_url("binance_futures", syms, ("wss://m/public/stream?streams=", "wss://m/market/stream?streams="), fast=True)
+    assert d == "wss://m/public/stream?streams=solusdt@depth@100ms/solusdt@bookTicker" and t == "wss://m/market/stream?streams=solusdt@aggTrade"

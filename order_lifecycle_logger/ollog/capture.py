@@ -23,7 +23,7 @@ from typing import Callable
 
 from .models import stamp
 
-LAYOUT = {"snapshot": "book_snapshots", "event": "book_events", "trade": "trades"}
+LAYOUT = {"snapshot": "book_snapshots", "event": "book_events", "trade": "trades", "bbo": "bbo"}
 TOP_N = 20
 
 
@@ -98,7 +98,7 @@ class _Capture:
     market: str
 
     def __init__(self, symbols: list[str], writer: TardisWriter, notes: Callable[[dict], None], checks: Callable[[dict], None],
-                 guard: Callable[[str], str], rest_base: str, ws_url, session=None, ws_connect=None, keep_history: bool = True):
+                 guard: Callable[[str], str], rest_base: str, ws_url, session=None, ws_connect=None, keep_history: bool = True, fast_streams: bool = False):
         self.symbols, self.writer, self._note, self._check, self.guard = symbols, writer, notes, checks, guard
         self.urls = [ws_url] if isinstance(ws_url, str) else list(ws_url)
         self.rest_base, self.session, self._ws_connect = rest_base, session, ws_connect
@@ -108,6 +108,9 @@ class _Capture:
         self._touched = {s: set() for s in symbols}              # prices changed since the last remembered update
         self.counts = Counter()
         self.stop = asyncio.Event()
+        self.fast_streams = fast_streams                                                     # also record the top of book streams (Binance bookTicker, Bybit orderbook.1) to bbo/; default off: nothing changes
+        self.last_bbo_u: dict[str, int] = {}
+        self.trade_hooks: list = []                                                          # callables (symbol, price, size, aggressor side, ts_s): the paper client's fills (perp probe v2); empty = nothing changes
 
     # ---- shared record writers --------------------------------------------------------------------------------
     def note(self, kind: str, **kw) -> None:
@@ -133,6 +136,18 @@ class _Capture:
         self.writer.write("trade", sym, ts_s, {"exchange": self.venue, "pair": sym, "exchange_ts": ts_s, "local_ts": recv[0] / 1e9,
                                                "local_mono_ns": recv[1], "price": price, "volume": size, "side": side})
         self.counts["trades"] += 1
+        for hook in self.trade_hooks:
+            hook(sym, price, size, side, ts_s)
+
+    def _bbo(self, sym: str, ts_s: float, bid, bid_sz, ask, ask_sz, u, recv: tuple) -> None:
+        """One top-of-book record (fast streams). The update id must not go backwards: a regression is counted and noted (feed health), the record is kept."""
+        prev = self.last_bbo_u.get(sym)
+        if u is not None:
+            if prev is not None and u < prev:
+                self.note("bbo_u_regression", symbol=sym, prev=prev, got=u)
+            self.last_bbo_u[sym] = max(u, prev) if prev is not None else u
+        self.writer.write("bbo", sym, ts_s, {"exchange": self.venue, "pair": sym, "exchange_ts": ts_s, "local_ts": recv[0] / 1e9, "local_mono_ns": recv[1], "bid": bid, "bid_size": bid_sz, "ask": ask, "ask_size": ask_sz, "update_id": u})
+        self.counts["bbo"] += 1
 
     def _remember(self, sym: str, update_id: int, first_id: int | None = None) -> None:
         """Keep the top of book after each applied update, keyed by the update-id range [first_id, update_id] it covers."""
@@ -293,14 +308,30 @@ class BybitCapture(_Capture):
         super().__init__(*a, **kw)
         self.last_u: dict[str, int] = {}
         self.last_seq: dict[str, int] = {}
+        self._l1: dict[str, dict] = {}
 
     async def after_connect(self, ws, url: str) -> None:
         for s in self.symbols:
             self.valid[s] = False
-        await ws.send(json.dumps({"op": "subscribe", "args": [f"orderbook.50.{s}" for s in self.symbols] + [f"publicTrade.{s}" for s in self.symbols]}))
+        args = [f"orderbook.50.{s}" for s in self.symbols] + [f"publicTrade.{s}" for s in self.symbols]
+        if self.fast_streams:
+            args += [f"orderbook.1.{s}" for s in self.symbols]                  # level 1, about 10 ms: kept apart from the level-50 book (a separate stream and file)
+        await ws.send(json.dumps({"op": "subscribe", "args": args}))
 
     async def handle(self, msg: dict, recv: tuple, ws=None) -> None:
         topic = msg.get("topic", "")
+        if topic.startswith("orderbook.1."):
+            d = msg["data"]
+            sym = d.get("s")
+            if self.fast_streams and sym in self.books:
+                top = self._l1.setdefault(sym, {"b": (None, None), "a": (None, None)})
+                for side in ("b", "a"):
+                    lv = d.get(side) or []
+                    if lv:
+                        top[side] = (_f(lv[0][0]), _f(lv[0][1]))
+                ts = (msg.get("cts") or msg.get("ts") or recv[0] / 1e6) / 1000
+                self._bbo(sym, ts, top["b"][0], top["b"][1], top["a"][0], top["a"][1], int(d["u"]) if d.get("u") is not None else None, recv)
+            return
         if topic.startswith("orderbook."):
             d = msg["data"]
             sym = d["s"]
@@ -393,6 +424,8 @@ class BinanceCapture(_Capture):
                     t.add_done_callback(self._sync_tasks.discard)
                 return
             self._apply(sym, d, recv)
+        elif e == "bookTicker" and self.fast_streams and d.get("s") in self.books:
+            self._bbo(d["s"], (d.get("T") or d.get("E") or recv[0] / 1e6) / 1000, _f(d["b"]), _f(d["B"]), _f(d["a"]), _f(d["A"]), int(d["u"]) if d.get("u") is not None else None, recv)
         elif e == "aggTrade" and d["s"] in self.books:
             self._trade(d["s"], d["T"] / 1000, _f(d["p"]), _f(d["q"]), "s" if d["m"] else "b", recv)
 
@@ -459,12 +492,14 @@ class BinanceCapture(_Capture):
         return self.compare(sym, int(obj["lastUpdateId"]), obj.get("bids", []), obj.get("asks", []))
 
 
-def stream_url(market: str, symbols: list[str], base) -> list[str]:
+def stream_url(market: str, symbols: list[str], base, fast: bool = False) -> list[str]:
     """Public stream URL(s). Bybit subscribes after connecting. Binance puts the streams in the URL; a (depth_base, trade_base) pair
     means the venue serves them on separate paths (mainnet USD-M: /public/ for depth, /market/ for aggTrade), so two connections."""
     if market == "bybit_linear":
         return [base]
     depth = "/".join(f"{x.lower()}@depth@100ms" for x in symbols)
+    if fast:
+        depth += "/" + "/".join(f"{x.lower()}@bookTicker" for x in symbols)       # bookTicker is served with the depth streams (the /public/ path on mainnet USD-M): UNVERIFIED, check with a capture-only run
     trade = "/".join(f"{x.lower()}@aggTrade" for x in symbols)
     if isinstance(base, tuple):
         return [base[0] + depth, base[1] + trade]

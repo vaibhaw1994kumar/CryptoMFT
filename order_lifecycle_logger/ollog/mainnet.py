@@ -29,6 +29,12 @@ PUBLIC_WS_MAINNET = {"bybit_linear": "wss://stream.bybit.com/v5/public/linear",
 LIMITS = {"symbols": frozenset({"BTCUSDT", "SOLUSDT"}), "max_orders": 200, "max_notional": Decimal(150), "max_net_notional": Decimal(150)}
 
 
+# The perp probe v2 (owner approved 15 Nov 2026; plan out/integration/cost/PERP_QUEUE_VALIDATION_PLAN.md): SOL, ADA, MNT on both venues, PostOnly at the touch and one tick back, minimum size. Its own ceilings; the v1 LIMITS above are
+# unchanged for the old plan. Nothing here starts anything: the operator still needs the typed confirmation, OLLOG_MAINNET=1 and the keys.
+LIMITS_V2 = {"symbols": frozenset({"SOLUSDT", "ADAUSDT", "MNTUSDT"}), "max_orders": 5000, "max_notional": Decimal(25), "max_net_notional": Decimal(200),
+             "max_open_per_symbol": 2, "loss_cap_day": Decimal(20), "loss_cap_total": Decimal(200)}
+
+
 class NotMainnetAllowed(RuntimeError):
     pass
 
@@ -51,6 +57,31 @@ for _m in MAINNET_MARKETS.values():
 for _u in PUBLIC_WS_MAINNET.values():
     for _x in ((_u,) if isinstance(_u, str) else _u):
         assert_mainnet_url(_x)
+
+
+def violations_v2(markets, symbols, max_orders, max_notional, max_net_notional, loss_cap_day, loss_cap_total, max_open, confirm: str | None, env_flag: str | None) -> list[str]:
+    """Every reason a mainnet perp-probe-v2 ORDER run is refused (its own ceilings, LIMITS_V2). Empty list = allowed. The loss caps and the open-order limit must be given: a run without them is refused."""
+    L = LIMITS_V2
+    out = []
+    if confirm != CONFIRM_PHRASE:
+        out.append(f"--confirm-mainnet must be exactly {CONFIRM_PHRASE}")
+    if env_flag != "1":
+        out.append("environment variable OLLOG_MAINNET=1 is not set")
+    bad = [m for m in markets if m not in MAINNET_MARKETS]
+    if bad:
+        out.append(f"market(s) {bad} are not available on mainnet (perpetual markets only)")
+    extra = sorted(set(symbols) - L["symbols"])
+    if extra:
+        out.append(f"symbol(s) {extra} are outside the v2 mainnet allow-list {sorted(L['symbols'])}")
+    for name, val, ceil in (("--max-orders", max_orders, L["max_orders"]), ("--max-notional", max_notional, L["max_notional"]), ("--max-net-notional", max_net_notional, L["max_net_notional"]),
+                            ("--max-open", max_open, L["max_open_per_symbol"]), ("--loss-cap-day", loss_cap_day, L["loss_cap_day"]), ("--loss-cap-total", loss_cap_total, L["loss_cap_total"])):
+        if val is None:
+            out.append(f"{name} must be given")
+        elif val <= 0:
+            out.append(f"{name} must be positive")
+        elif val > ceil:
+            out.append(f"{name} {val} exceeds the v2 mainnet ceiling {ceil}")
+    return out
 
 
 def violations(markets, symbols, max_orders, max_notional, max_net_notional, confirm: str | None, env_flag: str | None) -> list[str]:

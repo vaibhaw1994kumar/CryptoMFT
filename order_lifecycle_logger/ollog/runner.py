@@ -42,8 +42,8 @@ class RunConfig:
 class Budget:
     """Shared across markets: the hard cap on orders sent in one run."""
 
-    def __init__(self, total: int):
-        self.total, self.used = min(int(total), HARD_MAX_ORDERS), 0
+    def __init__(self, total: int, hard_max: int = HARD_MAX_ORDERS):
+        self.total, self.used = min(int(total), hard_max), 0
 
     def take(self) -> bool:
         if self.used >= self.total:
