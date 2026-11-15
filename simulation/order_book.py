@@ -76,7 +76,7 @@ class OrderBook:
         # WP4 book state
         "state", "seq_last", "gaps", "seq_duplicates", "captured_depth_bid", "captured_depth_ask", "recovering_since",
         # queue model v2 (opt-in, defaults reproduce the legacy book): tape repair switch and the own-fill shadow overlay
-        "tape_repair", "own_overlay", "overlay_bid", "overlay_ask",
+        "tape_repair", "own_overlay", "overlay_bid", "overlay_ask", "own_ledger",
         # message-atomic mode (opt-in): a crossed state inside one exchange message is not repaired; it is judged once at end_message()
         "message_atomic", "_pending_side",
     )
@@ -84,13 +84,21 @@ class OrderBook:
     def __init__(
         self, venue: str, pair: str,
         delta_semantics: str = "hybrid", max_levels: int = 200,
-        tape_repair: bool = True, own_overlay: bool = False, message_atomic: bool = False,
+        tape_repair: bool = True, own_overlay: bool = False, message_atomic: bool = False, own_refill_tau: float | None = None,
     ) -> None:
         # tape_repair=False: on_trade() mutates nothing (the book is rebuilt from book messages only). Default True = legacy.
         # own_overlay=True: our own taker consumption is recorded in overlay_bid / overlay_ask (price -> qty taken), never in the
         # public levels; walk() subtracts it; a public update of that price level (or a snapshot) clears it.
         self.tape_repair = tape_repair
         self.own_overlay = own_overlay
+        # own_refill_tau (owner 15 Nov, own_impact "refill"; needs own_overlay): our takes live in a simulation.impact.OwnTakeLedger instead of overlay_bid / overlay_ask: what we took comes back as 1 - exp(-t / tau), and a public update,
+        # a trade repair or a snapshot does NOT reset it (the public feed does not know our order, so the removal has to persist until it refills). None = the overlay above, unchanged.
+        if own_refill_tau is not None and not own_overlay:
+            raise ValueError("own_refill_tau needs own_overlay=True")
+        self.own_ledger = None
+        if own_refill_tau is not None:
+            from .impact import OwnTakeLedger
+            self.own_ledger = OwnTakeLedger(own_refill_tau)
         # message_atomic=True: apply_delta() never repairs a cross; the caller marks the end of each exchange message with end_message(), which counts and repairs
         # a cross that is still there. A crossed state that exists only between two deltas of one message is not a cross. Default False = the per-delta rule.
         self.message_atomic = message_atomic
@@ -297,8 +305,9 @@ class OrderBook:
     def apply_snapshot(self, bids, asks, ts: float) -> None:
         """Full replace. Resyncs any drift accumulated from deltas."""
         self._pending_side = None
-        self.overlay_bid.clear()
-        self.overlay_ask.clear()
+        if self.own_ledger is None:
+            self.overlay_bid.clear()
+            self.overlay_ask.clear()
         self._bids.clear()
         self._asks.clear()
         self._bid_heap.clear()
@@ -356,7 +365,7 @@ class OrderBook:
         book = self._bids if is_bid else self._asks
         et = event_type.lower()
         current = book.get(price, 0.0)
-        if self.own_overlay:
+        if self.own_overlay and self.own_ledger is None:
             (self.overlay_bid if is_bid else self.overlay_ask).pop(price, None)       # a public update of this level ends our shadow consumption of it
 
         if et in ("delete", "remove"):
@@ -414,7 +423,7 @@ class OrderBook:
         self.trades_applied += 1
         if not self.tape_repair:
             return
-        if self.own_overlay:                                                           # the repair is a public update of every level it touches
+        if self.own_overlay and self.own_ledger is None:                               # the repair is a public update of every level it touches
             if sign > 0:
                 for p in [p for p in self.overlay_ask if p <= price + 1e-12]:
                     del self.overlay_ask[p]
@@ -540,7 +549,7 @@ class OrderBook:
 
     # ── Taker execution ──────────────────────────────────────────────────────
 
-    def walk(self, side: str, qty: float, limit_price: float | None = None, takes: list | None = None) -> WalkResult:
+    def walk(self, side: str, qty: float, limit_price: float | None = None, takes: list | None = None, now: float | None = None) -> WalkResult:
         """Price `qty` against this side without mutating the book.
 
         side="ask" consumes asks (we are buying); side="bid" consumes bids (we
@@ -553,7 +562,10 @@ class OrderBook:
         buying = side.startswith("a")
         prices, book = (self._sorted_asks(), self._asks) if buying \
             else (self._sorted_bids(), self._bids)
-        ov = (self.overlay_ask if buying else self.overlay_bid) if self.own_overlay else None
+        if self.own_ledger is not None:                                                # refill mode: what we took and has not come back yet, at `now` (default: the book's own last update time)
+            ov = self.own_ledger.missing_by_price("ask" if buying else "bid", self.last_update_ts if now is None else now)
+        else:
+            ov = (self.overlay_ask if buying else self.overlay_bid) if self.own_overlay else None
 
         remaining = qty
         notional = 0.0
@@ -623,12 +635,17 @@ class OrderBook:
                 remaining = 0.0
         return result
 
-    def consume_overlay(self, side: str, qty: float, limit_price: float | None = None) -> WalkResult:
-        """walk() that records what it took in the shadow overlay instead of removing it from the public levels (own_overlay=True)."""
+    def consume_overlay(self, side: str, qty: float, limit_price: float | None = None, now: float | None = None) -> WalkResult:
+        """walk() that records what it took in the shadow overlay instead of removing it from the public levels (own_overlay=True). With own_refill_tau the take goes to the ledger at `now` (default: the book's last update time) and comes back as 1 - exp(-t / tau)."""
         if not self.own_overlay:
             raise ValueError("consume_overlay needs OrderBook(own_overlay=True)")
         takes: list = []
-        result = self.walk(side, qty, limit_price, takes)
+        result = self.walk(side, qty, limit_price, takes, now)
+        if self.own_ledger is not None:
+            t_now = self.last_update_ts if now is None else now
+            for price, take in takes:
+                self.own_ledger.record("ask" if side.startswith("a") else "bid", price, take, t_now)
+            return result
         ov = self.overlay_ask if side.startswith("a") else self.overlay_bid
         for price, take in takes:
             ov[price] = ov.get(price, 0.0) + take

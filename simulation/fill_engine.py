@@ -97,9 +97,9 @@ class TakerExecutor:
     """Aggressive execution against a replayed book."""
 
     def __init__(self, consume_liquidity: bool = True, own_impact: str = "legacy") -> None:
-        if own_impact not in ("legacy", "overlay"):
-            raise ValueError(f"own_impact must be 'legacy' or 'overlay', got {own_impact!r}")
-        self.own_impact = own_impact        # overlay: our consumption goes to OrderBook.consume_overlay, the public levels are never changed
+        if own_impact not in ("legacy", "overlay", "refill"):
+            raise ValueError(f"own_impact must be 'legacy', 'overlay' or 'refill', got {own_impact!r}")
+        self.own_impact = own_impact        # overlay: our consumption goes to OrderBook.consume_overlay, the public levels are never changed; refill: the same, and a public update does not reset it (it comes back as 1 - exp(-t / tau), OrderBook(own_refill_tau))
         # When True our own fill removes the liquidity it took, so two signals in
         # the same instant cannot both fill off the same resting size. The next
         # feed update overwrites the book, bounding own-impact to sub-tick time.
@@ -124,7 +124,7 @@ class TakerExecutor:
 
         book_side = "ask" if side == "buy" else "bid"
         if self.consume_liquidity:
-            walk = (book.consume_overlay if self.own_impact == "overlay" else book.consume)(book_side, qty, limit_price)
+            walk = (book.consume_overlay(book_side, qty, limit_price, now) if self.own_impact in ("overlay", "refill") else book.consume(book_side, qty, limit_price))
         else:
             walk = book.walk(book_side, qty, limit_price)
 

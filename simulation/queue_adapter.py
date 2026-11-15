@@ -58,6 +58,9 @@ class QueueAwareVenueAdapter(DeterministicVenueAdapter):
                 "a fill needs a real trade, so a depth change must never fill an order on its own"
             )
         super().__init__(venue, consume_liquidity=True)
+        self.impact = None            # step C level 3 (owner 14 Nov): an ImpactOverlay, set by the replay driver when impact.level is 3; None = every taker walk is exactly as before
+        self.own_ledger = None        # step 2 (owner 15 Nov, own_impact "refill"): a simulation.impact.OwnTakeLedger, set by the replay driver; None = every taker walk is exactly as before. With it the walk reads a COPY of the book with our recent
+        #                               takes removed (refilling as 1 - exp(-t / tau)) and the real core book is never touched, so two orders in a row cannot take the same liquidity
         self.observer = None          # E0 step (g): an optional observation sink (place / fill / hedge_arrival); it only RECORDS, nothing here reads it back
         self.executor = executor
         self.tick_size = float(tick_size)
@@ -270,7 +273,17 @@ class QueueAwareVenueAdapter(DeterministicVenueAdapter):
     def _taker_fill(self, request: CanonicalOrderRequest, book: CoreBook | None) -> tuple[ExecutionCallback, ...]:
         if self.observer is not None and request.action == OrderAction.SUBMIT:
             self.observer.hedge_arrival(self, request, self._at(request))
-        callbacks = super().handle(request, self._taker_book(request, book))      # IOC / FOK / market: a taker fill, the deterministic walk
+        taker_book = self._taker_book(request, book)
+        own_book = None
+        if self.own_ledger is not None and taker_book is not None:
+            own_book = taker_book = self._own_consumed(taker_book, self._at(request))     # step 2: our own recent takes are missing from the book (unshifted frame; the shift below moves every level alike)
+        if self.impact is not None and taker_book is not None:
+            taker_book = self._impact_shifted(taker_book)             # level 3: the walk reads the world the feed carries (our own earlier orders have moved this venue's prices)
+        callbacks = super().handle(request, taker_book)      # IOC / FOK / market: a taker fill, the deterministic walk
+        if self.impact is not None:
+            self._impact_record(request, callbacks)
+        if self.own_ledger is not None and own_book is not None:
+            self._own_record(request, callbacks, own_book)
         if (request.time_in_force == TimeInForce.IOC and len(callbacks) == 1 and callbacks[0].event_type == ExecutionEventType.REJECTED
                 and callbacks[0].reason == "no executable liquidity"):
             # An IOC that finds nothing inside its limit is not a venue reject: the exchange ends it unfilled (Bybit "Cancelled", Binance "EXPIRED"). The OMS then sees an unfilled IOC (retry or unwind by its own rule)
@@ -278,6 +291,76 @@ class QueueAwareVenueAdapter(DeterministicVenueAdapter):
             callbacks = (self._callback(request, ExecutionEventType.CANCELLED, reason="IOC expired unfilled"),)
             self._remember(callbacks)
         return callbacks
+
+    def _own_consumed(self, book: CoreBook, now_s: float) -> CoreBook:
+        """A copy of the core book with our own takes that have not refilled yet removed (OwnTakeLedger.missing_by_price at `now_s`); a level whose size falls to zero is dropped. The real core book is never touched; no copy when nothing is missing."""
+        miss = {side: self.own_ledger.missing_by_price(side, now_s) for side in ("ask", "bid")}
+        if not miss["ask"] and not miss["bid"]:
+            return book
+        def reduced(levels, side):
+            m = miss[side]
+            out = []
+            for price, qty in levels.items():
+                rem = qty - Decimal(repr(round(m.get(float(price), 0.0), 12))) if m else qty
+                if rem > 0:
+                    out.append(Level(price, rem))
+            return tuple(out)
+        copy = CoreBook(book.venue, book.instrument_id)
+        ts_ns = self._arrival_ns if self._arrival_ns is not None else 0
+        copy.apply(MarketEvent(event_id=stable_id("own-consumed-book", book.venue, ts_ns), event_type=EventType.BOOK_SNAPSHOT, venue=book.venue, instrument_id=book.instrument_id, exchange_ts_ns=ts_ns,
+                               receive_ts_ns=ts_ns, sequence=1, source_ts_ns=ts_ns, sequence_start=1, raw_ref="own-consumed-book", adapter_version="own-consume-v1", quality_flags=("OWN_CONSUMED_BOOK",),
+                               bids=reduced(book.bids, "bid"), asks=reduced(book.asks, "ask")))
+        return copy
+
+    def _own_record(self, request: CanonicalOrderRequest, callbacks, book: CoreBook) -> None:
+        """Record what an aggressive order of ours took, level by level: the deterministic walk takes best price first inside the limit, so the filled quantity laid over the levels of the book it walked (the ledger-adjusted one, in the unshifted frame) gives the levels."""
+        qty = max((float(cb.cumulative_filled_quantity) for cb in callbacks if cb.event_type in (ExecutionEventType.FILLED, ExecutionEventType.PARTIAL)), default=0.0)
+        if qty <= 0:
+            return
+        buy = request.side == CoreSide.BUY
+        levels = sorted(book.asks.items()) if buy else sorted(book.bids.items(), reverse=True)
+        dp = Decimal(repr(round(self.impact.applied_ticks.get(self.feed_venue, 0) * self.tick_size, 12))) if self.impact is not None else Decimal(0)
+        limit = None if request.price is None else request.price - dp                     # the request's cap is in the shifted frame the walk ran in
+        now_s = self._at(request)
+        remaining = Decimal(repr(round(qty, 12)))
+        for price, size in levels:
+            if limit is not None and ((buy and price > limit) or (not buy and price < limit)):
+                break
+            take = min(size, remaining)
+            if take > 0:
+                self.own_ledger.record("ask" if buy else "bid", float(price), float(take), now_s)
+                remaining -= take
+            if remaining <= Decimal("1e-12"):
+                break
+
+    def _impact_shifted(self, book: CoreBook) -> CoreBook:
+        """A copy of the core book with every price moved by the whole ticks the overlay has applied to this venue's feed (the real core book is never touched). No copy when the shift is zero."""
+        ticks = self.impact.applied_ticks.get(self.feed_venue, 0)
+        if not ticks:
+            return book
+        dp = Decimal(repr(round(ticks * self.tick_size, 12)))
+        shifted = CoreBook(book.venue, book.instrument_id)
+        ts_ns = self._arrival_ns if self._arrival_ns is not None else 0
+        shifted.apply(MarketEvent(event_id=stable_id("impact-shifted-book", book.venue, ts_ns), event_type=EventType.BOOK_SNAPSHOT, venue=book.venue, instrument_id=book.instrument_id, exchange_ts_ns=ts_ns,
+                                  receive_ts_ns=ts_ns, sequence=1, source_ts_ns=ts_ns, sequence_start=1, raw_ref="impact-shifted-book", adapter_version="impact-shift-v1", quality_flags=("IMPACT_SHIFTED_BOOK",),
+                                  bids=tuple(Level(p + dp, q) for p, q in book.bids.items()), asks=tuple(Level(p + dp, q) for p, q in book.asks.items())))
+        return shifted
+
+    def _impact_record(self, request: CanonicalOrderRequest, callbacks) -> None:
+        """Level 3: an aggressive order of ours that filled moves the later prices: record it with the depth within k bps of the touch it consumed (the decision-time state of the level-2 form)."""
+        qty = max((float(cb.cumulative_filled_quantity) for cb in callbacks if cb.event_type in (ExecutionEventType.FILLED, ExecutionEventType.PARTIAL)), default=0.0)
+        if qty <= 0:
+            return
+        now_s = self._at(request)
+        side = "buy" if request.side == CoreSide.BUY else "sell"
+        depth_k = None
+        view = self.view_book() if self.view_book is not None else None
+        if view is not None and view.ready:
+            k = self.impact.cfg.depth_k_bps
+            touch = view.best_ask if side == "buy" else view.best_bid
+            limit = touch * (1.0 + k / 1e4) if side == "buy" else touch * (1.0 - k / 1e4)
+            depth_k = view.depth_within("ask" if side == "buy" else "bid", limit)
+        self.impact.add_order(self.feed_venue, now_s, side, qty, depth_k=depth_k)
 
     def _thinned(self, request: CanonicalOrderRequest, book: CoreBook | None) -> CoreBook | None:
         """The book a hedge attempt executes against when `hedge_thin_attempts` thins it (see the attribute), else the book it was given."""
