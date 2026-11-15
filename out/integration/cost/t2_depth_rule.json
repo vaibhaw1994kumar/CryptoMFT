@@ -1,0 +1,14 @@
+{
+ "maker_Bybit": {
+  "quotes": 7,
+  "binance_eff_depth_bid_median": 12562.615159034334,
+  "bybit_eff_depth_bid_median": 17739.8838902724,
+  "share_binance_deeper": 0.14285714285714285
+ },
+ "maker_Binance": {
+  "quotes": 6,
+  "binance_eff_depth_bid_median": 31942.014352080238,
+  "bybit_eff_depth_bid_median": 23907.609270509616,
+  "share_binance_deeper": 0.6666666666666666
+ }
+}

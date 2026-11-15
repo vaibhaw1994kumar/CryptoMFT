@@ -1,0 +1,14 @@
+{
+ "level": 2,
+ "form": "volume",
+ "y": 0.1132,
+ "sigma_daily_bps": 546.8,
+ "daily_volume": 37353992.0,
+ "delta_volume": 0.44,
+ "permanent_fraction": 0.25,
+ "kernel": "exp",
+ "tau_s": 30.0,
+ "cross_bybit_to_binance": 0.247,
+ "cross_binance_to_bybit": 0.16,
+ "label": "PROXY curve (Y, delta from March TRAIN; sigma, V from the capture), LEVEL 2 = estimate only, no overlay"
+}

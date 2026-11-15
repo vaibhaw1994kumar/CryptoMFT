@@ -1,0 +1,14 @@
+{
+ "level": 3,
+ "form": "volume",
+ "y": 0.028733746613277267,
+ "sigma_daily_bps": 546.755813623101,
+ "daily_volume": 37353992.31875382,
+ "delta_volume": 0.3,
+ "permanent_fraction": 1.0,
+ "kernel": "exp",
+ "tau_s": 3.5,
+ "cross_bybit_to_binance": 0.7802984948455265,
+ "cross_binance_to_bybit": 0.22169592306966163,
+ "label": "PROXY, ISOLATED runs of 03-01, 03-08, 03-11 (Y, delta, phi capped at 1, tau, cross at the end of the run); sigma and V from the 2026-10-29 capture (Binance). DEFAULT"
+}

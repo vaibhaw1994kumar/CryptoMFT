@@ -1,0 +1,10 @@
+{
+ "horizon_s": 2.0,
+ "lambda_u_bps": 2.6,
+ "lambda_o_bps": 0.0,
+ "adverse_bps": 0.0,
+ "volume_window_s": 10.0,
+ "outflow_ratio_file": "/Users/vaibhav/Documents/Newproject/out/integration/cost/outflow_ratios_binance_2s.json",
+ "min_recent_volume": 1.0,
+ "label": "ASSUMED (lambda_u = sigma_1s x sqrt(T) of step D; outflow ratios from the capture's Binance prints, a PROXY)"
+}

@@ -1,0 +1,34 @@
+{
+ "fixed_Bybit": {
+  "n": 68,
+  "bursts": 3,
+  "mean": -0.6221112486468895,
+  "ci95": [
+   -2.4348897948360597,
+   -0.03220245444559831
+  ]
+ },
+ "fixed_Binance": {
+  "n": 24,
+  "bursts": 3,
+  "mean": -6.176354179735988,
+  "ci95": [
+   -6.4699735417833155,
+   -5.036622660219762
+  ]
+ },
+ "chosen_by_effective_depth": {
+  "n": 34,
+  "bursts": 2,
+  "mean": -4.689789535777173,
+  "ci95": [
+   -6.4699735417833155,
+   -2.4348897948360597
+  ]
+ },
+ "chosen_by_E": {
+  "status": "NOT RUN",
+  "why": "E's venue choice needs the queue and the recent depleting volume of BOTH venues at each quote time; the arms were run without the split evidence (it is written for the order's own venue only), so the counterfactual cannot be formed from them"
+ },
+ "label": "EXPLORATORY: one capture day, size 100 SOL, participation limit OFF; 13 quotes in all, 3 bursts per arm: every interval is wide; the profile's lifecycle and ack calibrations are Bybit's, the Binance-maker arm uses them unchanged"
+}

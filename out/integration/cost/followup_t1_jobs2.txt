@@ -1,0 +1,38 @@
+python3.12 -I out/integration/cost/t1_hedge_cost.py --fracs 0.25,0.5,1.0,2.0,4.0 --max-levels 500 --extra --seq --out t1b march 2024-03-03 > out/integration/cost/t1b/log_march_03.txt 2>&1
+python3.12 -I out/integration/cost/t1_hedge_cost.py --fracs 0.25,0.5,1.0,2.0,4.0 --max-levels 500 --extra --seq --out t1b march 2024-03-04 > out/integration/cost/t1b/log_march_04.txt 2>&1
+python3.12 -I out/integration/cost/t1_hedge_cost.py --fracs 0.25,0.5,1.0,2.0,4.0 --max-levels 500 --extra --seq --out t1b march 2024-03-05 > out/integration/cost/t1b/log_march_05.txt 2>&1
+python3.12 -I out/integration/cost/t1_hedge_cost.py --fracs 0.25,0.5,1.0,2.0,4.0 --max-levels 500 --extra --seq --out t1b march 2024-03-06 > out/integration/cost/t1b/log_march_06.txt 2>&1
+python3.12 -I out/integration/cost/t1_hedge_cost.py --fracs 0.25,0.5,1.0,2.0,4.0 --max-levels 500 --extra --seq --out t1b march 2024-03-07 > out/integration/cost/t1b/log_march_07.txt 2>&1
+python3.12 -I out/integration/cost/t1_hedge_cost.py --fracs 0.25,0.5,1.0,2.0,4.0 --max-levels 500 --extra --seq --out t1b march 2024-03-08 > out/integration/cost/t1b/log_march_08.txt 2>&1
+python3.12 -I out/integration/cost/t1_hedge_cost.py --fracs 0.25,0.5,1.0,2.0,4.0 --max-levels 500 --extra --seq --out t1b march 2024-03-09 > out/integration/cost/t1b/log_march_09.txt 2>&1
+python3.12 -I out/integration/cost/t1_hedge_cost.py --fracs 0.25,0.5,1.0,2.0,4.0 --max-levels 500 --extra --seq --out t1b march 2024-03-10 > out/integration/cost/t1b/log_march_10.txt 2>&1
+python3.12 -I out/integration/cost/t1_hedge_cost.py --fracs 0.25,0.5,1.0,2.0,4.0 --max-levels 500 --extra --seq --out t1b march 2024-03-11 > out/integration/cost/t1b/log_march_11.txt 2>&1
+python3.12 -I out/integration/cost/t1_hedge_cost.py --fracs 0.25,0.5,1.0,2.0,4.0 --max-levels 500 --extra --seq --out t1b march 2024-03-12 > out/integration/cost/t1b/log_march_12.txt 2>&1
+python3.12 -I out/integration/cost/t1_hedge_cost.py --fracs 0.25,0.5,1.0,2.0,4.0 --max-levels 500 --extra --seq --out t1c archive ADAUSDT 2026-04-01 0 > out/integration/cost/t1c/log_ADAUSDT_01_0.txt 2>&1
+python3.12 -I out/integration/cost/t1_hedge_cost.py --fracs 0.25,0.5,1.0,2.0,4.0 --max-levels 500 --extra --seq --out t1c archive ADAUSDT 2026-04-01 13 > out/integration/cost/t1c/log_ADAUSDT_01_13.txt 2>&1
+python3.12 -I out/integration/cost/t1_hedge_cost.py --fracs 0.25,0.5,1.0,2.0,4.0 --max-levels 500 --extra --seq --out t1c archive ADAUSDT 2026-04-03 0 > out/integration/cost/t1c/log_ADAUSDT_03_0.txt 2>&1
+python3.12 -I out/integration/cost/t1_hedge_cost.py --fracs 0.25,0.5,1.0,2.0,4.0 --max-levels 500 --extra --seq --out t1c archive ADAUSDT 2026-04-03 13 > out/integration/cost/t1c/log_ADAUSDT_03_13.txt 2>&1
+python3.12 -I out/integration/cost/t1_hedge_cost.py --fracs 0.25,0.5,1.0,2.0,4.0 --max-levels 500 --extra --seq --out t1c archive ADAUSDT 2026-04-05 0 > out/integration/cost/t1c/log_ADAUSDT_05_0.txt 2>&1
+python3.12 -I out/integration/cost/t1_hedge_cost.py --fracs 0.25,0.5,1.0,2.0,4.0 --max-levels 500 --extra --seq --out t1c archive ADAUSDT 2026-04-05 13 > out/integration/cost/t1c/log_ADAUSDT_05_13.txt 2>&1
+python3.12 -I out/integration/cost/t1_hedge_cost.py --fracs 0.25,0.5,1.0,2.0,4.0 --max-levels 500 --extra --seq --out t1c archive ADAUSDT 2026-04-07 0 > out/integration/cost/t1c/log_ADAUSDT_07_0.txt 2>&1
+python3.12 -I out/integration/cost/t1_hedge_cost.py --fracs 0.25,0.5,1.0,2.0,4.0 --max-levels 500 --extra --seq --out t1c archive ADAUSDT 2026-04-07 13 > out/integration/cost/t1c/log_ADAUSDT_07_13.txt 2>&1
+python3.12 -I out/integration/cost/t1_hedge_cost.py --fracs 0.25,0.5,1.0,2.0,4.0 --max-levels 500 --extra --seq --out t1c archive ADAUSDT 2026-04-09 0 > out/integration/cost/t1c/log_ADAUSDT_09_0.txt 2>&1
+python3.12 -I out/integration/cost/t1_hedge_cost.py --fracs 0.25,0.5,1.0,2.0,4.0 --max-levels 500 --extra --seq --out t1c archive ADAUSDT 2026-04-09 13 > out/integration/cost/t1c/log_ADAUSDT_09_13.txt 2>&1
+python3.12 -I out/integration/cost/t1_hedge_cost.py --fracs 0.25,0.5,1.0,2.0,4.0 --max-levels 500 --extra --seq --out t1c archive ADAUSDT 2026-04-11 0 > out/integration/cost/t1c/log_ADAUSDT_11_0.txt 2>&1
+python3.12 -I out/integration/cost/t1_hedge_cost.py --fracs 0.25,0.5,1.0,2.0,4.0 --max-levels 500 --extra --seq --out t1c archive ADAUSDT 2026-04-11 13 > out/integration/cost/t1c/log_ADAUSDT_11_13.txt 2>&1
+python3.12 -I out/integration/cost/t1_hedge_cost.py --fracs 0.25,0.5,1.0,2.0,4.0 --max-levels 500 --extra --seq --out t1c archive ADAUSDT 2026-04-13 0 > out/integration/cost/t1c/log_ADAUSDT_13_0.txt 2>&1
+python3.12 -I out/integration/cost/t1_hedge_cost.py --fracs 0.25,0.5,1.0,2.0,4.0 --max-levels 500 --extra --seq --out t1c archive ADAUSDT 2026-04-13 13 > out/integration/cost/t1c/log_ADAUSDT_13_13.txt 2>&1
+python3.12 -I out/integration/cost/t1_hedge_cost.py --fracs 0.25,0.5,1.0,2.0,4.0 --max-levels 500 --extra --seq --out t1c archive MNTUSDT 2026-04-01 0 > out/integration/cost/t1c/log_MNTUSDT_01_0.txt 2>&1
+python3.12 -I out/integration/cost/t1_hedge_cost.py --fracs 0.25,0.5,1.0,2.0,4.0 --max-levels 500 --extra --seq --out t1c archive MNTUSDT 2026-04-01 13 > out/integration/cost/t1c/log_MNTUSDT_01_13.txt 2>&1
+python3.12 -I out/integration/cost/t1_hedge_cost.py --fracs 0.25,0.5,1.0,2.0,4.0 --max-levels 500 --extra --seq --out t1c archive MNTUSDT 2026-04-03 0 > out/integration/cost/t1c/log_MNTUSDT_03_0.txt 2>&1
+python3.12 -I out/integration/cost/t1_hedge_cost.py --fracs 0.25,0.5,1.0,2.0,4.0 --max-levels 500 --extra --seq --out t1c archive MNTUSDT 2026-04-03 13 > out/integration/cost/t1c/log_MNTUSDT_03_13.txt 2>&1
+python3.12 -I out/integration/cost/t1_hedge_cost.py --fracs 0.25,0.5,1.0,2.0,4.0 --max-levels 500 --extra --seq --out t1c archive MNTUSDT 2026-04-05 0 > out/integration/cost/t1c/log_MNTUSDT_05_0.txt 2>&1
+python3.12 -I out/integration/cost/t1_hedge_cost.py --fracs 0.25,0.5,1.0,2.0,4.0 --max-levels 500 --extra --seq --out t1c archive MNTUSDT 2026-04-05 13 > out/integration/cost/t1c/log_MNTUSDT_05_13.txt 2>&1
+python3.12 -I out/integration/cost/t1_hedge_cost.py --fracs 0.25,0.5,1.0,2.0,4.0 --max-levels 500 --extra --seq --out t1c archive MNTUSDT 2026-04-07 0 > out/integration/cost/t1c/log_MNTUSDT_07_0.txt 2>&1
+python3.12 -I out/integration/cost/t1_hedge_cost.py --fracs 0.25,0.5,1.0,2.0,4.0 --max-levels 500 --extra --seq --out t1c archive MNTUSDT 2026-04-07 13 > out/integration/cost/t1c/log_MNTUSDT_07_13.txt 2>&1
+python3.12 -I out/integration/cost/t1_hedge_cost.py --fracs 0.25,0.5,1.0,2.0,4.0 --max-levels 500 --extra --seq --out t1c archive MNTUSDT 2026-04-09 0 > out/integration/cost/t1c/log_MNTUSDT_09_0.txt 2>&1
+python3.12 -I out/integration/cost/t1_hedge_cost.py --fracs 0.25,0.5,1.0,2.0,4.0 --max-levels 500 --extra --seq --out t1c archive MNTUSDT 2026-04-09 13 > out/integration/cost/t1c/log_MNTUSDT_09_13.txt 2>&1
+python3.12 -I out/integration/cost/t1_hedge_cost.py --fracs 0.25,0.5,1.0,2.0,4.0 --max-levels 500 --extra --seq --out t1c archive MNTUSDT 2026-04-11 0 > out/integration/cost/t1c/log_MNTUSDT_11_0.txt 2>&1
+python3.12 -I out/integration/cost/t1_hedge_cost.py --fracs 0.25,0.5,1.0,2.0,4.0 --max-levels 500 --extra --seq --out t1c archive MNTUSDT 2026-04-11 13 > out/integration/cost/t1c/log_MNTUSDT_11_13.txt 2>&1
+python3.12 -I out/integration/cost/t1_hedge_cost.py --fracs 0.25,0.5,1.0,2.0,4.0 --max-levels 500 --extra --seq --out t1c archive MNTUSDT 2026-04-13 0 > out/integration/cost/t1c/log_MNTUSDT_13_0.txt 2>&1
+python3.12 -I out/integration/cost/t1_hedge_cost.py --fracs 0.25,0.5,1.0,2.0,4.0 --max-levels 500 --extra --seq --out t1c archive MNTUSDT 2026-04-13 13 > out/integration/cost/t1c/log_MNTUSDT_13_13.txt 2>&1

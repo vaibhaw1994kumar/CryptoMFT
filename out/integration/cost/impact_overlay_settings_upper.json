@@ -1,0 +1,14 @@
+{
+ "level": 3,
+ "form": "volume",
+ "y": 0.4219150780336754,
+ "sigma_daily_bps": 546.755813623101,
+ "daily_volume": 37353992.31875382,
+ "delta_volume": 0.54,
+ "permanent_fraction": 1.0,
+ "kernel": "exp",
+ "tau_s": 18.0,
+ "cross_bybit_to_binance": 0.2474225757564385,
+ "cross_binance_to_bybit": 0.16003353605669593,
+ "label": "PROXY, ALL runs of 03-01, 03-08, 03-11 (phi capped at 1): the UPPER BOUND; sigma and V from the 2026-10-29 capture (Binance)"
+}

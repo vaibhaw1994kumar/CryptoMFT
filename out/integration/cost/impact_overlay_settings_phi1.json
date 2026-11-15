@@ -1,0 +1,14 @@
+{
+ "level": 3,
+ "form": "volume",
+ "y": 0.1132,
+ "sigma_daily_bps": 546.8,
+ "daily_volume": 37353992.0,
+ "delta_volume": 0.44,
+ "permanent_fraction": 1.0,
+ "kernel": "exp",
+ "tau_s": 30.0,
+ "cross_bybit_to_binance": 0.247,
+ "cross_binance_to_bybit": 0.16,
+ "label": "PROXY: Y, delta, cross from March 2024 TRAIN+SELECT runs; sigma and V from the 2026-10-29 capture (Binance); permanent_fraction 1.0 (the fitted value capped at 1) and tau 30 s ASSUMED (the fits did not identify them)"
+}
