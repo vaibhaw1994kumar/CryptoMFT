@@ -35,6 +35,8 @@ from crypto_stat_arb.execution import DispatchPolicy
 from crypto_stat_arb.hedge_lifecycle import HedgePolicy
 from crypto_stat_arb.models import EventType, MarketEvent, TradeEvent
 from crypto_stat_arb.session import ExecutionMode, TradingSession
+from crypto_stat_arb.ems.venue_selector import SplitVenue, split_single_venue
+from crypto_stat_arb.simulation.impact import CurveImpact, DisplayedDepthImpact, ImpactOverlay, OwnTakeLedger
 from crypto_stat_arb.simulation.order_book import float_mirror
 from crypto_stat_arb.simulation.queue_adapter import QueueAwareVenueAdapter, SimulatedVenueFeeder
 from crypto_stat_arb.simulation.venue_state import VenueState
@@ -169,16 +171,18 @@ class SessionReplay:
         self.book_only_ns_by_day: dict[str, int] = {}
         self.truth = None
         if config.timing is not None and config.timing.truth_books and not recorded:       # WP3 truth books, the shared rule (timing.TruthBooks): taker arrivals and PostOnly checks use the venue-truth book at the arrival's exchange time
-            truth_books = {v: OrderBook(v, config.pair, self.venue_specs[v].delta_semantics, tape_repair=config.book_tape_repair, own_overlay=config.own_impact == "overlay",
+            truth_books = {v: OrderBook(v, config.pair, self.venue_specs[v].delta_semantics, tape_repair=config.book_tape_repair, own_overlay=config.own_impact in ("overlay", "refill"),
                                         message_atomic=config.message_atomic_book) for v in venues}
             self.truth = TruthBooks(truth_books, self._truth_apply, message_atomic=config.message_atomic_book, aligner_of=lambda: self.latency.aligner, stats=self.timing_stats)
         # The float VIEW books the strategy reads and the maker executor is judged against: persistent, message-atomic, touch ages kept, a cross repaired at message end: the backtester's own books,
         # fed here from the converted events. The core books (below, in the session) serve the core's gates, OMS and risk.
-        self.views = {v: OrderBook(v, config.pair, self.venue_specs[v].delta_semantics, tape_repair=config.book_tape_repair, own_overlay=config.own_impact == "overlay",
+        self.views = {v: OrderBook(v, config.pair, self.venue_specs[v].delta_semantics, tape_repair=config.book_tape_repair, own_overlay=config.own_impact in ("overlay", "refill"),
                                    message_atomic=config.message_atomic_book) for v in venues}
+        if config.own_impact == "refill" and getattr(config, "impact", None) is None:
+            raise ValueError("own_impact 'refill' needs an impact: block (its own_refill_tau_s is the refill constant of our own takes)")
         executor = MakerExecutor(EmpiricalFillModel(), config.maker)
         self.executor = executor
-        executor.own_overlay = config.own_impact == "overlay"
+        executor.own_overlay = config.own_impact in ("overlay", "refill")
         self.adapters = {self.names[v]: QueueAwareVenueAdapter(self.names[v], executor, tick_size=self.ticks[v], maker_fee_bps=self.venue_specs[v].fees.maker_bps, pair=config.pair,
                                                                state=self.states[v], truth=self.truth, feed_venue=v, view_book=(lambda v=v: self.views[v]), driver_fed=True) for v in venues}
         # Hedge-fault injection (owner 11 Nov, the ghost hedge): OFF unless the run asks (an existing run never changes because its profile names a fault block). On, the config's hedge_faults reach the venue
@@ -258,10 +262,37 @@ class SessionReplay:
             self.strategy.rejects = TracedRejects(self.strategy.rejects, self.strategy, self.reject_trace)
         self.session.strategies.append(self.shim)
         self.session.strategy = self.shim
+        if config.own_impact == "refill":                                  # step 2 (owner 15 Nov): our own takes live in a ledger per venue adapter; the taker walk reads a copy of the book with them removed (they refill as 1 - exp(-t / tau))
+            for a in self.adapters.values():
+                a.own_ledger = OwnTakeLedger(config.impact.own_refill_tau_s)
+                a.consume_liquidity = False                              # the base adapter's own mechanism (a take is withheld until the published level shrinks or a snapshot arrives; it never refills) is REPLACED by the ledger, not added to it
+            self.config_notes["own_impact"] = ("REFILL ON (ASSUMED tau " + str(config.impact.own_refill_tau_s) + " s): after an aggressive fill of ours the size taken is missing from the book the next taker walk reads, "
+                                               "coming back as 1 - exp(-t / tau); a public update does not reset it; the core book is never touched")
+        self.impact = None
+        if getattr(config, "impact", None) is not None and config.impact.level == 3:         # step C (owner 14 Nov): the reactive overlay. Absent (None / level below 3): nothing below exists
+            self.impact = ImpactOverlay(config.impact, {v: self.ticks[v] for v in venues})
+            for a in self.adapters.values():
+                a.impact = self.impact
+            self._impact_dp = {v: 0.0 for v in venues}                    # the price shift (price units) each venue's feed carries now, a whole number of its own ticks
+            self.config_notes["impact"] = ("LEVEL 3 OVERLAY ON (" + config.impact.label + "): after each aggressive order of ours the later prices of its venue move by the permanent + decaying shift of the fitted curve, the other venue by the "
+                                           "cross coefficient; the feed the views, the strategy and the maker fill engine read is shifted, the taker walk reads a shifted copy of the core book; the core books (gate, markouts, valuation) are NOT shifted")
+        self._impact_model = CurveImpact(config.impact) if getattr(config, "impact", None) is not None and config.impact.level >= 2 else None       # step C level 2: the peak estimate journaled with each decision
+        self._split_cfg = getattr(config, "split", None)                                                                                      # step E/F: the order-split evidence (observation only)
+        self._outflow_ratios: tuple = ()
+        if self._split_cfg is not None:
+            if not getattr(config.venue_state, "depth_quality", False):
+                raise ValueError("split evidence needs venue_state.depth_quality (it reads the recent depleting volume of the depth-quality tracker)")
+            if self._split_cfg.volume_window_s > config.venue_state.dq_flicker_window_s + 1e-9:
+                raise ValueError("split.volume_window_s must not exceed venue_state.dq_flicker_window_s")
+            self._outflow_ratios = tuple(sorted(float(x) for x in json.loads(Path(self._split_cfg.outflow_ratio_file).read_text())))
+            if not self._outflow_ratios:
+                raise ValueError("split.outflow_ratio_file holds no samples")
         if getattr(config.venue_state, "depth_quality", False):         # owner 14 Nov: gap depth and flicker per venue (off by default; nothing below exists with it off)
             self.session.feed_gap_hook = lambda venue, now_s: self.states[self._feed_venue(venue)].note_feed_gap(now_s)
-            if self.session.intent_observer is not None:
-                self.session.intent_observer.layer.set_evidence_provider(self._depth_evidence)
+            for v, st in self.states.items():
+                st.set_tick(self.ticks[v])                              # the venue's own price grid, for the thin-tick run rule (step B)
+        if (getattr(config.venue_state, "depth_quality", False) or self._impact_model is not None) and self.session.intent_observer is not None:
+            self.session.intent_observer.layer.set_evidence_provider(self._routing_evidence)
         self._stream = stream
         self.events = {"book": 0, "trade": 0}
         self.last_ns = 0
@@ -474,6 +505,98 @@ class SessionReplay:
     def _feed_venue(self, core_name: str) -> str:
         return next(v for v, n in self.names.items() if n == core_name)
 
+    def _impact_sync(self, fv: str, now_s: float, ets) -> float:
+        """Level 3: the price shift (price units) venue `fv`'s feed carries at `now_s`. When the whole-tick shift changed, the view is re-seeded from its OWN current levels moved by the difference, and the maker fill engine
+        is told as it is for any snapshot (a depth change moves queues, never fills an order)."""
+        ov = self.impact
+        if not ov.orders:
+            return 0.0
+        view = self.views[fv]
+        mid = view.mid if view.ready else 0.0
+        if mid <= 0:
+            return self._impact_dp[fv]
+        k = ov.shift_ticks(fv, now_s, mid)
+        if k != ov.applied_ticks[fv]:
+            delta = round((k - ov.applied_ticks[fv]) * self.ticks[fv], 12)
+            bids = [[round(p + delta, 8), q] for p, q in view.levels("bid", 100_000)]
+            asks = [[round(p + delta, 8), q] for p, q in view.levels("ask", 100_000)]
+            ov.applied_ticks[fv] = k
+            self._impact_dp[fv] = round(k * self.ticks[fv], 12)
+            if bids and asks:
+                view.apply_snapshot(bids, asks, now_s)
+                self.states[fv].on_book(view, now_s)
+                adapter = self.adapters[self.names[fv]]
+                self._deliver(adapter, adapter.feed_snapshot(view, now_s, ets), int(now_s * _NS), int(now_s * _NS))
+        return self._impact_dp[fv]
+
+    def _routing_evidence(self, venue: str, side: str, now_s: float, qty: float | None = None) -> dict | None:
+        """The routing evidence the layer journals with a decision, for the side the order consumes of one venue's book (steps B, C, E, F; OBSERVATION ONLY, nothing is sent from it):
+          depth_quality  gap depth, survival, cancel-to-trade, spike (VenueState), when depth_quality is on
+          impact         the level-2 peak estimate in bps for `qty` at the decision, when config.impact has a curve
+          order_split    what the order split (Cont and Kukanov) would have chosen for `qty`: its inputs and the market and limit parts, when config.split is set"""
+        fv = self._feed_venue(venue)
+        view, state = self.views[fv], self.states[fv]
+        out: dict = {}
+        dq = state.depth_quality(view, now_s, side)
+        if dq is not None:
+            out["depth_quality"] = dq
+        peak = None
+        if self._impact_model is not None and qty:
+            cfg = self.config.impact
+            touch = (view.best_ask if side == "ask" else view.best_bid) if view.ready else 0.0
+            dk = None
+            if touch > 0:
+                limit = touch * (1.0 + cfg.depth_k_bps / 1e4) if side == "ask" else touch * (1.0 - cfg.depth_k_bps / 1e4)
+                dk = view.depth_within(side, limit)
+            peak = self._impact_model.cost_bps(float(qty), depth_k=dk)
+            out["impact"] = {"peak_bps": peak, "form": cfg.form, "depth_k": dk, "label": cfg.label + " (a fitted curve, a PROXY: not checked against real fills)"}
+        if self._split_cfg is not None and qty and dq is not None and view.ready:
+            out["order_split"] = self._split_evidence(fv, view, state, side, float(qty), now_s, dq, peak)
+        return out or None
+
+    def _split_evidence(self, fv: str, view, state, consumed: str, qty: float, now_s: float, dq: dict, peak: float | None) -> dict:
+        cfg, specs = self._split_cfg, self.venue_specs[fv]
+        rest_side = "ask" if consumed == "bid" else "bid"                       # a limit order of ours would rest on the OTHER side of the book, at its touch
+        levels = view.levels(rest_side, 1)
+        queue = levels[0][1] if levels else 0.0
+        recent = state.recent_volume(rest_side, now_s, cfg.volume_window_s) or 0.0
+        scale = max(recent, cfg.min_recent_volume)
+        samples = tuple(r * scale for r in self._outflow_ratios)
+        survival = (dq["survival"][consumed] or {}).get("mean", 1.0)
+        gap = dq["gap"][consumed]
+        depth_k = DisplayedDepthImpact().effective_depth_within_cap(view.levels(consumed, 80), (view.best_ask if consumed == "ask" else view.best_bid) * (1.0 + (1 if consumed == "ask" else -1) * 10.0 / 1e4), consumed == "ask", survival)
+        cap = min(depth_k, gap["depth"]) if gap["status"] == "GAP" and gap["depth"] is not None else depth_k
+        v = SplitVenue(fv, True, queue, samples, view.spread_bps / 2.0, specs.fees.taker_bps, -specs.fees.maker_bps, cfg.adverse_bps, peak or 0.0, cap)
+        d = split_single_venue(qty, v, cfg.lambda_u_bps, lambda_o_bps=cfg.lambda_o_bps)
+        return {"market": d.market.get(fv, 0.0), "limit": d.limit.get(fv, 0.0), "p": d.p, "status": d.status, "method": d.method,
+                "inputs": {"queue_ahead": queue, "recent_volume": recent, "outflow_samples": len(samples), "half_spread_bps": v.half_spread_bps, "taker_fee_bps": v.fee_bps, "rebate_bps": v.rebate_bps,
+                           "adverse_bps": v.adverse_bps, "impact_bps": v.impact_bps, "lambda_u_bps": cfg.lambda_u_bps, "max_market_qty": cap, "survival_mean": survival, "horizon_s": cfg.horizon_s},
+                "label": cfg.label + ", OBSERVATION ONLY: nothing was sent from this split"}
+
+    def _impact_sync(self, fv: str, now_s: float, ets) -> float:
+        """Level 3: the price shift (price units) venue `fv`'s feed carries at `now_s`. When the whole-tick shift changed, the view is re-seeded from its OWN current levels moved by the difference, and the maker fill engine
+        is told as it is for any snapshot (a depth change moves queues, never fills an order)."""
+        ov = self.impact
+        if not ov.orders:
+            return 0.0
+        view = self.views[fv]
+        mid = view.mid if view.ready else 0.0
+        if mid <= 0:
+            return self._impact_dp[fv]
+        k = ov.shift_ticks(fv, now_s, mid)
+        if k != ov.applied_ticks[fv]:
+            delta = round((k - ov.applied_ticks[fv]) * self.ticks[fv], 12)
+            bids = [[round(p + delta, 8), q] for p, q in view.levels("bid", 100_000)]
+            asks = [[round(p + delta, 8), q] for p, q in view.levels("ask", 100_000)]
+            ov.applied_ticks[fv] = k
+            self._impact_dp[fv] = round(k * self.ticks[fv], 12)
+            if bids and asks:
+                view.apply_snapshot(bids, asks, now_s)
+                self.states[fv].on_book(view, now_s)
+                adapter = self.adapters[self.names[fv]]
+                self._deliver(adapter, adapter.feed_snapshot(view, now_s, ets), int(now_s * _NS), int(now_s * _NS))
+        return self._impact_dp[fv]
+
     def _depth_evidence(self, venue: str, side: str, now_s: float) -> dict | None:
         """The routing evidence the layer journals with a decision: the gap depth and flicker of `side` of one venue's book (the side the order consumes), from the venue's own VenueState."""
         fv = self._feed_venue(venue)
@@ -608,15 +731,17 @@ class SessionReplay:
         self.session.books[(event.venue, event.instrument_id)].apply(event)
         fv = self._feed_venue(event.venue)
         view, state, adapter, ets = self.views[fv], self.states[fv], self.adapters[event.venue], self._ets(event.exchange_ts_ns)
+        dp = self._impact_sync(fv, now_s, ets) if self.impact is not None else 0.0          # level 3: the shift this venue's feed carries (0.0 = no overlay: every price below is exactly the event's)
+        px = (lambda l: float(l.price)) if not dp else (lambda l: round(float(l.price) + dp, 8))
         produced: list = []
         if event.event_type == EventType.BOOK_SNAPSHOT:
-            bids, asks = [[float(l.price), float(l.quantity)] for l in event.bids], [[float(l.price), float(l.quantity)] for l in event.asks]
+            bids, asks = [[px(l), float(l.quantity)] for l in event.bids], [[px(l), float(l.quantity)] for l in event.asks]
             if bids and asks:
                 view.apply_snapshot(bids, asks, now_s)
                 state.on_book(view, now_s)
                 produced += adapter.feed_snapshot(view, now_s, ets)
         else:
-            levels = [("bid", float(l.price), float(l.quantity)) for l in event.bids] + [("ask", float(l.price), float(l.quantity)) for l in event.asks]
+            levels = [("bid", px(l), float(l.quantity)) for l in event.bids] + [("ask", px(l), float(l.quantity)) for l in event.asks]
             for side, price, size in levels:
                 view.apply_delta(side, price, size, "modify", now_s)
             view.end_message()
@@ -631,6 +756,11 @@ class SessionReplay:
             self._synth_mark(event)
 
     def _trade(self, trade: TradeEvent) -> None:
+        if self.impact is not None:                                           # level 3: a print on a venue the overlay has moved is printed at the moved price
+            fv = self._feed_venue(trade.venue)
+            dp = self._impact_sync(fv, trade.receive_ts_ns / _NS, self._ets(trade.exchange_ts_ns))
+            if dp:
+                trade = dataclasses.replace(trade, price=trade.price + Decimal(repr(round(dp, 12))))
         if not self.feeder.on_trade(trade):
             return
         now = trade.receive_ts_ns

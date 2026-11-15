@@ -144,7 +144,7 @@ SWITCHES: tuple[Switch, ...] = (
     _mandatory("postonly_reject_model"),
     _mandatory("product_fee_consistency"),
     Switch("book_tape_repair", "LEGACY_COMPAT", note="engine default True (and in v1): the trade tape lowers book levels, which double-depletes when the depth decrease arrives first; v1.1 sets False"),
-    Switch("own_impact", "LEGACY_COMPAT", note="legacy (v1): own taker consumption mutates the public book; overlay (v1.1): a shadow overlay cleared at the next public update of that level"),
+    Switch("own_impact", "LEGACY_COMPAT", note="legacy (v1): own taker consumption mutates the public book; overlay (v1.1): a shadow overlay cleared at the next public update of that level; refill (owner 15 Nov, off in every profile): the shadow persists through public updates and refills as 1 - exp(-t / impact.own_refill_tau_s)"),
     Switch("maker.ledger_epoch", "LEGACY_COMPAT", note="off in v1; v1.1 sets True: a snapshot / reset invalidates old netting credit, ambiguous associations are flagged"),
     Switch("execution.primary.reprice", "CALIBRATED", note="none in v1 / v1.1 / v1_2 (a resting quote is never repriced); v1_3 carries the S0 rule with every number null and enabled false: the trader (or the live values) supplies them, nothing is fitted"),
     Switch("placement_book", "LEGACY_COMPAT", note="view in v1 / v1.1 (a passive order joins the strategy's feed-delayed book); v1_2 carries the switch: truth = the venue-truth book at the arrival's exchange time, the book PostOnly is judged on, when it is complete there, otherwise the view book (counted)"),
@@ -226,6 +226,8 @@ def apply_profile(doc: dict, dataset: str | None = None, **overrides):
     from .fill_engine import MakerConfig
     from .postonly import AckLatencyConfig
     from .venue_state import VenueStateConfig
+    from crypto_stat_arb.simulation.impact import ImpactConfig
+    from crypto_stat_arb.ems.venue_selector import SplitConfig
     from .hedge_faults import HedgeFaultConfig
     from .margin_model import MarginModelConfig, MarginTier, VenueMargin
     from .timing import ClockConfig, TimingConfig
@@ -290,7 +292,7 @@ def apply_profile(doc: dict, dataset: str | None = None, **overrides):
     check_latency_preset(doc, cfg_kw.get("latency_preset"), timing_preset, sensitivity)
     cfg = _build(ArbBacktestConfig, cfg_kw, where=f"profile {doc.get('name')}",
                  nested={"arb": ArbConfig, "maker": MakerConfig, "venue_state": VenueStateConfig, "agent_flow": AgentFlowConfig,
-                         "ack_latency": AckLatencyConfig})
+                         "ack_latency": AckLatencyConfig, "impact": ImpactConfig, "split": SplitConfig})
     hm = doc.get("hedge_move_calibration")
     if hm:
         cfg.arb.expected_hedge_move_bps_bid, cfg.arb.expected_hedge_move_bps_ask, hm_info = load_hedge_move_calibration(doc, hm, cfg.start_date)

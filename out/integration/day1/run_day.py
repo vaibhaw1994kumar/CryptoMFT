@@ -4,6 +4,7 @@ margin marks from the recorded derivatives stream when the part has derivatives.
 (no derivatives files locally), mark = mid, S1 table out-of-period (fitted March 2024), no own orders on the venues so the fills are simulated and show mechanics only.
 usage: run_day.py PROFILE OUT_DIR [MINUTES] [--size SOL] [--gross SOL] [--cap] [--src DIR] [--processing-strategy-ms X] [--processing-risk-ms Y] [--regime-boundaries FILE]      (MINUTES limits the run to the first minutes of the capture, for a trial; --size is the clip and net ceiling (default 1), --gross the per-venue
 limit (default 5 SOL; for a size sweep use at least 5 x size); --cap switches the E3 participation cap on (maker.participation_cap, default off). Owner 12 Nov: the sweep sizes are run settings, not a copy of this file)"""
+import dataclasses
 import itertools
 import json
 import sys
@@ -24,6 +25,9 @@ def _opt(flag, default, cast=float):
 size, gross_cli = _opt("--size", 1.0), _opt("--gross", None)       # owner 13 Nov: without --gross the profile's own gross per venue is used (v1_9: 2.0, approved production limit), else 5.0
 proc_strategy, proc_risk = _opt("--processing-strategy-ms", 0.0), _opt("--processing-risk-ms", 0.0)      # owner 12 Nov: the decision and risk processing time (default 0: nothing changes)
 boundaries = _opt("--regime-boundaries", None, str)                                                      # the training-day boundaries file: with it the lifecycle report is written (session_lifecycle_report.json)
+maker_venue = _opt("--maker-venue", None, str)                   # owner 14 Nov (step G T2): the venue that rests the quote (the other hedges); default = the profile's own (Bybit)
+split_file = _opt("--split", None, str)                          # owner 14 Nov (step F): a JSON file of SplitConfig settings: the order-split evidence journaled with every decision (needs --depth-quality); observation only
+impact_file = _opt("--impact", None, str)                        # owner 14 Nov (step C): a JSON file of ImpactConfig settings: the level-3 overlay on; without it nothing changes
 part_max = _opt("--participation-max", None)                  # owner 14 Nov (E3 follow-up): override arb.participation_max for an observation run (1.0 = the limit almost never binds)
 depth_quality = "--depth-quality" in argv                       # owner 14 Nov: VenueStateConfig.depth_quality on (gap depth and flicker journaled with every intent and child); observation only, off by default
 if depth_quality:
@@ -42,6 +46,14 @@ profile = load_profile(name)
 cfg = apply_profile(profile, dataset="mar2024", data_root="", pair="SOLUSDT", start_date="2026-10-29", end_date="2026-10-29", output_dir=str(out))
 if part_max is not None:
     cfg.arb.participation_max = part_max
+if maker_venue:
+    cfg.arb.maker_venues = (maker_venue,)
+if split_file:
+    from crypto_stat_arb.ems.venue_selector import SplitConfig
+    cfg.split = SplitConfig(**json.loads(Path(split_file).read_text()))
+if impact_file:
+    from crypto_stat_arb.simulation.impact import ImpactConfig
+    cfg.impact = ImpactConfig(**json.loads(Path(impact_file).read_text()))
 if depth_quality:
     cfg.venue_state.depth_quality = True
 cfg.arb.max_position_base = size                # the clip and the net ceiling (1 SOL by default, + the profile's fill headroom)
@@ -72,6 +84,11 @@ result["run"] = {"profile": name, "minutes_limit": minutes, "wall_s": round(time
                  "labels": ["EXPLORATORY", "recorder quality REJECTED; host clock UNKNOWN", "funding not included (no derivatives files locally); mark = mid", "S1 table out-of-period (SOL, fitted March 2024)",
                             "no own orders on the venues: simulated fills show mechanics only", f"size {size} SOL clip, net ceiling {size} SOL + headroom, {gross} SOL gross per venue (owner 11 Nov; sweep settings), participation cap {'ON' if cap else 'off'}", f"processing time strategy {proc_strategy} ms + risk {proc_risk} ms" + (" (ASSUMED sensitivity)" if proc_strategy or proc_risk else " (ASSUMED_ZERO)"), "marks: the recorded derivatives stream when present, else MARK_FROM_MID (replay only)"]}
 write_result(result, out)
+if getattr(replay, "impact", None) is not None:                     # step C: what the overlay did (aggregates only)
+    ov = replay.impact
+    (out / "session_impact.json").write_text(json.dumps({"label": "EXPLORATORY: level-3 impact overlay; the settings are in impact_settings, the label says where they come from", "impact_settings": dataclasses.asdict(ov.cfg) if hasattr(ov.cfg, "__dataclass_fields__") else {},
+        "counts": ov.counts, "orders": len(ov.orders), "orders_by_venue": {v: sum(1 for o in ov.orders if o.venue == v) for v in ov.ticks}, "mean_peak_bps": (sum(o.peak_bps for o in ov.orders) / len(ov.orders)) if ov.orders else None,
+        "max_peak_bps": max((o.peak_bps for o in ov.orders), default=None), "final_applied_ticks": ov.applied_ticks, "tick": ov.ticks}, indent=1))
 # Owner 13 Nov (the end-to-end rehearsal): the files the report needs that write_result does not make. The safety events in full (payloads included), and one file with every stop-quoting condition and every limit counter of the run,
 # read from the session (counts are complete, never a truncated list).
 import collections

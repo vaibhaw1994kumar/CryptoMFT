@@ -24,6 +24,9 @@ final mid. Attribution splits the result into:
 """
 from __future__ import annotations
 
+from crypto_stat_arb.ems.venue_selector import SplitConfig
+from crypto_stat_arb.simulation.impact import ImpactConfig
+
 import argparse
 import json
 import random
@@ -98,6 +101,8 @@ class ArbBacktestConfig:
     #                     "delta_first": equal timestamps ordered delta -> snapshot -> trade (a snapshot stamped with its deltas' update id).
     #   own_impact        "overlay": our own taker consumption (and maker print budget) lives in a shadow overlay cleared at the next public update
     #                     of that price level; the reconstructed public book is never mutated by an own fill. "legacy": consume_liquidity mutates it.
+    #                     "refill" (owner 15 Nov): the same shadow, but a public update does NOT clear it: what we took comes back as 1 - exp(-t / tau),
+    #                     tau = impact.own_refill_tau_s (an impact: block is required).
     # Queue model v2: maker-only analysis mode. "maker_only": the strategy and the hedge are switched off and the orders in `scheduled_orders` are injected through the SAME path
     # a strategy order takes (_fire -> PASSIVE intent -> risk group -> _send_leg -> latency -> maker.place -> the fill model). Each item is (release_ts, side, price, qty); price is a
     # number (an exact limit price) or "touch" | "improve" | "second", taken from the maker venue's book when the order is released. An optional fifth item, cancel_ts (exchange-clock
@@ -122,6 +127,8 @@ class ArbBacktestConfig:
     core_shadow: bool = False
     event_order: str = "legacy"
     own_impact: str = "legacy"
+    split: "SplitConfig | None" = None         # step F (owner 14 Nov): the order-split evidence journaled with every decision (observation only); None = off
+    impact: "ImpactConfig | None" = None       # step C (owner 14 Nov): price impact of our own aggressive orders; None = off, byte-identical to every earlier run
     include_deltas: bool = True
     # How duplicate trade records are removed when several collector files overlap: "set" (legacy: any repeat of a
     # record within 3 s is dropped, which also drops genuine identical prints inside one file) or "multiset" (only
@@ -573,6 +580,11 @@ class CrossVenueArbBacktester:
         # WP3 venue-truth books: per venue, the book as the EXCHANGE saw it at an arrival's exchange time, built from events the
         # feed has delivered or will deliver within the look-ahead window (receive order == exchange order within a venue, counted
         # when not). Taker arrivals execute against it; the strategy only ever reads self.books (receive time).
+        self._own_refill_tau: float | None = None   # own_impact "refill" (owner 15 Nov, step 2): the refill constant of our own takes, from impact.own_refill_tau_s
+        if config.own_impact == "refill":
+            if getattr(config, "impact", None) is None:
+                raise ValueError("own_impact 'refill' needs an impact: block (its own_refill_tau_s is the refill constant of our own takes)")
+            self._own_refill_tau = config.impact.own_refill_tau_s
         self._truth_on = config.timing is not None and config.timing.truth_books
         self.truth_books: dict[str, OrderBook] = {}
         self._ahead: dict[str, deque] = {v: deque() for v in config.venues}
@@ -585,12 +597,12 @@ class CrossVenueArbBacktester:
             self._install_timing()
             if self._truth_on:
                 self.truth_books = {v: OrderBook(v, config.pair, self.venue_specs[v].delta_semantics, tape_repair=config.book_tape_repair,
-                                                 own_overlay=config.own_impact == "overlay", message_atomic=config.message_atomic_book) for v in config.venues}
+                                                 own_overlay=config.own_impact in ("overlay", "refill"), message_atomic=config.message_atomic_book, own_refill_tau=self._own_refill_tau) for v in config.venues}
                 self._truth = TruthBooks(self.truth_books, self._truth_apply, message_atomic=config.message_atomic_book, aligner_of=lambda: self.latency.aligner, stats=self.timing_stats)
                 self._ahead = self._truth.ahead                    # the same deques: the placement code below reads them directly
         self.books: dict[str, OrderBook] = {
             v: OrderBook(v, config.pair, self.venue_specs[v].delta_semantics, tape_repair=config.book_tape_repair,
-                         own_overlay=config.own_impact == "overlay", message_atomic=config.message_atomic_book)
+                         own_overlay=config.own_impact in ("overlay", "refill"), message_atomic=config.message_atomic_book, own_refill_tau=self._own_refill_tau)
             for v in config.venues
         }
         self._shadow = None
@@ -664,7 +676,7 @@ class CrossVenueArbBacktester:
         )
         self.taker = TakerExecutor(consume_liquidity=config.consume_liquidity, own_impact=config.own_impact)
         self.maker = MakerExecutor(self.fill_model, config.maker)
-        self.maker.own_overlay = config.own_impact == "overlay"
+        self.maker.own_overlay = config.own_impact in ("overlay", "refill")
         self.pending = PendingOrderQueue()
         self.markouts = MarkoutTracker(config.markout_horizons_s)
         self.inventory = InventoryBook()
