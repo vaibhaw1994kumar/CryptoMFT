@@ -68,12 +68,17 @@ class GapDepth(unittest.TestCase):
         self.assertEqual(state().gap_depth(book([(100.0, 1.0)], fine), "ask", 1.0)["status"], "NO_GAP_WITHIN_CAPTURE")
         self.assertEqual(state(dq_gap_stretch_bps=11.0).gap_depth(book([(100.0, 1.0)], coarse), "ask", 1.0)["status"], "NO_GAP_WITHIN_CAPTURE")
 
-    def test_near_empty_levels_do_not_bridge_a_stretch(self):
-        asks = [(101.00, 5.0), (101.01, 0.01), (101.02, 0.01), (101.05, 5.0)]
-        self.assertEqual(state().gap_depth(book([(100.0, 1.0)], asks), "ask", 1.0)["status"], "NO_GAP_WITHIN_CAPTURE")      # 4.95 bps from 101.00 but 101.01 counts as a level
-        g = state(dq_gap_level_size=0.5).gap_depth(book([(100.0, 1.0)], asks), "ask", 1.0)
+    def test_thin_ticks_make_a_gap_only_with_the_venue_tick_and_a_run_of_m(self):
+        asks = [(101.00, 5.0), (101.01, 0.01), (101.02, 0.01), (101.05, 5.0)]                              # 2 thin levels + 2 absent ticks = a run of 4
+        st = state(dq_gap_level_size=0.5)                                                                    # warm-up rule: absolute, no medians yet
+        self.assertEqual(st.gap_depth(book([(100.0, 1.0)], asks), "ask", 1.0)["status"], "NO_GAP_WITHIN_CAPTURE")      # no tick known: the thin-run rule cannot run; no 3 bps jump between displayed levels
+        st.set_tick(0.01)
+        g = st.gap_depth(book([(100.0, 1.0)], asks), "ask", 1.0)
         self.assertEqual(g["status"], "GAP")
-        self.assertAlmostEqual(g["depth"], 5.02)
+        self.assertAlmostEqual(g["depth"], 5.0)                                                              # the size before the stretch starts (the thin levels are inside it)
+        st2 = state(dq_gap_level_size=0.5, dq_gap_min_ticks=5)
+        st2.set_tick(0.01)
+        self.assertEqual(st2.gap_depth(book([(100.0, 1.0)], asks), "ask", 1.0)["status"], "NO_GAP_WITHIN_CAPTURE")      # a run of 4 is below m = 5
 
     def test_bid_side_walks_downward(self):
         bids = [(100.00, 4.0), (99.99, 4.0), (98.00, 40.0)]
@@ -216,6 +221,158 @@ class AgreesWithTheDepletionLedger(unittest.TestCase):
         self.check([("book", 8.0, 2.000), ("book", 5.0, 2.010), ("print", 4.0, 2.020)])
 
 
+def ladder(side, n=10, size=10.0, thin=(), top=100.0, tick=0.01, skip=()):
+    """n levels from the touch outward; `thin` = distances (in ticks) whose size is 1; `skip` = distances with no level at all."""
+    sgn = -1 if side == "bid" else 1
+    return [(round(top + sgn * k * tick, 6), 1.0 if k in thin else size) for k in range(n) if k not in skip]
+
+
+class StepBGaps(unittest.TestCase):
+    """Step B: a tick is thin when its level is absent or below g x the rolling median level size at that distance; a gap is m or more consecutive thin ticks or a jump between displayed levels."""
+
+    def trained(self, **kw):
+        st = state(dq_median_min_samples=5, dq_median_eta=0.02, dq_gap_scan_levels=50, **kw)
+        st.set_tick(0.01)
+        warm = book(ladder("bid", 20), ladder("ask", 20, top=100.01))
+        for _ in range(40):
+            st._dq_update_medians(warm)
+        return st
+
+    def test_the_median_tracker_settles_near_the_typical_size_at_each_distance(self):
+        st = self.trained()
+        for key, (m, n) in st._dq_med.items():
+            self.assertGreaterEqual(n, 5)
+            self.assertAlmostEqual(m, 10.0, delta=1.0, msg=key)
+
+    def test_three_thin_ticks_in_a_row_are_a_gap_and_two_are_not(self):
+        st = self.trained()
+        three = book(ladder("bid", 20), ladder("ask", 20, top=100.01, thin=(4, 5, 6)))
+        g = st.gap_depth(three, "ask", 1.0)
+        self.assertEqual(g["status"], "GAP")
+        self.assertAlmostEqual(g["depth"], 40.0)                                      # the four solid levels before the thin run
+        self.assertAlmostEqual(g["distance_bps"], 0.03 / 100.01 * 1e4, places=5)
+        two = book(ladder("bid", 20), ladder("ask", 20, top=100.01, thin=(4, 5)))
+        self.assertEqual(st.gap_depth(two, "ask", 1.0)["status"], "NO_GAP_WITHIN_CAPTURE")
+
+    def test_absent_ticks_count_as_thin_and_a_size_at_the_threshold_is_not_thin(self):
+        st = self.trained()
+        gone = book(ladder("bid", 20), ladder("ask", 20, top=100.01, skip=(4, 5, 6)))
+        self.assertEqual(st.gap_depth(gone, "ask", 1.0)["status"], "GAP")
+        edge = book(ladder("bid", 20), [(p, 2.6 if k in (4, 5, 6) else 10.0) for k, (p, _) in enumerate(ladder("ask", 20, top=100.01))])       # 2.6 > 0.25 x ~10
+        self.assertEqual(st.gap_depth(edge, "ask", 1.0)["status"], "NO_GAP_WITHIN_CAPTURE")
+
+    def test_count_within_n_bps_and_the_asymmetry(self):
+        st = self.trained()
+        b = book(ladder("bid", 20, thin=(3, 4, 5, 10, 11, 12)), ladder("ask", 20, top=100.01, thin=(8, 9, 10)))
+        dq = st.depth_quality(b, 1.0)
+        self.assertEqual((dq["gap"]["bid"]["count_within_bps"], dq["gap"]["ask"]["count_within_bps"]), (2, 1))
+        self.assertAlmostEqual(dq["gap_asymmetry"], (2 - 1) / 3)
+        none = book(ladder("bid", 20), ladder("ask", 20, top=100.01))
+        self.assertIsNone(st.depth_quality(none, 1.0)["gap_asymmetry"])
+        small = self.trained(dq_gap_within_bps=2.5)
+        self.assertEqual(small.depth_quality(b, 1.0)["gap"]["bid"]["count_within_bps"], 1)       # the first bid gap starts 2 bps out, the second 9 bps out
+
+    def test_persistence_classes_by_age_and_closed_lifetimes_are_counted(self):
+        st = self.trained()
+        gap = book(ladder("bid", 20), ladder("ask", 20, top=100.01, thin=(4, 5, 6)))
+        for i in range(0, 25):
+            st.on_book(gap, i * 0.5)
+        self.assertEqual(st.gap_depth(gap, "ask", 0.3)["persistence"], "<1s")
+        self.assertEqual(st.gap_depth(gap, "ask", 5.0)["persistence"], "1-10s")
+        self.assertEqual(st.gap_depth(gap, "ask", 12.0)["persistence"], "10-60s")
+        self.assertEqual(st.gap_depth(gap, "ask", 200.0)["persistence"], ">60s")
+        healed = book(ladder("bid", 20), ladder("ask", 20, top=100.01))
+        st.on_book(healed, 13.0)
+        self.assertGreaterEqual(st.dq_stats.get("gap_closed_10-60s", 0.0), 1.0)
+
+
+class GapMinBps(unittest.TestCase):
+    def test_a_run_of_ticks_is_a_price_distance_when_dq_gap_min_bps_is_set(self):
+        asks = [(101.000, 5.0), (101.003, 5.0), (101.010, 5.0)]                    # a 3-tick hole then a 7-tick hole on a 0.001 grid (0.3 and 0.7 bps)
+        tiny = state(dq_gap_level_size=0.0)
+        tiny.set_tick(0.001)
+        self.assertEqual(tiny.gap_depth(book([(100.0, 1.0)], asks), "ask", 1.0)["status"], "GAP")             # m = 3 ticks: a "gap" 0.2 bps wide (the defect)
+        scaled = state(dq_gap_min_bps=3.0)
+        scaled.set_tick(0.001)
+        self.assertEqual(scaled.gap_depth(book([(100.0, 1.0)], asks), "ask", 1.0)["status"], "NO_GAP_WITHIN_CAPTURE")   # 3 bps = 31 ticks here
+        wide = [(101.000, 5.0), (101.050, 5.0)]
+        self.assertEqual(scaled.gap_depth(book([(100.0, 1.0)], wide), "ask", 1.0)["status"], "GAP")           # 5 bps
+        off = state()
+        off.set_tick(0.01)
+        self.assertEqual(off._dq_scan(book([(100.0, 1.0)], wide), "ask") is not None, True)
+
+
+class StepBSurvival(unittest.TestCase):
+    def test_any_decrease_counts_and_growth_does_not(self):
+        st = state(dq_survival_min_samples=3, dq_survival_levels=3)
+        b = book([(100.0, 10.0), (99.99, 10.0), (99.98, 10.0)], [(100.01, 10.0), (100.02, 10.0)])
+        st.on_book(b, 0.0)
+        b.apply_delta("bid", 100.0, 5.0, "modify", 0.1)                                # the touch halves: a cancel or a print, it does not matter
+        st.on_book(b, 0.1)
+        s = st.survival("bid", 0.2)
+        self.assertEqual(s["n"], 3)
+        self.assertAlmostEqual(s["mean"], (0.5 + 1 + 1) / 3)
+        self.assertAlmostEqual(s["median"], 1.0)
+        self.assertAlmostEqual(s["p10"], 0.5)
+        b.apply_delta("bid", 99.99, 0.0, "modify", 0.2)                                # a level leaves: size at the next update is 0
+        b.apply_delta("bid", 99.98, 40.0, "modify", 0.2)                               # growth is not a decrease
+        st.on_book(b, 0.2)
+        s = st.survival("bid", 0.3)
+        self.assertAlmostEqual(s["p10"], 0.0)
+
+    def test_none_before_enough_samples_and_the_window_rolls(self):
+        st = state(dq_survival_min_samples=3, dq_survival_levels=1, dq_survival_window_s=1.0)
+        b = book([(100.0, 10.0)], [(100.01, 10.0), (100.02, 10.0)])
+        for t in (0.0, 0.1, 0.2):
+            st.on_book(b, t)
+        self.assertIsNone(st.survival("bid", 0.25))                                    # only 2 samples
+        st.on_book(b, 0.3)
+        self.assertIsNotNone(st.survival("bid", 0.35))
+        self.assertIsNone(st.survival("bid", 5.0))                                     # all older than the 1 s window
+
+
+class StepBSpike(unittest.TestCase):
+    def test_a_value_far_outside_its_own_baseline_is_a_spike_and_a_feed_fault_is_not(self):
+        st = state(dq_baseline_tau_s=100.0, dq_baseline_every_s=0.0)
+        vals = {"c2t": 5.0, "surv": 0.9}
+        st.flicker = lambda side, now: vals["c2t"]
+        st.survival = lambda side, now: {"median": vals["surv"]}
+        b = book([(100.0, 10.0), (99.99, 10.0)], [(100.01, 10.0), (100.02, 10.0)])
+        for i in range(120):
+            vals["c2t"], vals["surv"] = 5.0 + 0.1 * (i % 5), 0.9 + 0.005 * (i % 3)
+            st._dq_baselines(float(i))
+        self.assertEqual(st.spike(b, "bid", 120.0)["status"], "NORMAL")
+        vals["c2t"] = 5000.0
+        st._dq_baselines(120.0)
+        self.assertEqual(st.spike(b, "bid", 120.0)["status"], "SPIKE")
+        st.note_feed_gap(119.5)
+        self.assertEqual(st.spike(b, "bid", 120.0)["status"], "FEED_FAULT")
+        self.assertEqual(st.spike(b, "bid", 125.0)["status"], "SPIKE")                 # past the 2 s fault window
+        vals["c2t"], vals["surv"] = 5.0, 0.2
+        st._dq_baselines(130.0)
+        self.assertLessEqual(st.spike(b, "bid", 130.0)["survival_z"], -4.0)
+
+    def test_warmup_before_the_baseline_has_60_samples(self):
+        st = state(dq_baseline_every_s=0.0)
+        st.flicker = lambda side, now: 3.0
+        st.survival = lambda side, now: {"median": 1.0}
+        b = book([(100.0, 10.0), (99.99, 10.0)], [(100.01, 10.0), (100.02, 10.0)])
+        for i in range(10):
+            st._dq_baselines(float(i))
+        self.assertEqual(st.spike(b, "ask", 10.0)["status"], "WARMUP")
+
+    def test_depth_quality_carries_every_step_b_field_and_cancel_to_trade_is_the_flicker_number(self):
+        st = state()
+        b = book([(100.0, 10.0), (99.99, 10.0)], [(100.01, 10.0), (100.02, 10.0)])
+        st.on_book(b, 0.0)
+        dq = st.depth_quality(b, 100.0, "bid")
+        for key in ("approx", "gap", "gap_asymmetry", "flicker", "cancel_to_trade", "survival", "spike"):
+            self.assertIn(key, dq)
+        self.assertEqual(dq["flicker"], dq["cancel_to_trade"])
+        for key in ("depth", "distance_bps", "count_within_bps", "persistence", "status"):
+            self.assertIn(key, dq["gap"]["bid"])
+
+
 class TacticGap(unittest.TestCase):
     """choose_tactic with gap_aware: a market-style answer is capped when the size before the gap is smaller than the order; flicker discounts the executable depth; OFF by default, and an unknown field changes nothing."""
 
@@ -328,16 +485,17 @@ class JournalEvidence(unittest.TestCase):
     def test_a_provider_adds_the_evidence_for_the_side_the_order_consumes(self):
         xl, calls = self.layer(), []
 
-        def provider(venue, side, now):
-            calls.append((venue, side, now))
-            return {"gap": {side: {"status": "GAP", "depth": 4.0}}, "flicker": {side: 0.2}}
+        def provider(venue, side, now, qty=None):
+            calls.append((venue, side, now, qty))
+            return {"depth_quality": {"gap": {side: {"status": "GAP", "depth": 4.0}}, "flicker": {side: 0.2}}, "impact": {"peak_bps": 0.7}}
         xl.set_evidence_provider(provider)
         it = self.open(xl, "buy")
         xl.child_sent(it, 11, 11, "PASSIVE", 1.5)
         rows = {j["event"]: j for j in xl.journal if j["event"] in ("intent", "child")}
         self.assertEqual(rows["intent"]["depth_quality"]["BYBIT"]["gap"]["ask"]["depth"], 4.0)          # a buy consumes the asks
         self.assertEqual(rows["child"]["depth_quality"]["BYBIT"]["flicker"]["ask"], 0.2)
-        self.assertEqual(calls, [("BYBIT", "ask", 1.0), ("BYBIT", "ask", 1.5)])
+        self.assertEqual(rows["intent"]["impact"], {"BYBIT": {"peak_bps": 0.7}})                         # every evidence name the provider returns gets its own key
+        self.assertEqual(calls, [("BYBIT", "ask", 1.0, 2.0), ("BYBIT", "ask", 1.5, 2.0)])               # the order's quantity is passed
         sell = self.open(xl, "sell")
         self.assertEqual(calls[-1][1], "bid")
         self.assertIsNotNone(sell)

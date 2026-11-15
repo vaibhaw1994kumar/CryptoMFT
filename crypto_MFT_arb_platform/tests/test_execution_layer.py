@@ -378,6 +378,7 @@ class TacticChoiceTests(unittest.TestCase):
         gap = TacticChoiceConfig(liquidity_aware=True, gap_aware=True, flicker_weight=1.0)                              # owner 14 Nov: the two depth-quality reasons (gap_aware, default off)
         seen |= {choose_tactic(self.state(inventory_pressure=0.2, time_to_limit_s=1.0, order_qty=10.0, depth_to_first_gap=4.0, gap_status="GAP"), gap, allow_market_banded=True).reason,
                  choose_tactic(self.state(inventory_pressure=0.7, order_qty=10.0, executable_depth_within_cap=10.0, flicker=0.5), gap).reason}
+        seen |= {choose_tactic(self.state(inventory_pressure=0.7, order_qty=10.0, split_market_qty=4.0, split_limit_qty=6.0), TacticChoiceConfig(order_split=True)).reason}        # step E
         self.assertEqual(seen, set(TACTIC_CHOICE_REASONS))
 
     def grid(self):
