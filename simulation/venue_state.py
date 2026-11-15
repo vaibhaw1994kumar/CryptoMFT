@@ -48,6 +48,22 @@ class VenueStateConfig:
     dq_gap_level_size: float = 0.0           # base units: a level smaller than this counts as near-empty (0 = only an absent price is empty)
     dq_gap_scan_levels: int = 200            # levels read from the touch outward (the capture's own depth bounds it: Bybit 50, Binance 1000 on 2026-10-29)
     dq_feed_fault_window_s: float = 2.0      # a gap seen this soon after a sequence gap on the venue's feed is FEED_FAULT, not a cliff
+    # Step B (owner 14 Nov, execution cost model). A tick is THIN when its level is absent or smaller than dq_thin_ratio (g) x the rolling median level size at that distance (same venue, side, distance bucket);
+    # a GAP is dq_gap_min_ticks (m) or more consecutive thin ticks, or a jump of more than dq_gap_stretch_bps between two displayed levels. All ASSUMED.
+    dq_thin_ratio: float = 0.25              # g
+    dq_gap_min_ticks: int = 3                # m (needs the venue tick: VenueState.set_tick; without it only the jump rule and the absolute dq_gap_level_size apply)
+    dq_gap_min_bps: float = 0.0              # ASSUMED (the T1 / T5 runs use 3.0 and report 2 and 5 as sensitivity). 0 = off. Above 0 the run length m is at least this many bps of the touch price, in the venue's own ticks (a run of 3 ticks is 0.2 bps on a 0.001 tick and 3 bps on a 0.01 tick: m is tick-dependent, this makes it a price distance)
+    dq_gap_within_bps: float = 10.0          # N: gaps are counted within this many bps of the touch
+    dq_gap_eval_s: float = 0.1               # the gap scan (and its persistence tracking) runs at most this often
+    dq_median_every_s: float = 1.0           # the rolling median level sizes are updated at most this often
+    dq_median_eta: float = 0.02              # geometric step of the median tracker per sample (about 35 samples to halve an error): APPROXIMATE rolling median
+    dq_median_min_samples: int = 50          # a distance bucket's median is used once it has this many samples
+    dq_survival_levels: int = 3              # survival: the best N levels of each side
+    dq_survival_window_s: float = 10.0       # survival: rolling window of the per-update ratios; the median is reported
+    dq_survival_min_samples: int = 20
+    dq_baseline_tau_s: float = 600.0         # flicker spike: time constant of the rolling baseline (mean and variance) of log1p(cancel-to-trade) and of survival
+    dq_baseline_every_s: float = 1.0
+    dq_spike_z: float = 4.0                  # |z| at or above this = a spike (cancel-to-trade high, survival low)
 
 
 class VenueState:
@@ -152,7 +168,7 @@ class VenueState:
         self.last_mid_ts = ts
 
     # ── Depth quality: gap depth and flicker (owner 14 Nov; opt-in, VenueStateConfig.depth_quality) ───────
-    DQ_APPROX = "APPROXIMATE: L2 depth at the feed's update rate (100 ms on these captures); a decrease is split by the depletion ledger's rule, not observed per order"
+    DQ_APPROX = "APPROXIMATE (stays so until checked against real hedge fills): L2 depth at the feed's own update rate (2026-10-29 capture: Bybit book mean 30 ms, Binance book mean 105 ms between updates); medians are a geometric tracker, a decrease is split by the depletion ledger's rule, not observed per order"
 
     def _dq_init(self) -> None:
         self._dq_prev: dict[str, dict[float, float]] = {"bid": {}, "ask": {}}
@@ -162,6 +178,15 @@ class VenueState:
         self._dq_traded: dict[str, deque] = {"bid": deque(), "ask": deque()}             # (ts, volume) of prints that deplete this side (a sell aggressor hits the bids)
         self._dq_first_ts: float | None = None
         self._dq_last_feed_gap_ts: float | None = None
+        self._dq_tick: float = 0.0
+        self._dq_med: dict[tuple, list] = {}                 # (side, distance bucket) -> [median, samples]
+        self._dq_last_med_ts = -1e18
+        self._dq_last_eval_ts = -1e18
+        self._dq_gaps: dict[str, dict[float, list]] = {"bid": {}, "ask": {}}      # side -> start price -> [first_seen, last_seen]: the gaps now standing, for persistence
+        self._dq_surv: dict[str, deque] = {"bid": deque(), "ask": deque()}        # (ts, min(size now, size at the next update) / size now) for the best levels
+        self._dq_base: dict[tuple, dict] = {}                # (side, "c2t" | "surv") -> rolling baseline {mean, var, n, ts}
+        self._dq_z: dict[tuple, float | None] = {}
+        self._dq_last_base_ts = -1e18
         self.dq_stats: dict[str, float] = {}                 # print_volume_netted / decrease_volume_netted / unexplained_volume: the same names the ledger's ledger_stats uses
 
     def _dq_note(self, key: str, v: float) -> None:
@@ -254,12 +279,179 @@ class VenueState:
                     entry = self._dq_add("delta", key, ts, dec - explained)
                     if entry is not None:
                         self._dq_pending[side].append(entry)
+            if cfg.dq_survival_levels > 0 and prev:
+                order = sorted(prev, reverse=(side == "bid"))[:cfg.dq_survival_levels]
+                for price in order:
+                    old = prev[price]
+                    if old > 1e-12:
+                        self._dq_surv[side].append((ts, min(book.level_size(side, price), old) / old))       # ANY decrease counts: a cancel, a print or the level leaving
             self._dq_prev[side] = cur
+        if ts - self._dq_last_eval_ts >= cfg.dq_gap_eval_s:
+            self._dq_last_eval_ts = ts
+            if ts - self._dq_last_med_ts >= cfg.dq_median_every_s:
+                self._dq_last_med_ts = ts
+                self._dq_update_medians(book)
+            for side in ("bid", "ask"):
+                found = self._dq_scan(book, side)
+                if found is not None:
+                    self._dq_track(side, found, ts)
+        if ts - self._dq_last_base_ts >= cfg.dq_baseline_every_s:
+            self._dq_last_base_ts = ts
+            self._dq_baselines(ts)
+
+    def set_tick(self, tick: float) -> None:
+        """The venue's own price grid (instrument tick, NOT a strategy grid), for the thin-tick run rule. No effect with depth_quality off."""
+        if self._dq_on:
+            self._dq_tick = float(tick)
 
     def note_feed_gap(self, ts: float) -> None:
-        """The venue's feed reported a sequence gap at `ts`. A depth gap seen soon after is a feed fault, not a cliff. No effect with depth_quality off."""
+        """The venue's feed reported a sequence gap at `ts` (or its health flag went bad: same effect). A depth gap or a spike seen soon after is FEED_FAULT, not a cliff. No effect with depth_quality off."""
         if self._dq_on:
             self._dq_last_feed_gap_ts = ts
+
+    note_feed_fault = note_feed_gap
+
+    def _dq_faulty(self, book, now: float) -> bool:
+        last = self._dq_last_feed_gap_ts
+        return getattr(book, "state", "valid") == "recovering" or (last is not None and 0.0 <= now - last <= self.config.dq_feed_fault_window_s)
+
+    # median level size by distance from the touch
+    @staticmethod
+    def _dq_bucket(k: int) -> int:
+        return k if k < 4 else min(int(math.log2(k)) + 2, 9)           # 0,1,2,3 | 4-7 | 8-15 | 16-31 | 32-63 | 64-127 | 128+
+
+    def _dq_update_medians(self, book) -> None:
+        cfg, tick = self.config, self._dq_tick
+        if tick <= 0:
+            return
+        for side in ("bid", "ask"):
+            lv = book.levels(side, max(2, int(cfg.dq_gap_scan_levels)))
+            if len(lv) < 2:
+                continue
+            touch = lv[0][0]
+            for price, size in lv:
+                cell = self._dq_med.setdefault((side, self._dq_bucket(int(round(abs(price - touch) / tick)))), [size, 0])
+                cell[0] *= (1.0 + cfg.dq_median_eta) if size > cell[0] else (1.0 - cfg.dq_median_eta)
+                cell[1] += 1
+
+    def _dq_thin(self, side: str, k: int | None, size: float) -> bool:
+        cell = self._dq_med.get((side, self._dq_bucket(k))) if k is not None else None
+        if cell is not None and cell[1] >= self.config.dq_median_min_samples:
+            return size < self.config.dq_thin_ratio * cell[0]
+        return size < self.config.dq_gap_level_size            # warm-up (or no tick): the absolute rule, 0 = only an absent price is empty
+
+    def _dq_scan(self, book, side: str) -> list | None:
+        """The gaps of one side, from the touch outward: [(start price, size before the gap, distance of its start from the touch in bps)]. None when fewer than two levels are shown. A gap that would only end at the edge of
+        the captured depth is not a gap (the edge is not a cliff)."""
+        cfg, tick = self.config, self._dq_tick
+        lv = book.levels(side, max(2, int(cfg.dq_gap_scan_levels)))
+        if len(lv) < 2:
+            return None
+        touch = lv[0][0]
+        gaps: dict[float, tuple] = {}
+        m_eff = cfg.dq_gap_min_ticks
+        if cfg.dq_gap_min_bps > 0 and tick > 0:
+            m_eff = max(m_eff, int(math.ceil(cfg.dq_gap_min_bps * touch / 1e4 / tick)))
+        cum = run = 0
+        solid_px, solid_cum, prev_px, prev_k = touch, 0.0, touch, 0
+        for price, size in lv:
+            k = int(round(abs(price - touch) / tick)) if tick > 0 else None
+            if abs(price - prev_px) / touch * 1e4 > cfg.dq_gap_stretch_bps:                       # a price jump between two displayed levels
+                gaps.setdefault(prev_px, (prev_px, cum, abs(prev_px - touch) / touch * 1e4))
+            if k is not None:
+                run += max(0, k - prev_k - 1)                                                       # absent ticks are thin
+            if self._dq_thin(side, k, size):
+                run += 1
+            else:
+                if run >= m_eff > 0 and tick > 0:
+                    gaps.setdefault(solid_px, (solid_px, solid_cum, abs(solid_px - touch) / touch * 1e4))
+                run, solid_px, solid_cum = 0, price, cum + size
+            cum += size
+            prev_px = price
+            if k is not None:
+                prev_k = k
+        return sorted(gaps.values(), key=lambda g: g[2])
+
+    @staticmethod
+    def _dq_class(age: float) -> str:
+        return "<1s" if age < 1.0 else ("1-10s" if age < 10.0 else ("10-60s" if age < 60.0 else ">60s"))
+
+    def _dq_track(self, side: str, found: list, ts: float) -> None:
+        """Persistence: a gap is identified by the price of the last solid level before it. Seen again = it persists; gone = its lifetime is counted in dq_stats by class."""
+        stand = self._dq_gaps[side]
+        now_keys = set()
+        for start_px, _, _ in found:
+            key = round(start_px, 8)
+            now_keys.add(key)
+            cell = stand.get(key)
+            if cell is None:
+                stand[key] = [ts, ts]
+            else:
+                cell[1] = ts
+        for key in [k for k in stand if k not in now_keys]:
+            first, last = stand.pop(key)
+            self._dq_note("gap_closed_" + self._dq_class(last - first), 1.0)
+
+    # survival (availability) near the touch
+    def survival(self, side: str, now: float) -> dict | None:
+        """Median, mean and 10th percentile of min(size now, size at the next update at the same price) / size now over the best levels of `side` in the rolling window (any decrease counts). None before
+        dq_survival_min_samples. The unit of time is the feed's own update, so it is not comparable between venues with different update rates (APPROXIMATE)."""
+        if not self._dq_on:
+            return None
+        cut = now - self.config.dq_survival_window_s
+        dq = self._dq_surv[side]
+        while dq and dq[0][0] < cut:
+            dq.popleft()
+        if len(dq) < self.config.dq_survival_min_samples:
+            return None
+        vals = sorted(r for _, r in dq)
+        return {"median": vals[len(vals) // 2], "mean": sum(vals) / len(vals), "p10": vals[len(vals) // 10], "n": len(vals)}
+
+    def recent_volume(self, side: str, now: float, window_s: float) -> float | None:
+        """Volume of the prints that deplete `side` (a sell aggressor hits the bids) over the last `window_s` seconds (at most the held window, dq_flicker_window_s). None with depth_quality off."""
+        if not self._dq_on:
+            return None
+        if window_s > self.config.dq_flicker_window_s + 1e-9:
+            raise ValueError(f"window_s {window_s} is longer than the held window dq_flicker_window_s {self.config.dq_flicker_window_s}")
+        self._dq_sweep(now)
+        cut = now - window_s
+        return sum(v for t, v in self._dq_traded[side] if t >= cut)
+
+    def cancel_to_trade(self, side: str, now: float) -> float | None:
+        """Unexplained depth decreases over traded volume, the best N levels, rolling: the same figure as `flicker` (one name for the fakeness measure, one number)."""
+        return self.flicker(side, now)
+
+    # flicker spike: cancel-to-trade or survival far outside its own rolling baseline
+    def _dq_baselines(self, ts: float) -> None:
+        cfg = self.config
+        for side in ("bid", "ask"):
+            c2t, surv = self.flicker(side, ts), self.survival(side, ts)
+            for name, x in (("c2t", None if c2t is None else math.log1p(c2t)), ("surv", None if surv is None else surv["median"])):
+                if x is None:
+                    continue
+                st = self._dq_base.setdefault((side, name), {"mean": x, "var": 0.0, "n": 0, "ts": ts})
+                self._dq_z[(side, name)] = None
+                if st["n"] >= 60:
+                    sd = math.sqrt(st["var"])
+                    self._dq_z[(side, name)] = (x - st["mean"]) / sd if sd > 1e-12 else 0.0
+                a = 1.0 - math.exp(-(ts - st["ts"]) / cfg.dq_baseline_tau_s) if st["n"] else 1.0
+                d = x - st["mean"]
+                st["mean"] += a * d
+                st["var"] = (1.0 - a) * (st["var"] + a * d * d)
+                st["n"] += 1
+                st["ts"] = ts
+
+    def spike(self, book, side: str, now: float) -> dict:
+        """status SPIKE (log1p cancel-to-trade at least dq_spike_z standard deviations above its own rolling baseline, or survival that many below), NORMAL, WARMUP (baseline not ready) or FEED_FAULT (a sequence
+        gap or an unhealthy feed within dq_feed_fault_window_s: not a spike). The z values are those of the last baseline update (at most dq_baseline_every_s old)."""
+        z1, z2 = self._dq_z.get((side, "c2t")), self._dq_z.get((side, "surv"))
+        out = {"status": "WARMUP", "cancel_to_trade_z": z1, "survival_z": z2}
+        if self._dq_faulty(book, now):
+            out["status"] = "FEED_FAULT"
+        elif z1 is not None or z2 is not None:
+            hi = (z1 is not None and z1 >= self.config.dq_spike_z) or (z2 is not None and z2 <= -self.config.dq_spike_z)
+            out["status"] = "SPIKE" if hi else "NORMAL"
+        return out
 
     def flicker(self, side: str, now: float) -> float | None:
         """Unexplained decrease of the best N levels of `side` over the rolling window, divided by the volume printed against that side in it (never less than dq_flicker_min_volume). None before one window of data
@@ -276,47 +468,45 @@ class VenueState:
         return unexplained / max(traded, cfg.dq_flicker_min_volume)
 
     def gap_depth(self, book, side: str, now: float) -> dict:
-        """The size resting between the touch and the first near-empty stretch of `side` (the side an order would CONSUME: asks for a buy), and where that stretch starts.
-        status GAP                    depth = size before the gap, distance_bps = from the touch to the last solid level before it
+        """The gaps of `side` (the side an order would CONSUME: asks for a buy), from VenueStateConfig's g, m and jump rule, nearest first.
+        status GAP                    depth = size before the first gap, distance_bps = from the touch to its start, count_within_bps = gaps within dq_gap_within_bps, persistence = class of the first gap's age
               NO_GAP_WITHIN_CAPTURE   no gap in the levels the capture holds: the book's edge is not a cliff; depth None
               FEED_FAULT              a gap, but the feed reported a sequence gap within dq_feed_fault_window_s (or the book is recovering): not a cliff; depth None
               NOT_EVALUABLE           fewer than two levels, or depth_quality off; depth None
-        A level is solid when its size is at least dq_gap_level_size; the stretch between two solid levels is measured in bps of the touch price, whatever the venue's tick."""
-        out = {"status": "NOT_EVALUABLE", "depth": None, "distance_bps": None, "levels": 0}
+        The distances are in bps of the touch price, whatever the venue's tick."""
+        out = {"status": "NOT_EVALUABLE", "depth": None, "distance_bps": None, "levels": 0, "count_within_bps": None, "persistence": None, "first_gap_age_s": None}
         if not self._dq_on:
             return out
-        cfg = self.config
-        lv = book.levels(side, max(2, int(cfg.dq_gap_scan_levels)))
+        found = self._dq_scan(book, side)
+        lv = book.levels(side, max(2, int(self.config.dq_gap_scan_levels)))
         out["levels"] = len(lv)
-        if len(lv) < 2:
-            return out
-        touch = lv[0][0]
-        solid_px, cum = touch, 0.0
-        found = None
-        for price, size in lv:
-            if size >= cfg.dq_gap_level_size:
-                if abs(price - solid_px) / touch * 1e4 > cfg.dq_gap_stretch_bps:
-                    found = (cum, abs(solid_px - touch) / touch * 1e4)
-                    break
-                solid_px = price
-            cum += size
         if found is None:
-            out["status"] = "NO_GAP_WITHIN_CAPTURE"
-            out["captured_depth"] = cum
             return out
-        last = self._dq_last_feed_gap_ts
-        if getattr(book, "state", "valid") == "recovering" or (last is not None and 0.0 <= now - last <= cfg.dq_feed_fault_window_s):
+        if not found:
+            out.update(status="NO_GAP_WITHIN_CAPTURE", count_within_bps=0, captured_depth=sum(x[1] for x in lv))
+            return out
+        if self._dq_faulty(book, now):
             out["status"] = "FEED_FAULT"
             return out
-        out.update(status="GAP", depth=found[0], distance_bps=found[1])
+        start_px, depth, dist = found[0]
+        cell = self._dq_gaps[side].get(round(start_px, 8))
+        age = 0.0 if cell is None else max(0.0, now - cell[0])
+        out.update(status="GAP", depth=depth, distance_bps=dist, count_within_bps=sum(1 for g in found if g[2] <= self.config.dq_gap_within_bps), persistence=self._dq_class(age), first_gap_age_s=age)
         return out
 
     def depth_quality(self, book, now: float, side: str | None = None) -> dict | None:
-        """One decision's evidence: gap depth and flicker for `side` ("bid" / "ask"; both when None), labelled APPROXIMATE. None when depth_quality is off (the caller then writes nothing)."""
+        """One decision's evidence for `side` ("bid" / "ask"; both when None), labelled APPROXIMATE: gaps (size before the first, distance, count within N bps, persistence class), the venue's gap asymmetry
+        (bid gaps - ask gaps) / total within N bps (None when there are none, or a feed fault), survival, cancel-to-trade (also under the old key `flicker`) and the spike state. None when depth_quality is off."""
         if not self._dq_on:
             return None
         sides = ("bid", "ask") if side is None else (side,)
-        return {"approx": self.DQ_APPROX, "gap": {s: self.gap_depth(book, s, now) for s in sides}, "flicker": {s: self.flicker(s, now) for s in sides}}
+        both = {s: self.gap_depth(book, s, now) for s in ("bid", "ask")}
+        counts = {s: g["count_within_bps"] for s, g in both.items()}
+        total = sum(c for c in counts.values() if c)
+        asym = None if any(g["status"] in ("FEED_FAULT", "NOT_EVALUABLE") for g in both.values()) or not total else (counts["bid"] - counts["ask"]) / total
+        c2t = {s: self.cancel_to_trade(s, now) for s in sides}
+        return {"approx": self.DQ_APPROX, "gap": {s: both[s] for s in sides}, "gap_asymmetry": asym, "flicker": dict(c2t), "cancel_to_trade": c2t,
+                "survival": {s: self.survival(s, now) for s in sides}, "spike": {s: self.spike(book, s, now) for s in sides}}
 
     # ── Derived signals ──────────────────────────────────────────────────────
 

@@ -130,18 +130,23 @@ class ExecutionLayer:
         self.reservations = ReservationBook()
         self._limits_fn: Callable[[], RiskLimits] | None = None
         self._base_fn: Callable[[], dict[str, float]] | None = None
-        self._evidence_fn: Callable[[str, str, float], dict | None] | None = None      # depth quality (owner 14 Nov): (venue, side the order consumes, now) -> the gap-depth / flicker record. None: nothing is added to any journal record
+        self._evidence_fn: Callable[..., dict | None] | None = None      # routing evidence (owner 14 Nov, steps B, C, E, F): (venue, side the order consumes, now, qty) -> {evidence name: value} or None. None: nothing is added to any journal record
 
-    def set_evidence_provider(self, fn: Callable[[str, str, float], dict | None] | None) -> None:
-        """Routing evidence: with a provider set, every intent and every child the journal records also carries `depth_quality` (the provider's answer per venue, APPROXIMATE). Observation only: nothing reads it back,
-        and with no provider the records have no such key at all, so every existing journal is unchanged."""
+    def set_evidence_provider(self, fn: Callable[..., dict | None] | None) -> None:
+        """Routing evidence: with a provider set, every intent and every child the journal records also carries, for each evidence name the provider returns, `rec[name] = {venue: value}` (for example `depth_quality`,
+        `impact`, `order_split`), computed at the decision from what the venue's book showed. Observation only: nothing reads it back and nothing is sent from it. With no provider the records have no such key at all,
+        so every existing journal is unchanged."""
         self._evidence_fn = fn
 
-    def _evidence(self, venues, side: str, now: float) -> dict | None:
+    def _evidence(self, venues, side: str, now: float, qty: float | None = None) -> dict | None:
         if self._evidence_fn is None:
             return None
         consumed = "ask" if side == "buy" else "bid"                       # a buy takes the asks, a sell the bids
-        out = {v: ev for v in venues for ev in (self._evidence_fn(v, consumed, now),) if ev is not None}
+        out: dict = {}
+        for v in venues:
+            for name, value in (self._evidence_fn(v, consumed, now, qty) or {}).items():
+                if value is not None:
+                    out.setdefault(name, {})[v] = value
         return out or None
 
     def suggest_tactic(self, state, cfg=None):
@@ -212,9 +217,9 @@ class ExecutionLayer:
         self._by_signal.setdefault(signal_id, []).append(iid)
         if len(self.journal) < JOURNAL_MAX:
             rec = {"seq": len(self.journal), "event": "intent", **it.as_record()}
-            ev = self._evidence(venues, side, now)
+            ev = self._evidence(venues, side, now, qty)
             if ev is not None:
-                rec["depth_quality"] = ev                              # routing evidence (owner 14 Nov): present only when a provider is set
+                rec.update(ev)                                         # routing evidence (owner 14 Nov): present only when a provider is set
             self.journal.append(rec)
         self.counts["intents_" + role] += 1
         if role == Role.HEDGE:
@@ -364,9 +369,9 @@ class ExecutionLayer:
         self.counts["children_" + tactic] += 1
         if len(self.journal) < JOURNAL_MAX:
             rec = {"seq": len(self.journal), "event": "child", "intent_id": intent.intent_id, "order_id": order_id, "tactic": tactic, "ts": now}
-            ev = self._evidence(intent.venues, intent.side, now)
+            ev = self._evidence(intent.venues, intent.side, now, intent.qty)
             if ev is not None:
-                rec["depth_quality"] = ev
+                rec.update(ev)
             self.journal.append(rec)
         if intent.role == Role.HEDGE:
             live = self._live[intent.intent_id]

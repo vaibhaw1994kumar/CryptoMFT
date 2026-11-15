@@ -23,11 +23,11 @@ writes it to ``metrics_report.json``, a separate file, so ``summary.json`` and i
 
 from __future__ import annotations
 
-from collections import defaultdict
+from collections import Counter, defaultdict
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from decimal import Decimal
-from typing import Any, Iterable, Mapping
+from typing import Any, Callable, Iterable, Mapping
 
 METRICS_SCHEMA_VERSION = "1.0.0"
 BPS = Decimal("10000")
@@ -544,6 +544,76 @@ def pair_economics(fills: list[Mapping[str, Any]], journal: list[Mapping[str, An
 
 
 BPS_F = 10_000.0
+
+
+def shortfall_split(rows: Iterable[Mapping[str, Any]], signal_of: Mapping[str, Mapping[str, Any]], touch_at: Callable[[str, float, str], float | None],
+                    assumed_fee_bps: float, *, block_s: float = 3_600.0, reps: int = 1000, seed: int = 0) -> dict[str, Any]:
+    """Implementation-shortfall split (Perold) of each fully hedged arb fill: believed net edge minus realised net, in basis points of the maker fill price. Pure: it reads pair_economics rows, the signal each
+    maker intent was quoted from (`signal_of`: maker_intent_id -> {buy_price, sell_price, net_edge_bps, ...}) and a touch lookup, and changes nothing. Never called by a run (off by default).
+    For a maker BUY hedged by a SELL (sgn +1; the mirror for a maker SELL, sgn -1), with H the hedge venue's touch on the side the hedge hits, P the maker fill price, avg the hedge's average fill:
+      delay_drift          sgn * (H(quote)  - H(maker fill))     / P   the hedge venue's price moved while the quote rested (H(quote) is the signal's own hedge price)
+      hedge_latency_drift  sgn * (H(maker fill) - H(hedge arrival)) / P   it moved while the hedge was in flight
+      hedge_impact         sgn * (H(hedge arrival) - avg)        / P   the hedge walked the book
+      fee_diff             actual fees - assumed fees (actual = gross - net of the pair row)
+    These telescope: delay + latency + impact = sgn * (H(quote) - avg) / P. The rest of believed - realised is named, not hidden:
+      quote_price_term     the signal priced the gross edge at the QUOTE price, the fill is at P (a tick-rounded or improved fill)
+      believed_allowances  what the believed net edge already deducted beyond fees (safety buffer, expected adverse move); it makes the shortfall SMALLER, so it enters with a minus sign
+    shortfall = delay + latency + impact + fee_diff + quote_price_term - believed_allowances; `residual` is what is left (about 1e-9: it only checks the arithmetic). The opportunity part (unfilled quotes) is not per fill:
+    see `opportunity_cost`. Rows that are not fully hedged, have no signal, or whose touch is unknown are counted in `excluded` and left out."""
+    out, excluded = [], Counter()
+    for r in rows:
+        if not r.get("fully_hedged") or r.get("pair_net_bps") is None or r.get("hedge_avg_price") is None:
+            excluded["not_fully_hedged"] += 1
+            continue
+        sig = signal_of.get(r["maker_intent_id"])
+        if sig is None:
+            excluded["no_signal"] += 1
+            continue
+        buy = r["maker_side"] == "buy"
+        sgn, hedge_side = (1.0, "bid") if buy else (-1.0, "ask")
+        price, avg = float(r["maker_price"]), float(r["hedge_avg_price"])
+        quote_px, h_q = (float(sig["buy_price"]), float(sig["sell_price"])) if buy else (float(sig["sell_price"]), float(sig["buy_price"]))
+        t_fill = float(r["maker_fill_ts"])
+        t_arr = t_fill + float(r["first_hedge_fill_delay_s"])
+        h_fill, h_arr = touch_at(r["hedge_venue"], t_fill, hedge_side), touch_at(r["hedge_venue"], t_arr, hedge_side)
+        if not h_fill or not h_arr:
+            excluded["touch_unknown"] += 1
+            continue
+        k = BPS_F / price
+        delay, latency, impact = sgn * (h_q - h_fill) * k, sgn * (h_fill - h_arr) * k, sgn * (h_arr - avg) * k
+        actual_fee = float(r["pair_gross_bps"]) - float(r["pair_net_bps"])
+        fee_diff = actual_fee - assumed_fee_bps
+        believed, realised = float(sig["net_edge_bps"]), float(r["pair_net_bps"])
+        gross_sig = sgn * (h_q - quote_px) / quote_px * BPS_F
+        gross_at_fill = sgn * (h_q - price) * k
+        quote_price_term = gross_sig - gross_at_fill
+        allowances = gross_sig - believed - assumed_fee_bps
+        shortfall = believed - realised
+        residual = shortfall - (delay + latency + impact + fee_diff + quote_price_term - allowances)
+        out.append({"maker_intent_id": r["maker_intent_id"], "maker_fill_ts": t_fill, "qty": r["qty"], "maker_side": r["maker_side"], "believed_net_bps": believed, "realised_net_bps": realised,
+                    "shortfall_bps": shortfall, "delay_drift_bps": delay, "hedge_latency_drift_bps": latency, "hedge_impact_bps": impact, "fee_diff_bps": fee_diff,
+                    "quote_price_term_bps": quote_price_term, "believed_allowances_bps": allowances, "residual_bps": residual})
+    parts = ("believed_net_bps", "realised_net_bps", "shortfall_bps", "delay_drift_bps", "hedge_latency_drift_bps", "hedge_impact_bps", "fee_diff_bps", "quote_price_term_bps", "believed_allowances_bps", "residual_bps")
+    blocks = [int(r["maker_fill_ts"] // block_s) for r in out]
+    summary = {p: distribution_stats([r[p] for r in out], blocks, reps=reps, seed=seed) for p in parts}
+    return {"rows": out, "summary": summary, "excluded": dict(excluded), "max_abs_residual_bps": max((abs(r["residual_bps"]) for r in out), default=0.0)}
+
+
+def opportunity_cost(signals: Iterable[Mapping[str, Any]], filled_opportunity_ids: set[str]) -> dict[str, Any]:
+    """The opportunity part of the shortfall: quotes (signals) that never produced a fill, with the edge they believed. Pure; `filled_opportunity_ids` are the opportunity ids that have at least one fill.
+    believed_edge_quote_ccy = sum of net_edge_bps x qty x quote price / 10,000 over the unfilled signals (what the quotes believed they would earn, not a loss that was incurred)."""
+    n = nf = 0
+    bps, ccy = [], 0.0
+    for s in signals:
+        n += 1
+        if s["opportunity_id"] in filled_opportunity_ids:
+            continue
+        nf += 1
+        bps.append(float(s["net_edge_bps"]))
+        ccy += float(s["net_edge_bps"]) * float(s["qty"]) * float(s["buy_price"]) / BPS_F
+    return {"signals": n, "unfilled": nf, "unfilled_share": (nf / n) if n else None, "mean_believed_edge_bps_unfilled": (sum(bps) / len(bps)) if bps else None, "believed_edge_quote_ccy_unfilled": ccy}
+
+
 
 
 def time_day(ts: float) -> str:
