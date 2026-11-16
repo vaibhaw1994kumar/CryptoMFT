@@ -312,6 +312,13 @@ class FrozenV1_9(unittest.TestCase):
             "margin.mark_stamp",                                                                                    # the 5 s mark rule fixed
             "seed", "hedge_faults.seed",                                                                            # seeds as profile keys (current defaults)
             "decision_status.case2i_passed", "decision_status.testnet_amend_drill_passed",                         # the real-order amend guard flags
+            "oms.session_limits.order_rate.per_s", "oms.session_limits.order_rate.burst",                           # Order 3 limits (owner 16 Nov): A1 order rate
+            "oms.session_limits.daily_loss_stop_usdt_per_sol_of_clip",                                             # A2
+            "oms.session_limits.clock_offset.max_uncertainty_ms", "oms.session_limits.clock_offset.max_age_s",     # A3
+            "oms.session_limits.margin_warning.free_margin_multiple", "oms.session_limits.margin_warning.resume_hysteresis_s",   # A4
+            "oms.session_limits.missing_marks_kill_s",                                                              # A5
+            "oms.session_limits.tier_table",                                                                        # A6
+            "oms.session_limits.verify_account.enabled", "oms.session_limits.verify_account.margin_mode", "oms.session_limits.verify_account.leverage",   # A8
         })
         self.assertEqual((b["arb.quote_withdraw"], b["arb.quote_withdraw_hysteresis_bps"], b["execution.primary.reprice.band_down_bps"], b["execution.primary.reprice.min_interval_ms"],
                           b["execution.primary.reprice.max_age_s"], b["execution.primary.reprice.source"], b["hedge_faults.dust_carry"]),

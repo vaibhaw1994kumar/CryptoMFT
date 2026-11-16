@@ -439,6 +439,70 @@ for sz in ("1", "5", "25"):
         v110_row(f"2n_size{sz}_v110", f"2n v1_10: size {sz} SOL (size_aware cap, participation cap on)", "OMS, size_aware cap, simulator, E3", len(h), r["cov"]["checks"]["pass"] and bal,
                  f"hedge IOC full {paths['hedge_ioc_full']}, partial {paths['hedge_ioc_partial']}, zero {paths['hedge_ioc_zero']}, unwind orders {paths['unwind_orders']}; maker filled {qm:g} hedge filled {qh:g}; residual at end {res['flag']}; withdrawn {paths['maker_withdrawn_on_event']}", str(r["dir"].name))
 
+# ---- Order 3 limits on v1_10 (owner 16 Nov). Each case INJECTS its condition (labelled); a limit that never bound is NOT COVERED, never PASS. Baseline = the same dense window with every limit at the profile's own value.
+def _limits_of(case):
+    f = RUNS / f"scn_{case}" / "session_limits.json"
+    return json.loads(f.read_text()) if f.exists() else None
+
+
+def _o3(case, title, layer, bound, ok, detail, evidence=None):
+    if ok is False:
+        add(title, layer, bound, False, detail, evidence or f"runs/scn_{case}/session_limits.json")
+    elif not bound:
+        add(title, layer, bound, None, detail + " THE LIMIT NEVER BOUND IN THIS RUN: NOT COVERED, not PASS.", evidence or f"runs/scn_{case}/session_limits.json")
+    else:
+        add(title, layer, bound, True, detail, evidence or f"runs/scn_{case}/session_limits.json")
+
+
+def _filled_pair(r):
+    qm = sum(float(o["filled_quantity"]) for o in r["orders"] if o["venue"] == "BYBIT"); qh = sum(float(o["filled_quantity"]) for o in r["orders"] if o["venue"] == "BINANCE")
+    return qm, qh
+
+
+base3, lim3 = load("3x_baseline_v110"), _limits_of("3x_baseline_v110")
+if base3 and lim3:
+    bound = {k: v for k, v in lim3["counters"].items() if k != "clock_not_evaluable"}
+    add("3x Baseline (dense window, v1_10 with every Order 3 limit at the profile's value)", "session limits", len(bound), len(bound) == 0 and not lim3["kills"],
+        f"signals {len(base3['signals'])}, maker orders {sum(1 for o in base3['orders'] if o['venue'] == 'BYBIT')}, fills {len(base3['fills'])}; no limit bound ({bound or 'none'}); the clock gate was 'not evaluable' {lim3['counters'].get('clock_not_evaluable', 0)} times (counted, not blocking); the daily P&L low point {lim3['daily_loss']['min_pnl_usdt'][:8]} USDT against the limit {lim3['daily_loss']['limit_usdt']}: the -5 USDT stop does not bind on this day at 1 SOL; the order rate peaked at {lim3['order_rate']['BYBIT']['taken']} orders taken, {lim3['order_rate']['BYBIT']['skipped']} skipped",
+        "runs/scn_3x_baseline_v110")
+r, lim = load("3a_order_rate_v110"), _limits_of("3a_order_rate_v110")
+if r and lim and base3:
+    qm, qh = _filled_pair(r); st = [e for e in lim["state_changes"] if e["limit"].startswith("order_rate")]
+    skipped = lim["order_rate"]["BYBIT"]["skipped"]
+    _o3("3a_order_rate_v110", "3a A1 order rate (INJECTED: 0.2 per second, burst 1, instead of 2 and 5)", "session, rate_limits.OrderRateBucket", skipped,
+        r["cov"]["checks"]["pass"] and abs(qm - qh) < 1e-9 and sum(1 for e in st if e["state"] == "ACTIVE") == lim["counters"].get("order_rate:BYBIT_episodes", 0),
+        f"skipped {skipped} (quotes {lim['counters'].get('order_rate_skipped_quote', 0)}, amends {lim['counters'].get('order_rate_skipped_amend', 0)}) of {lim['order_rate']['BYBIT']['taken'] + skipped} asks; {lim['counters'].get('order_rate:BYBIT_episodes', 0)} state changes recorded once each (ACTIVE) and cleared when a token returned; maker orders {sum(1 for o in r['orders'] if o['venue'] == 'BYBIT')} against {sum(1 for o in base3['orders'] if o['venue'] == 'BYBIT')} in the baseline; maker filled {qm:g} = hedge filled {qh:g}: hedges were never refused; nothing was queued")
+r, lim = load("3b_loss_stop_v110"), _limits_of("3b_loss_stop_v110")
+if r and lim:
+    qm, qh = _filled_pair(r); act = [e for e in lim["state_changes"] if e["limit"] == "daily_loss_stop" and e["state"] == "ACTIVE"]
+    res = r["manifest"]["residual_at_end"]
+    _o3("3b_loss_stop_v110", "3b A2 daily loss stop (INJECTED: the limit set to -0.02 USDT so the day's own P&L trips it; the forced-adverse-fills variant is the unit test)", "session, OMS kill switch (keep_risk_reducing)", lim["counters"].get("daily_loss_stop_trips", 0),
+        len(act) == 1 and abs(qm - qh) < 1e-9 and res["flag"] in ("FLAT_NET",) and abs(float(res["net_position_base"])) < 1e-9,
+        f"tripped once at P&L {act[0]['pnl_usdt'][:9] if act else None} USDT; {len(act)} ACTIVE event; maker filled {qm:g} = hedge filled {qh:g} (the hedge in flight finished); residual {res['flag']}; orders after the trip: {len(r['orders'])} against {len(base3['orders']) if base3 else '?'} in the baseline (the kill is latched, no manual reset in a replay)")
+rb, lb = load("3c_clock_bad_v110"), _limits_of("3c_clock_bad_v110")
+if rb and lb:
+    _o3("3c_clock_bad_v110", "3c A3 clock-offset gate (INJECTED measurement: uncertainty 6 ms against the 5 ms limit)", "session, time_integrity.ClockGate", lb["signals_blocked_by_limits"],
+        len(rb["orders"]) == 0 and len([e for e in lb["state_changes"] if e["limit"] == "clock_offset"]) == 1,
+        f"{lb['signals_blocked_by_limits']} signal evaluations blocked (reason clock_uncertain), maker orders {len(rb['orders'])}, one ACTIVE event; hedges and cancels are not asked (none were needed)")
+ro, lo = load("3c_clock_ok_v110"), _limits_of("3c_clock_ok_v110")
+rn, ln = load("3c_clock_none_v110"), _limits_of("3c_clock_none_v110")
+if ro and lo and rn and ln and base3:
+    same = [len(x["signals"]) for x in (ro, rn, base3)], [len(x["orders"]) for x in (ro, rn, base3)]
+    add("3c A3 clock gate, measured 4 ms (INJECTED) and no measured clock", "session, time_integrity.ClockGate", ln["counters"].get("clock_not_evaluable", 0), same[0][0] == same[0][1] == same[0][2] and same[1][0] == same[1][1] == same[1][2] and lo["signals_blocked_by_limits"] == 0 and ln["signals_blocked_by_limits"] == 0,
+        f"4 ms measured: evaluated 'ok', nothing blocked; no measured clock: 'not evaluable' {ln['counters'].get('clock_not_evaluable', 0)} times, counted and not blocking; signals and orders equal the baseline in both ({same[0][0]}, {same[1][0]})", "runs/scn_3c_clock_ok_v110, scn_3c_clock_none_v110")
+r, lim = load("3d_margin_warning_v110"), _limits_of("3d_margin_warning_v110")
+if r and lim:
+    _o3("3d_margin_warning_v110", "3d A4 margin WARNING stop (INJECTED: 30 USDT capital per venue, so free margin is below 10x the initial margin at the hard cap)", "session, risk margin report", lim["signals_blocked_by_limits"],
+        len(r["orders"]) == 0, f"{lim['signals_blocked_by_limits']} evaluations blocked (reason margin_warning, venue(s) {lim['state_changes'][0].get('venues') if lim['state_changes'] else None}), maker orders {len(r['orders'])}; one ACTIVE event; the 1000 USDT profile capital never triggers it (baseline)")
+r, lim = load("3e_missing_marks_v110"), _limits_of("3e_missing_marks_v110")
+if r and lim:
+    kill = lim["kills"].get("missing_marks")
+    _o3("3e_missing_marks_v110", "3e A5 missing marks (INJECTED: the Binance feed lost for 150 s, 11:20:00 to 11:22:30)", "session, OMS kill switch (keep_risk_reducing)", lim["counters"].get("missing_marks_trips", 0),
+        kill is not None and kill["paused_s"] > 60.0 and lim["counters"].get("missing_marks_trips", 0) == 1,
+        f"the price pause began at 11:20:05, the kill switch tripped once after {kill['paused_s']:.2f} s (limit 60 s); no hedge was in flight and the day's later signals were already over, so the stop on new quotes is shown by the unit test, not by this run; after the injected reconnect the Binance feed stayed in a price pause for more than an hour: an artefact of the injected snapshot, not a market fact" if kill else "no trip")
+add("3f A6 tier table and A8 account check at start-up (recorded messages)", "testnet transports, sdk, paper_live start-up", 21, True,
+    "21 tests in tests/test_session_limits_startup.py: the Binance leverageBracket and Bybit risk-limit reads become ordered tiers (initial rate 1/leverage, deductions, order of brackets), an error or an unexpected shape raises, the read asks for the READ permission only, a spot transport says it has none; the start-up refuses when any venue's tiers cannot be read and replaces the ASSUMED tiers (source ACCOUNT_READ) when they can; verify_account refuses hedge mode, another margin mode or leverage, a missing leverage row, collects every problem, and labels reduce-only acceptance DERIVED_FROM_ONE_WAY_MODE and UNVERIFIED. HAND-WRITTEN messages in the documented shapes: the endpoint shapes are UNVERIFIED against the live endpoints, and the replays have no account (a replay keeps the ASSUMED tiers, labelled)", "tests/test_session_limits_startup.py")
+
 # ---- cases covered at unit / OMS level only, and the ones not covered
 def _case_2i():
     """Owner 14 Nov: S0 in the session runtime, rules of v1_9_TOLERANCES.md section O (written before the runs). Reads runs/scn_2i_* (session_s0_audit.json). A run with no amend request cannot pass the amend rules (rule 6)."""

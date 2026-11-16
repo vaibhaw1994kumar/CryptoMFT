@@ -746,6 +746,31 @@ if __name__ == "__main__":
 
 
 
+class KillSwitchKeepsHedgesInFlight(Scenario):
+    """Owner 16 Nov (limits A2 and A5): the loss stop and the missing-marks kill 'cancel quotes, no new risk, hedges in flight finish'. `activate_kill_switch(keep_risk_reducing=True)` cancels the quote's resting
+    remainder and leaves a hedge already sent alone; the default (every earlier caller) cancels everything live, hedges included."""
+
+    def test_the_hedge_in_flight_is_left_alone_and_the_quote_is_cancelled(self):
+        self.build(hedge=["ack"])
+        self.maker_fill("1.2", 5 * S)
+        (hedge,) = [o for o in self.plan.children if o.order_role == "HEDGE"]
+        self.assertEqual(hedge.state, OrderState.ACKNOWLEDGED)                      # sent and acknowledged, not filled
+        snap = self.oms.activate_kill_switch(reason="daily loss stop", now_ns=6 * S, operator_id="session-limits", source="LIMIT_DAILY_LOSS_STOP", keep_risk_reducing=True)
+        self.assertTrue(snap["active"] if "active" in snap else self.oms.risk.kill_switch)
+        self.assertEqual(self.binance.cancels, 0)                                   # the hedge was not cancelled
+        self.assertEqual(self.bybit.cancels, 1)                                     # the quote's resting remainder was
+        self.assertEqual(hedge.state, OrderState.ACKNOWLEDGED)
+        self.assertNotEqual(self.plan.state.value, "CLOSED")                         # the plan is not finalised under the hedge
+        done = [e for e in self.ledger.events if e["event_type"] == "KILL_SWITCH_CANCEL_ALL_COMPLETE"]
+        self.assertTrue(done and done[-1]["risk_reducing_orders_kept"])
+
+    def test_the_default_still_cancels_every_live_order_including_the_hedge(self):
+        self.build(hedge=["ack"])
+        self.maker_fill("1.2", 5 * S)
+        self.oms.activate_kill_switch(reason="manual", now_ns=6 * S, operator_id="op")
+        self.assertEqual(self.binance.cancels, 1)
+
+
 class HedgeDustCarry(Scenario):
     """Owner 16 Nov (hedge dust carry; HedgePolicy dust_carry next_hedge). Maker BUY on BYBIT at 100, hedge SELL on BINANCE at 99.0 (lot 0.001, minimum notional 5: the smallest hedge is 0.051). A hedge chunk below the
     venue minimum is not sent and not unwound: it is carried in one signed balance per (hedge venue, instrument), added to the next hedge, and sent alone as soon as it reaches the minimum."""

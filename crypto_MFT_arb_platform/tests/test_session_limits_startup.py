@@ -1,0 +1,267 @@
+"""Owner 16 Nov, Order 3: the start-up halves of the session limits. A3 the clock-offset source (server-time probe) and the real-order refusal without a source; A6 the account's own risk tiers read at start-up; A8 the
+account check (one-way mode, margin mode, leverage, reduce-only derived). Every response is hand-written in the venue's documented shape (SYNTHETIC recorded messages, no account data, no network). The endpoint shapes
+for the tier reads come from the public documentation and are UNVERIFIED against the live endpoints: the testnet drill confirms them."""
+import asyncio
+import sys
+import unittest
+from decimal import Decimal
+from pathlib import Path
+from unittest import mock
+from urllib.parse import parse_qs, urlparse
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+from crypto_stat_arb.margin import AccountTierReadError, apply_account_tiers, read_account_tiers
+from crypto_stat_arb.sdk import TestnetVenueAdapter
+from crypto_stat_arb.testnet import (AccountVerificationError, BinanceFuturesTestnetTransport, BybitV5LinearTestnetTransport, REDUCE_ONLY_NOTE, risk_tier_rows_binance, risk_tier_rows_bybit,
+                                     verify_accounts_for_start)
+from crypto_stat_arb.time_integrity import parse_server_time_ns, probe_server_clock
+from test_forward_testnet_calibration import FakeHttp, SECRET
+
+PERP = "SOL-USDT-PERP"
+NOW_MS = 1_700_000_100_000
+
+BINANCE_BRACKETS = [{"symbol": "SOLUSDT", "notionalCoef": 1.0, "brackets": [
+    {"bracket": 2, "initialLeverage": 50, "notionalCap": 50000, "notionalFloor": 10000, "maintMarginRatio": 0.01, "cum": 35.0},
+    {"bracket": 1, "initialLeverage": 75, "notionalCap": 10000, "notionalFloor": 0, "maintMarginRatio": 0.0065, "cum": 0.0}]}]      # out of order on purpose
+BYBIT_LIMITS = {"retCode": 0, "retMsg": "OK", "result": {"category": "linear", "list": [
+    {"id": 1, "symbol": "SOLUSDT", "riskLimitValue": "200000", "maintenanceMargin": "0.005", "initialMargin": "0.01", "isLowestRisk": 1, "maxLeverage": "100.00", "mmDeduction": ""},
+    {"id": 2, "symbol": "SOLUSDT", "riskLimitValue": "400000", "maintenanceMargin": "0.01", "initialMargin": "0.02", "isLowestRisk": 0, "maxLeverage": "50.00", "mmDeduction": "1000"}]}}
+
+
+def adapter(transport):
+    return TestnetVenueAdapter(transport.venue, lambda req: transport(req, SECRET))
+
+
+class TierReads(unittest.TestCase):
+    def test_binance_brackets_become_ordered_tiers_with_initial_rate_one_over_leverage(self):
+        http = FakeHttp([(200, BINANCE_BRACKETS)])
+        rows = adapter(BinanceFuturesTestnetTransport(symbols={PERP: "SOLUSDT"}, http=http, clock_ms=lambda: NOW_MS)).account_risk_tiers(PERP)
+        self.assertEqual([r["max_notional"] for r in rows], ["10000", "50000"])
+        self.assertEqual(Decimal(rows[0]["initial_rate"]), Decimal(1) / Decimal(75))
+        self.assertEqual((rows[1]["maintenance_rate"], rows[1]["maintenance_deduction"]), ("0.01", "35.0"))
+        self.assertEqual((http.calls[0][0], urlparse(http.calls[0][1]).path, parse_qs(urlparse(http.calls[0][1]).query)["symbol"]), ("GET", "/fapi/v1/leverageBracket", ["SOLUSDT"]))
+
+    def test_bybit_risk_limit_rows_become_tiers(self):
+        http = FakeHttp([(200, BYBIT_LIMITS)])
+        rows = adapter(BybitV5LinearTestnetTransport(symbols={PERP: "SOLUSDT"}, http=http, clock_ms=lambda: NOW_MS)).account_risk_tiers(PERP)
+        self.assertEqual([(r["max_notional"], r["maintenance_rate"], r["initial_rate"], r["maintenance_deduction"]) for r in rows], [("200000", "0.005", "0.01", "0"), ("400000", "0.01", "0.02", "1000")])
+        self.assertEqual(urlparse(http.calls[0][1]).path, "/v5/market/risk-limit")
+
+    def test_an_error_or_an_unexpected_shape_raises(self):
+        for bad in ([], [{"symbol": "BTCUSDT", "brackets": []}], [{"symbol": "SOLUSDT", "brackets": []}], {"msg": "x"}):
+            with self.assertRaises(ConnectionError):
+                risk_tier_rows_binance(bad, "SOLUSDT")
+        for bad in ({"retCode": 10005, "retMsg": "denied"}, {"retCode": 0, "result": {"list": []}}, {"retCode": 0, "result": {"list": [{"symbol": "BTCUSDT", "riskLimitValue": "1"}]}}):
+            with self.assertRaises(ConnectionError):
+                risk_tier_rows_bybit(bad, "SOLUSDT")
+        transport = BinanceFuturesTestnetTransport(symbols={PERP: "SOLUSDT"}, http=FakeHttp([(400, {"code": -1, "msg": "bad"})]), clock_ms=lambda: NOW_MS)
+        with self.assertRaises(ConnectionError):
+            adapter(transport).account_risk_tiers(PERP)
+
+    def test_the_read_asks_for_the_read_permission_never_the_trade_one(self):
+        from crypto_stat_arb.credentials import CredentialPermission, CredentialedTestnetTransport
+
+        class Broker:
+            def inject(self, credential_id, **kw):
+                self.permissions = kw["required_permissions"]
+                return ({"event_type": "ACCOUNT_RISK_TIERS", "tiers": []},)
+        broker = Broker()
+        CredentialedTestnetTransport(broker, "cred", "BYBIT", lambda *a: ())({"action": "ACCOUNT_RISK_TIERS", "instrument_id": PERP})
+        self.assertEqual(broker.permissions, (CredentialPermission.READ_ACCOUNT,))
+
+    def test_a_spot_transport_has_no_tier_read_and_says_so(self):
+        from crypto_stat_arb.testnet import BybitV5TestnetTransport
+        with self.assertRaisesRegex(ValueError, "perpetual transports only"):
+            BybitV5TestnetTransport(symbols={PERP: "SOLUSDT"}, http=FakeHttp([]), clock_ms=lambda: NOW_MS)({"action": "ACCOUNT_RISK_TIERS", "instrument_id": PERP}, SECRET)
+
+    def venue_readers(self, instrument_id=PERP):
+        return {"BINANCE": adapter(BinanceFuturesTestnetTransport(symbols={instrument_id: "SOLUSDT"}, http=FakeHttp([(200, BINANCE_BRACKETS)]), clock_ms=lambda: NOW_MS)),
+                "BYBIT": adapter(BybitV5LinearTestnetTransport(symbols={instrument_id: "SOLUSDT"}, http=FakeHttp([(200, BYBIT_LIMITS)]), clock_ms=lambda: NOW_MS))}
+
+    def test_read_account_tiers_builds_schedules_sourced_account_read(self):
+        tiers = read_account_tiers(self.venue_readers(), ("BINANCE", "BYBIT"), PERP)
+        self.assertEqual(tiers["BINANCE"].source, "ACCOUNT_READ:BINANCE")
+        self.assertEqual(tiers["BYBIT"].initial(Decimal("100000")), Decimal("1000"))                # 1% of 100000
+        self.assertEqual(tiers["BINANCE"].maintenance(Decimal("20000")), Decimal("165"))            # 20000 x 0.01 - 35 (the deduction)
+
+    def test_a_missing_reader_or_a_failed_read_refuses_and_names_every_venue(self):
+        class Broken:
+            def account_risk_tiers(self, instrument_id):
+                raise ConnectionError("unreachable")
+        with self.assertRaises(AccountTierReadError) as ctx:
+            read_account_tiers({"BINANCE": Broken()}, ("BINANCE", "BYBIT"), PERP)
+        self.assertIn("BINANCE", str(ctx.exception)); self.assertIn("BYBIT", str(ctx.exception))
+
+    def test_the_margin_config_takes_the_account_tiers_in_place_of_the_assumed_ones(self):
+        from crypto_stat_arb.config import load_config
+        cfg, _ = load_config(Path(__file__).resolve().parents[1] / "config/perp_research.json")
+        tiers = read_account_tiers(self.venue_readers(cfg.instrument_id), tuple(cfg.venues), cfg.instrument_id)
+        out = apply_account_tiers(cfg.margin, tiers, cfg.instrument_id)
+        for venue in cfg.venues:
+            self.assertEqual(out.venues[venue].tiers[cfg.instrument_id].source, f"ACCOUNT_READ:{venue}")
+        self.assertNotEqual(cfg.margin.venues[cfg.venues[0]].tiers[cfg.instrument_id].source, f"ACCOUNT_READ:{cfg.venues[0]}")       # the original is untouched
+
+
+def binance_verify_http(dual=False, leverage="10", margin="cross"):
+    return FakeHttp([(200, {"dualSidePosition": dual}), (200, [{"symbol": "SOLUSDT", "leverage": leverage, "marginType": margin, "positionAmt": "0"}])])
+
+
+def bybit_verify_http(mode="REGULAR_MARGIN", leverage="10", idx=0):
+    return FakeHttp([(200, {"retCode": 0, "result": {"marginMode": mode}}), (200, {"retCode": 0, "result": {"list": [{"symbol": "SOLUSDT", "positionIdx": idx, "leverage": leverage, "size": "0"}]}})])
+
+
+class VerifyAccount(unittest.TestCase):
+    def test_binance_one_way_cross_leverage_ten_passes_and_says_reduce_only_is_derived(self):
+        facts = adapter(BinanceFuturesTestnetTransport(symbols={PERP: "SOLUSDT"}, http=binance_verify_http(), clock_ms=lambda: NOW_MS)).verify_account(PERP, "cross", 10)
+        self.assertEqual((facts["position_mode"], facts["margin_mode"], facts["leverage"]), ("ONE_WAY", "CROSS", 10))
+        self.assertEqual(facts["reduce_only_accepted"], REDUCE_ONLY_NOTE)
+        self.assertIn("UNVERIFIED", facts["reduce_only_accepted"])
+
+    def test_binance_hedge_mode_another_margin_type_or_another_leverage_each_refuse(self):
+        for http, text in ((binance_verify_http(dual=True), "hedge mode"), (binance_verify_http(margin="isolated"), "margin type"), (binance_verify_http(leverage="20"), "leverage")):
+            with self.assertRaisesRegex(ValueError, text):
+                adapter(BinanceFuturesTestnetTransport(symbols={PERP: "SOLUSDT"}, http=http, clock_ms=lambda: NOW_MS)).verify_account(PERP, "cross", 10)
+
+    def test_bybit_one_way_regular_margin_leverage_ten_passes(self):
+        facts = adapter(BybitV5LinearTestnetTransport(symbols={PERP: "SOLUSDT"}, http=bybit_verify_http(), clock_ms=lambda: NOW_MS)).verify_account(PERP, "cross", 10)
+        self.assertEqual((facts["position_mode"], facts["margin_mode"], facts["leverage"]), ("ONE_WAY", "REGULAR_MARGIN", 10))
+
+    def test_bybit_isolated_margin_hedge_mode_or_another_leverage_each_refuse(self):
+        for http, text in ((bybit_verify_http(mode="ISOLATED_MARGIN"), "margin mode"), (bybit_verify_http(idx=1), "hedge"), (bybit_verify_http(leverage="5"), "leverage")):
+            with self.assertRaisesRegex(ValueError, text):
+                adapter(BybitV5LinearTestnetTransport(symbols={PERP: "SOLUSDT"}, http=http, clock_ms=lambda: NOW_MS)).verify_account(PERP, "cross", 10)
+
+    def test_a_row_without_leverage_cannot_be_verified_and_refuses(self):
+        http = FakeHttp([(200, {"retCode": 0, "result": {"marginMode": "REGULAR_MARGIN"}}), (200, {"retCode": 0, "result": {"list": []}})])
+        with self.assertRaises(ConnectionError):
+            adapter(BybitV5LinearTestnetTransport(symbols={PERP: "SOLUSDT"}, http=http, clock_ms=lambda: NOW_MS)).verify_account(PERP, "cross", 10)
+
+    def test_the_start_up_helper_collects_every_problem(self):
+        good = adapter(BinanceFuturesTestnetTransport(symbols={PERP: "SOLUSDT"}, http=binance_verify_http(), clock_ms=lambda: NOW_MS))
+        bad = adapter(BybitV5LinearTestnetTransport(symbols={PERP: "SOLUSDT"}, http=bybit_verify_http(mode="ISOLATED_MARGIN"), clock_ms=lambda: NOW_MS))
+        with self.assertRaises(AccountVerificationError) as ctx:
+            verify_accounts_for_start({"BINANCE": good, "BYBIT": bad}, ("BINANCE", "BYBIT", "OTHER"), PERP, margin_mode="cross", leverage=10)
+        self.assertIn("BYBIT", str(ctx.exception)); self.assertIn("OTHER: no account verifier", str(ctx.exception)); self.assertNotIn("BINANCE:", str(ctx.exception))
+        fresh = {"BINANCE": adapter(BinanceFuturesTestnetTransport(symbols={PERP: "SOLUSDT"}, http=binance_verify_http(), clock_ms=lambda: NOW_MS)),
+                 "BYBIT": adapter(BybitV5LinearTestnetTransport(symbols={PERP: "SOLUSDT"}, http=bybit_verify_http(), clock_ms=lambda: NOW_MS))}
+        rows = verify_accounts_for_start(fresh, ("BINANCE", "BYBIT"), PERP, margin_mode="cross", leverage=10)
+        self.assertEqual([r["venue"] for r in rows], ["BINANCE", "BYBIT"])
+
+
+class ClockProbe(unittest.IsolatedAsyncioTestCase):
+    def test_both_venues_server_time_bodies_parse(self):
+        self.assertEqual(parse_server_time_ns("BINANCE", '{"serverTime": 1700000000123}'), 1_700_000_000_123_000_000)
+        self.assertEqual(parse_server_time_ns("BYBIT", '{"retCode":0,"result":{"timeSecond":"1700000000","timeNano":"1700000000123456789"},"time":1700000000123}'), 1_700_000_000_123_456_789)
+        self.assertEqual(parse_server_time_ns("BYBIT", '{"retCode":0,"result":{},"time":1700000000123}'), 1_700_000_000_123_000_000)       # the millisecond fallback
+        for venue, body in (("BINANCE", "{}"), ("BYBIT", '{"retCode":10002,"retMsg":"x"}'), ("OTHER", "{}")):
+            with self.assertRaises((KeyError, ValueError)):
+                parse_server_time_ns(venue, body)
+
+    async def test_five_probes_the_lowest_round_trip_wins_and_a_failure_is_dropped(self):
+        ticks = iter(range(0, 10_000_000_000, 1_000_000))
+        delays = [8_000_000, 3_000_000, None, 6_000_000, 4_000_000]
+        state = {"now": 0, "i": 0}
+
+        def clock():
+            return state["now"]
+
+        async def getter(url, timeout):
+            d = delays[state["i"]]
+            state["i"] += 1
+            if d is None:
+                raise ConnectionError("down")
+            state["now"] += d
+            return '{"serverTime": %d}' % ((state["now"] - d // 2) // 1_000_000), state["now"]
+
+        async def run():
+            return await probe_server_clock(getter, "BINANCE", clock_ns=clock)
+        m = await run()
+        self.assertEqual(m.samples, 4)
+        self.assertEqual(m.uncertainty_ns, 1_500_000)                                               # the 3 ms probe: half of it
+        self.assertTrue(m.source.startswith("server_time:BINANCE"))
+
+    async def test_no_valid_probe_gives_none(self):
+        async def getter(url, timeout):
+            raise ConnectionError("down")
+        self.assertIsNone(await probe_server_clock(getter, "BYBIT"))
+
+
+class StartUp(unittest.TestCase):
+    """LivePaperSession with oms.session_limits: the account checks run when real orders can be sent (or readers are given), before anything starts."""
+    CONFIG = Path(__file__).resolve().parents[1] / "config/perp_research.json"
+
+    def make(self, limits, readers, **kw):
+        import tempfile
+        from crypto_stat_arb.live_feed import LiveFeedSettings
+        from crypto_stat_arb.paper_live import LivePaperSession
+        settings = LiveFeedSettings(udp_enabled=False, binance_market="linear", bybit_market="linear")
+        with tempfile.TemporaryDirectory() as d, mock.patch("crypto_stat_arb.paper_live.verify_account_fee_rates", lambda *a, **k: []):       # the fee check has its own tests
+            return LivePaperSession(self.CONFIG, Path(d), "limits-start", settings, fee_readers=readers, session_limits=limits, **kw)
+
+    def readers(self, venues, **verify):
+        out = {}
+        for v in venues:
+            transport = (BinanceFuturesTestnetTransport if v == "BINANCE" else BybitV5LinearTestnetTransport)(symbols={PERP: "SOLUSDT"}, http=FakeHttp([]), clock_ms=lambda: NOW_MS)
+            reader = adapter(transport)
+            out[v] = reader
+        return out
+
+    def test_a_wrong_account_refuses_the_start(self):
+        from crypto_stat_arb.config import load_config
+        cfg, _ = load_config(self.CONFIG)
+
+        class Reader:
+            def __init__(self, ok):
+                self.ok = ok
+
+            def verify_account(self, instrument_id, margin_mode, leverage):
+                if not self.ok:
+                    raise ValueError("account is in hedge mode")
+                return {"event_type": "ACCOUNT_VERIFIED", "position_mode": "ONE_WAY"}
+        limits = {"verify_account": {"enabled": True, "margin_mode": "cross", "leverage": 10}}
+        with self.assertRaisesRegex(AccountVerificationError, "hedge mode"):
+            self.make(limits, {v: Reader(v != cfg.venues[0]) for v in cfg.venues})
+
+    def test_unreadable_tiers_refuse_the_start_and_readable_ones_replace_the_assumed_tiers(self):
+        from crypto_stat_arb.config import load_config
+        cfg, _ = load_config(self.CONFIG)
+
+        class NoTiers:
+            def account_risk_tiers(self, instrument_id):
+                raise ConnectionError("down")
+
+        class Tiers:
+            def account_risk_tiers(self, instrument_id):
+                return ({"max_notional": "1000000", "maintenance_rate": "0.005", "initial_rate": "0.01", "maintenance_deduction": "0"},)
+        with self.assertRaises(AccountTierReadError):
+            self.make({"tier_table": "read_at_start"}, {v: NoTiers() for v in cfg.venues})
+        paper = self.make({"tier_table": "read_at_start"}, {v: Tiers() for v in cfg.venues})
+        for v in cfg.venues:
+            self.assertEqual(paper.session.margin_config.venues[v].tiers[cfg.instrument_id].source, f"ACCOUNT_READ:{v}")
+        self.assertEqual(paper.account_checks["tier_table"][cfg.venues[0]]["tiers"], 1)
+
+    def test_a_real_order_session_with_the_clock_gate_and_no_clock_source_refuses_to_start(self):
+        from crypto_stat_arb.config import load_config
+        cfg, _ = load_config(self.CONFIG)
+        limits = {"clock_offset": {"max_uncertainty_ms": 5.0, "max_age_s": 900.0}}
+        with self.assertRaisesRegex(ValueError, "clock source"):
+            self.make(limits, {v: object() for v in cfg.venues})
+        paper = self.make(limits, {v: object() for v in cfg.venues}, clock_source="server_time")
+        self.assertIsNotNone(paper.session.clock_gate)
+        self.assertFalse(paper.session.clock_gate.replay)                                            # a live session blocks on an unknown clock
+
+    def test_a_purely_simulated_session_with_no_account_starts_as_before_and_does_not_run_the_checks(self):
+        import tempfile
+        from crypto_stat_arb.live_feed import LiveFeedSettings
+        from crypto_stat_arb.paper_live import LivePaperSession
+        settings = LiveFeedSettings(udp_enabled=False, binance_market="linear", bybit_market="linear")
+        limits = {"verify_account": {"enabled": True, "margin_mode": "cross", "leverage": 10}, "tier_table": "read_at_start", "clock_offset": {"max_uncertainty_ms": 5.0, "max_age_s": 900.0}}
+        with tempfile.TemporaryDirectory() as d:
+            paper = LivePaperSession(self.CONFIG, Path(d), "sim", settings, session_limits=limits)
+        self.assertEqual(paper.account_checks, {})
+
+
+if __name__ == "__main__":
+    unittest.main()

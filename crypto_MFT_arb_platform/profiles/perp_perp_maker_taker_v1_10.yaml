@@ -197,6 +197,14 @@ oms:
     enabled: true                        # hedges, unwinds and flattens are NEVER refused by the limiter (they queue with priority and may use the whole window); cancels are unrestricted (the whole window).
     quote_share: 0.7                     # v1_5 to v1_8 and the core default: 0.8
     quote_min_free: 2
+  session_limits:                        # owner 16 Nov (Order 3, limits A1-A6 and A8; A7 is arb.requote_delay_after_withdraw_s above). Off in every earlier profile. Values are the owner's approved numbers; none is calibrated.
+    order_rate: {per_s: 2.0, burst: 5}   # A1: new maker orders and amends per venue, a token bucket; skipped, never queued; hedges, unwinds and cancels are never refused. On top of rate_limits above
+    daily_loss_stop_usdt_per_sol_of_clip: -5.0   # A2: realised + marked P&L since 00:00 UTC (or the session start) at or below this per SOL of clip -> latched kill switch (quotes cancelled, hedges in flight finish). Scales with the clip (-5 at a 1 SOL clip)
+    clock_offset: {max_uncertainty_ms: 5.0, max_age_s: 900}   # A3: no new quotes while the clock offset is unknown or its uncertainty is above 5 ms (server-time probe); max_age_s 900 is ASSUMED (probe every 300 s). A replay with no measured clock reports "not evaluable", counted, never blocked
+    margin_warning: {free_margin_multiple: 10.0, resume_hysteresis_s: 5.0}   # A4: a margin WARNING (not a missing price) or free margin below 10x the initial margin at the hard cap stops new quotes; resumes after 5 s clear (ASSUMED)
+    missing_marks_kill_s: 60.0           # A5: a margin price pause longer than 60 s trips a latched kill switch
+    tier_table: read_at_start            # A6: real-order modes read each account's own risk-limit / leverage brackets at start-up and refuse to start if they cannot be read; replays keep the ASSUMED tiers below, labelled
+    verify_account: {enabled: true, margin_mode: cross, leverage: 10}   # A8: paper/live start-up refuses unless one-way mode, this margin mode and leverage (10 = the instrument rule used here, ASSUMED), and reduce-only accepted
   maker_ack_deadline: true               # owner 13 Nov: a sent PostOnly quote is watched from the send, not only from its ack (a submit or ack lost in a gateway outage ends TIMED_OUT with the kill switch instead of sitting SENT unwatched; 565 s in the 2l replay). Earlier profiles: off. REQUIRED for any profile used with real orders (config.REAL_ORDER_REQUIRED)
   account_fee_check: true                # owner 13 Nov (edge calibration item 2): a declaration for live/paper: the session reads the account's SOLUSDT maker/taker rates on both venues at start-up and refuses to start if they differ from fee_presets (crypto_stat_arb.fees.verify_account_fee_rates). No effect on a backtest. REQUIRED for any profile used with real orders
 hedge_faults:                            # the response policy (recovery), not injected faults
@@ -289,13 +297,13 @@ _production_limits_approved_13nov:
     account_fee_check_at_startup: "oms.account_fee_check + fees.verify_account_fee_rates: a session that sends real orders refuses to start when either venue's account rates cannot be read or differ from the profile (owner 14 Nov); Binance endpoint path confirmed in the testnet drill; replays keep the profile fees, labelled"
     breaker: "the profile's breaker block (trips, flatten, dust rules of 13 Nov)"
     restart_gate_and_snapshot: "oms.restart_reconcile_gate + account_snapshot adapters built; a session setting, not a profile key"
-  NOT_BUILT_APPROVED:
-    new_maker_orders_per_second: "2/s per venue sustained, 5/s peak: no per-second order limiter exists; the venue window limiter (70% share) is the only rate rule"
-    daily_loss_stop: "kill switch at -5 USDT on 1 SOL clips (realised + marked): no code"
-    clock_offset_gate: "stop quoting when the clock offset is unknown or its uncertainty is above 5 ms: no code"
-    margin_warning_stop: "stop new quotes on a margin WARNING state or free margin below 10x the hard-cap initial margin: no code (margin BREACH and a missing mark are enforced)"
-    missing_mark_kill_after_60s: "kill after 60 s of paused missing marks: no code (the pause is enforced)"
-    tier_table_read_at_startup: "refuse to go live until the account's own tier table is read: no code"
-    account_settings_check_at_startup: "position mode, reduce-only, leverage, margin mode against the account: built for the testnet transports (verify_account), not wired into the session"
-    quote_requote_delay_after_withdraw_1s: "a withdrawn quote is not re-quoted for 1 s: no code"
-    market_data_stress: "10,000 events/s for 5 s without a stale-book event: not proven (needs a 3x-speed replay)"
+  BUILT_16NOV_ORDER3:                    # owner 16 Nov (Order 3): the approved limits that had no code, in v1_10 under oms.session_limits (A7 under arb.requote_delay_after_withdraw_s); see docs/strategy_contract.md "Session limits"
+    new_maker_orders_per_second: "ENFORCED (A1): oms.session_limits.order_rate, a per-venue token bucket 2/s burst 5, skipped never queued, on top of the window limiter"
+    daily_loss_stop: "ENFORCED (A2): oms.session_limits.daily_loss_stop_usdt_per_sol_of_clip -5.0 x the clip; latched kill switch, hedges in flight finish"
+    clock_offset_gate: "ENFORCED (A3): oms.session_limits.clock_offset 5 ms; server-time probe; not evaluable (counted) in a replay without a measured clock; a real-order session refuses to start without a source"
+    margin_warning_stop: "ENFORCED (A4): oms.session_limits.margin_warning (a real WARNING or free margin below 10x the hard-cap initial margin; 5 s hysteresis ASSUMED)"
+    missing_mark_kill_after_60s: "ENFORCED (A5): oms.session_limits.missing_marks_kill_s 60, latched kill switch"
+    tier_table_read_at_startup: "BUILT (A6): oms.session_limits.tier_table; the endpoint shapes are UNVERIFIED against the live endpoints; the replays keep the ASSUMED tiers below"
+    account_settings_check_at_startup: "BUILT (A8): oms.session_limits.verify_account; reduce-only acceptance is derived from one-way mode, UNVERIFIED by an order"
+    quote_requote_delay_after_withdraw_1s: "ENFORCED (A7, Order 2): arb.requote_delay_after_withdraw_s 1.0"
+    market_data_stress: "MEASURED (A9): scripts/stress_feed.py, 10,000 events/s for 5 s per venue through the live parse, book and session path on this Mac; the result is in out/integration/stress/"

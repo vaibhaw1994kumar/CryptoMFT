@@ -27,6 +27,7 @@ BND = "/Users/vaibhav/Documents/Newproject/crypto_MFT_arb_platform/config/regime
 A, B = ("11:00", "13:00"), ("19:00", "21:00")      # the windows that hold the capture natural maker fills (11:15 and 12:30 UTC; 19:59 UTC)
 
 # case -> settings. profile v1_9 (size_aware) unless the case needs another; every case uses 1 SOL unless it says size.
+DENSE = {"min_net_edge_bps": -2.0, "participation_max": 0.0}          # labelled: the dense entry of the 2i cases, so that the capture has quotes for a limit to act on
 CASES = {
     "H1a": dict(profile="perp_perp_maker_taker_v1_9", window=A),                                   # determinism: the same case twice
     "H1b": dict(profile="perp_perp_maker_taker_v1_9", window=A),
@@ -82,6 +83,16 @@ CASES = {
     "2n_size1_v110": dict(profile="perp_perp_maker_taker_v1_10", window=A, size=1.0, gross=5.0, cap=True),
     "2n_size5_v110": dict(profile="perp_perp_maker_taker_v1_10", window=A, size=5.0, gross=25.0, cap=True),
     "2n_size25_v110": dict(profile="perp_perp_maker_taker_v1_10", window=A, size=25.0, gross=125.0, cap=True),
+    # ORDER 3 limits on v1_10 (owner 16 Nov). Each case INJECTS the condition (labelled in the result): nothing binds on the 29 Oct day by itself. All use the dense entry (threshold -2.0 bps, participation limit off:
+    # labelled arb_overrides) so that there are quotes to limit. profile_set changes profile keys for the case only.
+    "3a_order_rate_v110": dict(profile="perp_perp_maker_taker_v1_10", window=A, hedge_min_notional=5.0, arb_overrides=DENSE, profile_set={"oms.session_limits.order_rate": {"per_s": 0.2, "burst": 1}}),
+    "3b_loss_stop_v110": dict(profile="perp_perp_maker_taker_v1_10", window=A, hedge_min_notional=5.0, arb_overrides=DENSE, profile_set={"oms.session_limits.daily_loss_stop_usdt_per_sol_of_clip": -0.02}),
+    "3c_clock_bad_v110": dict(profile="perp_perp_maker_taker_v1_10", window=A, hedge_min_notional=5.0, arb_overrides=DENSE, clock_inject={"offset_ms": 1.0, "uncertainty_ms": 6.0}),
+    "3c_clock_ok_v110": dict(profile="perp_perp_maker_taker_v1_10", window=A, hedge_min_notional=5.0, arb_overrides=DENSE, clock_inject={"offset_ms": 1.0, "uncertainty_ms": 4.0}),
+    "3c_clock_none_v110": dict(profile="perp_perp_maker_taker_v1_10", window=A, hedge_min_notional=5.0, arb_overrides=DENSE),
+    "3d_margin_warning_v110": dict(profile="perp_perp_maker_taker_v1_10", window=A, hedge_min_notional=5.0, arb_overrides=DENSE, profile_set={"margin.venues.bybit.initial_capital": 30.0, "margin.venues.binance.initial_capital": 30.0}),
+    "3e_missing_marks_v110": dict(profile="perp_perp_maker_taker_v1_10", window=A, hedge_min_notional=5.0, arb_overrides=DENSE, gap=("11:20:00", "11:22:30"), gap_venue="BINANCE"),
+    "3x_baseline_v110": dict(profile="perp_perp_maker_taker_v1_10", window=A, hedge_min_notional=5.0, arb_overrides=DENSE),
 }
 
 
@@ -96,7 +107,14 @@ if layer_only:
 case = argv[0]
 st = CASES[case]
 out = Path("runs") / (f"scn_{case}_layeronly" if layer_only else f"scn_{case}")
-profile = dict(load_profile(st["profile"]))
+import copy
+profile = copy.deepcopy(dict(load_profile(st["profile"])))
+for _path, _val in (st.get("profile_set") or {}).items():        # Order 3 cases: profile keys changed for the case only (labelled in the result settings)
+    _node = profile
+    _parts = _path.split(".")
+    for _p in _parts[:-1]:
+        _node = _node[_p]
+    _node[_parts[-1]] = _val
 cfg = apply_profile(profile, dataset="mar2024", data_root="", pair="SOLUSDT", start_date="2026-10-29", end_date="2026-10-29", output_dir=str(out))
 cfg.arb.max_position_base = st.get("size", 1.0)
 cfg.arb.max_venue_imbalance_base = st.get("gross", 5.0)
@@ -149,6 +167,9 @@ if st.get("maker_outage"):
     cfg.hedge_faults = HedgeFaultConfig(outages=tuple(Outage("BYBIT", hms(a), hms(b)) for a, b in st["maker_outage"]), outage_policy="blackhole", ack_timeout_s=2.0, max_retries=2, retry_backoff_s=0.25)
     kw["hedge_fault_injection"] = True
 replay = SessionReplay(cfg, profile, ticks=dated_ticks("2026-10-29"), recorded=True, decompose_markouts=True, mark_from_mid=True, lifecycle_report=True, regime_boundaries=BND, **kw)
+if st.get("clock_inject"):                         # Order 3 (A3): an INJECTED clock measurement (a replay has no measured clock); measured at the end of the window so it never ages out
+    from crypto_stat_arb.time_integrity import ClockMeasurement
+    replay.session.clock_gate.update(ClockMeasurement(offset_ns=int(st["clock_inject"]["offset_ms"] * 1e6), uncertainty_ns=int(st["clock_inject"]["uncertainty_ms"] * 1e6), measured_ts_ns=int(hms(st["window"][1] + ":00") * 1e9), source="INJECTED"))
 
 if st.get("profile") in ("perp_perp_maker_taker_v1_9", "perp_perp_maker_taker_v1_9s", "perp_perp_maker_taker_v1_10"):
     assert replay.session.oms.maker_ack_deadline, "v1_9 carries oms.maker_ack_deadline (owner 13 Nov)"      # from the profile now, not set here
@@ -286,10 +307,10 @@ def events():
             replay.strategy.config.min_net_edge_bps = ARMED_EDGE
             armed = True
         if gap is not None:
-            if isinstance(ev, MarketEvent):
+            if isinstance(ev, MarketEvent) and (st.get("gap_venue") is None or ev.venue == st["gap_venue"]):
                 shadow.setdefault(ev.venue, OrderBook(ev.venue, ev.instrument_id)).apply(ev)         # the books as the exchange has them, outage or not
-            if gap[0] <= ts < gap[1]:
-                continue                       # the injected outage: neither feed delivers anything
+            if gap[0] <= ts < gap[1] and (st.get("gap_venue") is None or ev.venue == st["gap_venue"]):
+                continue                       # the injected outage: neither feed delivers anything (Order 3: with gap_venue, only that venue's feed)
             if not reconnected and ts >= gap[1]:
                 reconnected = True             # the reconnect: each feed restarts with a SNAPSHOT of the book as it stands (the recorded capture has none after its first part, so without this a gap could never end)
                 for venue, book in shadow.items():
@@ -303,13 +324,15 @@ result = replay.run_recorded(events())
 result["run"] = {"case": case, "settings": {k: v for k, v in st.items()}, "window_utc": st["window"], "wall_s": round(time.time() - t, 1), "labels": ["EXPLORATORY: mechanics only, no profit claim", "2-hour window of the 2026-10-29 capture; the books are warmed from the capture start (09:56 UTC) with quoting off until the window opens: counts of events and the regime samples include the warm-up",
                  "mark = mid, no funding", "regime boundaries IN-SAMPLE (the capture's own terciles)"]}
 write_result(result, out)
-safety = [e for e in replay.session.ledger.events if e["event_type"].startswith(("BREAKER_", "KILL_SWITCH", "UNWIND_", "HEDGE_ALARM", "MARGIN_PRICE", "NEW_RISK_HELD", "RECONCILIATION", "QUOTE_SKIPPED"))]
+safety = [e for e in replay.session.ledger.events if e["event_type"].startswith(("BREAKER_", "LIMIT_STATE", "KILL_SWITCH", "UNWIND_", "HEDGE_ALARM", "MARGIN_PRICE", "NEW_RISK_HELD", "RECONCILIATION", "QUOTE_SKIPPED"))]
 if safety:                                   # the safety events of the run in full (payloads included), next to the standard outputs
     (out / "session_safety_events.jsonl").write_text("".join(json.dumps({k: (str(v) if not isinstance(v, (int, float, bool, type(None), list, dict)) else v) for k, v in e.items()}, sort_keys=True, default=str) + "\n" for e in safety))
 else:
     (out / "session_safety_events.jsonl").unlink(missing_ok=True)      # a rerun with no safety events must not leave the previous run's file behind
 if st.get("inject_move"):
     (out / "session_injection.json").write_text(json.dumps({"label": "INJECTED: a scripted shift of the hedge venue's book on the real capture (not a market event)", "setting": st["inject_move"], "shifts_applied": len(inj_events), "events": inj_events}, indent=1))
+if replay.session._limits is not None:             # Order 3: every limit, whether it bound, and why quoting stopped (aggregates only)
+    (out / "session_limits.json").write_text(json.dumps({"label": "EXPLORATORY: session limits of Order 3 on the 29 Oct capture; the condition is INJECTED in the 3x cases", **replay.session.limits_report()}, indent=1, default=str))
 from new_backtest.session_replay import s0_audit
 (out / "session_s0_audit.json").write_text(json.dumps(s0_audit(replay.session.ledger.events, replay.session.oms.plans, replay.session.reprice_counters), indent=1, default=str))       # owner 14 Nov: the counts for case 2i (a-j)
 sigs = result["signals"]

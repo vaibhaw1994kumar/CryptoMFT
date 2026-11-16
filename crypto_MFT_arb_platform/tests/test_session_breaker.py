@@ -535,3 +535,230 @@ class V1_10Rules(unittest.TestCase):
         st.strategy.config.requote_delay_after_withdraw_s = 0.0                       # off: a later withdrawal starts no delay
         st.note_quote_withdrawn({"venue_feed": "bybit", "side": "buy"}, 20 * S)
         self.assertIsNotNone(st.evaluate({}, 20 * S + 1))
+
+
+# ---- Order 3 session limits (owner 16 Nov): A1 order rate, A2 daily loss stop, A3 clock-offset gate, A4 margin WARNING stop, A5 missing marks ---------------------------------------------------------------
+def limits(**kw):
+    base = {"clip_base": 1.0}
+    base.update(kw)
+    return base
+
+
+class SessionLimitsOffByDefault(unittest.TestCase):
+    def test_a_session_without_the_block_builds_nothing_and_reports_nothing(self):
+        s = session()
+        self.assertIsNone(s._limits)
+        self.assertIsNone(s.clock_gate)
+        self.assertTrue(s._order_rate_ok(A, S, "quote"))
+        self.assertIsNone(s._new_quote_stop(S))
+        s._limits_step(S) if s._limits else None
+        self.assertNotIn("session_limits", s.breaker_report())
+        self.assertEqual([e for e in s.ledger.events if e["event_type"] == "LIMIT_STATE"], [])
+
+
+class A1OrderRate(unittest.TestCase):
+    def test_the_bucket_admits_a_burst_of_five_then_two_per_second_and_never_queues(self):
+        from crypto_stat_arb.rate_limits import OrderRateBucket
+        b = OrderRateBucket(2.0, 5)
+        self.assertEqual([b.take(0) for _ in range(6)], [True] * 5 + [False])                     # burst 5, the sixth is skipped
+        self.assertTrue(b.take(500_000_000))                                                       # 0.5 s later one token is back
+        self.assertFalse(b.take(500_000_000))
+        self.assertEqual([b.take(3 * S) for _ in range(6)], [True] * 5 + [False])                  # idle time refills to the burst, never beyond
+        self.assertEqual((b.taken, b.skipped), (11, 3))
+
+    def test_a_skipped_order_is_counted_the_state_change_is_recorded_once_and_clears_on_recovery(self):
+        s = session(session_limits=limits(order_rate={"per_s": 2.0, "burst": 2}))
+        self.assertEqual([s._order_rate_ok(A, 0, "quote"), s._order_rate_ok(A, 0, "quote"), s._order_rate_ok(A, 0, "quote"), s._order_rate_ok(A, 0, "amend"), s._order_rate_ok(A, 0, "quote")], [True, True, False, False, False])
+        self.assertEqual(s.limit_counters["order_rate_skipped_quote"], 2)
+        self.assertEqual(s.limit_counters["order_rate_skipped_amend"], 1)
+        self.assertTrue(s._order_rate_ok(B, 0, "quote"))                                          # the other venue has its own bucket
+        changes = events(s, "LIMIT_STATE")
+        self.assertEqual([(e["limit"], e["state"]) for e in changes], [(f"order_rate:{A}", "ACTIVE")])   # once, not per skip
+        self.assertTrue(s._order_rate_ok(A, S, "quote"))                                          # a second later: tokens are back
+        self.assertEqual([(e["limit"], e["state"]) for e in events(s, "LIMIT_STATE")], [(f"order_rate:{A}", "ACTIVE"), (f"order_rate:{A}", "CLEARED")])
+        rep = s.limits_report()
+        self.assertEqual(rep["order_rate"][A]["skipped"], 3)
+
+    def test_an_amend_is_skipped_by_the_controller_when_the_bucket_is_empty(self):
+        from types import SimpleNamespace
+        s = session(session_limits=limits(order_rate={"per_s": 2.0, "burst": 1}))
+        counters = {}
+        fake = SimpleNamespace(_limits=s._limits, _order_rate_ok=s._order_rate_ok, router=SimpleNamespace(quote_has_room=lambda *a: True), reprice_counters=counters,
+                               _count_reprice=lambda k: counters.__setitem__(k, counters.get(k, 0) + 1), oms=SimpleNamespace(instruments=s.oms.instruments))
+        from crypto_stat_arb.session import TradingSession as TS
+        d = SimpleNamespace(price=100.0, reason="adverse_move")
+        c = {"venue": A, "instrument_id": INSTR, "order_id": "o", "parent_id": "p", "side": "buy"}
+        s._order_rate_ok(A, 0, "quote")                                                           # the only token is gone
+        TS._amend_for_reprice(fake, c, SimpleNamespace(), 0.0, 0, d)
+        self.assertEqual(counters, {"amend_skipped_order_rate": 1})                                # skipped before anything was requested
+
+
+class A2DailyLossStop(unittest.TestCase):
+    def loss_session(self, limit="-5.0", clip=1.0):
+        s = session(session_limits=limits(clip_base=clip, daily_loss_stop={"usdt_per_sol_of_clip": float(limit) / clip, "limit_usdt": float(limit)}))
+        with_books(s)
+        from crypto_stat_arb.models import ChildOrder, OrderState, Side
+        s.ledger.apply_fill(ChildOrder(order_id="f1", parent_id="p", opportunity_id="o", venue=A, instrument_id=INSTR, side=Side.BUY, quantity=Decimal("10"), limit_price=Decimal("100"), state=OrderState.FILLED,
+                                       filled_quantity=Decimal("10"), average_price=Decimal("100")), 1)
+        return s
+
+    def test_realised_plus_marked_loss_at_the_limit_trips_a_latched_kill_switch_once(self):
+        s = self.loss_session()
+        s._limits_step(2 * S)                                                                       # the baseline: equity at the session start
+        self.assertFalse(s.risk.kill_switch)
+        for v in CFG.venues:
+            s.books[(v, INSTR)].apply(snapshot(v, 3 * S, "98.0", "100.0", seq=5))                    # the mid falls from 100 to 99: -10 marked on a long of 10
+        s.oms._books.update(s.books)
+        s._limits_step(4 * S)
+        self.assertTrue(s.risk.kill_switch)
+        self.assertTrue(s.risk.kill_switch_reason.startswith("daily loss stop"))
+        s._limits_step(6 * S)
+        s._limits_step(8 * S)
+        trips = [e for e in events(s, "LIMIT_STATE") if e["limit"] == "daily_loss_stop"]
+        self.assertEqual([e["state"] for e in trips], ["ACTIVE"])                                   # once per state change
+        self.assertEqual(s.limit_counters["daily_loss_stop_trips"], 1)
+        self.assertLessEqual(Decimal(s.limits_report()["daily_loss"]["min_pnl_usdt"]), Decimal("-5"))
+        self.assertTrue(events(s, "KILL_SWITCH_CANCEL_ALL_COMPLETE")[-1]["risk_reducing_orders_kept"])   # hedges in flight finish
+
+    def test_a_loss_inside_the_limit_does_not_trip_and_the_limit_scales_with_the_clip(self):
+        s = self.loss_session(limit="-25.0", clip=5.0)
+        s._limits_step(2 * S)
+        for v in CFG.venues:
+            s.books[(v, INSTR)].apply(snapshot(v, 3 * S, "98.0", "100.0", seq=5))
+        s.oms._books.update(s.books)
+        s._limits_step(4 * S)
+        self.assertFalse(s.risk.kill_switch)                                                        # -10 against -25 at a 5 SOL clip
+        from crypto_stat_arb.config import session_limits_from_profile
+        prof = {"oms": {"session_limits": {"daily_loss_stop_usdt_per_sol_of_clip": -5.0}}}
+        self.assertEqual(session_limits_from_profile(prof, 1.0)["daily_loss_stop"]["limit_usdt"], -5.0)
+        self.assertEqual(session_limits_from_profile(prof, 5.0)["daily_loss_stop"]["limit_usdt"], -25.0)
+
+    def test_the_baseline_is_the_start_of_the_utc_day_and_a_reset_clears_the_latch_with_a_log(self):
+        s = self.loss_session()
+        s._limits_step(2 * S)
+        first = s._loss_baseline
+        s._limits_step(2 * S + 86_400 * S)                                                          # the next UTC day: the baseline is taken again
+        self.assertEqual(s._loss_day, (2 * S + 86_400 * S) // 86_400_000_000_000)
+        for v in CFG.venues:
+            s.books[(v, INSTR)].apply(snapshot(v, 3 * S, "98.0", "100.0", seq=5))
+        s.oms._books.update(s.books)
+        s._limits_step(3 * S + 86_400 * S)
+        self.assertTrue(s.risk.kill_switch)
+        s.risk.kill_switch = False                                                                  # the operator's logged reset (oms.recover_kill_switch, with its approved reconciliation, is tested in test_oms): the limit sees the latch gone
+        self.assertFalse(s.risk.kill_switch)
+        s._limits_step(5 * S + 86_400 * S)
+        states = [e["state"] for e in events(s, "LIMIT_STATE") if e["limit"] == "daily_loss_stop"]
+        self.assertEqual(states, ["ACTIVE", "CLEARED"])
+        self.assertFalse(s.risk.kill_switch)                                                        # re-based at the reset: not tripped again by the same loss
+
+
+class A3ClockGate(unittest.TestCase):
+    def gated(self, live):
+        lim = limits(clock_offset={"max_uncertainty_ms": 5.0, "max_age_s": 900.0})
+        return TradingSession(CFG, execution_mode=ExecutionMode.INTERNAL_PAPER, live_data=True, session_limits=lim) if live else session(session_limits=lim)
+
+    def test_best_probe_is_the_lowest_round_trip_with_uncertainty_half_of_it(self):
+        from crypto_stat_arb.time_integrity import best_probe
+        m = best_probe([(0, 10_000_000, 8_000_000), (100, 10_004_000, 3_000_100), (5, 0, 4)], source="t")
+        self.assertEqual((m.uncertainty_ns, m.offset_ns, m.samples), (1_500_000, 1_500_100 - 10_004_000, 2))        # the 3 ms probe wins; the third has no server time and is dropped
+
+    def test_a_replay_with_no_measured_clock_is_not_evaluable_counted_and_never_blocks(self):
+        s = self.gated(live=False)
+        self.assertIsNone(s._new_quote_stop(S))
+        self.assertIsNone(s._new_quote_stop(2 * S))
+        self.assertEqual(s.limit_counters["clock_not_evaluable"], 2)
+        self.assertEqual(events(s, "LIMIT_STATE"), [])
+
+    def test_unknown_or_uncertain_blocks_new_quotes_once_and_a_good_measurement_clears_it(self):
+        from crypto_stat_arb.time_integrity import ClockMeasurement
+        s = self.gated(live=True)
+        self.assertEqual(s._new_quote_stop(S), "clock_unknown")                                     # no measurement in a live session: no new quotes
+        self.assertEqual(s._new_quote_stop(2 * S), "clock_unknown")
+        s.clock_gate.update(ClockMeasurement(offset_ns=1_000_000, uncertainty_ns=6_000_000, measured_ts_ns=2 * S, source="probe"))
+        self.assertEqual(s._new_quote_stop(3 * S), "clock_uncertain")                               # 6 ms above 5 ms
+        s.clock_gate.update(ClockMeasurement(offset_ns=1_000_000, uncertainty_ns=5_000_000, measured_ts_ns=4 * S, source="probe"))
+        self.assertIsNone(s._new_quote_stop(5 * S))                                                  # exactly 5 ms is allowed
+        self.assertEqual([(e["limit"], e["state"]) for e in events(s, "LIMIT_STATE")], [("clock_offset", "ACTIVE"), ("clock_offset", "CLEARED")])   # once per change
+        self.assertEqual(s.limit_blocks, {"clock_unknown": 2, "clock_uncertain": 1})
+        self.assertIsNone(s._new_quote_stop(4 * S + 899 * S))
+        self.assertEqual(s._new_quote_stop(4 * S + 901 * S), "clock_unknown")                       # a measurement older than max_age counts as unknown
+
+    def test_the_gate_stops_the_strategy_but_not_the_event_flow(self):
+        s = self.gated(live=True)
+        fake = Fake()
+        s.strategies = [fake]
+        with_books(s)
+        s.on_event(snapshot(B, 5 * S, seq=2), now_ns=5 * S, gate_allowed=True)
+        self.assertEqual(fake.calls, 0)
+        self.assertEqual(s.signals_blocked_by_limits, 1)
+
+
+class A4MarginWarningStop(unittest.TestCase):
+    def warn_session(self, capital):
+        from dataclasses import replace
+        from crypto_stat_arb.margin import MarginConfig
+        s = session(session_limits=limits(margin_warning={"free_margin_multiple": 10.0, "resume_hysteresis_s": 5.0}))
+        with_books(s)
+        return s
+
+    def report(self, state="HEALTHY", available="1000", price_missing=False):
+        from types import SimpleNamespace
+        row = SimpleNamespace(venue=A, state=SimpleNamespace(value=state), margin_enabled=True, details={"price_missing": price_missing}, available_margin=Decimal(available))
+        return SimpleNamespace(venues=[row])
+
+    def test_a_real_warning_stops_new_quotes_once_and_resumes_after_the_hysteresis(self):
+        s = self.warn_session(1000)
+        marks = {(A, INSTR): Decimal("100"), (B, INSTR): Decimal("100")}
+        s._margin_warning_step(self.report("WARNING"), marks, 10 * S)
+        self.assertEqual(s._new_quote_stop(10 * S), "margin_warning")
+        s._margin_warning_step(self.report("WARNING"), marks, 11 * S)                              # still bad: no second event
+        s._margin_warning_step(self.report("HEALTHY"), marks, 12 * S)                              # clear, but only just
+        self.assertEqual(s._new_quote_stop(12 * S), "margin_warning")                              # hysteresis: still held
+        s._margin_warning_step(self.report("HEALTHY"), marks, 17 * S)                              # 5 s clear
+        self.assertIsNone(s._new_quote_stop(17 * S))
+        self.assertEqual([(e["limit"], e["state"]) for e in events(s, "LIMIT_STATE")], [("margin_warning", "ACTIVE"), ("margin_warning", "CLEARED")])
+
+    def test_a_warning_that_only_means_a_missing_price_is_not_counted_here(self):
+        s = self.warn_session(1000)
+        s._margin_warning_step(self.report("WARNING", price_missing=True), {(A, INSTR): Decimal("100")}, 10 * S)
+        self.assertIsNone(s._new_quote_stop(10 * S))                                                 # the margin price pause (and A5) own that case
+
+    def test_free_margin_below_ten_times_the_initial_margin_at_the_hard_cap_stops_new_quotes(self):
+        s = self.warn_session(1000)
+        cap = s._gate_limits().venue_cap                                                            # base units
+        sched = s.margin_config.venues[A].tiers[INSTR]
+        need = sched.initial(Decimal(str(cap)) * Decimal("100")) * 10
+        s._margin_warning_step(self.report("HEALTHY", available=str(need - 1)), {(A, INSTR): Decimal("100")}, 10 * S)
+        self.assertEqual(s._new_quote_stop(10 * S), "margin_warning")
+        self.assertIn("free_margin", s.limit_events[0]["venues"])
+        s2 = self.warn_session(1000)
+        s2._margin_warning_step(self.report("HEALTHY", available=str(need)), {(A, INSTR): Decimal("100")}, 10 * S)
+        self.assertIsNone(s2._new_quote_stop(10 * S))                                                # exactly 10x is enough
+
+
+class A5MissingMarks(unittest.TestCase):
+    def test_a_pause_longer_than_sixty_seconds_trips_a_latched_kill_switch_once(self):
+        s = session(session_limits=limits(missing_marks_kill_s=60.0))
+        s.margin_price_paused = True
+        s._price_pause_since = 10 * S
+        s._limits_step(70 * S)                                                                       # exactly 60 s: not longer
+        self.assertFalse(s.risk.kill_switch)
+        s._limits_step(70 * S + 1)
+        self.assertTrue(s.risk.kill_switch)
+        s._limits_step(80 * S)
+        self.assertEqual([(e["limit"], e["state"]) for e in events(s, "LIMIT_STATE")], [("missing_marks", "ACTIVE")])
+        self.assertEqual(s.limit_counters["missing_marks_trips"], 1)
+
+    def test_a_pause_that_ends_in_time_never_trips_and_the_timer_follows_the_pause(self):
+        s = margin_session()
+        s._limits = limits(missing_marks_kill_s=60.0)
+        s._evaluate_margin(5 * S)
+        s.books[(A, INSTR)].start_resync("stale")
+        s._evaluate_margin(11 * S)
+        self.assertEqual(s._price_pause_since, 11 * S)
+        s.books[(A, INSTR)].apply(snapshot(A, 15 * S, seq=3))
+        s.oms._books.update(s.books)
+        s._evaluate_margin(16 * S)
+        self.assertIsNone(s._price_pause_since)
+        s._limits_step(200 * S)
+        self.assertFalse(s.risk.kill_switch)

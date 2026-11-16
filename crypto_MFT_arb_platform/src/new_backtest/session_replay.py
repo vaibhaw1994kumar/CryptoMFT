@@ -27,7 +27,7 @@ from decimal import Decimal
 from pathlib import Path
 from typing import Any, Iterable
 
-from crypto_stat_arb.config import check_real_order_profile, config_from_raw, hedge_dust_fields, raw_config_from_profile
+from crypto_stat_arb.config import check_real_order_profile, config_from_raw, hedge_dust_fields, raw_config_from_profile, session_limits_from_profile
 from crypto_stat_arb.derivatives import DerivativeTicker
 from crypto_stat_arb.metrics import regime_sample
 from crypto_stat_arb.ems.layer import hedge_policy_fields
@@ -255,7 +255,11 @@ class SessionReplay:
             layer_risk_mode=layer_risk_mode,   # E0 step (c): count (default) = the layer's base-ceiling gate only counts; enforce = it refuses before the OMS reserves anything
             intent_journal=True,               # E0 step (a) (owner 10 Nov): the orders are journaled as layer intents next to the OMS plan; observation only
             markout_horizons_s=tuple(config.markout_horizons_s),          # owner 9 Nov: forward markouts per fill, by venue and role, as the backtester reports them (the core's MarkoutTracker)
+            session_limits=session_limits_from_profile(profile, float(config.arb.max_position_base)),      # owner 16 Nov (Order 3): oms.session_limits, None (nothing built) for every profile without the block
         )
+        if self.session._limits is not None:                                # owner 16 Nov (Order 3): recorded in the manifest only when the profile has the block
+            self.config_notes["session_limits"] = {"config": self.session._limits, "tier_table": "replays keep the ASSUMED margin tiers (the account-read tiers are a real-order start-up step), labelled",
+                                                   "clock_offset": "not evaluable in a replay without a measured clock: counted, never blocking", "verify_account": "a start-up step for paper and live; not run in a replay"}
         if config.arb.maker_max_age_s > 0:
             self.session.oms.order_lifetime_ns = int(config.arb.maker_max_age_s * _NS)     # the profile's MANDATORY maker order lifetime (a rule, the same on both runtimes)
         self.strategy = CrossVenueArbStrategy(config.pair, self.venue_specs, config.arb)
@@ -1191,6 +1195,10 @@ def live_paper_setup(profile_name: str) -> dict:
     guard = amend_guard_from_profile(profile)
     if guard is not None:
         session_kwargs["amend_guard"] = guard             # owner 16 Nov: read by TradingSession only when it sends real orders
+    from crypto_stat_arb.config import session_limits_from_profile
+    limits = session_limits_from_profile(profile, float(cfg.arb.max_position_base))
+    if limits is not None:
+        session_kwargs["session_limits"] = limits         # owner 16 Nov (Order 3): the profile's oms.session_limits, the clip scaling the loss stop; absent in every earlier profile
     return {"session_kwargs": session_kwargs, "queue_simulation": asdict(cfg.maker), "strategy_builder": build}
 
 

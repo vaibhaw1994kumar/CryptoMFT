@@ -384,6 +384,70 @@
   "evidence": "runs/scn_2n_size5_v110/session_ems_path_coverage.json"
  },
  {
+  "case": "J2/J3 checks, 3a_order_rate_v110",
+  "covering_layer": "execution layer, router",
+  "count": 20,
+  "result": "PASS",
+  "detail": "off_tick=0, tactic_violations=0",
+  "evidence": "runs/scn_3a_order_rate_v110/session_ems_path_coverage.json"
+ },
+ {
+  "case": "J2/J3 checks, 3b_loss_stop_v110",
+  "covering_layer": "execution layer, router",
+  "count": 3,
+  "result": "PASS",
+  "detail": "off_tick=0, tactic_violations=0",
+  "evidence": "runs/scn_3b_loss_stop_v110/session_ems_path_coverage.json"
+ },
+ {
+  "case": "J2/J3 checks, 3c_clock_bad_v110",
+  "covering_layer": "execution layer, router",
+  "count": 0,
+  "result": "PASS",
+  "detail": "off_tick=0, tactic_violations=0",
+  "evidence": "runs/scn_3c_clock_bad_v110/session_ems_path_coverage.json"
+ },
+ {
+  "case": "J2/J3 checks, 3c_clock_none_v110",
+  "covering_layer": "execution layer, router",
+  "count": 27,
+  "result": "PASS",
+  "detail": "off_tick=0, tactic_violations=0",
+  "evidence": "runs/scn_3c_clock_none_v110/session_ems_path_coverage.json"
+ },
+ {
+  "case": "J2/J3 checks, 3c_clock_ok_v110",
+  "covering_layer": "execution layer, router",
+  "count": 27,
+  "result": "PASS",
+  "detail": "off_tick=0, tactic_violations=0",
+  "evidence": "runs/scn_3c_clock_ok_v110/session_ems_path_coverage.json"
+ },
+ {
+  "case": "J2/J3 checks, 3d_margin_warning_v110",
+  "covering_layer": "execution layer, router",
+  "count": 0,
+  "result": "PASS",
+  "detail": "off_tick=0, tactic_violations=0",
+  "evidence": "runs/scn_3d_margin_warning_v110/session_ems_path_coverage.json"
+ },
+ {
+  "case": "J2/J3 checks, 3e_missing_marks_v110",
+  "covering_layer": "execution layer, router",
+  "count": 27,
+  "result": "PASS",
+  "detail": "off_tick=0, tactic_violations=0",
+  "evidence": "runs/scn_3e_missing_marks_v110/session_ems_path_coverage.json"
+ },
+ {
+  "case": "J2/J3 checks, 3x_baseline_v110",
+  "covering_layer": "execution layer, router",
+  "count": 27,
+  "result": "PASS",
+  "detail": "off_tick=0, tactic_violations=0",
+  "evidence": "runs/scn_3x_baseline_v110/session_ems_path_coverage.json"
+ },
+ {
   "case": "J2/J3 checks, H1a",
   "covering_layer": "execution layer, router",
   "count": 13,
@@ -578,9 +642,9 @@
  {
   "case": "2h New-level vs queued fills: every maker fill carries queue_class",
   "covering_layer": "simulator observation rows",
-  "count": 263,
+  "count": 329,
   "result": "PASS",
-  "detail": "maker fills with the field 263 in 39 runs (scn_2a_quote_withdraw, scn_2a_v110, scn_2b_v110, scn_2c_partial_then_fill, scn_2c_thin_top, scn_2c_zero_exhausted, scn_2c_zero_exhausted_layeronly, scn_2c_zero_then_fill, scn_2c_zero_then_fill_layeronly, scn_2d_ghost3, scn_2d_ghost30, scn_2e_feed_gap, scn_2f_rate_limit, scn_2f_v110, scn_2i_control_v19, scn_2i_s0, scn_2i_v110_dense, scn_2i_v110_disconnect, scn_2i_v110_dup_filled, scn_2i_v110_reject, scn_2i_v110_short, scn_2i_v110_timeout, scn_2j_duplicate_filled, scn_2k_breaker_pause, scn_2k_breaker_trip, scn_2l_maker_outage, scn_2m_p99, scn_2m_p999, scn_2m_p999_v110, scn_2m_processing, scn_2m_processing_v110, scn_2n_size1, scn_2n_size1_v110, scn_2n_size25, scn_2n_size25_v110, scn_2n_size5, scn_2n_size5_v110, scn_H1a, scn_H1b): {'queued': 263}. The class is read from the placement of the same order (new_level: no displayed size at our price when we placed, queued: behind displayed size, unknown: queue not known); it sits on the maker_fill rows of maker_observations.jsonl, an observation-only file, so no existing output changed. Agreement with real fills is a Track C result and is NOT claimed",
+  "detail": "maker fills with the field 329 in 45 runs (scn_2a_quote_withdraw, scn_2a_v110, scn_2b_v110, scn_2c_partial_then_fill, scn_2c_thin_top, scn_2c_zero_exhausted, scn_2c_zero_exhausted_layeronly, scn_2c_zero_then_fill, scn_2c_zero_then_fill_layeronly, scn_2d_ghost3, scn_2d_ghost30, scn_2e_feed_gap, scn_2f_rate_limit, scn_2f_v110, scn_2i_control_v19, scn_2i_s0, scn_2i_v110_dense, scn_2i_v110_disconnect, scn_2i_v110_dup_filled, scn_2i_v110_reject, scn_2i_v110_short, scn_2i_v110_timeout, scn_2j_duplicate_filled, scn_2k_breaker_pause, scn_2k_breaker_trip, scn_2l_maker_outage, scn_2m_p99, scn_2m_p999, scn_2m_p999_v110, scn_2m_processing, scn_2m_processing_v110, scn_2n_size1, scn_2n_size1_v110, scn_2n_size25, scn_2n_size25_v110, scn_2n_size5, scn_2n_size5_v110, scn_3a_order_rate_v110, scn_3b_loss_stop_v110, scn_3c_clock_none_v110, scn_3c_clock_ok_v110, scn_3e_missing_marks_v110, scn_3x_baseline_v110, scn_H1a, scn_H1b): {'queued': 329}. The class is read from the placement of the same order (new_level: no displayed size at our price when we placed, queued: behind displayed size, unknown: queue not known); it sits on the maker_fill rows of maker_observations.jsonl, an observation-only file, so no existing output changed. Agreement with real fills is a Track C result and is NOT claimed",
   "evidence": "runs/scn_*/maker_observations.jsonl"
  },
  {
@@ -654,6 +718,70 @@
   "result": "PASS",
   "detail": "hedge IOC full 12, partial 0, zero 0, unwind orders 0; maker filled 36.1 hedge filled 36.1; residual at end FLAT_NET; withdrawn 5",
   "evidence": "scn_2n_size25_v110"
+ },
+ {
+  "case": "3x Baseline (dense window, v1_10 with every Order 3 limit at the profile's value)",
+  "covering_layer": "session limits",
+  "count": 0,
+  "result": "PASS",
+  "detail": "signals 13, maker orders 14, fills 26; no limit bound (none); the clock gate was 'not evaluable' 401834 times (counted, not blocking); the daily P&L low point -0.54599 USDT against the limit -5.0: the -5 USDT stop does not bind on this day at 1 SOL; the order rate peaked at 14 orders taken, 0 skipped",
+  "evidence": "runs/scn_3x_baseline_v110"
+ },
+ {
+  "case": "3a A1 order rate (INJECTED: 0.2 per second, burst 1, instead of 2 and 5)",
+  "covering_layer": "session, rate_limits.OrderRateBucket",
+  "count": 162,
+  "result": "PASS",
+  "detail": "skipped 162 (quotes 157, amends 5) of 170 asks; 3 state changes recorded once each (ACTIVE) and cleared when a token returned; maker orders 8 against 14 in the baseline; maker filled 5 = hedge filled 5: hedges were never refused; nothing was queued",
+  "evidence": "runs/scn_3a_order_rate_v110/session_limits.json"
+ },
+ {
+  "case": "3b A2 daily loss stop (INJECTED: the limit set to -0.02 USDT so the day's own P&L trips it; the forced-adverse-fills variant is the unit test)",
+  "covering_layer": "session, OMS kill switch (keep_risk_reducing)",
+  "count": 1,
+  "result": "PASS",
+  "detail": "tripped once at P&L -0.027155 USDT; 1 ACTIVE event; maker filled 1 = hedge filled 1 (the hedge in flight finished); residual FLAT_NET; orders after the trip: 3 against 27 in the baseline (the kill is latched, no manual reset in a replay)",
+  "evidence": "runs/scn_3b_loss_stop_v110/session_limits.json"
+ },
+ {
+  "case": "3c A3 clock-offset gate (INJECTED measurement: uncertainty 6 ms against the 5 ms limit)",
+  "covering_layer": "session, time_integrity.ClockGate",
+  "count": 401874,
+  "result": "PASS",
+  "detail": "401874 signal evaluations blocked (reason clock_uncertain), maker orders 0, one ACTIVE event; hedges and cancels are not asked (none were needed)",
+  "evidence": "runs/scn_3c_clock_bad_v110/session_limits.json"
+ },
+ {
+  "case": "3c A3 clock gate, measured 4 ms (INJECTED) and no measured clock",
+  "covering_layer": "session, time_integrity.ClockGate",
+  "count": 401834,
+  "result": "PASS",
+  "detail": "4 ms measured: evaluated 'ok', nothing blocked; no measured clock: 'not evaluable' 401834 times, counted and not blocking; signals and orders equal the baseline in both (13, 27)",
+  "evidence": "runs/scn_3c_clock_ok_v110, scn_3c_clock_none_v110"
+ },
+ {
+  "case": "3d A4 margin WARNING stop (INJECTED: 30 USDT capital per venue, so free margin is below 10x the initial margin at the hard cap)",
+  "covering_layer": "session, risk margin report",
+  "count": 401874,
+  "result": "PASS",
+  "detail": "401874 evaluations blocked (reason margin_warning, venue(s) BYBIT:free_margin), maker orders 0; one ACTIVE event; the 1000 USDT profile capital never triggers it (baseline)",
+  "evidence": "runs/scn_3d_margin_warning_v110/session_limits.json"
+ },
+ {
+  "case": "3e A5 missing marks (INJECTED: the Binance feed lost for 150 s, 11:20:00 to 11:22:30)",
+  "covering_layer": "session, OMS kill switch (keep_risk_reducing)",
+  "count": 1,
+  "result": "PASS",
+  "detail": "the price pause began at 11:20:05, the kill switch tripped once after 60.05 s (limit 60 s); no hedge was in flight and the day's later signals were already over, so the stop on new quotes is shown by the unit test, not by this run; after the injected reconnect the Binance feed stayed in a price pause for more than an hour: an artefact of the injected snapshot, not a market fact",
+  "evidence": "runs/scn_3e_missing_marks_v110/session_limits.json"
+ },
+ {
+  "case": "3f A6 tier table and A8 account check at start-up (recorded messages)",
+  "covering_layer": "testnet transports, sdk, paper_live start-up",
+  "count": 21,
+  "result": "PASS",
+  "detail": "21 tests in tests/test_session_limits_startup.py: the Binance leverageBracket and Bybit risk-limit reads become ordered tiers (initial rate 1/leverage, deductions, order of brackets), an error or an unexpected shape raises, the read asks for the READ permission only, a spot transport says it has none; the start-up refuses when any venue's tiers cannot be read and replaces the ASSUMED tiers (source ACCOUNT_READ) when they can; verify_account refuses hedge mode, another margin mode or leverage, a missing leverage row, collects every problem, and labels reduce-only acceptance DERIVED_FROM_ONE_WAY_MODE and UNVERIFIED. HAND-WRITTEN messages in the documented shapes: the endpoint shapes are UNVERIFIED against the live endpoints, and the replays have no account (a replay keeps the ASSUMED tiers, labelled)",
+  "evidence": "tests/test_session_limits_startup.py"
  },
  {
   "case": "2g Restart: exchange-side reconciliation (open orders, executions, positions fetched from the venue; OMS level, scripted venue)",

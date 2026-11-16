@@ -174,7 +174,7 @@ class AmendPriceOnGrid(unittest.TestCase):
         oms = SimpleNamespace(instruments=SimpleNamespace(get=lambda venue, instrument, ts: SimpleNamespace(tick_size=Decimal("0.01"))),
                               request_amend=lambda order_id, price, ts, reason: sent.append(price) or "REQUESTED")
         counters = {}
-        fake = SimpleNamespace(router=SimpleNamespace(quote_has_room=lambda *a: True), oms=oms, reprice_counters=counters, _reprice_pending={},
+        fake = SimpleNamespace(_limits=None, router=SimpleNamespace(quote_has_room=lambda *a: True), oms=oms, reprice_counters=counters, _reprice_pending={},
                                _count_reprice=lambda key: counters.__setitem__(key, counters.get(key, 0) + 1))
         c = {"venue": "BYBIT", "instrument_id": "SOL-USDT-PERP", "order_id": "o1", "parent_id": "p1", "side": side}
         st = SimpleNamespace(last_request_ts=0.0, pending=False, reprices=0)
