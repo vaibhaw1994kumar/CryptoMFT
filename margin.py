@@ -375,3 +375,39 @@ class LiquidationEngine:
         if self.on_liquidation is not None:
             self.on_liquidation(f"venue liquidation {venue} {instrument_id}: {row['code']}", now_ns)
         return row
+
+
+class AccountTierReadError(RuntimeError):
+    """Owner 16 Nov (limit A6): a venue's own risk tiers could not be read at start-up (no reader, a failed read, an unexpected shape): a real-order session then refuses to start."""
+
+
+def read_account_tiers(readers: dict[str, Any], venues: tuple[str, ...], instrument_id: str) -> dict[str, TierSchedule]:
+    """Read every venue's own risk tiers for the instrument (`readers[venue].account_risk_tiers(instrument_id)` -> rows of text rates) into TierSchedules sourced 'ACCOUNT_READ'. Collects every problem and raises
+    once (fail closed: tiers that cannot be read are not tiers that were checked). Read-only."""
+    out: dict[str, TierSchedule] = {}
+    problems: list[str] = []
+    for venue in venues:
+        reader = readers.get(venue)
+        if reader is None:
+            problems.append(f"{venue}: no account tier reader (the account's own tiers are not read)")
+            continue
+        try:
+            rows = reader.account_risk_tiers(instrument_id)
+            out[venue] = TierSchedule(tuple(
+                RiskTier(max_notional=Decimal(str(r["max_notional"])), maintenance_rate=Decimal(str(r["maintenance_rate"])), initial_rate=Decimal(str(r["initial_rate"])),
+                         maintenance_deduction=Decimal(str(r.get("maintenance_deduction", "0")))) for r in rows), source=f"ACCOUNT_READ:{venue}")
+        except Exception as exc:
+            problems.append(f"{venue}: the account's risk tiers could not be read ({type(exc).__name__}: {exc})")
+    if problems:
+        raise AccountTierReadError("account risk tiers unavailable: " + "; ".join(problems))
+    return out
+
+
+def apply_account_tiers(config: MarginConfig, tiers: dict[str, TierSchedule], instrument_id: str) -> MarginConfig:
+    """The margin configuration with the account-read tiers in place of the ASSUMED ones, for the venues it configures. Nothing else changes."""
+    from dataclasses import replace as _replace
+
+    venues = {}
+    for venue, vc in config.venues.items():
+        venues[venue] = _replace(vc, tiers={**vc.tiers, instrument_id: tiers[venue]}) if venue in tiers else vc
+    return _replace(config, venues=venues)

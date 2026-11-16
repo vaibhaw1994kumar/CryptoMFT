@@ -30,6 +30,9 @@ from typing import Any, Callable
 from .config import load_config
 from .execution import VenueExecutionAdapter
 from .fees import verify_account_fee_rates
+from .margin import apply_account_tiers, read_account_tiers
+from .testnet import verify_accounts_for_start
+from .time_integrity import ClockMeasurement, probe_server_clock
 from .instrument_status import InstrumentStatusPoller
 from .live_feed import (
     LiveFeedSettings,
@@ -89,6 +92,8 @@ class LivePaperSession:
         strategy_builder: Callable[["LivePaperSession"], list] | None = None,
         fee_readers: dict[str, Any] | None = None,
         require_account_fees: bool = False,
+        session_limits: dict | None = None,
+        clock_source: str | None = None,
     ) -> None:
         self.cfg, _ = load_config(Path(config_path))
         settings = settings or LiveFeedSettings(udp_enabled=False)
@@ -102,6 +107,25 @@ class LivePaperSession:
         self.account_fee_check: list[dict] | None = None
         if require_account_fees or readers is not None or execution_mode != ExecutionMode.INTERNAL_PAPER:       # any mode that sends real orders reads the account's fees: no fallback to assumed fees
             self.account_fee_check = verify_account_fee_rates(self.cfg.instruments.fee_schedule, self.cfg.instrument_id, readers or {})
+        # Owner 16 Nov (Order 3): the start-up checks of the session limits. Any mode that sends real orders (or has account readers) READS the account before anything starts and refuses to start when the
+        # account is not as the profile expects (A8: one-way mode, margin mode, leverage, reduce-only accepted) or its own risk tiers cannot be read (A6: they replace the ASSUMED margin tiers); a real-order
+        # session with a clock-offset gate (A3) refuses to start without a clock source. A purely simulated session with no account and no readers has nothing to read and starts as before (the checks are not run, and say so).
+        self.session_limits = session_limits
+        self.account_checks: dict[str, Any] = {}
+        self.clock_source = clock_source
+        if session_limits is not None:
+            real = readers is not None or execution_mode != ExecutionMode.INTERNAL_PAPER
+            va = session_limits.get("verify_account")
+            if va is not None and va.get("enabled") and real:
+                self.account_checks["verify_account"] = verify_accounts_for_start(readers or {}, tuple(self.cfg.venues), self.cfg.instrument_id, margin_mode=va.get("margin_mode"), leverage=va.get("leverage"))
+            if session_limits.get("tier_table") == "read_at_start" and real:
+                tiers = read_account_tiers(readers or {}, tuple(self.cfg.venues), self.cfg.instrument_id)
+                if self.cfg.margin is not None and self.cfg.margin.configured:
+                    from dataclasses import replace as _dc_replace
+                    self.cfg = _dc_replace(self.cfg, margin=apply_account_tiers(self.cfg.margin, tiers, self.cfg.instrument_id))
+                self.account_checks["tier_table"] = {v: {"source": t.source, "tiers": len(t.tiers), "last_max_notional": str(t.tiers[-1].max_notional)} for v, t in tiers.items()}
+            if session_limits.get("clock_offset") is not None and real and clock_source is None:
+                raise ValueError("a session that sends real orders needs a clock source for the clock-offset gate (clock_source='server_time'); it refuses to start without one")
         self.clock_ns = clock_ns
         self.service = LiveOrderBookService(
             Path(config_path), Path(output_dir), session_id, settings,
@@ -124,9 +148,12 @@ class LivePaperSession:
                 raise ValueError("queue_simulation replaces the simulated venue adapters: INTERNAL_PAPER only, with no adapters supplied")
             from .simulation.queue_adapter import SimulatedVenueFeeder, build_queue_simulation
             adapters, self._views, self._states, self.queue_executor = build_queue_simulation(self.cfg, queue_simulation)
+        kwargs = dict(session_kwargs or {})
+        if session_limits is not None:
+            kwargs.setdefault("session_limits", session_limits)
         self.session = TradingSession(
             self.cfg, execution_mode=execution_mode, live_data=True,
-            adapters=adapters, books=books, clock_ns=clock_ns, **(session_kwargs or {}),
+            adapters=adapters, books=books, clock_ns=clock_ns, **kwargs,
         )
         if queue_simulation is not None:
             # exchange-time eligibility stays off (ets None) until a measured host-clock offset exists (D7d); the venue names are the feed's own, so the name map is the identity
@@ -153,6 +180,7 @@ class LivePaperSession:
         self.status_poller = status_poller
         self.status_poll_ns = int(status_poll_seconds * 1_000_000_000)
         self._next_status_poll_ns = 0
+        self._next_clock_probe_ns = 0
         self.tick_seconds = tick_seconds
         self.started_ts_ns: int | None = None
         self.settings = settings
@@ -230,6 +258,8 @@ class LivePaperSession:
                 self._write_row({
                     "record_type": "FLATTEN_STARTED", "ts_ns": now, "exit_intents": sent,
                 })
+            if self.clock_source == "server_time" and now >= self._next_clock_probe_ns:
+                await self._probe_clock(now)
             if self.status_poller is None or now < self._next_status_poll_ns:
                 continue
             self._next_status_poll_ns = now + self.status_poll_ns
@@ -243,8 +273,26 @@ class LivePaperSession:
                     "ts_ns": now, "error": f"{type(exc).__name__}: {exc}"[:300],
                 })
 
+    CLOCK_PROBE_SECONDS = 300.0                         # the ollog rule: the offset is re-measured every 300 s
+
+    async def _probe_clock(self, now: int) -> None:
+        """Owner 16 Nov (limit A3): measure the local clock against every venue's server time (five round trips each, the lowest wins) and hand the WORST venue to the gate (the conservative reading: both venues'
+        stamps must be comparable). A venue whose probe fails leaves the gate with no fresh measurement, so it goes 'unknown' by age."""
+        self._next_clock_probe_ns = now + int(self.CLOCK_PROBE_SECONDS * 1e9)
+        gate = self.session.clock_gate
+        if gate is None:
+            return
+        found = [await probe_server_clock(self.service.http_getter, venue, clock_ns=self.clock_ns) for venue in self.cfg.venues]
+        if any(m is None for m in found):
+            self._write_row({"record_type": "CLOCK_PROBE_FAILED", "ts_ns": now, "venues": [v for v, m in zip(self.cfg.venues, found) if m is None]})
+            return
+        worst = max(found, key=lambda m: m.uncertainty_ns)
+        gate.update(ClockMeasurement(offset_ns=worst.offset_ns, uncertainty_ns=worst.uncertainty_ns, measured_ts_ns=max(m.measured_ts_ns for m in found), source="+".join(m.source for m in found), samples=sum(m.samples for m in found)))
+
     async def run(self) -> dict[str, Any]:
         self.started_ts_ns = self.clock_ns()
+        if self.clock_source == "server_time":
+            await self._probe_clock(self.started_ts_ns)         # quoting starts only after a measurement exists
         ticker = asyncio.create_task(self._ticker())
         try:
             service_summary = await self.service.run()

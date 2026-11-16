@@ -39,7 +39,8 @@ from .plan_store import ParentPlanStore
 from .risk import RiskEngine
 from .strategy import AmendQuote, CancelQuote, CrossVenueSpreadStrategy, ExitInventory, PlaceQuote
 from .mean_reversion import CrossVenueMeanReversionStrategy, MeanReversionConfig
-from .time_integrity import TimeIntegrityMonitor
+from .time_integrity import ClockGate, ClockMeasurement, TimeIntegrityMonitor
+from .rate_limits import OrderRateBucket
 
 
 class ExecutionMode(StrEnum):
@@ -189,6 +190,8 @@ class TradingSession:
         layer_route_mode: str = "count",
         execution_config: Any = None,
         amend_guard: dict | None = None,
+        session_limits: dict | None = None,
+        clock_measurement: ClockMeasurement | None = None,
     ) -> None:
         execution_mode = ExecutionMode(execution_mode)
         assert_execution_mode(
@@ -361,6 +364,7 @@ class TradingSession:
         # until then every reprice is a cancel and a fresh quote through all the gates (amend_first false), counted and labelled. Replays and paper without sends are not restricted. Withdrawal is not restricted.
         self.amend_guard_state: dict[str, Any] | None = None
         self._apply_amend_guard(amend_guard, execution_mode)
+        self._init_limits(session_limits, live_data, clock_measurement)
         self.ledger.journal = self.financing_journal
         # Margin is evaluated during the session, not only at the end (ECO04):
         # on market-data time every ``evaluate_interval_ms`` and after any fill
@@ -460,6 +464,7 @@ class TradingSession:
         self._last_good_marks: dict[tuple[str, str], tuple[int, Decimal]] = {}
         self.margin_price_paused = False                  # a missing margin price pauses new risk (margin.missing_price_action 'pause'); resumes when the price is back
         self.signals_blocked_by_margin_price = 0
+        self.signals_blocked_by_limits = 0
         self.exchange_marks: dict[tuple[str, str], tuple[int, Decimal]] = {}       # (venue, instrument) -> (receive ts, mark price) from the derivatives stream, or the replay's labelled MARK_FROM_MID
 
     def _now(self, event: MarketEvent, now_ns: int | None) -> int:
@@ -568,6 +573,8 @@ class TradingSession:
         self._notify_closed_plans()
         self._pump_quote_callbacks(now)
         self._breaker_step(now)
+        if self._limits is not None:
+            self._limits_step(now)
         if gate_allowed is None:
             required = tuple(
                 self.books[(venue, self.cfg.instrument_id)] for venue in self.cfg.venues
@@ -591,6 +598,9 @@ class TradingSession:
                 continue
             if self.margin_price_paused and not hasattr(strategy, "force_exit"):
                 self.signals_blocked_by_margin_price += 1       # no price for the margin check: no new risk until it is back
+                continue
+            if self._limits is not None and not hasattr(strategy, "force_exit") and self._new_quote_stop(now) is not None:
+                self.signals_blocked_by_limits += 1             # owner 16 Nov (A3, A4): the clock gate or a margin WARNING: no new quotes; hedges and cancels continue
                 continue
             started = self.wall_ns()
             opportunity = strategy.evaluate(self.books, now)
@@ -716,6 +726,8 @@ class TradingSession:
             if self.quotes_skipped_rate_limit <= 200:
                 self.ledger.record("QUOTE_SKIPPED_RATE_LIMIT", now, opportunity_id=opportunity.opportunity_id, venue=maker_venue)
             return None
+        if maker_venue is not None and not self._order_rate_ok(maker_venue, now, "quote"):
+            return None                                  # owner 16 Nov (A1): the per-venue order rate is used up: this quote is SKIPPED (counted, never queued); hedges, unwinds, flattens and cancels never pass this test
         plan = self.oms.execute(opportunity, self.books, dispatch_ts_ns=dispatch_ts, maker_venue=maker_venue)
         if hasattr(strategy, "on_plan_closed"):
             self._tracked_plans[plan.parent_id] = strategy
@@ -769,7 +781,7 @@ class TradingSession:
             return "breaker"
         if self.margin_price_paused:
             return "margin_price_missing"
-        return None
+        return self._new_quote_stop(now)
 
     def _run_quote_strategy(self, strategy: Any, now: int) -> None:
         actions = strategy.quotes(self.books, now) or ()
@@ -797,6 +809,8 @@ class TradingSession:
             reason = None
             if is_quote and blocked is not None:
                 reason = f"blocked:{blocked}"
+            elif is_quote and self._limits is not None and not self._order_rate_ok(action.venue, now, "quote"):
+                reason = "order_rate_skipped"                      # owner 16 Nov (A1): skipped, never queued
             elif is_quote and not self.oms.router.quote_has_room(action.venue, instrument_id, now):
                 reason = "rate_limit_skipped"                      # the quote share of the window is used up: skipped, never queued (an exit is risk reducing and is never refused by the limiter)
                 self.quotes_skipped_rate_limit += 1
@@ -833,6 +847,10 @@ class TradingSession:
             if action.qty is not None and Decimal(action.qty) != rec["qty"]:
                 self._quote_cb(rec, "on_quote_amend_refused", action.quote_id, "quantity_change_not_supported", now)
                 self._quote_count("amend_refused")
+                return
+            if self._limits is not None and not self._order_rate_ok(head.venue, now, "amend"):
+                self._quote_count("amend_refused")
+                self._quote_cb(rec, "on_quote_amend_refused", action.quote_id, "order_rate_skipped", now)
                 return
             result = self.oms.request_amend(head.order_id, Decimal(action.price), now, reason="strategy amend")
             if result.startswith("REFUSED"):
@@ -1111,6 +1129,176 @@ class TradingSession:
             self.oms.amend_blocked = "REFUSED:amend_guard:" + "+".join(missing)
             self.amend_guard_state = {"label": "REAL_ORDER_AMEND_GUARD", "active": True, "missing": missing, "effect": "every reprice is a cancel and a fresh quote; no amend is sent"}
 
+    # ---- Order 3 limits (owner 16 Nov): order rate (A1), daily loss stop (A2), clock-offset gate (A3), margin WARNING stop (A4), missing marks (A5). Off unless the profile has oms.session_limits: with it off nothing below
+    # is built, counted or written, so every earlier profile is byte-identical. Each limit has a counter and a LIMIT_STATE event recorded ONCE per state change (ACTIVE / CLEARED). The stops that only hold back NEW quotes
+    # (A3, A4) never touch hedges, unwinds or cancels; the two kills (A2, A5) cancel the quotes, let hedges in flight finish, and stay latched until a logged manual reset (`oms.recover_kill_switch`).
+    def _init_limits(self, limits: dict | None, live_data: bool, clock_measurement: ClockMeasurement | None) -> None:
+        self._limits = limits
+        self.limit_state: dict[str, bool] = {}
+        self.limit_counters: dict[str, int] = {}
+        self.limit_blocks: dict[str, int] = {}
+        self.limit_events: list[dict[str, Any]] = []
+        self._order_rate: dict[str, OrderRateBucket] = {}
+        self._limit_kills: dict[str, dict[str, Any]] = {}
+        self._loss_baseline: Decimal | None = None
+        self._loss_day: int | None = None
+        self._loss_due_ns = 0
+        self._loss_min_pnl: Decimal | None = None
+        self._price_pause_since: int | None = None
+        self._margin_warn_active = False
+        self._margin_warn_ok_since: int | None = None
+        self.clock_gate: ClockGate | None = None
+        if limits is None:
+            return
+        c = limits.get("clock_offset")
+        if c is not None:
+            self.clock_gate = ClockGate(int(c["max_uncertainty_ms"] * 1e6), int(c["max_age_s"] * 1e9), replay=not live_data, measurement=clock_measurement)
+
+    def _limit_count(self, key: str, n: int = 1) -> None:
+        self.limit_counters[key] = self.limit_counters.get(key, 0) + n
+
+    def _limit_edge(self, name: str, active: bool, now: int, **ctx: Any) -> None:
+        if self.limit_state.get(name, False) == active:
+            return
+        self.limit_state[name] = active
+        if active:
+            self._limit_count(f"{name}_episodes")
+        self.ledger.record("LIMIT_STATE", now, limit=name, state="ACTIVE" if active else "CLEARED", **ctx)
+        if len(self.limit_events) < 500:
+            self.limit_events.append({"limit": name, "state": "ACTIVE" if active else "CLEARED", "ts_ns": now, **{k: v for k, v in ctx.items() if isinstance(v, (int, float, str, bool))}})
+
+    def _order_rate_ok(self, venue: str, now: int, kind: str) -> bool:
+        """A1: one token for a new maker order or an amend of `venue`. False = skipped (counted, nothing queued)."""
+        cfg = None if self._limits is None else self._limits.get("order_rate")
+        if cfg is None:
+            return True
+        bucket = self._order_rate.get(venue)
+        if bucket is None:
+            bucket = self._order_rate[venue] = OrderRateBucket(cfg["per_s"], cfg["burst"])
+        if bucket.take(now):
+            if self.limit_state.get(f"order_rate:{venue}", False):
+                self._limit_edge(f"order_rate:{venue}", False, now, venue=venue, per_s=cfg["per_s"], burst=cfg["burst"])
+            return True
+        self._limit_count(f"order_rate_skipped_{kind}")
+        self._limit_edge(f"order_rate:{venue}", True, now, venue=venue, per_s=cfg["per_s"], burst=cfg["burst"], kind=kind)
+        return False
+
+    def _new_quote_stop(self, now: int) -> str | None:
+        """Why a NEW quote may not go out now because of a session limit: the clock gate (A3) or a margin WARNING (A4). None = no stop. Hedges, unwinds and cancels never ask."""
+        reason = None
+        gate = self.clock_gate
+        if gate is not None:
+            state, detail = gate.evaluate(now)
+            if state == "not_evaluable":
+                self._limit_count("clock_not_evaluable")               # a replay with no measured clock: counted, never blocked
+            elif state != "ok":
+                reason = "clock_" + state
+            self._limit_edge("clock_offset", reason is not None, now, detail=detail)
+        if reason is None and self._margin_warn_active:
+            reason = "margin_warning"
+        if reason is not None:
+            self.limit_blocks[reason] = self.limit_blocks.get(reason, 0) + 1
+        return reason
+
+    def _equity_at_mids(self) -> Decimal | None:
+        """Cash plus positions at the book mids of every venue: the figure the replay reports as equity_at_book_mids. None when a venue has no valid book."""
+        mids: dict[str, Decimal] = {}
+        for (venue, _instrument), book in self.books.items():
+            if book.state.value == "VALID" and book.bids and book.asks:
+                mids[venue] = (book.best_bid + book.best_ask) / Decimal("2")
+        if len(mids) < len(self.cfg.venues):
+            return None
+        return (sum((self.ledger.cash_deltas.get(v, Decimal("0")) for v in mids), Decimal("0"))
+                + sum((q * mids[v] for (v, _i), q in self.ledger.positions.items() if v in mids), Decimal("0")))
+
+    def _limit_trip(self, name: str, now: int, reason: str, **ctx: Any) -> None:
+        """A2 / A5: the latched kill switch. Quotes are cancelled, hedges and unwinds in flight finish, new risk stops; it stays until a logged manual reset."""
+        if name in self._limit_kills:
+            return
+        self._limit_kills[name] = {"ts_ns": now, "reason": reason, **{k: v for k, v in ctx.items() if isinstance(v, (int, float, str, bool))}}
+        self._limit_count(f"{name}_trips")
+        self._limit_edge(name, True, now, reason=reason, action="kill_switch", **ctx)
+        if not self.risk.kill_switch:
+            self.oms.activate_kill_switch(reason=reason, now_ns=now, operator_id="session-limits", source="LIMIT_" + name.upper(), keep_risk_reducing=True)
+
+    def _limits_step(self, now: int) -> None:
+        L = self._limits
+        for name in tuple(self._limit_kills):                           # a manual reset (recover_kill_switch) ends the latch: logged, and the daily baseline is re-based at the reset
+            if not self.risk.kill_switch:
+                del self._limit_kills[name]
+                self._limit_edge(name, False, now, reason="manual_reset")
+                if name == "daily_loss_stop":
+                    self._loss_baseline = self._equity_at_mids()
+        loss = L.get("daily_loss_stop")
+        if loss is not None and now >= self._loss_due_ns:
+            self._loss_due_ns = now + 1_000_000_000
+            equity = self._equity_at_mids()
+            if equity is not None:
+                day = now // 86_400_000_000_000
+                if self._loss_baseline is None or self._loss_day != day:
+                    self._loss_baseline, self._loss_day = equity, day      # 00:00 UTC, or the session start for the first evaluation
+                pnl = equity - self._loss_baseline
+                if self._loss_min_pnl is None or pnl < self._loss_min_pnl:
+                    self._loss_min_pnl = pnl
+                if pnl <= Decimal(str(loss["limit_usdt"])) and "daily_loss_stop" not in self._limit_kills:
+                    self._limit_trip("daily_loss_stop", now, "daily loss stop", pnl_usdt=str(pnl), limit_usdt=loss["limit_usdt"])
+        kill_s = L.get("missing_marks_kill_s")
+        if kill_s is not None and self._price_pause_since is not None and now - self._price_pause_since > int(kill_s * 1e9):
+            self._limit_trip("missing_marks", now, "missing marks", paused_s=(now - self._price_pause_since) / 1e9, limit_s=kill_s)
+
+    def _margin_warning_step(self, report: Any, marks: dict, now: int) -> None:
+        """A4: a venue in a real margin WARNING (a buffer below its requirement; a WARNING that only means a missing price is the pause's business and A5's, not counted here), or free margin below
+        `free_margin_multiple` x the initial margin at the hard cap, stops NEW quotes. It resumes after the condition has been clear for `resume_hysteresis_s` of event time."""
+        cfg = self._limits.get("margin_warning")
+        if cfg is None:
+            return
+        bad: list[str] = []
+        cap = Decimal(str(self._gate_limits().venue_cap))
+        for row in report.venues:
+            if not row.margin_enabled:
+                continue
+            if row.state.value == "WARNING" and not row.details.get("price_missing"):
+                bad.append(f"{row.venue}:WARNING")
+                continue
+            vc = self.margin_config.venues.get(row.venue)
+            mark = marks.get((row.venue, self.cfg.instrument_id))
+            if vc is None or mark is None or row.available_margin is None:
+                continue
+            schedule = vc.tiers.get(self.cfg.instrument_id)
+            if schedule is None:
+                continue
+            initial_at_cap = schedule.initial(cap * mark)
+            if initial_at_cap is None or row.available_margin < Decimal(str(cfg["free_margin_multiple"])) * initial_at_cap:
+                bad.append(f"{row.venue}:free_margin")
+        if bad:
+            self._margin_warn_ok_since = None
+            if not self._margin_warn_active:
+                self._margin_warn_active = True
+                self._limit_edge("margin_warning", True, now, venues=",".join(bad))
+        elif self._margin_warn_active:
+            if self._margin_warn_ok_since is None:
+                self._margin_warn_ok_since = now
+            if now - self._margin_warn_ok_since >= int(cfg["resume_hysteresis_s"] * 1e9):
+                self._margin_warn_active = False
+                self._margin_warn_ok_since = None
+                self._limit_edge("margin_warning", False, now, reason="recovered")
+
+    def limits_report(self) -> dict[str, Any]:
+        """Every limit of Order 3, whether it bound, and why quoting stopped (aggregates only)."""
+        L = self._limits or {}
+        return {
+            "config": {k: v for k, v in L.items()},
+            "order_rate": {v: b.snapshot() for v, b in sorted(self._order_rate.items())},
+            "counters": dict(sorted(self.limit_counters.items())),
+            "stop_quoting_reasons": dict(sorted(self.limit_blocks.items())),
+            "signals_blocked_by_limits": self.signals_blocked_by_limits,
+            "daily_loss": {"limit_usdt": (L.get("daily_loss_stop") or {}).get("limit_usdt"), "min_pnl_usdt": None if self._loss_min_pnl is None else str(self._loss_min_pnl)},
+            "kills": {k: dict(v) for k, v in self._limit_kills.items()},
+            "clock_gate": None if self.clock_gate is None else {"replay": self.clock_gate.replay, "measurement": None if self.clock_gate.measurement is None else {
+                "offset_ms": self.clock_gate.measurement.offset_ns / 1e6, "uncertainty_ms": self.clock_gate.measurement.uncertainty_ns / 1e6, "source": self.clock_gate.measurement.source}},
+            "state_changes": list(self.limit_events),
+        }
+
     def _count_reprice(self, key: str) -> None:
         self.reprice_counters[key] = self.reprice_counters.get(key, 0) + 1
 
@@ -1177,6 +1365,9 @@ class TradingSession:
     def _amend_for_reprice(self, c: dict, st, now: float, now_ns: int, d) -> None:
         if not self.router.quote_has_room(c["venue"], c["instrument_id"], now_ns):       # an amend is quote-tier traffic (at most quote_share of each window, quote_min_free left free): skipped, never queued; cancels and hedges are never refused
             self._count_reprice("amend_skipped_rate_limit")
+            return
+        if self._limits is not None and not self._order_rate_ok(c["venue"], now_ns, "amend"):
+            self._count_reprice("amend_skipped_order_rate")     # owner 16 Nov (A1): skipped, never queued; the controller asks again on the next book update
             return
         new_price = Decimal(repr(round(d.price, 10)))
         tick = self.oms.instruments.get(c["venue"], c["instrument_id"], now_ns).tick_size
@@ -1262,6 +1453,7 @@ class TradingSession:
                 **({"no_requote": {"withdrawn_by_validity": sum(getattr(s, "withdrawn_by_validity", 0) for s in self.strategies), "requote_blocked_after_withdraw": sum(getattr(s, "requote_blocked_after_withdraw", 0) for s in self.strategies)}}
                    if any(getattr(getattr(getattr(s, "strategy", None), "config", None), "requote_delay_after_withdraw_s", 0) > 0 for s in self.strategies) else {}),
                 **({"amend_guard": dict(self.amend_guard_state)} if self.amend_guard_state is not None else {}),
+                **({"session_limits": self.limits_report()} if self._limits is not None else {}),
                 **({"hedge_dust_carry": self.oms.dust_report(getattr(self.oms, "_last_execution_ts_ns", None))} if self.oms.dust_on else {}),
                 **({"breaker_flatten": {"counters": dict(self.breaker_flatten_counters), "dust_events": list(self.breaker_dust_events), "dust_now": None if self._breaker_dust is None else {k: str(v) for k, v in self._breaker_dust.items()}}}
                    if (self.breaker_flatten_counters["dust_recorded"] or self.breaker_flatten_counters["unavailable_retries"]) else {}),
@@ -1274,6 +1466,8 @@ class TradingSession:
         steps = self.oms.advance_time(now_ns, self.books)
         self._notify_closed_plans()
         self._breaker_step(now_ns)
+        if self._limits is not None:
+            self._limits_step(now_ns)
         if self.flattening:
             self.flatten_strategies(now_ns)
         return steps
@@ -1454,6 +1648,8 @@ class TradingSession:
         if bool(missing) == self.margin_price_paused:
             return
         self.margin_price_paused = bool(missing)
+        if self._limits is not None:
+            self._price_pause_since = now if missing else None          # owner 16 Nov (A5): how long the pause has lasted
         self.ledger.record("MARGIN_PRICE_PAUSE" if missing else "MARGIN_PRICE_RESUME", now, venues=missing, mark_max_age_s=self.margin_config.mark_max_age_ns / 1e9,
                            **(self.alert_context(now) if missing else {}))      # owner 12 Nov: the pause is an alert, the resume is not
 
@@ -1469,6 +1665,8 @@ class TradingSession:
         )
         if self.margin_config.missing_price_action == "pause":
             self._margin_price_step(report, now)
+        if self._limits is not None:
+            self._margin_warning_step(report, marks, now)
         for row in report.venues:
             if row.state.value != "BREACH" or row.venue not in self.margin_config.venues:
                 continue

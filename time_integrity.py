@@ -314,3 +314,90 @@ class TimeIntegrityMonitor:
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(json.dumps(report, indent=2, sort_keys=True), encoding="utf-8")
         return report
+
+
+# ---------------------------------------------------------------------------------------------------------------------------------------------------
+# Clock-offset gate source (owner 16 Nov, limit A3). The audit (A1, 1.6) found that HostClockMonitor has no independent reference: its "offset" is the estimate itself. The one reference the platform
+# trusts is the venues' own server time, read the way the testnet logger (ollog) does: five probes, the one with the lowest round trip wins, offset = server time minus the local midpoint of the probe,
+# uncertainty = half that round trip. Ported here (the core never imports ollog).
+# ---------------------------------------------------------------------------------------------------------------------------------------------------
+@dataclass(slots=True)
+class ClockMeasurement:
+    offset_ns: int                      # local minus server (positive: the local clock is ahead)
+    uncertainty_ns: int                 # half the round trip of the best probe
+    measured_ts_ns: int                 # local time at which it was taken
+    source: str                         # "server_time:<venue>" or "ntp:<server>" or an injected label
+    samples: int = 1
+
+
+def best_probe(probes: list[tuple[int, int, int]], *, source: str) -> ClockMeasurement | None:
+    """`probes` = (local_before_ns, server_ts_ns, local_after_ns) per request. The lowest round trip wins; None when there is no valid probe (a negative or zero round trip is not a probe)."""
+    valid = [(after - before, before, server, after) for before, server, after in probes if after > before and server > 0]
+    if not valid:
+        return None
+    rtt, before, server, after = min(valid)
+    return ClockMeasurement(offset_ns=(before + after) // 2 - server, uncertainty_ns=rtt // 2, measured_ts_ns=after, source=source, samples=len(valid))
+
+
+@dataclass(slots=True)
+class ClockGate:
+    """The A3 decision. `evaluate` returns (state, detail) with state "ok", "unknown" (no measurement, or one older than `max_age_ns`) or "uncertain" (uncertainty above the limit). Replays with no measured clock use
+    `replay=True`: the answer is "not_evaluable", which the session counts and never blocks on. Real-order modes (replay=False) block new quotes on "unknown" and "uncertain"; hedges continue."""
+    max_uncertainty_ns: int
+    max_age_ns: int
+    replay: bool = False
+    measurement: ClockMeasurement | None = None
+    history: list = field(default_factory=list)
+
+    def update(self, measurement: ClockMeasurement | None) -> None:
+        if measurement is not None:
+            self.measurement = measurement
+            if len(self.history) < 200:
+                self.history.append({"measured_ts_ns": measurement.measured_ts_ns, "offset_ms": measurement.offset_ns / 1e6, "uncertainty_ms": measurement.uncertainty_ns / 1e6, "source": measurement.source})
+
+    def evaluate(self, now_ns: int) -> tuple[str, str]:
+        m = self.measurement
+        if m is None:
+            return ("not_evaluable", "no measured clock in a replay") if self.replay else ("unknown", "no clock measurement")
+        if now_ns - m.measured_ts_ns > self.max_age_ns:
+            return ("not_evaluable", "measurement older than max_age in a replay") if self.replay else ("unknown", f"measurement {(now_ns - m.measured_ts_ns) / 1e9:.0f} s old")
+        if m.uncertainty_ns > self.max_uncertainty_ns:
+            return "uncertain", f"uncertainty {m.uncertainty_ns / 1e6:.2f} ms above {self.max_uncertainty_ns / 1e6:.2f} ms"
+        return "ok", f"uncertainty {m.uncertainty_ns / 1e6:.2f} ms"
+
+
+SERVER_TIME_URLS = {"BINANCE": "https://fapi.binance.com/fapi/v1/time", "BYBIT": "https://api.bybit.com/v5/market/time"}
+
+
+def parse_server_time_ns(venue: str, body: Any) -> int:
+    """The venue's server time in nanoseconds from its time endpoint's body. Binance USD-M: {"serverTime": ms}. Bybit v5: {"result": {"timeNano": "..."}, "time": ms}; the nanosecond field is preferred, the
+    millisecond one is the fallback. Anything else raises (a probe that cannot be read is not a probe)."""
+    import json as _json
+
+    doc = _json.loads(body if isinstance(body, (str, bytes, bytearray)) else _json.dumps(body))
+    if venue == "BINANCE":
+        return int(doc["serverTime"]) * 1_000_000
+    if venue == "BYBIT":
+        if doc.get("retCode", 0) != 0:
+            raise ValueError(f"bybit server time error {doc.get('retMsg')}")
+        nano = (doc.get("result") or {}).get("timeNano")
+        return int(nano) if nano else int(doc["time"]) * 1_000_000
+    raise ValueError(f"no server-time endpoint known for {venue}")
+
+
+async def probe_server_clock(http_getter, venue: str, *, probes: int = 5, timeout_s: float = 2.0, clock_ns=None) -> ClockMeasurement | None:
+    """Five round trips to the venue's time endpoint on the live HTTP path (`http_getter(url, timeout) -> (body, receive_ts_ns)`, the live service's own getter). The best probe is kept (`best_probe`).
+    A probe that fails is dropped; no valid probe returns None."""
+    import time as _time
+
+    clock = clock_ns or _time.time_ns
+    out: list[tuple[int, int, int]] = []
+    for _ in range(probes):
+        before = clock()
+        try:
+            body, _recv = await http_getter(SERVER_TIME_URLS[venue], timeout_s)
+            after = clock()
+            out.append((before, parse_server_time_ns(venue, body), after))
+        except Exception:
+            continue
+    return best_probe(out, source=f"server_time:{venue}")

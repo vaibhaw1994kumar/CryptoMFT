@@ -57,6 +57,9 @@ TESTNET_HOSTS = frozenset({"testnet.binance.vision", "testnet.binancefuture.com"
 
 HttpCall = Callable[[str, str, dict[str, str], bytes | None, float], tuple[int, str]]
 
+REDUCE_ONLY_NOTE = ("DERIVED_FROM_ONE_WAY_MODE (both venues accept a reduce-only order in one-way mode; Binance rejects it in hedge mode). UNVERIFIED by an order: the start-up check sends none. "
+                    "Whether a reduce-only order is exempt from the minimum notional is also UNVERIFIED; both are items of the testnet drill")
+
 
 def verified_ssl_context() -> ssl.SSLContext:
     """Certificate verification always on. A Python whose default CA store is
@@ -181,6 +184,8 @@ class VenueTestnetTransport:
             return (self.account_snapshot(request, key, secret_bytes),)
         if action == "ACCOUNT_FEE_RATE":
             return (self.account_fee_rate(request, symbol, key, secret_bytes),)
+        if action == "ACCOUNT_RISK_TIERS":
+            return (self.account_risk_tiers(request, symbol, key, secret_bytes),)
         if action == "VERIFY_ACCOUNT":
             return self.verify_account(request, symbol, key, secret_bytes)
         if action in {"SUBMIT", "REPLACE"}:
@@ -215,6 +220,9 @@ class VenueTestnetTransport:
     def account_fee_rate(self, request, symbol, key, secret) -> dict[str, Any]:  # pragma: no cover - perpetual transports only
         raise ValueError(f"account_fee_rate is built for the perpetual transports only, not {type(self).__name__}")
 
+    def account_risk_tiers(self, request, symbol, key, secret) -> dict[str, Any]:  # pragma: no cover - perpetual transports only
+        raise ValueError(f"account_risk_tiers is built for the perpetual transports only, not {type(self).__name__}")
+
     def _snapshot_windows(self, since_ms: int, now_ms: int) -> list[tuple[int, int]]:
         if since_ms > now_ms:
             raise ValueError("account_snapshot since is in the future")
@@ -239,6 +247,41 @@ def _liquidity(maker_flags: list[bool]) -> str:
     if not maker_flags:
         return ""
     return "MAKER" if all(maker_flags) else "TAKER"
+
+
+def risk_tier_rows_binance(payload: Any, symbol: str) -> list[dict[str, str]]:
+    """Owner 16 Nov (limit A6): the account's own leverage brackets from Binance USD-M `GET /fapi/v1/leverageBracket?symbol=` (signed; a list with one object per symbol, or the object itself). Each bracket:
+    notionalCap (upper bound), maintMarginRatio, cum (the maintenance deduction), initialLeverage (the initial rate is 1 / leverage). SHAPE FROM THE PUBLIC DOCUMENTATION, UNVERIFIED against the live endpoint in
+    this build: tested on hand-written recorded messages; confirmed in the testnet drill. Anything else raises (the start-up then refuses)."""
+    items = payload if isinstance(payload, list) else [payload]
+    row = next((x for x in items if isinstance(x, dict) and str(x.get("symbol")) == symbol), None)
+    brackets = None if row is None else row.get("brackets")
+    if not brackets:
+        raise ConnectionError(f"binance leverageBracket returned no brackets for {symbol}")
+    out = []
+    for b in sorted(brackets, key=lambda b: Decimal(str(b["notionalCap"]))):
+        leverage = Decimal(str(b["initialLeverage"]))
+        if leverage <= 0:
+            raise ConnectionError("binance leverageBracket: a bracket has no initial leverage")
+        out.append({"max_notional": str(b["notionalCap"]), "maintenance_rate": str(b["maintMarginRatio"]), "initial_rate": str(Decimal(1) / leverage),
+                    "maintenance_deduction": str(b.get("cum", "0"))})
+    return out
+
+
+def risk_tier_rows_bybit(payload: Any, symbol: str) -> list[dict[str, str]]:
+    """Owner 16 Nov (limit A6): the risk-limit tiers of Bybit v5 `GET /v5/market/risk-limit?category=linear&symbol=` (result.list rows: riskLimitValue = the tier's upper bound, maintenanceMargin and initialMargin
+    as rates, mmDeduction when present). The endpoint is the symbol's tier ladder, not the account's selected tier; the account's selected risk limit is a separate setting (UNVERIFIED: the drill reads it). SHAPE FROM THE
+    PUBLIC DOCUMENTATION, UNVERIFIED against the live endpoint in this build. Anything else raises."""
+    if not isinstance(payload, dict) or payload.get("retCode") != 0:
+        raise ConnectionError(f"bybit risk-limit failed: {payload.get('retMsg') if isinstance(payload, dict) else payload}")
+    rows = [r for r in payload.get("result", {}).get("list", []) if str(r.get("symbol")) == symbol]
+    if not rows:
+        raise ConnectionError(f"bybit risk-limit returned no tiers for {symbol}")
+    out = []
+    for r in sorted(rows, key=lambda r: Decimal(str(r["riskLimitValue"]))):
+        out.append({"max_notional": str(r["riskLimitValue"]), "maintenance_rate": str(r["maintenanceMargin"]), "initial_rate": str(r["initialMargin"]),
+                    "maintenance_deduction": str(r.get("mmDeduction") or "0")})
+    return out
 
 
 class BinanceSpotTestnetTransport(VenueTestnetTransport):
@@ -664,6 +707,12 @@ class BinanceFuturesTestnetTransport(BinanceSpotTestnetTransport):
             positions[instrument_id] = decimal_text(amount)
         return {"event_type": "ACCOUNT_SNAPSHOT", "orders": list(orders.values()), "executions": executions, "positions": positions, "fetched_ts_ns": now_ms * 1_000_000}
 
+    def account_risk_tiers(self, request, symbol, key, secret) -> dict[str, Any]:
+        status, payload = self._signed("GET", "/fapi/v1/leverageBracket", {"symbol": symbol}, key, secret)
+        if status != 200:
+            raise ConnectionError(f"binance futures leverageBracket failed: {payload.get('msg') if isinstance(payload, dict) else payload}")
+        return {"event_type": "ACCOUNT_RISK_TIERS", "tiers": risk_tier_rows_binance(payload, symbol), "source": "BINANCE /fapi/v1/leverageBracket (account read)"}
+
     def verify_account(self, request, symbol, key, secret):
         status, payload = self._signed("GET", "/fapi/v1/positionSide/dual", {}, key, secret)
         if status != 200:
@@ -671,8 +720,23 @@ class BinanceFuturesTestnetTransport(BinanceSpotTestnetTransport):
         if payload.get("dualSidePosition") is not False:
             raise ValueError("binance futures account is in hedge mode; the platform trades one-way mode only "
                              "(change it in the account, not from code)")
-        return ({"event_type": "ACCOUNT_VERIFIED", "market": "linear", "position_mode": "ONE_WAY",
-                 "margin_mode": "NOT_VERIFIED (per-symbol margin type not checked)"},)
+        event = {"event_type": "ACCOUNT_VERIFIED", "market": "linear", "position_mode": "ONE_WAY",
+                 "margin_mode": "NOT_VERIFIED (per-symbol margin type not checked)", "reduce_only_accepted": REDUCE_ONLY_NOTE}
+        if request.get("expected_margin_mode") is not None or request.get("expected_leverage") is not None:
+            # owner 16 Nov (limit A8): the per-symbol margin type and leverage from GET /fapi/v2/positionRisk (signed; a row per symbol, flat or not)
+            status, rows = self._signed("GET", "/fapi/v2/positionRisk", {"symbol": symbol}, key, secret)
+            row = next((r for r in rows if str(r.get("symbol")) == symbol), None) if status == 200 and isinstance(rows, list) else None
+            if row is None:
+                raise ConnectionError("binance futures positionRisk returned no row for the symbol: margin type and leverage cannot be verified")
+            margin = str(row.get("marginType", "")).lower()
+            leverage = int(Decimal(str(row.get("leverage", "0"))))
+            expected_mode, expected_leverage = request.get("expected_margin_mode"), request.get("expected_leverage")
+            if expected_mode is not None and margin != str(expected_mode).lower():
+                raise ValueError(f"binance futures margin type is {margin or 'unknown'}, the profile expects {expected_mode}; change it in the account, not from code")
+            if expected_leverage is not None and leverage != int(expected_leverage):
+                raise ValueError(f"binance futures leverage for {symbol} is {leverage}, the profile expects {expected_leverage}; change it in the account, not from code")
+            event.update(margin_mode=margin.upper(), leverage=leverage)
+        return (event,)
 
 
 class BybitV5LinearTestnetTransport(BybitV5TestnetTransport):
@@ -795,12 +859,16 @@ class BybitV5LinearTestnetTransport(BybitV5TestnetTransport):
         return {"event_type": "ACCOUNT_SNAPSHOT", "orders": list(orders.values()),
                 "executions": sorted(executions.values(), key=lambda e: (e["ts_ns"], e["execution_id"])), "positions": positions, "fetched_ts_ns": now_ms * 1_000_000}
 
+    def account_risk_tiers(self, request, symbol, key, secret) -> dict[str, Any]:
+        payload = self._signed("GET", "/v5/market/risk-limit", key, secret, params={"category": self.category, "symbol": symbol})
+        return {"event_type": "ACCOUNT_RISK_TIERS", "tiers": risk_tier_rows_bybit(payload, symbol), "source": "BYBIT /v5/market/risk-limit (symbol tier ladder)"}
+
     def verify_account(self, request, symbol, key, secret):
         info = self._signed("GET", "/v5/account/info", key, secret, params={})
         if info.get("retCode") != 0:
             raise ConnectionError(f"bybit account info failed: {info.get('retMsg')}")
         margin_mode = str(info.get("result", {}).get("marginMode", ""))
-        expected = self.MARGIN_MODES.get(str(self.expected_margin_mode or "").upper())
+        expected = self.MARGIN_MODES.get(str(request.get("expected_margin_mode") or self.expected_margin_mode or "").upper())
         if expected and margin_mode != expected:
             raise ValueError(f"bybit account margin mode {margin_mode} does not match the configured "
                              f"{self.expected_margin_mode} ({expected}); change it in the account, not from code")
@@ -811,8 +879,18 @@ class BybitV5LinearTestnetTransport(BybitV5TestnetTransport):
         modes = {int(row.get("positionIdx", 0)) for row in positions.get("result", {}).get("list", [])}
         if modes - {0}:
             raise ValueError("bybit position is in hedge (both-side) mode; the platform trades one-way mode only")
-        return ({"event_type": "ACCOUNT_VERIFIED", "market": "linear", "position_mode": "ONE_WAY",
-                 "margin_mode": margin_mode or "UNKNOWN"},)
+        event = {"event_type": "ACCOUNT_VERIFIED", "market": "linear", "position_mode": "ONE_WAY",
+                 "margin_mode": margin_mode or "UNKNOWN", "reduce_only_accepted": REDUCE_ONLY_NOTE}
+        expected_leverage = request.get("expected_leverage")
+        if expected_leverage is not None:                                  # owner 16 Nov (limit A8): the symbol's leverage from the same position list
+            rows = [r for r in positions.get("result", {}).get("list", []) if str(r.get("symbol")) == symbol]
+            if not rows or not str(rows[0].get("leverage", "")).strip():
+                raise ConnectionError("bybit position list returned no leverage for the symbol: it cannot be verified")
+            leverage = int(Decimal(str(rows[0]["leverage"])))
+            if leverage != int(expected_leverage):
+                raise ValueError(f"bybit leverage for {symbol} is {leverage}, the profile expects {expected_leverage}; change it in the account, not from code")
+            event["leverage"] = leverage
+        return (event,)
 
 
 TRANSPORTS = {
@@ -866,3 +944,27 @@ def markets_for(cfg) -> dict[str, str]:
         venue: "linear" if is_perpetual(cfg.instruments.get(venue, cfg.instrument_id).product_type) else "spot"
         for venue in cfg.venues
     }
+
+
+class AccountVerificationError(RuntimeError):
+    """Owner 16 Nov (limit A8): the account is not as the profile expects (hedge mode, another margin mode or leverage, no reader, a read that failed): a paper or live session then refuses to start."""
+
+
+def verify_accounts_for_start(readers: dict[str, Any], venues: tuple[str, ...], instrument_id: str, *, margin_mode: str | None, leverage: int | None) -> list[dict[str, Any]]:
+    """Run `verify_account` on every venue's reader at session start-up. Collects every problem (no reader, a failed read, a mismatch) and raises once; returns one facts row per venue. Read-only: it sends no order, so
+    reduce-only acceptance is DERIVED from one-way mode and labelled UNVERIFIED in the facts (REDUCE_ONLY_NOTE)."""
+    rows: list[dict[str, Any]] = []
+    problems: list[str] = []
+    for venue in venues:
+        reader = readers.get(venue)
+        if reader is None or not hasattr(reader, "verify_account"):
+            problems.append(f"{venue}: no account verifier (the account's settings are not checked)")
+            continue
+        try:
+            facts = reader.verify_account(instrument_id, margin_mode, leverage)
+            rows.append({"venue": venue, **{k: v for k, v in facts.items() if k != "event_type"}})
+        except Exception as exc:
+            problems.append(f"{venue}: {type(exc).__name__}: {exc}")
+    if problems:
+        raise AccountVerificationError("account settings differ from the profile or could not be verified: " + "; ".join(problems))
+    return rows

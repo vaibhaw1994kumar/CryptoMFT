@@ -977,12 +977,23 @@ class OMS:
 
     def activate_kill_switch(
         self, *, reason: str, now_ns: int, operator_id: str,
-        source: str = "PM", cancel_all: bool = True,
+        source: str = "PM", cancel_all: bool = True, keep_risk_reducing: bool = False,
     ) -> dict[str, object]:
+        """`keep_risk_reducing` (owner 16 Nov, the daily loss stop and the missing-marks kill): cancel the quotes and every other risk-increasing order, let hedges and unwinds already in flight
+        finish (a cancelled hedge would leave naked exposure), and do not finalise the open plans. Off by default: every earlier caller is unchanged."""
         self.risk.activate_kill_switch(
             now_ns=now_ns, reason=reason, source=source,
             ledger=self.ledger, operator_id=operator_id,
         )
+        if keep_risk_reducing:
+            cancelled = self._cancel_orders(reason, now_ns, venue=None, preserve_risk_reducing=True, ledger_event="BOOK_INTEGRITY_CANCEL_ALL") if cancel_all else 0
+            self.ledger.record(
+                "KILL_SWITCH_CANCEL_ALL_COMPLETE", now_ns,
+                source=source, operator_id=operator_id,
+                cancel_all=cancel_all, cancelled_orders=cancelled,
+                risk_reducing_orders_allowed=True, risk_reducing_orders_kept=True,
+            )
+            return self.kill_switch_snapshot()
         cancelled = self.cancel_open_orders(reason, now_ns) if cancel_all else 0
         self.ledger.record(
             "KILL_SWITCH_CANCEL_ALL_COMPLETE", now_ns,

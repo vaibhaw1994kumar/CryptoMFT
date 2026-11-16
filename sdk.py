@@ -303,6 +303,29 @@ class TestnetVenueAdapter:
             raise ConnectionError(f"{self.venue} returned no account fee rate")
         return Decimal(str(row["maker_rate"])), Decimal(str(row["taker_rate"]))
 
+    def account_risk_tiers(self, instrument_id: str) -> tuple[dict[str, str], ...]:
+        """Owner 16 Nov (limit A6): this venue's risk tiers for the instrument as rows of text rates (max_notional, maintenance_rate, initial_rate, maintenance_deduction), read through the credentialed transport
+        (a read, never a trade). A transport that cannot answer, or answers another shape, raises (the start-up then refuses); a spot transport has none."""
+        natives = tuple(self.transport({"action": "ACCOUNT_RISK_TIERS", "instrument_id": instrument_id}))
+        row = next((n for n in natives if n.get("event_type") == "ACCOUNT_RISK_TIERS"), None)
+        if row is None or not row.get("tiers"):
+            raise ConnectionError(f"{self.venue} returned no account risk tiers")
+        return tuple(dict(t) for t in row["tiers"])
+
+    def verify_account(self, instrument_id: str, expected_margin_mode: str | None = None, expected_leverage: int | None = None) -> dict[str, Any]:
+        """Owner 16 Nov (limit A8): one-way position mode, the expected margin mode and leverage, and (derived, UNVERIFIED by an order) reduce-only acceptance, read through the credentialed transport. Raises on any
+        mismatch or a read that fails; returns the facts it saw. Read-only."""
+        request = {"action": "VERIFY_ACCOUNT", "instrument_id": instrument_id}
+        if expected_margin_mode is not None:
+            request["expected_margin_mode"] = expected_margin_mode
+        if expected_leverage is not None:
+            request["expected_leverage"] = int(expected_leverage)
+        natives = tuple(self.transport(request))
+        row = next((n for n in natives if n.get("event_type") == "ACCOUNT_VERIFIED"), None)
+        if row is None:
+            raise ConnectionError(f"{self.venue} returned no account verification")
+        return dict(row)
+
     def account_snapshot(self, since_ns: int) -> "VenueAccountSnapshot":
         """Owner 13 Nov, exchange-side restart reconciliation: this venue's account (orders open and closed keyed by the client order id, executions since `since_ns`, positions by instrument) through the same
         credentialed transport, read-only. A transport that cannot answer raises (the OMS keeps the restart gate closed); a spot transport has no snapshot and says so."""

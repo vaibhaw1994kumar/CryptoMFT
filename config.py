@@ -488,8 +488,65 @@ REAL_ORDER_REQUIRED: tuple[RealOrderRequirement, ...] = (
     RealOrderRequirement('oms.rate_limits.quote_min_free', (2,), 'a new quote always leaves at least 2 requests of the window free (owner 13 Nov; ASSUMED)'),
     RealOrderRequirement('oms.account_fee_check', (True,), "at live/paper start-up the account's own SOLUSDT maker/taker rate is read on both venues and the session refuses to start if one differs from the profile's fee_presets or cannot be read (owner 13 Nov; crypto_stat_arb.fees.verify_account_fee_rates, LivePaperSession). The headline VIP 5 / VIP 9 presets are PUBLIC_SCHEDULE_UNVERIFIED: expect a refusal until the presets equal the account's rates"),
     RealOrderRequirement('hedge_faults.silent_carry_bound', ('below_one_lot',), 'a failed hedge always unwinds whatever its size; only a remainder below one hedge-venue lot is carried silently'),
+    RealOrderRequirement('arb.requote_delay_after_withdraw_s', (1.0,), 'owner 16 Nov (limit A7): a quote withdrawn by validity is not placed again on the same venue and side for 1 s (ASSUMED), so a flickering edge cannot become a stream of orders'),
+    RealOrderRequirement('oms.session_limits.order_rate.per_s', (2.0,), 'owner 16 Nov (limit A1): at most 2 new maker orders or amends per second per venue sustained (token bucket), skipped and never queued; hedges, unwinds and cancels are never refused'),
+    RealOrderRequirement('oms.session_limits.order_rate.burst', (5,), 'owner 16 Nov (limit A1): bursts of up to 5'),
+    RealOrderRequirement('oms.session_limits.daily_loss_stop_usdt_per_sol_of_clip', (-5.0,), 'owner 16 Nov (limit A2): realised plus marked P&L since 00:00 UTC (or the session start) at or below -5 USDT per SOL of clip trips a latched kill switch: quotes cancelled, no new risk, hedges in flight finish'),
+    RealOrderRequirement('oms.session_limits.clock_offset.max_uncertainty_ms', (5.0,), 'owner 16 Nov (limit A3): no new quotes while the clock offset is unknown or its uncertainty is above 5 ms (server-time probe); hedges continue; a real-order session refuses to start without a clock source'),
+    RealOrderRequirement('oms.session_limits.margin_warning.free_margin_multiple', (10.0,), 'owner 16 Nov (limit A4): no new quotes in a margin WARNING (not a missing price) or with free margin below 10x the initial margin at the hard cap; resumes after recovery with hysteresis'),
+    RealOrderRequirement('oms.session_limits.missing_marks_kill_s', (60.0,), 'owner 16 Nov (limit A5): a margin price pause longer than 60 s trips a latched kill switch'),
+    RealOrderRequirement('oms.session_limits.tier_table', ('read_at_start',), "owner 16 Nov (limit A6): each account's own risk-limit / leverage brackets are read at start-up and replace the ASSUMED margin tiers; the session refuses to start if they cannot be read"),
+    RealOrderRequirement('oms.session_limits.verify_account.enabled', (True,), 'owner 16 Nov (limit A8): at paper/live start-up the account must be in one-way mode with the expected margin mode and leverage, and reduce-only orders must be accepted; the session refuses to start otherwise'),
     RealOrderRequirement('hedge_faults.dust_carry', ('next_hedge',), 'owner 16 Nov: a hedge chunk below the hedge venue\'s minimum is carried (one signed balance per venue and instrument, added to the next hedge, sent alone as soon as it reaches the minimum, age alarm after dust_alarm_after_s), never refused and left open. v1_10 and later'),
 )
+
+
+SESSION_LIMIT_DEFAULT_KEYS = ("order_rate", "daily_loss_stop_usdt_per_sol_of_clip", "clock_offset", "margin_warning", "missing_marks_kill_s", "tier_table", "verify_account")
+
+
+def session_limits_from_profile(profile: dict, clip_base: float | None = None) -> dict | None:
+    """Owner 16 Nov (Order 3, limits A1-A6, A8): the profile's `oms.session_limits` block, validated and normalised for TradingSession; None when the profile has none (every earlier profile: the session then
+    builds nothing, writes nothing and its outputs are byte-identical). `clip_base` is the run's clip in SOL (arb.max_position_base): the daily loss stop is stated per SOL of clip and scales with it."""
+    block = (profile.get("oms") or {}).get("session_limits")
+    if not block:
+        return None
+    unknown = sorted(set(block) - set(SESSION_LIMIT_DEFAULT_KEYS))
+    if unknown:
+        raise ValueError(f"oms.session_limits: unknown key(s) {unknown}")
+    out: dict[str, Any] = {"clip_base": float(clip_base) if clip_base is not None else 1.0}
+    rate = block.get("order_rate")
+    if rate is not None:
+        per_s, burst = float(rate["per_s"]), int(rate["burst"])
+        if per_s <= 0 or burst < 1:
+            raise ValueError("oms.session_limits.order_rate needs per_s > 0 and burst >= 1")
+        out["order_rate"] = {"per_s": per_s, "burst": burst}
+    loss = block.get("daily_loss_stop_usdt_per_sol_of_clip")
+    if loss is not None:
+        if float(loss) >= 0:
+            raise ValueError("oms.session_limits.daily_loss_stop_usdt_per_sol_of_clip must be negative (a loss)")
+        out["daily_loss_stop"] = {"usdt_per_sol_of_clip": float(loss), "limit_usdt": float(loss) * out["clip_base"]}
+    clock = block.get("clock_offset")
+    if clock is not None:
+        if float(clock["max_uncertainty_ms"]) <= 0:
+            raise ValueError("oms.session_limits.clock_offset.max_uncertainty_ms must be positive")
+        out["clock_offset"] = {"max_uncertainty_ms": float(clock["max_uncertainty_ms"]), "max_age_s": float(clock.get("max_age_s", 900.0))}
+    warn = block.get("margin_warning")
+    if warn is not None:
+        if float(warn["free_margin_multiple"]) <= 0:
+            raise ValueError("oms.session_limits.margin_warning.free_margin_multiple must be positive")
+        out["margin_warning"] = {"free_margin_multiple": float(warn["free_margin_multiple"]), "resume_hysteresis_s": float(warn.get("resume_hysteresis_s", 5.0))}
+    if block.get("missing_marks_kill_s") is not None:
+        if float(block["missing_marks_kill_s"]) <= 0:
+            raise ValueError("oms.session_limits.missing_marks_kill_s must be positive")
+        out["missing_marks_kill_s"] = float(block["missing_marks_kill_s"])
+    if block.get("tier_table") is not None:
+        if block["tier_table"] != "read_at_start":
+            raise ValueError("oms.session_limits.tier_table must be 'read_at_start'")
+        out["tier_table"] = "read_at_start"
+    va = block.get("verify_account")
+    if va is not None:
+        out["verify_account"] = {"enabled": bool(va.get("enabled", True)), "margin_mode": str(va.get("margin_mode", "cross")).lower(), "leverage": int(va["leverage"]) if va.get("leverage") is not None else None}
+    return out
 
 
 AMEND_GUARD_FLAGS = ("case2i_passed", "testnet_amend_drill_passed")

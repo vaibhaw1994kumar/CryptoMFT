@@ -172,3 +172,41 @@ class ScopedRateLimiter:
                 "buckets": rows, "throttled_by_status": dict(self.throttled),
                 "cancels_delayed": self.cancels_delayed, "over_limit_sent": self.over_limit_sent,
                 "max_utilization": max((row["utilization"] for row in rows), default=0.0)}
+
+
+class OrderRateBucket:
+    """Owner 16 Nov (limit A1): new maker orders and amends of one venue, at most `per_s` per second sustained, bursts up to `burst` (a token bucket). A request that finds no whole token is SKIPPED: nothing is queued
+    and nothing is retried here. Hedges, unwinds, flattens and cancels never pass through it. It is the strict per-venue cap on top of the window limiter above (which can queue); both apply.
+    Refills on the request's own timestamp (the event clock), so a replay is deterministic. Tokens are floats of seconds' worth; the arithmetic is exact enough that a run of requests spaced 1/per_s apart
+    is always admitted."""
+
+    __slots__ = ("per_s", "burst", "tokens", "last_ns", "taken", "skipped")
+
+    def __init__(self, per_s: float, burst: int) -> None:
+        if per_s <= 0 or burst < 1:
+            raise ValueError("order rate needs per_s > 0 and burst >= 1")
+        self.per_s, self.burst = float(per_s), int(burst)
+        self.tokens, self.last_ns = float(burst), None
+        self.taken = self.skipped = 0
+
+    def _refill(self, now_ns: int) -> None:
+        if self.last_ns is not None and now_ns > self.last_ns:
+            self.tokens = min(float(self.burst), self.tokens + (now_ns - self.last_ns) / 1e9 * self.per_s)
+        if self.last_ns is None or now_ns > self.last_ns:
+            self.last_ns = now_ns
+
+    def has_room(self, now_ns: int) -> bool:
+        self._refill(now_ns)
+        return self.tokens >= 1.0 - 1e-9
+
+    def take(self, now_ns: int) -> bool:
+        """One token for one new order or amend; False (and a counted skip) when there is none."""
+        if not self.has_room(now_ns):
+            self.skipped += 1
+            return False
+        self.tokens = max(0.0, self.tokens - 1.0)
+        self.taken += 1
+        return True
+
+    def snapshot(self) -> dict:
+        return {"per_s": self.per_s, "burst": self.burst, "taken": self.taken, "skipped": self.skipped, "tokens_now": round(self.tokens, 6)}
