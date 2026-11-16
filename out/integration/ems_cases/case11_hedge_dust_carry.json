@@ -1,0 +1,25 @@
+{
+ "label": "EXPLORATORY: hedge dust carry (owner 16 Nov), v1_9 + run override hedge_faults.dust_carry=next_hedge, hedge venue minimum notional 5 USDT (run option), 25 SOL clip, 125 SOL gross, 29 Oct capture; aggregates only",
+ "dust_report": {
+  "mode": "next_hedge",
+  "alarm_after_s": 60.0,
+  "alarm_after_label": "ASSUMED",
+  "carried_events": 3,
+  "max_abs_base": "0.008968287255",
+  "oldest_age_s": 4653.468351699,
+  "hedges_with_dust": 3,
+  "host_hedges": 0,
+  "alarms": 1,
+  "balance_end": "0.007620191459"
+ },
+ "ledger_dust_events": {
+  "HEDGE_DUST_ALARM": 1,
+  "HEDGE_DUST_CARRIED": 3,
+  "HEDGE_DUST_INCLUDED": 3
+ },
+ "hedged_plus_carried_equals_filled": true,
+ "maker_filled_base": 124.987620191459,
+ "hedge_filled_base": 124.98,
+ "balance_end_base": 0.007620191459,
+ "unit_cases": "tests/test_core_hedge_scenarios.py::HedgeDustCarry (10 cases: a-e, g and the host-plan price case) and tests/test_session_breaker.py (2 breaker cases)"
+}

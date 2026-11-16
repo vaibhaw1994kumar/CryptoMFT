@@ -161,6 +161,8 @@ SWITCHES: tuple[Switch, ...] = (
     Switch("maker.unknown_queue_dist", "CALIBRATED", note="floor in v1 (hand-set 25); v1.1: fitted on strictly earlier days, floor 0, flagged fallback 25 where the fit has no data (unknown_queue_fallback)"),
     Switch("oms.account_fee_check", "LEGACY_COMPAT", note="absent in every profile up to v1_8; v1_9 (owner 13 Nov) true: a declaration only (a backtest has no account to read): a live or paper session started with this profile reads the account's SOLUSDT maker/taker rates on both venues and refuses to start if they differ from fee_presets. REQUIRED for any profile used with real orders (crypto_stat_arb.config.REAL_ORDER_REQUIRED)"),
     Switch("oms.maker_ack_deadline", "LEGACY_COMPAT", note="off in every profile up to v1_8 (a sent PostOnly quote with no answer stays SENT, unwatched); v1_9 (owner 13 Nov) ON: it is watched from the send and, unanswered, queried, TIMED_OUT, kill switch. REQUIRED for any profile used with real orders (crypto_stat_arb.config.REAL_ORDER_REQUIRED)"),
+    Switch("hedge_faults.dust_carry", "LEGACY_COMPAT", note="absent (off) in every profile up to v1_9; v1_10 (owner 16 Nov) next_hedge: a hedge chunk below the hedge venue's minimum is carried in one signed balance per venue and added to the next hedge, instead of being refused and left open. REQUIRED for any profile used with real orders"),
+    Switch("hedge_faults.dust_alarm_after_s", "LEGACY_COMPAT", note="ASSUMED 60 s (owner 16 Nov): carried dust older than this raises HEDGE_DUST_ALARM once; read only with dust_carry on"),
     Switch("hedge_faults.silent_carry_bound", "LEGACY_COMPAT", note="position_size in every profile up to v1_8 (a residual under the position size is carried with no action); v1_9 (owner 13 Nov) below_one_lot: a failed hedge unwinds whatever its size, only a sub-lot remainder is carried. REQUIRED for any profile used with real orders"),
     Switch("execution.price_cap_required", "CALIBRATED", note="execution layer: every non-unwind intent carries a worst price and every child stays inside it; true in both profiles (today's behaviour), CALIBRATED until the cap decision (brief step 11) is made"),
     _mandatory("execution.one_hedge_child"),
@@ -280,7 +282,7 @@ def apply_profile(doc: dict, dataset: str | None = None, **overrides):
             raise ProfileError(f"profile {doc.get('name')}: execution.pairing none is a market-making quote (no hedge leg), never an arb profile's pairing: this is an arb profile")
     hf = cfg_kw.pop("hedge_faults", None)
     if isinstance(hf, dict):
-        cfg_kw["hedge_faults"] = HedgeFaultConfig(**{k: v for k, v in hf.items() if k != "silent_carry_bound"})      # the session runtime's residual bound (core config); the backtester's own loop has no such rule
+        cfg_kw["hedge_faults"] = HedgeFaultConfig(**{k: v for k, v in hf.items() if k not in ("silent_carry_bound", "dust_carry", "dust_alarm_after_s")})      # the session runtime's residual bound (core config); the backtester's own loop has no such rule
     cal = doc.get("calibration")
     if cal:
         path = resolve_calibration(doc, cal)

@@ -743,3 +743,190 @@ class MakerLifetimeSilentFeed(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+
+class HedgeDustCarry(Scenario):
+    """Owner 16 Nov (hedge dust carry; HedgePolicy dust_carry next_hedge). Maker BUY on BYBIT at 100, hedge SELL on BINANCE at 99.0 (lot 0.001, minimum notional 5: the smallest hedge is 0.051). A hedge chunk below the
+    venue minimum is not sent and not unwound: it is carried in one signed balance per (hedge venue, instrument), added to the next hedge, and sent alone as soon as it reaches the minimum."""
+
+    def dust_policy(self, **kw):
+        return HedgePolicy(dust_carry="next_hedge", **kw)
+
+    def events_of(self, *names):
+        return [e for e in self.ledger.events if e["event_type"] in names]
+
+    def second_plan(self, qty, *, sell_maker=False, op="op-2"):
+        opp = replace(opportunity(qty), opportunity_id=op, buy_venue="BYBIT", sell_venue="BINANCE", buy_price=Decimal("100.0"), sell_price=Decimal("99.0"))
+        if sell_maker:
+            opp = replace(opp, buy_venue="BINANCE", sell_venue="BYBIT", buy_price=Decimal("99.0"), sell_price=Decimal("100.0"))
+        self.bybit.script.append("ack")                                          # the second maker rests too
+        plan = self.oms.execute(opp, self.books, maker_venue="BYBIT")
+        return plan, plan.children[0]
+
+    def fill_plan(self, plan, maker, cum, ts, n, state=ExecutionEventType.PARTIAL, price="100.0"):
+        u = maker_update(plan, maker, n, state, cum, ts)
+        self.oms.ingest_order_update(replace(u, average_price=Decimal(price)))
+
+    def net_exposure(self):
+        """Ledger net over both venues, in base: what the account really holds."""
+        return sum(self.oms.ledger.positions.values(), Decimal("0"))
+
+    def test_a_tiny_partial_fill_is_carried_once_with_no_order_and_no_event_per_tick(self):
+        self.build(qty="1.0", policy=self.dust_policy())
+        self.maker_fill("0.04", 5 * S)                                           # 0.04 x 99 = 3.96 USDT: below the 5 USDT minimum
+        self.assertEqual(self.binance.submits, [])                                # not sent
+        self.assertEqual(self.events_of("HEDGE_CHILD_INVALID", "HEDGE_LOT_RESIDUAL"), [])
+        (ev,) = self.events_of("HEDGE_DUST_CARRIED")
+        self.assertEqual((ev["venue"], ev["signed_exposure"], ev["parent_id"], ev["balance_after"]), ("BINANCE", "0.04", self.plan.parent_id, "0.04"))
+        self.assertIn("price", ev)
+        self.assertEqual(self.oms.dust_balance_total(), Decimal("0.04"))
+        self.assertEqual(self.plan.residual_base, Decimal("0"))                   # the plan is clean: the dust is in the balance, once
+        self.assertEqual(self.oms.residual_risk_snapshot()["carried_dust_base"], "0.04")
+        self.assertEqual(self.oms.residual_risk_snapshot()["total_residual_base"], "0.04")
+        for t in range(6, 40):                                                    # every second for 34 s: nothing is recorded again
+            self.oms.advance_time(t * S, self.books)
+            self.oms.on_book_update("BINANCE", INSTR, t * S)
+        self.assertEqual(len(self.events_of("HEDGE_DUST_CARRIED")), 1)
+        self.assertEqual(self.events_of("RESIDUAL_LIMIT_BREACH", "UNWIND_VENUE_SKIPPED", "HEDGE_DUST_ALARM"), [])
+        self.assertEqual(self.binance.submits, [])
+
+    def test_the_next_same_direction_fill_hedges_its_own_quantity_plus_the_dust(self):
+        self.build(hedge=[("fill", None)], qty="1.0", policy=self.dust_policy())
+        self.maker_fill("0.04", 5 * S)
+        self.maker_fill("0.10", 6 * S)                                           # own 0.06 + carried 0.04 = 0.10
+        (hedge,) = [o for o in self.plan.children if o.order_role == "HEDGE"]
+        self.assertEqual((hedge.quantity, hedge.side.value, hedge.state), (Decimal("0.100"), "SELL", OrderState.FILLED))
+        self.assertEqual(self.oms.dust_balance_total(), Decimal("0"))
+        (inc,) = self.events_of("HEDGE_DUST_INCLUDED")
+        self.assertEqual((Decimal(inc["dust_included"]), Decimal(inc["own_quantity"]), Decimal(inc["hedge_quantity"])), (Decimal("0.04"), Decimal("0.06"), Decimal("0.10")))
+        self.assertEqual(self.events_of("HEDGE_CHAIN_OPENED")[0]["dust_included"], "0.04")
+        self.assertEqual(self.net_exposure(), Decimal("0"))                         # hedged = filled
+        self.assertEqual((self.position("BYBIT"), self.position("BINANCE")), (0.10, -0.10))
+        self.assertEqual(self.plan.residual_base, Decimal("0"))
+        self.assertEqual(len(self.events_of("HEDGE_DUST_CLEARED")), 1)
+
+    def test_dust_in_the_opposite_direction_reduces_the_next_hedge(self):
+        self.build(qty="1.0", policy=self.dust_policy(), hedge=[("fill", None)])
+        self.maker_fill("0.04", 5 * S)                                           # long 0.04 carried (a SELL hedge is owed)
+        plan2, maker2 = self.second_plan("1.0", sell_maker=True)                  # a SELL maker: its hedge is a BUY
+        self.fill_plan(plan2, maker2, "0.10", 6 * S, 1, price="100.0")            # short 0.10, minus the carried long 0.04 = a BUY hedge of 0.06
+        hedges = [o for o in plan2.children if o.order_role == "HEDGE"]
+        self.assertEqual([(h.side.value, h.quantity) for h in hedges], [("BUY", Decimal("0.060"))])
+        self.assertEqual(self.oms.dust_balance_total(), Decimal("0"))
+        self.assertEqual(self.net_exposure(), Decimal("0"))
+
+    def test_dust_of_several_plans_reaches_the_minimum_and_is_sent_at_once_with_no_new_fill(self):
+        self.build(qty="1.0", policy=self.dust_policy(), hedge=[("fill", None)])
+        self.maker_fill("0.03", 5 * S)                                           # 2.97 USDT
+        self.assertEqual(self.binance.submits, [])
+        plan2, maker2 = self.second_plan("1.0")
+        self.fill_plan(plan2, maker2, "0.03", 6 * S, 1)                          # 0.03 + 0.03 = 0.06 x 99 = 5.94 USDT >= 5: one hedge, now
+        (hedge,) = [o for o in plan2.children if o.order_role == "HEDGE"]
+        self.assertEqual(hedge.quantity, Decimal("0.060"))
+        self.assertEqual(len(self.binance.submits), 1)
+        self.assertEqual(self.oms.dust_balance_total(), Decimal("0"))
+        self.assertEqual(self.net_exposure(), Decimal("0"))
+        self.assertEqual((self.plan.residual_base, plan2.residual_base), (Decimal("0"), Decimal("0")))
+
+    def test_a_balance_lifted_over_the_minimum_by_the_price_alone_is_sent_as_its_own_hedge(self):
+        self.build(qty="1.0", policy=self.dust_policy(), hedge=[("fill", None)])
+        self.maker_fill("0.050", 5 * S)                                          # 0.05 x 99 = 4.95 USDT: dust
+        self.assertEqual(self.binance.submits, [])
+        up = make_book("BINANCE", "103.0", "105.0", "5")
+        self.books[("BINANCE", INSTR)] = up
+        self.oms._books[("BINANCE", INSTR)] = up
+        self.oms.on_book_update("BINANCE", INSTR, 7 * S)                          # 0.05 x 103 = 5.15 USDT: no fill, the balance alone reaches the minimum
+        (req,) = self.binance.submits
+        self.assertEqual((req.side.value, req.quantity), ("SELL", Decimal("0.050")))
+        self.assertEqual(self.oms.dust_balance_total(), Decimal("0"))
+        self.assertEqual(len(self.events_of("HEDGE_DUST_HOST_OPENED")), 1)
+        self.assertEqual(self.net_exposure(), Decimal("0"))
+        host = [p for p in self.oms.plans.values() if p.parent_id in self.oms._dust_host_plans]
+        self.assertEqual([p.state.value for p in host], ["CLOSED"])
+        self.assertEqual(host[0].residual_base, Decimal("0"))
+
+    def test_the_own_dust_hedge_has_the_normal_retry_and_unwind_path(self):
+        self.build(qty="1.0", policy=self.dust_policy(retry_limit=1, retry_backoff_ns=1 * S), hedge=[("reject", "-1003"), ("reject", "-1003")])
+        self.maker_fill("0.03", 5 * S)
+        plan2, maker2 = self.second_plan("1.0")
+        self.fill_plan(plan2, maker2, "0.03", 6 * S, 1)                          # the hedge of 0.06 is rejected, retried once, rejected again, then unwound
+        self.oms.advance_time(20 * S, self.books)
+        chains = [c for g in self.oms.hedge_chains.values() for c in g.values()]
+        self.assertEqual(len(chains), 1)
+        self.assertEqual(len(self.binance.submits), 2)                            # one send and one retry, no more
+        self.assertIn(chains[0].state, (H.UNWINDING, H.RECONCILED, H.FAILED))
+        unwinds = [o for p in self.oms.plans.values() for o in p.children if o.order_role == "UNWIND"]
+        self.assertEqual([(u.venue, u.side.value, u.quantity) for u in unwinds], [("BYBIT", "SELL", Decimal("0.060"))])
+        self.assertEqual(self.net_exposure(), Decimal("0"))
+        self.assertEqual(self.oms.dust_balance_total(), Decimal("0"))
+
+    def test_dust_older_than_the_limit_raises_one_alarm_that_does_not_block_and_clears_at_zero(self):
+        self.build(qty="1.0", policy=self.dust_policy(dust_alarm_after_s=60.0), hedge=[("fill", None)])
+        self.maker_fill("0.04", 5 * S)
+        self.oms.advance_time(40 * S, self.books)
+        self.assertEqual(self.events_of("HEDGE_DUST_ALARM"), [])
+        self.oms.advance_time(70 * S, self.books)
+        self.oms.advance_time(90 * S, self.books)
+        (alarm,) = self.events_of("HEDGE_DUST_ALARM")
+        for key in ("confirmed_residual_base", "pending_hedge_qty", "oldest_exposure_age_s", "execution_blocked_reason"):
+            self.assertIn(key, alarm)
+        self.assertEqual((alarm["execution_blocked_reason"], alarm["balance"]), ("", "0.04"))        # it blocks nothing
+        plan2, maker2 = self.second_plan("1.0")
+        self.assertNotEqual(plan2.terminal_outcome, "REJECTED")                                      # quoting continues
+        self.assertFalse(self.oms.risk.kill_switch)
+        self.fill_plan(plan2, maker2, "0.10", 95 * S, 1)                                              # own 0.10 + dust 0.04: sent, the balance returns to 0
+        self.assertEqual(self.oms.dust_balance_total(), Decimal("0"))
+        self.assertEqual(len(self.events_of("HEDGE_DUST_ALARM_CLEARED")), 1)
+        self.assertEqual(len(self.events_of("HEDGE_DUST_ALARM")), 1)
+
+    def test_a_restart_keeps_the_balance_and_the_plan_adjustments(self):
+        import tempfile
+        from crypto_stat_arb.plan_store import ParentPlanStore
+        with tempfile.TemporaryDirectory() as d:
+            path = Path(d) / "plans.sqlite"
+            store = ParentPlanStore(path)
+            self.ledger = Ledger()
+            inst = scenario_instruments()
+            self.bybit, self.binance, self.books = Venue("BYBIT", ["ack"], price="99.0"), Venue("BINANCE", [("fill", None)], price="99.0"), scenario_books()
+            self.oms = OMS(inst, risk(), self.ledger, router=StrategyDirectedRouter(inst, adapters={"BYBIT": self.bybit, "BINANCE": self.binance}), dispatch_policy=DispatchPolicy.FILL_TRIGGERED,
+                           hedge_policy=self.dust_policy(), plan_store=store)
+            opp = replace(opportunity("1.0"), buy_venue="BYBIT", sell_venue="BINANCE", buy_price=Decimal("100.0"), sell_price=Decimal("99.0"))
+            self.plan = self.oms.execute(opp, self.books, maker_venue="BYBIT")
+            self.maker = self.plan.children[0]
+            self.n = 0
+            self.maker_fill("0.04", 5 * S)
+            before = (self.oms.dust_balance_total(), dict(self.oms._dust_plan_adj), self.oms._dust[("BINANCE", INSTR)]["since_ns"])
+            store.close()
+            store2 = ParentPlanStore(path)
+            binance2 = Venue("BINANCE", [("fill", None)], price="99.0")
+            inst2 = scenario_instruments()
+            oms2 = OMS(inst2, risk(), Ledger(), router=StrategyDirectedRouter(inst2, adapters={"BYBIT": Venue("BYBIT"), "BINANCE": binance2}), dispatch_policy=DispatchPolicy.FILL_TRIGGERED,
+                       hedge_policy=self.dust_policy(), plan_store=store2)
+            oms2._books.update(scenario_books())
+            self.assertEqual((oms2.dust_balance_total(), dict(oms2._dust_plan_adj), oms2._dust[("BINANCE", INSTR)]["since_ns"]), before)
+            plan = oms2.plans[self.plan.parent_id]
+            self.assertEqual(plan.residual_base, Decimal("0"))
+            self.assertEqual(oms2._hedge_specs[self.plan.parent_id]["requested_qty"], Decimal("0.04"))
+            maker = next(o for o in plan.children if o.order_id == self.maker.order_id)
+            oms2.ingest_order_update(replace(maker_update(plan, maker, 1, ExecutionEventType.PARTIAL, "0.04", 50 * MS, "again"), average_price=Decimal("100.0")))     # the same 0.04 again: nothing
+            self.assertEqual((binance2.submits, oms2.dust_balance_total()), ([], Decimal("0.04")))
+            oms2.ingest_order_update(replace(maker_update(plan, maker, 2, ExecutionEventType.PARTIAL, "0.10", 60 * MS, "more"), average_price=Decimal("100.0")))
+            self.assertEqual([r.quantity for r in binance2.submits], [Decimal("0.100")])                # the restored balance is taken into the next hedge
+            self.assertEqual(oms2.dust_balance_total(), Decimal("0"))
+            store2.close()
+
+    def test_a_dust_balance_is_in_the_account_net_exactly_once(self):
+        self.build(qty="1.0", policy=self.dust_policy())
+        self.maker_fill("0.04", 5 * S)
+        snap = self.oms.residual_risk_snapshot()
+        self.assertEqual(Decimal(snap["total_residual_base"]), abs(self.net_exposure()))            # open plan 0 + carried 0 + balance 0.04 = the ledger net
+        self.assertEqual(Decimal(snap["open_residual_base"]), Decimal("0"))
+
+    def test_off_by_default_the_same_fill_is_refused_as_before(self):
+        self.build(qty="1.0")
+        self.maker_fill("0.04", 5 * S)
+        self.assertEqual(len(self.events_of("HEDGE_CHILD_INVALID")), 1)
+        self.assertEqual((self.events_of("HEDGE_DUST_CARRIED"), self.oms.dust_on, self.oms._dust, self.oms._dust_plan_adj), ([], False, {}, {}))
+        self.assertNotIn("carried_dust_base", self.oms.residual_risk_snapshot())
+

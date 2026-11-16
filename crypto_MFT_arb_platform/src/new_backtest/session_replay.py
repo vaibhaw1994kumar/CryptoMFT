@@ -27,7 +27,7 @@ from decimal import Decimal
 from pathlib import Path
 from typing import Any, Iterable
 
-from crypto_stat_arb.config import check_real_order_profile, config_from_raw, raw_config_from_profile
+from crypto_stat_arb.config import check_real_order_profile, config_from_raw, hedge_dust_fields, raw_config_from_profile
 from crypto_stat_arb.derivatives import DerivativeTicker
 from crypto_stat_arb.metrics import regime_sample
 from crypto_stat_arb.ems.layer import hedge_policy_fields
@@ -94,7 +94,7 @@ class SessionReplay:
 
     def __init__(self, config, profile: dict, *, stream: Iterable | None = None, ticks: dict[str, float] | None = None, recorded: bool = False,
                  decompose_markouts: bool = False, mark_from_mid: bool = False, hedge_fault_injection: bool = False, hedge_thin_book: tuple = (), layer_risk_mode: str | None = None, reconcile_mode: str = "count", observations: bool = True, layer_route_mode: str = "count",
-                 lifecycle_report: bool = False, regime_boundaries=None, breaker_config=None, profile_safety: bool = False) -> None:
+                 lifecycle_report: bool = False, regime_boundaries=None, breaker_config=None, profile_safety: bool = False, hedge_min_notional: float | None = None) -> None:
         if config.runtime != "session":
             raise ValueError("SessionReplay runs the session runtime only")
         self.config, self.profile = config, profile
@@ -153,7 +153,8 @@ class SessionReplay:
         self.ticks = ticks or dated_ticks(config.start_date)
         size = float(config.arb.max_position_base)
         raw, self.config_notes = raw_config_from_profile(profile, pair=config.pair, venues=venues, ticks=self.ticks, quantity_steps={v: quantity_steps()[v] for v in venues}, size_base=size,
-                                                         seed=config.seed, venue_cap_base=float(config.arb.max_venue_imbalance_base) or None)
+                                                         seed=config.seed, venue_cap_base=float(config.arb.max_venue_imbalance_base) or None,
+                                                         min_notional_by_venue=None if hedge_min_notional is None else {v: repr(hedge_min_notional) for v in venues if v not in config.arb.maker_venues})        # owner 16 Nov: a run option, the hedge venue's minimum notional (dust cases)
         self.app_config, self.raw_config = config_from_raw(raw)
         self.config_notes["fees"] = "PROFILE_FEES: a replay books the profile's fee_presets; no account rates are read (a live or paper session that sends real orders refuses to start unless the account's rates equal them)"        # owner 14 Nov
         self.config_notes["funding_window"] = "evaluated only where the run has derivative data (next funding times); without it every evaluation counts funding_window_not_evaluable and nothing is blocked"
@@ -229,7 +230,7 @@ class SessionReplay:
         hf, hedge_cfg = config.hedge_faults, (config.execution.hedge if getattr(config, "execution", None) is not None else {})
         hedge_policy = HedgePolicy(retry_limit=int(getattr(hf, "max_retries", 0) or 0), retry_backoff_ns=int(float(getattr(hf, "retry_backoff_s", 0.0) or 0.0) * _NS),
                                    query_attempt_limit=int(getattr(hf, "unknown_query_max_attempts", 3) or 3),
-                                   **hedge_policy_fields(hedge_cfg, config.arb.max_walk_bps))
+                                   **hedge_policy_fields(hedge_cfg, config.arb.max_walk_bps), **hedge_dust_fields(profile))
         # E0 step (g): the maker observation records (place / fill / hedge arrival), observation only, ported from the backtester; maker_observations.jsonl is written with the run's output
         self.obs = None
         if observations:
@@ -1168,7 +1169,7 @@ def live_paper_setup(profile_name: str) -> dict:
     hf, hedge_cfg = cfg.hedge_faults, (cfg.execution.hedge if getattr(cfg, "execution", None) is not None else {})
     hedge_policy = HedgePolicy(retry_limit=int(getattr(hf, "max_retries", 0) or 0), retry_backoff_ns=int(float(getattr(hf, "retry_backoff_s", 0.0) or 0.0) * _NS),
                                query_attempt_limit=int(getattr(hf, "unknown_query_max_attempts", 3) or 3),
-                               **hedge_policy_fields(hedge_cfg, cfg.arb.max_walk_bps))
+                               **hedge_policy_fields(hedge_cfg, cfg.arb.max_walk_bps), **hedge_dust_fields(profile))
     timelines = Timelines(cfg.timing) if cfg.timing is not None else None
     session_kwargs = {"dispatch_policy": DispatchPolicy.FILL_TRIGGERED, "maker_venues": tuple(names[v] for v in cfg.arb.maker_venues), "hedge_policy": hedge_policy,
                       "latency_model": TimelinesLatencyModel(timelines) if timelines is not None else None, "gate_on_every_event": True}

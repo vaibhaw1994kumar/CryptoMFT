@@ -69,7 +69,8 @@ class ProfileSafetyInTheReplay(unittest.TestCase):
         cfg.arb.participation_max = 0.0                                              # v1_9 limits a new quote to 10% of the prints at its level; these synthetic streams have none and the test is about something else (tests/test_e3_participation.py covers the limit)
         older = SessionReplay(cfg, profile, stream=stream()).session.router.scoped_limits
         self.assertEqual((older.quote_share, older.quote_min_free), (0.8, 2))
-        self.assertEqual(check_real_order_profile(load_profile("perp_perp_maker_taker_v1_9")), [])
+        self.assertEqual(check_real_order_profile(load_profile("perp_perp_maker_taker_v1_10")), [])           # owner 16 Nov: v1_10 is the profile named in the real-orders table (v1_9 lacks hedge_faults.dust_carry)
+        self.assertTrue(any("dust_carry" in m for m in check_real_order_profile(load_profile("perp_perp_maker_taker_v1_9"))))
         self.assertTrue(any("quote_share" in m for m in check_real_order_profile(profile)))              # an older profile is told what it lacks
 
     def test_on_the_gate_is_enforce_and_the_breaker_is_the_profiles_block(self):

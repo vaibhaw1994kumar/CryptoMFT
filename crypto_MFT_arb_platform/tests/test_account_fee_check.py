@@ -121,10 +121,10 @@ class Transports(unittest.TestCase):
 
 
 class Requirement(unittest.TestCase):
-    def test_v1_9_declares_the_check_and_older_profiles_are_told_it_is_missing(self):
+    def test_v1_10_declares_the_check_and_older_profiles_are_told_it_is_missing(self):
         from crypto_stat_arb.config import check_real_order_profile
         from new_backtest.profiles import load_profile
-        self.assertEqual(check_real_order_profile(load_profile("perp_perp_maker_taker_v1_9")), [])
+        self.assertEqual(check_real_order_profile(load_profile("perp_perp_maker_taker_v1_10")), [])          # owner 16 Nov: v1_10 is the profile named for real orders
         self.assertTrue(any("account_fee_check" in m for m in check_real_order_profile(load_profile("perp_perp_maker_taker_v1_8"))))
 
 

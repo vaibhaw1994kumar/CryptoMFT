@@ -464,6 +464,14 @@
   "evidence": "case10_exchange_side_restart_reconciliation_missed_fill.jsonl"
  },
  {
+  "case": "2o Hedge dust carry (a hedge chunk below the venue minimum is carried, never refused and left open; owner 16 Nov)",
+  "covering_layer": "OMS, EMS layer, session breaker",
+  "count": 3,
+  "result": "PASS",
+  "detail": "size-25 day, v1_9 + labelled dust_carry override, hedge minimum 5 USDT: carried 3 times, all lot remainders (the day has no chunk below 5 USDT at this size: the sub-minimum chunk is covered by the unit cases); max balance 0.008968287255 base, oldest age 4653 s, balance at the end 0.007620191459; one HEDGE_DUST_ALARM (age over 60 s, ASSUMED) that blocks nothing; hedged + carried = filled. Unit cases: tiny partial fill carried once, no order, no event per tick; next fill takes the dust in; opposite dust reduces; dust of two plans reaches the minimum and is sent at once; price alone lifts the balance (dust host plan); retry and unwind path; age alarm once and clear; restart keeps the balance; breaker ignores carried dust but trips on an uncarried lot. NOT VERIFIED: whether a reduce-only order is exempt from the minimum notional (testnet drill).",
+  "evidence": "case11_hedge_dust_carry.json"
+ },
+ {
   "case": "2g Restart with open orders, inside a replay",
   "covering_layer": "session, OMS, plan store",
   "count": null,

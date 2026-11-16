@@ -172,6 +172,32 @@ class DustAndFlattenRules(unittest.TestCase):
         self.assertEqual(s.breaker.state(), "TRIPPED")
         self.assertIn("net_exposure", events(s, "BREAKER_TRIP")[0]["cause"])
 
+    def test_carried_hedge_dust_does_not_trip_the_net_trigger_but_an_uncarried_lot_does(self):
+        """Owner 16 Nov (hedge dust carry): exposure recorded as carried dust is not what the net-exposure trigger reads, however large it is against the lot; anything not carried still trips."""
+        from crypto_stat_arb.hedge_lifecycle import HedgePolicy
+        s = session(self.net_cfg, hedge_policy=HedgePolicy(dust_carry="next_hedge"))
+        with_books(s)
+        s._breaker_step(1 * S)
+        s.oms._dust[(A, INSTR)] = {"exposure": Decimal("0.04"), "since_ns": 1 * S, "alarmed": False, "host": None}      # 0.04 carried: four lots of 0.01, 3.96 USDT, below the 5 USDT minimum
+        s.ledger.positions[(B, INSTR)] = Decimal("0.04")
+        for t in range(2, 40):
+            s._breaker_step(t * S)
+        self.assertEqual(s.breaker.state(), "OK")                                          # carried dust: no trip, however long it is held
+        s.ledger.positions[(B, INSTR)] = Decimal("0.041")                                   # one lot (0.001) that is NOT carried
+        s._breaker_step(40 * S)
+        s._breaker_step(46 * S)
+        self.assertEqual(s.breaker.state(), "TRIPPED")
+        self.assertIn("net_exposure", events(s, "BREAKER_TRIP")[0]["cause"])
+
+    def test_the_same_dust_without_the_switch_trips_as_before(self):
+        s = session(self.net_cfg)
+        with_books(s)
+        s._breaker_step(1 * S)
+        s.ledger.positions[(B, INSTR)] = Decimal("0.04")
+        s._breaker_step(2 * S)
+        s._breaker_step(8 * S)
+        self.assertEqual(s.breaker.state(), "TRIPPED")
+
     def test_a_flatten_remainder_below_the_minimum_is_dust_recorded_once_never_retried_and_latched_until_reset(self):
         cfg = CircuitBreakerConfig(trip_on_gateway_down=True, pause_on_gateway_down_when_flat=True, heartbeat_timeout_s=2.0)
         s = session(cfg)

@@ -425,6 +425,14 @@ if ev10.exists():
     add("2g Restart: exchange-side reconciliation (open orders, executions, positions fetched from the venue; OMS level, scripted venue)", "OMS, plan store, restart gate", len(e10), len(via_rest) == 1 and len(hedges) == 1 and first_fill == 1,
         f"stage trace: the missed maker fill came from the venue's account (REST_QUERY) and was booked {len(via_rest)} time(s); hedges sent for it before any new quote {len(hedges)}; the new quote went out only after the reconciliation (a repeated account fetch books nothing). The unit cases also show an unknown venue order, a position that differs, a failed fetch and executions that do not add up each keeping new maker exposure held, and an order still resting at the venue reconciled without being finished. "
         f"Scripted venues only: the live adapters' account_snapshot and a testnet restart drill are not built yet", ev10.name)
+ev11 = CASES / "case11_hedge_dust_carry.json"
+if ev11.exists():
+    e11 = json.loads(ev11.read_text())
+    rep = e11["dust_report"]
+    add("2o Hedge dust carry (a hedge chunk below the venue minimum is carried, never refused and left open; owner 16 Nov)", "OMS, EMS layer, session breaker", rep["carried_events"],
+        e11["hedged_plus_carried_equals_filled"] and rep["alarms"] <= 1,
+        f"size-25 day, v1_9 + labelled dust_carry override, hedge minimum 5 USDT: carried {rep['carried_events']} times, all lot remainders (the day has no chunk below 5 USDT at this size: the sub-minimum chunk is covered by the unit cases); max balance {rep['max_abs_base']} base, oldest age {rep['oldest_age_s']:.0f} s, balance at the end {rep['balance_end']}; one HEDGE_DUST_ALARM (age over {rep['alarm_after_s']:g} s, ASSUMED) that blocks nothing; hedged + carried = filled. "
+        "Unit cases: tiny partial fill carried once, no order, no event per tick; next fill takes the dust in; opposite dust reduces; dust of two plans reaches the minimum and is sent at once; price alone lifts the balance (dust host plan); retry and unwind path; age alarm once and clear; restart keeps the balance; breaker ignores carried dust but trips on an uncarried lot. NOT VERIFIED: whether a reduce-only order is exempt from the minimum notional (testnet drill).", ev11.name)
 for case, (layer, why, res) in unit.items():
     matrix.append({"case": case, "covering_layer": layer, "count": None, "result": res, "detail": why, "evidence": "see detail"})
 
