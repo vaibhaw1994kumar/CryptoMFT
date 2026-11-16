@@ -324,6 +324,7 @@ class OMS:
         self.lot_residual_alarm: dict[str, Any] | None = None          # owner 12 Nov (a): a carried sub-lot residual that reaches one full hedge lot raises this PERSISTENT alarm (it stays set; there is no auto-clear)
         # Owner 12 Nov (amend semantics, CR-MQ part 2's order part): OFF by default; every caller before the requoting strategies behaves as before. See request_amend.
         self.amend_enabled = False
+        self.amend_blocked: str | None = None               # owner 16 Nov: None = amends allowed; else the refusal text (real orders before case2i_passed and testnet_amend_drill_passed are recorded)
         self._lineage_of: dict[str, str] = {}              # order id -> the root order id of its amend lineage (only orders that were amended or replace one)
         self._amend_seq: dict[str, int] = {}
         self.hedge_short_vol_bps = None       # owner 12 Nov (cap size_aware): an optional callable(venue, ts_ns) -> the short-horizon volatility in bps per sqrt(second); None = no source (the volatility term is then 0, labelled in the cap event)
@@ -2564,6 +2565,13 @@ class OMS:
             hedged = sum((o.filled_quantity for o in plan.children if o.order_role == "HEDGE"), Decimal("0"))
             if all(state == OrderState.FILLED for state in states) and hedged < spec["max_qty"]:
                 states = states | {OrderState.PARTIAL}
+            maker_head = next((o for o in relevant if o.order_id == spec["maker_order_id"]), None)
+            if (maker_head is not None and maker_head.state in (OrderState.ACKNOWLEDGED, OrderState.AMEND_PENDING)
+                    and self._lineage_filled(plan, maker_head) > 0):
+                # a quote that has filled part of its size is PARTIAL whatever its head reads: after an amend the head is the replacement (no fill of its own yet),
+                # during a pending amend it is the old order (AMEND_PENDING, which no plan state maps to), and a hedge child that is merely acknowledged must not
+                # pull the plan back from PARTIAL to ACKNOWLEDGED, an illegal transition (found by the v1_10 case 2i / 2n replays, 16 Nov)
+                states = states | {OrderState.PARTIAL}
         elif plan.parent_id in self._quote_plans:
             # a quote that was amended is judged by its live head, not by the old order the venue replaced (which reads CANCELLED)
             states = {order.state for order in plan.children if not self._amend_bookkeeping_order(plan, order)} or {order.state for order in plan.children}
@@ -2898,6 +2906,9 @@ class OMS:
         once the cancel is confirmed, so two live orders never exist), or REFUSED:<why>."""
         if not self.amend_enabled:
             return "REFUSED:amend_disabled"
+        if self.amend_blocked:                                       # owner 16 Nov: the real-order amend guard (set by the session); the same refusal the session's own rule gives
+            self.realism_counters["amend_refused_real_order_guard"] = self.realism_counters.get("amend_refused_real_order_guard", 0) + 1
+            return self.amend_blocked
         found = next(((plan, x) for plan in self.plans.values() for x in plan.children if x.order_id == order_id), None)
         if found is None:
             return "REFUSED:unknown_order"
@@ -4231,7 +4242,10 @@ class OMS:
         for parent_id, chains in self.hedge_chains.items():
             for c in chains.values():
                 if c.max_residual_age_s is not None and c.state in self._CHAIN_OPEN and c.exposure_closed_ts is None:
-                    out.append(int((c.opened_ts + c.max_residual_age_s) * 1e9) + 1)
+                    t = int((c.opened_ts + c.max_residual_age_s) * 1e9) + 1
+                    while t / 1e9 - c.opened_ts <= c.max_residual_age_s and t < 1 << 62:      # the timer must land where the breach test (float seconds) is true: at today's epoch one float step is about 240 ns, so +1 ns can sit just before it and the timers never converge (found on the v1_10 2i run: a held hedge)
+                        t += 64
+                    out.append(t)
         return out
 
     def _hedge_progress_all(self, now_ns: int) -> None:

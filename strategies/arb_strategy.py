@@ -80,6 +80,9 @@ class ArbConfig:
     # executable price for the quote's size (VWAP over the depth needed); below the entry threshold minus the hysteresis it is withdrawn (cancelled). Withdrawal only: no repricing (S0 stays off).
     quote_withdraw: bool = False
     quote_withdraw_hysteresis_bps: float = 0.5   # ASSUMED
+    # Owner 16 Nov (approved "1 s no-requote after a withdrawal"): a quote withdrawn by validity is not placed again on the same venue and side for this long (ASSUMED 1.0 s in v1_10; 0 = off, bit-identical).
+    # Counted (requote_blocked_after_withdraw). Funding-window withdrawals and S0 repricing cancels are not validity withdrawals and start no delay.
+    requote_delay_after_withdraw_s: float = 0.0
     # Entry hedge price (owner 13 Nov, edge calibration item 1; default "touch" = every profile up to v1_8 unchanged, "vwap" set by v1_9): "vwap" prices the hedge at the VWAP the hedge venue's book gives for the
     # size the quote will really have (the same walk quote_validity uses, one helper), in the quote price AND the entry edge, so entry and quote_validity give the same net edge for the same book, price and size.
     # expected_hedge_slippage_bps then stays 0 by design: the depth cost is already in the price.
@@ -237,6 +240,8 @@ class ArbConfig:
 
     def __post_init__(self) -> None:
         validate_maker_lifetime(self.maker_max_age_s)
+        if self.requote_delay_after_withdraw_s < 0:
+            raise ValueError("arb.requote_delay_after_withdraw_s must be >= 0")
         if self.entry_hedge_price not in ("touch", "vwap"):
             raise ValueError(f"arb.entry_hedge_price must be 'touch' or 'vwap', got {self.entry_hedge_price!r}")
         if self.funding_credit not in ("floor_zero", "allow"):
@@ -1291,6 +1296,9 @@ class ArbSessionStrategy:
         self._feed_name = {core: feed for feed, core in self.venue_names.items()}
         self.signals: dict[str, ArbSignal] = {}
         self.last_signal: ArbSignal | None = None
+        self._no_requote_until_ns: dict[tuple[str, str], int] = {}                            # owner 16 Nov: (maker feed venue, side) -> no new quote before this time (arb.requote_delay_after_withdraw_s)
+        self.requote_blocked_after_withdraw = 0
+        self.withdrawn_by_validity = 0
         self.grid_snaps = {"price": 0, "quantity": 0}                                         # how often the instrument grid changed a signal value (0 when the strategy already quotes on the grid)
 
     # -- inputs from the core ------------------------------------------------------------------------------------------------
@@ -1374,8 +1382,15 @@ class ArbSessionStrategy:
                     continue
                 valid, net, why = self.strategy.quote_validity(self._feed_name[child.venue], child.side.value.lower(), float(child.limit_price), remaining, floats, now_s)
                 if not valid:
-                    out.append({"order_id": child.order_id, "net_bps": net, "reason": why})
+                    out.append({"order_id": child.order_id, "net_bps": net, "reason": why, "venue_feed": self._feed_name[child.venue], "side": child.side.value.lower()})
         return out
+
+    def note_quote_withdrawn(self, q: dict, now_ns: int) -> None:
+        """The session withdrew a quote for validity (its edge was gone): the same venue and side is not quoted again for arb.requote_delay_after_withdraw_s (owner 16 Nov). Off (0) = nothing is recorded."""
+        self.withdrawn_by_validity += 1
+        delay = self.strategy.config.requote_delay_after_withdraw_s
+        if delay > 0 and q.get("venue_feed") is not None:
+            self._no_requote_until_ns[(q["venue_feed"], q["side"])] = now_ns + int(delay * 1_000_000_000)
 
     # -- the session's call -------------------------------------------------------------------------------------------------
 
@@ -1415,6 +1430,11 @@ class ArbSessionStrategy:
         )
         if signal is None:
             return None
+        if self._no_requote_until_ns:
+            key = (signal.maker_venue, "buy" if signal.maker_venue == signal.buy_venue else "sell")
+            if now_ns < self._no_requote_until_ns.get(key, 0):
+                self.requote_blocked_after_withdraw += 1
+                return None
         opportunity = self.to_opportunity(signal, now_ns, books, fingerprint)
         self.signals[opportunity.opportunity_id] = signal
         self.last_signal = signal

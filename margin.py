@@ -173,6 +173,12 @@ def _missing_price_action(value: Any) -> str:
     return value
 
 
+def _mark_stamp(value: Any) -> str:
+    if value not in ("restamp", "own_timestamp"):
+        raise ValueError(f"margin.mark_stamp must be restamp or own_timestamp, got {value!r}")
+    return str(value)
+
+
 @dataclass(frozen=True, slots=True)
 class MarginConfig:
     venues: dict[str, VenueMarginConfig] = field(default_factory=dict)
@@ -184,6 +190,9 @@ class MarginConfig:
     mark_max_age_ns: int = 5_000_000_000
     # What a missing price does: "breach" (the old rule: fail closed, margin BREACH, kill switch) or "pause" (new risk is paused until a fresh price returns; only a real shortfall with a fresh price is a BREACH).
     missing_price_action: str = "breach"
+    # Owner 16 Nov (the 5 s mark rule): "restamp" (every earlier profile, labelled LEGACY) stamps a mark with the time the evaluation saw it, so a mark lives up to about 2 x mark_max_age (9-10 s measured);
+    # "own_timestamp" (v1_10 onward) keeps the mark's own time: a mark older than mark_max_age by its OWN timestamp is missing (age exactly mark_max_age still counts), and nothing is re-stamped.
+    mark_stamp: str = "restamp"
 
     @classmethod
     def from_config(cls, section: dict[str, Any] | None) -> "MarginConfig":
@@ -236,7 +245,8 @@ class MarginConfig:
                    evaluate_interval_ns=int(section.get("evaluate_interval_ms", 1_000)) * 1_000_000,
                    flatten_after_liquidation=bool(section.get("flatten_after_liquidation", True)),
                    mark_max_age_ns=int(float(section.get("mark_max_age_s", 5.0)) * 1_000_000_000),
-                   missing_price_action=_missing_price_action(section.get("missing_price_action", "breach")))
+                   missing_price_action=_missing_price_action(section.get("missing_price_action", "breach")),
+                   mark_stamp=_mark_stamp(section.get("mark_stamp", "restamp")))
 
     @property
     def configured(self) -> bool:

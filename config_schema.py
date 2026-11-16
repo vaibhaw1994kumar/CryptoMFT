@@ -80,7 +80,7 @@ SCHEMA: dict[str, Any] = {
                                 "maintenance_margin_rate": ANY, "liquidation_buffer_rate": ANY}),
         "inventory": {"model": ANY, "initial_base_by_venue": Map(ANY), "initial_quote_by_venue": Map(ANY)},
         "margin": {
-            "evaluate_interval_ms": ANY, "flatten_after_liquidation": ANY, "mark_max_age_s": ANY, "missing_price_action": ANY,
+            "evaluate_interval_ms": ANY, "flatten_after_liquidation": ANY, "mark_max_age_s": ANY, "missing_price_action": ANY, "mark_stamp": ANY,
             "venues": Map({
                 "mode": ANY, "reported_tolerance": ANY, "isolated_margin": Map(ANY),
                 "collateral": ListOf({"asset": ANY, "haircut": ANY, "eligible": ANY}),

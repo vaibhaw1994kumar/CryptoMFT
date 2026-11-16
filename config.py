@@ -492,6 +492,20 @@ REAL_ORDER_REQUIRED: tuple[RealOrderRequirement, ...] = (
 )
 
 
+AMEND_GUARD_FLAGS = ("case2i_passed", "testnet_amend_drill_passed")
+
+
+def amend_guard_from_profile(profile: dict) -> dict | None:
+    """Owner 16 Nov: with real orders (paper with sends, testnet, mainnet) a profile that amends refuses to send an amend until `decision_status` records BOTH case2i_passed and testnet_amend_drill_passed as true;
+    until then every reprice is a cancel followed by a fresh quote through all the gates (counted and labelled). None when the profile does not reprice by amend (nothing to guard); every flag absent or false = blocked.
+    Withdrawal (quote validity) is not restricted."""
+    reprice = (((profile.get("execution") or {}).get("primary") or {}).get("reprice")) or {}
+    if not reprice.get("enabled") or not reprice.get("amend_first", True):
+        return None
+    status = profile.get("decision_status") or {}
+    return {"required": list(AMEND_GUARD_FLAGS), "recorded": {k: status.get(k) is True for k in AMEND_GUARD_FLAGS}}
+
+
 def hedge_dust_fields(profile: dict) -> dict:
     """The dust-carry fields of the OMS HedgePolicy from the profile's `hedge_faults` block (owner 16 Nov). Empty when the profile does not set them, so every older profile builds the policy it always built."""
     hf = profile.get("hedge_faults") or {}
@@ -618,7 +632,8 @@ def raw_config_from_profile(
             "initial_capital_by_venue": capital, "max_order_notional": "1000000000", "max_gross_notional": "1000000000", "max_residual_base": residual_cap,
             "max_position_base": str(ceiling if venue_cap_base is None else max(ceiling, venue_cap_base)), "inventory": {"model": "unconstrained"},
             "margin": {"evaluate_interval_ms": int(float(margin.get("check_every_s", 1.0)) * 1000), "flatten_after_liquidation": bool(margin.get("flatten_other_venue", True)), "venues": margin_venues,
-                       "mark_max_age_s": float(margin.get("mark_max_age_s", 5.0)), "missing_price_action": str(margin.get("missing_price_action", "pause"))},   # owner 11 Nov: a missing price pauses new risk, it never trips the kill switch
+                       "mark_max_age_s": float(margin.get("mark_max_age_s", 5.0)), "missing_price_action": str(margin.get("missing_price_action", "pause")),
+                       **({"mark_stamp": str(margin["mark_stamp"])} if "mark_stamp" in margin else {})},   # owner 11 Nov: a missing price pauses new risk, it never trips the kill switch
             "margin_accounts": {v: {"margin_enabled": True} for v in margin_venues},
         },
         "oms": {"timeouts": {"maker_ack_deadline": bool((profile.get("oms") or {}).get("maker_ack_deadline", False))},

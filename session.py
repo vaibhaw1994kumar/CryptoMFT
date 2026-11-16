@@ -188,6 +188,7 @@ class TradingSession:
         layer_risk_mode: str = "count",
         layer_route_mode: str = "count",
         execution_config: Any = None,
+        amend_guard: dict | None = None,
     ) -> None:
         execution_mode = ExecutionMode(execution_mode)
         assert_execution_mode(
@@ -356,6 +357,10 @@ class TradingSession:
         self._seen_gaps: dict[tuple, int] = {}
         if self._reprice_cfg.enabled:
             self.oms.amend_enabled = True
+        # Owner 16 Nov (real-order amend guard): a session that sends real orders (testnet, mainnet, paper with sends) does not amend until the profile records case2i_passed AND testnet_amend_drill_passed;
+        # until then every reprice is a cancel and a fresh quote through all the gates (amend_first false), counted and labelled. Replays and paper without sends are not restricted. Withdrawal is not restricted.
+        self.amend_guard_state: dict[str, Any] | None = None
+        self._apply_amend_guard(amend_guard, execution_mode)
         self.ledger.journal = self.financing_journal
         # Margin is evaluated during the session, not only at the end (ECO04):
         # on market-data time every ``evaluate_interval_ms`` and after any fill
@@ -1093,6 +1098,18 @@ class TradingSession:
             for q in quotes(self.books, now_ns):
                 if self.oms.withdraw_quote(q["order_id"], now_ns, q["reason"], q["net_bps"]):
                     self.quotes_withdrawn += 1
+                    note = getattr(strategy, "note_quote_withdrawn", None)
+                    if note is not None and q.get("side") is not None:
+                        note(q, now_ns)                               # owner 16 Nov: the 1 s no-requote after a validity withdrawal (a strategy that keeps no such rule has no hook)
+
+    def _apply_amend_guard(self, amend_guard: dict | None, execution_mode: ExecutionMode) -> None:
+        if amend_guard is None or not self._reprice_cfg.enabled or execution_mode in (ExecutionMode.INTERNAL_SIMULATION, ExecutionMode.INTERNAL_PAPER):
+            return
+        missing = sorted(k for k in amend_guard["required"] if not amend_guard["recorded"].get(k))
+        if missing:
+            self._reprice_cfg = dataclass_replace(self._reprice_cfg, amend_first=False)
+            self.oms.amend_blocked = "REFUSED:amend_guard:" + "+".join(missing)
+            self.amend_guard_state = {"label": "REAL_ORDER_AMEND_GUARD", "active": True, "missing": missing, "effect": "every reprice is a cancel and a fresh quote; no amend is sent"}
 
     def _count_reprice(self, key: str) -> None:
         self.reprice_counters[key] = self.reprice_counters.get(key, 0) + 1
@@ -1146,6 +1163,8 @@ class TradingSession:
                 elif d.action == CANCEL:
                     self._cancel_for_reprice(c, now_ns, d.reason)
                 elif d.action == CANCEL_REPLACE:
+                    if self.amend_guard_state is not None:
+                        self._count_reprice("amend_guard_cancel_instead")          # labelled: the amend is refused with real orders until the two proofs are recorded
                     self._cancel_for_reprice(c, now_ns, d.reason)
                 else:
                     self._amend_for_reprice(c, st, now, now_ns, d)
@@ -1159,7 +1178,13 @@ class TradingSession:
         if not self.router.quote_has_room(c["venue"], c["instrument_id"], now_ns):       # an amend is quote-tier traffic (at most quote_share of each window, quote_min_free left free): skipped, never queued; cancels and hedges are never refused
             self._count_reprice("amend_skipped_rate_limit")
             return
-        outcome = self.oms.request_amend(c["order_id"], Decimal(repr(round(d.price, 10))), now_ns, "reprice:" + d.reason)
+        new_price = Decimal(repr(round(d.price, 10)))
+        tick = self.oms.instruments.get(c["venue"], c["instrument_id"], now_ns).tick_size
+        if new_price % tick:                                         # the target is a float price: onto the venue's grid without loosening it (a bid rounds down, an ask up). Found by case 2i on v1_10: the first amend of the arb on the capture was refused 'price violates tick'
+            from .ems.layer import limit_on_grid
+            new_price = limit_on_grid(c["side"], new_price, tick)
+            self._count_reprice("amend_price_snapped_to_tick")
+        outcome = self.oms.request_amend(c["order_id"], new_price, now_ns, "reprice:" + d.reason)
         st.last_request_ts = now
         if outcome == "REQUESTED":
             st.pending = True
@@ -1234,6 +1259,9 @@ class TradingSession:
 
     def breaker_report(self) -> dict[str, Any]:
         return {"breaker": self.breaker.summary() if self.breaker is not None else None, "breaker_alarms": list(self.breaker_alarms), "signals_blocked_by_breaker": self.signals_blocked_by_breaker,
+                **({"no_requote": {"withdrawn_by_validity": sum(getattr(s, "withdrawn_by_validity", 0) for s in self.strategies), "requote_blocked_after_withdraw": sum(getattr(s, "requote_blocked_after_withdraw", 0) for s in self.strategies)}}
+                   if any(getattr(getattr(getattr(s, "strategy", None), "config", None), "requote_delay_after_withdraw_s", 0) > 0 for s in self.strategies) else {}),
+                **({"amend_guard": dict(self.amend_guard_state)} if self.amend_guard_state is not None else {}),
                 **({"hedge_dust_carry": self.oms.dust_report(getattr(self.oms, "_last_execution_ts_ns", None))} if self.oms.dust_on else {}),
                 **({"breaker_flatten": {"counters": dict(self.breaker_flatten_counters), "dust_events": list(self.breaker_dust_events), "dust_now": None if self._breaker_dust is None else {k: str(v) for k, v in self._breaker_dust.items()}}}
                    if (self.breaker_flatten_counters["dust_recorded"] or self.breaker_flatten_counters["unavailable_retries"]) else {}),
@@ -1386,6 +1414,8 @@ class TradingSession:
         and stays usable for up to `margin_config.mark_max_age_ns` (ASSUMED 5 s, stamped when the evaluation saw it, so up to one evaluation interval generous); only after that is the price missing.
         Without this a book that goes quiet for 500 ms (STALE) lost its mark, the position was priced as missing, the venue went into margin BREACH and the kill switch tripped (2026-10-29 capture: every breach sat inside a BINANCE:STALE interval)."""
         max_age = self.margin_config.mark_max_age_ns
+        if self.margin_config.mark_stamp == "own_timestamp":
+            return self._margin_marks_own_timestamp(now, max_age)
         fresh = {
             key: (book.best_bid + book.best_ask) / Decimal("2")
             for key, book in self.books.items()
@@ -1401,6 +1431,22 @@ class TradingSession:
             if key not in marks and now - ts <= max_age:
                 marks[key] = price
         return marks
+
+    def _margin_marks_own_timestamp(self, now: int, max_age: int) -> dict[tuple[str, str], Decimal]:
+        """The 5 s mark rule as the owner decided it (16 Nov, v1_10 onward): every mark keeps its OWN timestamp (an exchange mark its receive time, a book mid the book's last receive time) and nothing is re-stamped
+        with the time this evaluation saw it. A mark whose own age is more than mark_max_age is missing (the pause); an age of exactly mark_max_age still counts. A VALID book's mid is the book's own."""
+        cands: dict[tuple[str, str], tuple[int, Decimal]] = {}
+        for key, book in self.books.items():
+            if book.state.value == "VALID" and book.bids and book.asks:
+                cands[key] = (book.last_receive_ts_ns if book.last_receive_ts_ns is not None else now, (book.best_bid + book.best_ask) / Decimal("2"))
+        for key, (ts, price) in self.exchange_marks.items():               # the venue's own mark is preferred when it is within the limit
+            if now - ts <= max_age:
+                cands[key] = (ts, price)
+        for key, (ts, price) in cands.items():
+            old = self._last_good_marks.get(key)
+            if old is None or ts >= old[0]:
+                self._last_good_marks[key] = (ts, price)
+        return {key: price for key, (ts, price) in self._last_good_marks.items() if now - ts <= max_age}
 
     def _margin_price_step(self, report, now: int) -> None:
         """A missing price pauses new risk and resumes by itself when a fresh price is back; it never trips the kill switch (a real shortfall with a fresh price still does, through the margin BREACH)."""
