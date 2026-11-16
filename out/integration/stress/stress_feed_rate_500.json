@@ -1,0 +1,98 @@
+{
+ "rate_per_s_per_venue": 500.0,
+ "seconds": 5.0,
+ "frames_scheduled_per_venue": 2500,
+ "wall_s": 6.093,
+ "venues": {
+  "BINANCE": {
+   "frames_handed": 2500,
+   "book_stream_frames": 2500,
+   "canonical_events": 2501,
+   "dropped_frames": 0,
+   "normalization_errors": 0,
+   "processing_ms": {
+    "n": 2501,
+    "p50": 0.047542,
+    "p99": 0.083417,
+    "max": 0.334333
+   },
+   "harness_lag_ms": {
+    "p50": 0.48825,
+    "p99": 2.648917,
+    "max": 15.412875
+   },
+   "book_age_ms": {
+    "n": 481,
+    "p50": 1.211,
+    "p99": 1.991,
+    "max": 2.078
+   },
+   "stale_book_transitions": 0,
+   "stale_samples": 0,
+   "gaps": 0,
+   "out_of_order": 0,
+   "duplicates": 0,
+   "resyncs": 1,
+   "book_state_at_end": "VALID",
+   "reconnects": null
+  },
+  "BYBIT": {
+   "frames_handed": 2500,
+   "book_stream_frames": 2500,
+   "canonical_events": 2500,
+   "dropped_frames": 0,
+   "normalization_errors": 0,
+   "processing_ms": {
+    "n": 2500,
+    "p50": 0.047667,
+    "p99": 0.087125,
+    "max": 0.122792
+   },
+   "harness_lag_ms": {
+    "p50": 0.501375,
+    "p99": 2.374125,
+    "max": 14.268417
+   },
+   "book_age_ms": {
+    "n": 482,
+    "p50": 1.244,
+    "p99": 1.984,
+    "max": 2.014
+   },
+   "stale_book_transitions": 0,
+   "stale_samples": 0,
+   "gaps": 0,
+   "out_of_order": 0,
+   "duplicates": 0,
+   "resyncs": 0,
+   "book_state_at_end": "VALID",
+   "reconnects": null
+  }
+ },
+ "book_gate_suspended_at_end": false,
+ "session_events_processed": 5001,
+ "cpu": {
+  "user_plus_system_s": 3.953,
+  "share_of_one_core": 0.649,
+  "max_rss_mb": 73.8
+ },
+ "verdict": {
+  "checks": {
+   "stale_book_events_zero": true,
+   "no_dropped_frames": true,
+   "no_gaps_out_of_order_or_errors": true,
+   "kept_up_with_the_schedule_p99_lag_under_100ms": true,
+   "book_gate_open_at_end": true
+  },
+  "pass": true,
+  "stale_book_events": 0,
+  "dropped_frames": 0,
+  "gaps_out_of_order_duplicates_errors": 0
+ },
+ "label": "EXPLORATORY: this Mac, one process, a synthetic top-of-book stream through the live parse, book and session path on the wall clock",
+ "machine": {
+  "platform": "macOS-15.3.1-arm64-arm-64bit",
+  "python": "3.12.0",
+  "processor": "arm"
+ }
+}

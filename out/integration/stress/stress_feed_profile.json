@@ -1,0 +1,145 @@
+{
+ "rate_per_s_per_venue": 10000.0,
+ "seconds": 2.0,
+ "frames_scheduled_per_venue": 20000,
+ "wall_s": 13.199,
+ "venues": {
+  "BINANCE": {
+   "frames_handed": 20000,
+   "book_stream_frames": 20000,
+   "canonical_events": 20001,
+   "dropped_frames": 0,
+   "normalization_errors": 0,
+   "processing_ms": {
+    "n": 20001,
+    "p50": 0.01475,
+    "p99": 0.023541,
+    "max": 0.951041
+   },
+   "harness_lag_ms": {
+    "p50": 3011.107292,
+    "p99": 6024.223584,
+    "max": 6082.284959
+   },
+   "book_age_ms": {
+    "n": 724,
+    "p50": 0.186,
+    "p99": 0.223,
+    "max": 1.261
+   },
+   "stale_book_transitions": 0,
+   "stale_samples": 0,
+   "gaps": 0,
+   "out_of_order": 0,
+   "duplicates": 0,
+   "resyncs": 1,
+   "book_state_at_end": "VALID",
+   "reconnects": null
+  },
+  "BYBIT": {
+   "frames_handed": 20000,
+   "book_stream_frames": 20000,
+   "canonical_events": 20000,
+   "dropped_frames": 0,
+   "normalization_errors": 0,
+   "processing_ms": {
+    "n": 20000,
+    "p50": 0.01475,
+    "p99": 0.019125,
+    "max": 0.115875
+   },
+   "harness_lag_ms": {
+    "p50": 3000.735625,
+    "p99": 6013.729167,
+    "max": 6076.254667
+   },
+   "book_age_ms": {
+    "n": 725,
+    "p50": 0.376,
+    "p99": 0.46,
+    "max": 45.959
+   },
+   "stale_book_transitions": 0,
+   "stale_samples": 0,
+   "gaps": 0,
+   "out_of_order": 0,
+   "duplicates": 0,
+   "resyncs": 0,
+   "book_state_at_end": "VALID",
+   "reconnects": null
+  }
+ },
+ "book_gate_suspended_at_end": false,
+ "session_events_processed": 40001,
+ "cpu": {
+  "user_plus_system_s": 12.369,
+  "share_of_one_core": 0.937,
+  "max_rss_mb": 238.9
+ },
+ "verdict": {
+  "checks": {
+   "stale_book_events_zero": true,
+   "no_dropped_frames": true,
+   "no_gaps_out_of_order_or_errors": true,
+   "kept_up_with_the_schedule_p99_lag_under_100ms": false,
+   "book_gate_open_at_end": true
+  },
+  "pass": false,
+  "stale_book_events": 0,
+  "dropped_frames": 0,
+  "gaps_out_of_order_duplicates_errors": 0
+ },
+ "label": "EXPLORATORY: this Mac, one process, a synthetic top-of-book stream through the live parse, book and session path on the wall clock",
+ "machine": {
+  "platform": "macOS-15.3.1-arm64-arm-64bit",
+  "python": "3.12.0",
+  "processor": "arm"
+ },
+ "profile_run": {
+  "by_own_time_top18": [
+   "         41723230 function calls (37457322 primitive calls) in 17.463 seconds",
+   "   Ordered by: internal time",
+   "   List reduced from 470 to 18 due to restriction <18>",
+   "   ncalls  tottime  percall  cumtime  percall filename:lineno(function)",
+   "3885025/120385    1.902    0.000    3.543    0.000 /Library/Frameworks/Python.framework/Versions/3.12/lib/python3.12/dataclasses.py:1323(_asdict_inner)",
+   "   360084    1.672    0.000    1.704    0.000 /Library/Frameworks/Python.framework/Versions/3.12/lib/python3.12/json/encoder.py:205(iterencode)",
+   "   160013    0.568    0.000    0.568    0.000 {method 'flush' of '_io.TextIOWrapper' objects}",
+   "   160019    0.493    0.000    1.961    0.000 {built-in method posix.stat}",
+   "    80002    0.408    0.000    0.878    0.000 /Users/vaibhav/Documents/Newproject/crypto_MFT_arb_platform/src/crypto_stat_arb/time_integrity.py:188(observe)",
+   "  3731089    0.341    0.000    0.341    0.000 {built-in method builtins.isinstance}",
+   "   120043    0.320    0.000    0.570    0.000 /Library/Frameworks/Python.framework/Versions/3.12/lib/python3.12/pathlib.py:387(_parse_path)",
+   "1242919/1242917    0.317    0.000    0.349    0.000 {built-in method builtins.max}",
+   "    20015    0.294    0.000    0.294    0.000 {method 'control' of 'select.kqueue' objects}",
+   "    40001    0.294    0.000    3.277    0.000 /Users/vaibhav/Documents/Newproject/crypto_MFT_arb_platform/src/crypto_stat_arb/raw_capture.py:98(append)",
+   "   360084    0.276    0.000    2.404    0.000 /Library/Frameworks/Python.framework/Versions/3.12/lib/python3.12/json/__init__.py:183(dumps)",
+   "   160464    0.275    0.000    0.462    0.000 /Library/Frameworks/Python.framework/Versions/3.12/lib/python3.12/dataclasses.py:1269(fields)",
+   "  2282690    0.263    0.000    0.263    0.000 {method 'get' of 'dict' objects}",
+   "    40001    0.248    0.000    4.140    0.000 /Users/vaibhav/Documents/Newproject/crypto_MFT_arb_platform/src/crypto_stat_arb/live_feed.py:385(capture_wire)",
+   "840040/600040    0.242    0.000    1.194    0.000 /Library/Frameworks/Python.framework/Versions/3.12/lib/python3.12/dataclasses.py:1373(<genexpr>)",
+   "   360084    0.241    0.000    2.065    0.000 /Library/Frameworks/Python.framework/Versions/3.12/lib/python3.12/json/encoder.py:183(encode)",
+   "   120043    0.236    0.000    0.418    0.000 <frozen posixpath>:71(join)",
+   "    40001    0.215    0.000    7.125    0.000 /Users/vaibhav/Documents/Newproject/crypto_MFT_arb_platform/src/crypto_stat_arb/live_feed.py:2170(_apply_and_record)"
+  ],
+  "by_cumulative_time_core_modules": [
+   "         41723230 function calls (37457322 primitive calls) in 17.463 seconds",
+   "   Ordered by: cumulative time",
+   "   List reduced from 470 to 96 due to restriction <'live_feed|session|orderbook|adapters|paper_live|book_gate|time_integrity|strategy'>",
+   "   List reduced from 96 to 14 due to restriction <14>",
+   "   ncalls  tottime  percall  cumtime  percall filename:lineno(function)",
+   "    40006    0.010    0.000   17.184    0.000 /Users/vaibhav/Documents/Newproject/crypto_MFT_arb_platform/src/crypto_stat_arb/live_feed.py:908(_fail_closed)",
+   "    40002    0.010    0.000   17.169    0.000 /Users/vaibhav/Documents/Newproject/crypto_MFT_arb_platform/src/crypto_stat_arb/live_feed.py:1220(_venue_forever)",
+   "    40000    0.105    0.000   16.216    0.000 /Users/vaibhav/Documents/Newproject/crypto_MFT_arb_platform/src/crypto_stat_arb/live_feed.py:2040(_process_websocket_frame)",
+   "   120003    0.071    0.000   10.647    0.000 /Users/vaibhav/Documents/Newproject/crypto_MFT_arb_platform/src/crypto_stat_arb/live_feed.py:88(wrapper)",
+   "    20001    0.034    0.000    8.809    0.000 /Users/vaibhav/Documents/Newproject/crypto_MFT_arb_platform/src/crypto_stat_arb/live_feed.py:1577(_run_bybit_connection)",
+   "    20001    0.033    0.000    8.348    0.000 /Users/vaibhav/Documents/Newproject/crypto_MFT_arb_platform/src/crypto_stat_arb/live_feed.py:1507(_run_binance_connection)",
+   "    40001    0.088    0.000    7.826    0.000 /Users/vaibhav/Documents/Newproject/crypto_MFT_arb_platform/src/crypto_stat_arb/live_feed.py:1882(_capture_and_parse)",
+   "    40001    0.215    0.000    7.125    0.000 /Users/vaibhav/Documents/Newproject/crypto_MFT_arb_platform/src/crypto_stat_arb/live_feed.py:2170(_apply_and_record)",
+   "    40001    0.248    0.000    4.140    0.000 /Users/vaibhav/Documents/Newproject/crypto_MFT_arb_platform/src/crypto_stat_arb/live_feed.py:385(capture_wire)",
+   "    40001    0.030    0.000    3.307    0.000 /Users/vaibhav/Documents/Newproject/crypto_MFT_arb_platform/src/crypto_stat_arb/live_feed.py:460(append_payload)",
+   "    40001    0.155    0.000    3.129    0.000 /Users/vaibhav/Documents/Newproject/crypto_MFT_arb_platform/src/crypto_stat_arb/live_feed.py:490(record_event)",
+   "    40001    0.017    0.000    2.568    0.000 /Users/vaibhav/Documents/Newproject/crypto_MFT_arb_platform/src/crypto_stat_arb/live_feed.py:378(_ensure_part)",
+   "    40000    0.105    0.000    2.550    0.000 /Users/vaibhav/Documents/Newproject/crypto_MFT_arb_platform/src/crypto_stat_arb/live_feed.py:366(_should_rotate)",
+   "    40001    0.104    0.000    1.340    0.000 /Users/vaibhav/Documents/Newproject/crypto_MFT_arb_platform/src/crypto_stat_arb/paper_live.py:205(_on_event)"
+  ]
+ }
+}

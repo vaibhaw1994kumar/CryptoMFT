@@ -1,0 +1,98 @@
+{
+ "rate_per_s_per_venue": 5000.0,
+ "seconds": 5.0,
+ "frames_scheduled_per_venue": 25000,
+ "wall_s": 16.821,
+ "venues": {
+  "BINANCE": {
+   "frames_handed": 25000,
+   "book_stream_frames": 25000,
+   "canonical_events": 25001,
+   "dropped_frames": 0,
+   "normalization_errors": 0,
+   "processing_ms": {
+    "n": 25001,
+    "p50": 0.014791,
+    "p99": 0.025375,
+    "max": 0.466542
+   },
+   "harness_lag_ms": {
+    "p50": 2667.055542,
+    "p99": 5372.801334,
+    "max": 5419.352584
+   },
+   "book_age_ms": {
+    "n": 924,
+    "p50": 0.384,
+    "p99": 0.557,
+    "max": 0.869
+   },
+   "stale_book_transitions": 0,
+   "stale_samples": 0,
+   "gaps": 0,
+   "out_of_order": 0,
+   "duplicates": 0,
+   "resyncs": 1,
+   "book_state_at_end": "VALID",
+   "reconnects": null
+  },
+  "BYBIT": {
+   "frames_handed": 25000,
+   "book_stream_frames": 25000,
+   "canonical_events": 25000,
+   "dropped_frames": 0,
+   "normalization_errors": 0,
+   "processing_ms": {
+    "n": 25000,
+    "p50": 0.014833,
+    "p99": 0.027792,
+    "max": 0.944334
+   },
+   "harness_lag_ms": {
+    "p50": 2657.385042,
+    "p99": 5362.986417,
+    "max": 5413.88325
+   },
+   "book_age_ms": {
+    "n": 925,
+    "p50": 0.193,
+    "p99": 0.287,
+    "max": 0.652
+   },
+   "stale_book_transitions": 0,
+   "stale_samples": 0,
+   "gaps": 0,
+   "out_of_order": 0,
+   "duplicates": 0,
+   "resyncs": 0,
+   "book_state_at_end": "VALID",
+   "reconnects": null
+  }
+ },
+ "book_gate_suspended_at_end": false,
+ "session_events_processed": 50001,
+ "cpu": {
+  "user_plus_system_s": 15.882,
+  "share_of_one_core": 0.944,
+  "max_rss_mb": 254.8
+ },
+ "verdict": {
+  "checks": {
+   "stale_book_events_zero": true,
+   "no_dropped_frames": true,
+   "no_gaps_out_of_order_or_errors": true,
+   "kept_up_with_the_schedule_p99_lag_under_100ms": false,
+   "book_gate_open_at_end": true
+  },
+  "pass": false,
+  "stale_book_events": 0,
+  "dropped_frames": 0,
+  "gaps_out_of_order_duplicates_errors": 0
+ },
+ "label": "EXPLORATORY: this Mac, one process, a synthetic top-of-book stream through the live parse, book and session path on the wall clock",
+ "machine": {
+  "platform": "macOS-15.3.1-arm64-arm-64bit",
+  "python": "3.12.0",
+  "processor": "arm"
+ }
+}

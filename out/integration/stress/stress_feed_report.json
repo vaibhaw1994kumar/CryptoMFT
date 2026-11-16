@@ -1,0 +1,120 @@
+{
+ "rate_per_s_per_venue": 10000.0,
+ "seconds": 5.0,
+ "frames_scheduled_per_venue": 50000,
+ "wall_s": 33.031,
+ "venues": {
+  "BINANCE": {
+   "frames_handed": 50000,
+   "book_stream_frames": 50000,
+   "canonical_events": 50001,
+   "dropped_frames": 0,
+   "normalization_errors": 0,
+   "processing_ms": {
+    "n": 50001,
+    "p50": 0.014667,
+    "p99": 0.019209,
+    "max": 0.3595
+   },
+   "harness_lag_ms": {
+    "p50": 7809.573375,
+    "p99": 15377.893625,
+    "max": 15522.564333
+   },
+   "book_age_ms": {
+    "n": 1820,
+    "p50": 0.187,
+    "p99": 0.241,
+    "max": 1.361
+   },
+   "stale_book_transitions": 0,
+   "stale_samples": 0,
+   "gaps": 0,
+   "out_of_order": 0,
+   "duplicates": 0,
+   "resyncs": 1,
+   "book_state_at_end": "VALID",
+   "reconnects": null
+  },
+  "BYBIT": {
+   "frames_handed": 50000,
+   "book_stream_frames": 50000,
+   "canonical_events": 50000,
+   "dropped_frames": 0,
+   "normalization_errors": 0,
+   "processing_ms": {
+    "n": 50000,
+    "p50": 0.014834,
+    "p99": 0.023667,
+    "max": 6.972
+   },
+   "harness_lag_ms": {
+    "p50": 7801.856417,
+    "p99": 15370.20175,
+    "max": 15518.480292
+   },
+   "book_age_ms": {
+    "n": 1821,
+    "p50": 0.378,
+    "p99": 0.51,
+    "max": 71.748
+   },
+   "stale_book_transitions": 0,
+   "stale_samples": 0,
+   "gaps": 0,
+   "out_of_order": 0,
+   "duplicates": 0,
+   "resyncs": 0,
+   "book_state_at_end": "VALID",
+   "reconnects": null
+  }
+ },
+ "book_gate_suspended_at_end": false,
+ "session_events_processed": 100001,
+ "cpu": {
+  "user_plus_system_s": 31.517,
+  "share_of_one_core": 0.954,
+  "max_rss_mb": 525.6
+ },
+ "verdict": {
+  "checks": {
+   "stale_book_events_zero": true,
+   "no_dropped_frames": true,
+   "no_gaps_out_of_order_or_errors": true,
+   "kept_up_with_the_schedule_p99_lag_under_100ms": false,
+   "book_gate_open_at_end": true
+  },
+  "pass": false,
+  "stale_book_events": 0,
+  "dropped_frames": 0,
+  "gaps_out_of_order_duplicates_errors": 0
+ },
+ "label": "EXPLORATORY: this Mac, one process, a synthetic top-of-book stream through the live parse, book and session path on the wall clock",
+ "machine": {
+  "platform": "macOS-15.3.1-arm64-arm-64bit",
+  "python": "3.12.0",
+  "processor": "arm"
+ },
+ "profile_run": [
+  "         38727677 function calls (32975631 primitive calls) in 13.915 seconds",
+  "",
+  "   Ordered by: cumulative time",
+  "   List reduced from 774 to 12 due to restriction <12>",
+  "",
+  "   ncalls  tottime  percall  cumtime  percall filename:lineno(function)",
+  "    10139    0.036    0.000   14.200    0.001 /Library/Frameworks/Python.framework/Versions/3.12/lib/python3.12/asyncio/base_events.py:1874(_run_once)",
+  "    22288    0.010    0.000   13.477    0.001 /Library/Frameworks/Python.framework/Versions/3.12/lib/python3.12/asyncio/events.py:82(_run)",
+  "    22288    0.017    0.000   13.467    0.001 {method 'run' of '_contextvars.Context' objects}",
+  "    20012    0.005    0.000    8.469    0.000 /Users/vaibhav/Documents/Newproject/crypto_MFT_arb_platform/src/crypto_stat_arb/live_feed.py:908(_fail_closed)",
+  "    20004    0.005    0.000    8.460    0.000 /Users/vaibhav/Documents/Newproject/crypto_MFT_arb_platform/src/crypto_stat_arb/live_feed.py:1220(_venue_forever)",
+  "    20000    0.053    0.000    7.985    0.000 /Users/vaibhav/Documents/Newproject/crypto_MFT_arb_platform/src/crypto_stat_arb/live_feed.py:2040(_process_websocket_frame)",
+  "    60003    0.036    0.000    5.186    0.000 /Users/vaibhav/Documents/Newproject/crypto_MFT_arb_platform/src/crypto_stat_arb/live_feed.py:88(wrapper)",
+  "        4    0.000    0.000    4.887    1.222 /Users/vaibhav/Documents/Newproject/crypto_MFT_arb_platform/src/crypto_stat_arb/paper_live.py:292(run)",
+  "        1    0.022    0.022    4.785    4.785 /Users/vaibhav/Documents/Newproject/crypto_MFT_arb_platform/src/crypto_stat_arb/paper_live.py:306(finalize)",
+  "   160335    0.057    0.000    4.519    0.000 /Library/Frameworks/Python.framework/Versions/3.12/lib/python3.12/dataclasses.py:1299(asdict)",
+  "5506089/160335    2.358    0.000    4.416    0.000 /Library/Frameworks/Python.framework/Versions/3.12/lib/python3.12/dataclasses.py:1323(_asdict_inner)",
+  "    10002    0.017    0.000    4.264    0.000 /Users/vaibhav/Documents/Newproject/crypto_MFT_arb_platform/src/crypto_stat_arb/live_feed.py:1577(_run_bybit_connection)",
+  "",
+  ""
+ ]
+}
