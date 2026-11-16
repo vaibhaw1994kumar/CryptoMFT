@@ -97,6 +97,8 @@ class HedgePolicy:
     max_slip_bps: float = 15.0                # size_aware: the absolute limit beyond the touch (ASSUMED)
     vol_k: float = 0.0                        # size_aware: the volatility/latency term k * short_vol_bps * sqrt(latency_s); k = 0 (ASSUMED) switches it off
     latency_s: float = 0.0                    # size_aware: the hedge latency the volatility term scales with
+    dust_carry: str = "off"                   # owner 16 Nov: "next_hedge" = a hedge chunk below the hedge venue's minimum is carried in a signed balance per (venue, instrument) and added to the next hedge; "off" (default) = the old refusal
+    dust_alarm_after_s: float = 60.0          # ASSUMED (owner 16 Nov): carried dust older than this raises HEDGE_DUST_ALARM once (it never blocks new risk)
     calibration_label: str = "DECISION_PENDING_CALIBRATION"
 
 

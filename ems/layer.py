@@ -205,14 +205,14 @@ class ExecutionLayer:
     # ── intents ──────────────────────────────────────────────────────────────
     def _create(self, *, role: str, side: str, qty: float, venues: tuple[str, ...], worst_price: float | None, now: float,
                 signal_id: int, parent: ExecutionIntent | None, parent_filled_qty: float, urgency: str, deadline_ts: float | None,
-                reason: str, tactic_hint: str) -> ExecutionIntent:
+                reason: str, tactic_hint: str, dust_included: float = 0.0) -> ExecutionIntent:
         kind = _KIND[role]
         self._serial[(signal_id, kind)] += 1
         iid = f"sig{signal_id}-{kind}{self._serial[(signal_id, kind)]}"
         it = ExecutionIntent(intent_id=iid, role=role, instrument=self.instrument, side=side, qty=qty, venues=tuple(venues),
                              worst_price=worst_price, urgency=urgency, deadline_ts=deadline_ts, tactic_hint=tactic_hint, reason=reason,
                              parent_id=parent.intent_id if parent is not None else "", parent_filled_qty=parent_filled_qty,
-                             signal_id=signal_id, created_ts=now)
+                             signal_id=signal_id, created_ts=now, dust_included=dust_included)
         self.intents[iid] = it
         self._by_signal.setdefault(signal_id, []).append(iid)
         if len(self.journal) < JOURNAL_MAX:
@@ -226,11 +226,11 @@ class ExecutionLayer:
             self._live[iid] = set()
         return it
 
-    def _validate_open(self, role: str, qty: float, worst_price: float | None, signal_id: int, parent, parent_filled_qty: float) -> None:
+    def _validate_open(self, role: str, qty: float, worst_price: float | None, signal_id: int, parent, parent_filled_qty: float, dust_only: bool = False) -> None:
         if role == Role.HEDGE:
-            if parent is None:
+            if parent is None and not dust_only:
                 raise IntentError("a hedge intent needs its parent intent")
-            if parent_filled_qty < qty - 1e-9 and self.dispatch_mode != "simultaneous":
+            if parent_filled_qty < qty - 1e-9 and self.dispatch_mode != "simultaneous" and not dust_only:
                 raise IntentError(f"hedge for {qty} opened with only {parent_filled_qty} filled on {parent.intent_id} "
                                   f"(a hedge exists only after the maker fill)")
         if worst_price is None and self.cfg.price_cap_required and role not in (Role.UNWIND, Role.FLATTEN):
@@ -238,15 +238,16 @@ class ExecutionLayer:
 
     def open_intent(self, *, role: str, side: str, qty: float, venues: tuple[str, ...], worst_price: float | None, now: float,
                     signal_id: int, parent: ExecutionIntent | None = None, parent_filled_qty: float = 0.0, urgency: str = "normal",
-                    deadline_ts: float | None = None, reason: str = "", tactic_hint: str = "") -> ExecutionIntent:
+                    deadline_ts: float | None = None, reason: str = "", tactic_hint: str = "", dust_included: float = 0.0, dust_only: bool = False) -> ExecutionIntent:
         if role == Role.PRIMARY:
             return self.open_primary_group([dict(side=side, qty=qty, venues=venues, worst_price=worst_price, urgency=urgency,
                                                  deadline_ts=deadline_ts, reason=reason, tactic_hint=tactic_hint)],
                                            now=now, signal_id=signal_id)[0]
-        self._validate_open(role, qty, worst_price, signal_id, parent, parent_filled_qty)
-        return self._create(role=role, side=side, qty=qty, venues=venues, worst_price=worst_price, now=now, signal_id=signal_id,
-                            parent=parent, parent_filled_qty=parent_filled_qty, urgency=urgency, deadline_ts=deadline_ts,
-                            reason=reason, tactic_hint=tactic_hint)
+        self._validate_open(role, qty, worst_price, signal_id, parent, parent_filled_qty, dust_only)
+        it = self._create(role=role, side=side, qty=qty, venues=venues, worst_price=worst_price, now=now, signal_id=signal_id,
+                          parent=parent, parent_filled_qty=parent_filled_qty, urgency=urgency, deadline_ts=deadline_ts,
+                          reason=reason, tactic_hint=tactic_hint, dust_included=dust_included)
+        return it
 
     def open_primary_group(self, specs: list[dict], *, now: float, signal_id: int, gated: bool = False) -> list[ExecutionIntent]:
         """All primary legs of one signal: validate, check the worst-case exposure with every leg added, then create and reserve
@@ -604,12 +605,17 @@ class IntentObserver:
             self.counts["primary_children"] += 1
         return None
 
-    def chain_opened(self, plan, chain_id: str, maker, spec: dict, qty, now: float) -> None:
+    def chain_opened(self, plan, chain_id: str, maker, spec: dict, qty, now: float, dust_included: float = 0.0) -> None:
         sid = self._signal.setdefault(plan.parent_id, len(self._signal) + 1)
         px = self._px(spec["limit_price"])
-        it = self._guard("open_hedge", self.layer.open_intent, role=Role.HEDGE, side=spec["side"].value.lower(), qty=float(qty), venues=(spec["venue"],),
-                         worst_price=px, now=now, signal_id=sid, parent=self._by_order.get(maker.order_id),
-                         parent_filled_qty=float(maker.filled_quantity), urgency="urgent", reason="hedge after maker fill")
+        if maker is None:                      # the hedge of the carried dust alone (owner 16 Nov): no maker, no parent intent; the dust was filled earlier
+            it = self._guard("open_hedge", self.layer.open_intent, role=Role.HEDGE, side=spec["side"].value.lower(), qty=float(qty), venues=(spec["venue"],), worst_price=px, now=now,
+                             signal_id=sid, parent=None, parent_filled_qty=float(qty), urgency="urgent", reason="hedge of carried dust", dust_included=dust_included, dust_only=True)
+        else:
+            extra = {"dust_included": dust_included} if dust_included else {}
+            it = self._guard("open_hedge", self.layer.open_intent, role=Role.HEDGE, side=spec["side"].value.lower(), qty=float(qty), venues=(spec["venue"],),
+                             worst_price=px, now=now, signal_id=sid, parent=self._by_order.get(maker.order_id),
+                             parent_filled_qty=float(maker.filled_quantity) + dust_included, urgency="urgent", reason="hedge after maker fill", **extra)
         if it is not None:
             self._by_chain[chain_id] = it
             self._spec_price[it.intent_id] = px

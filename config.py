@@ -488,7 +488,22 @@ REAL_ORDER_REQUIRED: tuple[RealOrderRequirement, ...] = (
     RealOrderRequirement('oms.rate_limits.quote_min_free', (2,), 'a new quote always leaves at least 2 requests of the window free (owner 13 Nov; ASSUMED)'),
     RealOrderRequirement('oms.account_fee_check', (True,), "at live/paper start-up the account's own SOLUSDT maker/taker rate is read on both venues and the session refuses to start if one differs from the profile's fee_presets or cannot be read (owner 13 Nov; crypto_stat_arb.fees.verify_account_fee_rates, LivePaperSession). The headline VIP 5 / VIP 9 presets are PUBLIC_SCHEDULE_UNVERIFIED: expect a refusal until the presets equal the account's rates"),
     RealOrderRequirement('hedge_faults.silent_carry_bound', ('below_one_lot',), 'a failed hedge always unwinds whatever its size; only a remainder below one hedge-venue lot is carried silently'),
+    RealOrderRequirement('hedge_faults.dust_carry', ('next_hedge',), 'owner 16 Nov: a hedge chunk below the hedge venue\'s minimum is carried (one signed balance per venue and instrument, added to the next hedge, sent alone as soon as it reaches the minimum, age alarm after dust_alarm_after_s), never refused and left open. v1_10 and later'),
 )
+
+
+def hedge_dust_fields(profile: dict) -> dict:
+    """The dust-carry fields of the OMS HedgePolicy from the profile's `hedge_faults` block (owner 16 Nov). Empty when the profile does not set them, so every older profile builds the policy it always built."""
+    hf = profile.get("hedge_faults") or {}
+    out: dict = {}
+    if "dust_carry" in hf:
+        mode = str(hf["dust_carry"])
+        if mode not in ("off", "next_hedge"):
+            raise ValueError(f"hedge_faults.dust_carry must be off or next_hedge, got {mode!r}")
+        out["dust_carry"] = mode
+    if "dust_alarm_after_s" in hf:
+        out["dust_alarm_after_s"] = float(hf["dust_alarm_after_s"])
+    return out
 
 
 def check_real_order_profile(doc: dict) -> list[str]:
@@ -550,13 +565,15 @@ def require_safe_profile(doc: dict, *, latency_sensitivity: str | None = None) -
 
 def raw_config_from_profile(
     profile: dict, *, pair: str, venues: tuple[str, ...], ticks: dict[str, str | float], quantity_steps: dict[str, str | float], size_base: float,
-    seed: int = 7, max_book_age_s: float = 0.5, latency_sensitivity: str | None = None, venue_cap_base: float | None = None,
+    seed: int = 7, max_book_age_s: float = 0.5, latency_sensitivity: str | None = None, venue_cap_base: float | None = None, min_notional_by_venue: dict[str, str] | None = None,
 ) -> tuple[dict, dict[str, str]]:
     """The run profile (a plain mapping: the YAML after any dataset settings and run overrides were merged) as the raw config the core reads, so a replay and a live run build
     their `AppConfig` from the same profile through `config_from_raw`. Returns (raw, notes): `notes` names every value that the profile does not state and that was chosen here,
     with its source, for the run manifest. Nothing here imports the backtester. `ticks` and `quantity_steps` are per lower-case venue and are the dated grid of the dataset
     (Bybit 0.005 in January 2022, 0.001 in March 2024); `size_base` is the run's clip (max position base at the profile's net ceiling multiple). `venue_cap_base` (owner 11 Nov, a run option, None = the ceiling as before)
-    raises the risk engine's per-venue position limit above the net ceiling, for a run that holds a larger gross position per venue with a small net."""
+    raises the risk engine's per-venue position limit above the net ceiling, for a run that holds a larger gross position per venue with a small net.
+    `min_notional_by_venue` (owner 16 Nov, a run option, None = every venue keeps the replay's "1"): the minimum notional of the named lower-case venues for this run only, so a replay can model the real
+    Binance SOLUSDT minimum (5 USDT, read from the live instrument rules there) for the hedge dust cases. The default is unchanged, so no golden moves."""
     from .fees import tier_rows
 
     require_safe_profile(profile, latency_sensitivity=latency_sensitivity)          # live and paper refuse what the backtest refuses (Track A item 4)
@@ -609,7 +626,7 @@ def raw_config_from_profile(
                              "max_unwind_attempts": int(hedge.get("unwind_max_attempts", 3)), "hold_new_risk_on_breach": True, "kill_after_ms": 30_000},
                 **({"rate_limits": dict((profile.get("oms") or {})["rate_limits"])} if (profile.get("oms") or {}).get("rate_limits") else {})},      # owner 13 Nov: oms.rate_limits (quote_share, quote_min_free) from the profile; absent = the core defaults, so every older profile is unchanged
         "instruments": [{"instrument_id": instrument_id, "venue": n, "symbol": pair, "base": base, "quote": quote, "tick_size": str(ticks[v]), "quantity_step": str(quantity_steps[v]),
-                         "min_quantity": str(quantity_steps[v]), "min_notional": "1", "taker_fee_bps": str(taker[n]), "product_type": "PERP", "leverage": "10", "contract_type": "LINEAR",
+                         "min_quantity": str(quantity_steps[v]), "min_notional": str((min_notional_by_venue or {}).get(v, "1")), "taker_fee_bps": str(taker[n]), "product_type": "PERP", "leverage": "10", "contract_type": "LINEAR",
                          "settlement_asset": quote, "funding_interval_hours": 8, "funding_anchor": "1970-01-01T00:00:00Z"} for v, n in zip(venues, names)],
         "funding": {"rates": [], "settle_lag_ms": 5000, "mark_fallback": "exchange_mark", "max_mark_age_ms": 60000, "max_abs_rate": "0.03"},
     }

@@ -908,6 +908,8 @@ class TradingSession:
 
     # -- circuit breaker and risk gate (Track A item 1, owner 11 Nov) -------------------------------------------------------------------------------------------------------------------------
     def _net_abs(self) -> float:
+        if self.oms.dust_on:                                         # owner 16 Nov: carried hedge dust is recorded exposure (a balance the next hedge takes in); the net-exposure trigger reads what is NOT carried
+            return abs(float(sum(self.ledger.positions.values(), Decimal(0)) - self.oms.dust_balance_total()))
         return abs(float(sum(self.ledger.positions.values(), Decimal(0))))
 
     def _base_by_venue(self) -> dict[str, float]:
@@ -996,6 +998,8 @@ class TradingSession:
                                **({"dust_residual_base": b.dust_base} if b.dust_base > 0 else {}))
         managed = self.oms.open_plan_position_by_venue()
         net_d = sum(self.ledger.positions.values(), Decimal(0)) - sum(managed.values(), Decimal(0))      # the net no open plan manages: the only exposure the breaker flattens
+        if self.oms.dust_on:
+            net_d += self.oms.dust_adj_closed()                       # carried dust is not flattened (below the venue minimum it could not be sent; the next hedge takes it in)
         net = abs(float(net_d))
         if not first:
             flatten_open = any(p.inherited_base and p.state != PlanState.CLOSED for p in self.oms.plans.values())
@@ -1230,6 +1234,7 @@ class TradingSession:
 
     def breaker_report(self) -> dict[str, Any]:
         return {"breaker": self.breaker.summary() if self.breaker is not None else None, "breaker_alarms": list(self.breaker_alarms), "signals_blocked_by_breaker": self.signals_blocked_by_breaker,
+                **({"hedge_dust_carry": self.oms.dust_report(getattr(self.oms, "_last_execution_ts_ns", None))} if self.oms.dust_on else {}),
                 **({"breaker_flatten": {"counters": dict(self.breaker_flatten_counters), "dust_events": list(self.breaker_dust_events), "dust_now": None if self._breaker_dust is None else {k: str(v) for k, v in self._breaker_dust.items()}}}
                    if (self.breaker_flatten_counters["dust_recorded"] or self.breaker_flatten_counters["unavailable_retries"]) else {}),
                 "margin_price_paused": self.margin_price_paused, "signals_blocked_by_margin_price": self.signals_blocked_by_margin_price,

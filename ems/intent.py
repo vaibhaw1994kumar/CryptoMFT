@@ -80,6 +80,7 @@ class ExecutionIntent:
     children: list[int] = field(default_factory=list)     # order ids sent for this intent, in order
     meta: dict = field(default_factory=dict)              # tactic bookkeeping (break-even price, attempts budget); not part of the journal record
     filled_qty: float = 0.0
+    dust_included: float = 0.0            # owner 16 Nov (hedge dust carry): the carried dust this hedge takes in (absolute base); in the journal record only when non-zero
 
     def move(self, to: IntentState) -> None:
         """The only way a state changes. An illegal transition is a bug in the caller, never silently absorbed."""
@@ -102,7 +103,10 @@ class ExecutionIntent:
             raise IntentError("intent qty must be positive")
 
     def as_record(self) -> dict:
-        return {"intent_id": self.intent_id, "role": self.role, "instrument": self.instrument, "side": self.side, "qty": self.qty,
+        rec = {"intent_id": self.intent_id, "role": self.role, "instrument": self.instrument, "side": self.side, "qty": self.qty,
                 "venues": list(self.venues), "worst_price": self.worst_price, "urgency": self.urgency, "deadline_ts": self.deadline_ts,
                 "tactic_hint": self.tactic_hint, "reason": self.reason, "parent_id": self.parent_id,
                 "parent_filled_qty": self.parent_filled_qty, "signal_id": self.signal_id, "created_ts": self.created_ts}
+        if self.dust_included:
+            rec["dust_included"] = self.dust_included
+        return rec

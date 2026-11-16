@@ -307,6 +307,18 @@ class OMS:
         self._reconciliation_retry: set[str] = set()
         self._deferred_close: dict[str, tuple[str, tuple[str, ...]]] = {}
         self.hedge_policy = hedge_policy or HedgePolicy()
+        if self.hedge_policy.dust_carry not in ("off", "next_hedge"):
+            raise ValueError(f"hedge dust_carry must be off or next_hedge, got {self.hedge_policy.dust_carry!r}")
+        # Owner 16 Nov (hedge dust carry; hedge_faults.dust_carry next_hedge, OFF by default: every structure below stays empty and no rule reads it). _dust: (hedge venue, instrument) -> the signed carried EXPOSURE
+        # (base, + long) that was too small to hedge, with the time it became non-zero and its alarm flag. _dust_plan_adj: plan -> signed exposure moved out of the plan (carried) or into it (taken into its hedge):
+        # plan.residual_base = raw residual + adj, and the adjustments sum to MINUS the balance, so the dust is counted once, in the balance, and every residual rule reads a plan without it.
+        self.dust_on = self.hedge_policy.dust_carry == "next_hedge"
+        self._dust: dict[tuple[str, str], dict[str, Any]] = {}
+        self._dust_plan_adj: dict[str, Decimal] = {}
+        self._dust_host_plans: set[str] = set()
+        self._dust_last_plan: dict[tuple[str, str], str] = {}
+        self._dust_breach_recorded: set[str] = set()
+        self.dust_stats: dict[str, Any] = {"carried_events": 0, "max_abs_base": Decimal("0"), "oldest_age_s": 0.0, "hedges_with_dust": 0, "host_plans": 0, "alarms": 0}
         self.expired_at_release: list[dict[str, Any]] = []
         self.route_mode = "count"             # E0 step (d): "count" counts a layer decision that differs from the order's venue and sends the order's own venue; "enforce" rejects the order back instead
         self.lot_residual_alarm: dict[str, Any] | None = None          # owner 12 Nov (a): a carried sub-lot residual that reaches one full hedge lot raises this PERSISTENT alarm (it stays set; there is no auto-clear)
@@ -370,7 +382,7 @@ class OMS:
         # Owner 12 Nov (restart against the venue): the recovered plans that are still open are UNRECONCILED until reconcile_plan has put the venue's own account of their orders through the OMS (executions missed
         # while down are booked once there, the hedge they trigger is sent there). With restart_reconcile_gate on (default off: no caller before the live runtime restarts anything) no NEW risk is taken while any is.
         self.restart_reconcile_gate = False
-        self._restart_unreconciled: set[str] = {pid for pid, plan in self.plans.items() if plan.state != PlanState.CLOSED}
+        self._restart_unreconciled: set[str] = {pid for pid, plan in self.plans.items() if plan.state != PlanState.CLOSED and not (pid in self._dust_host_plans and not plan.children)}      # a dust host with no order sent yet has nothing at the venue to reconcile
         self._restart_account_problems: dict[str, list[str]] = {}          # owner 13 Nov: venue -> what its account snapshot did not settle (fetch failed, unknown order, position or execution mismatch); non-empty keeps the gate closed
         # REJECT_AFTER_FILL_ALARM is once per order across restarts: the recovered reports show which were raised.
         self._reject_after_fill_alarmed.update(
@@ -409,8 +421,8 @@ class OMS:
                         order.filled_quantity, order.filled_quantity * order.average_price
                     )
             for plan in self.plans.values():
-                if plan.state in {PlanState.CREATED, PlanState.CLOSED} or plan.inherited_base:
-                    continue        # a flatten plan reduces risk and holds no reservation
+                if plan.state in {PlanState.CREATED, PlanState.CLOSED} or plan.inherited_base or plan.parent_id in self._dust_host_plans:
+                    continue        # a flatten plan reduces risk and holds no reservation; neither does a dust host (owner 16 Nov)
                 try:
                     reservation = self.risk.rehydrate_reservation(plan.opportunity)
                     # Filled legs already moved the balances: hold only the remainder.
@@ -1084,6 +1096,7 @@ class OMS:
             "total_residual_base": str(abs(
                 self.carried_residual_base()
                 + sum((self._counted_residual(plan) for plan in open_residuals), Decimal("0"))
+                + (self.dust_balance_total() if self.dust_on else Decimal("0"))          # carried hedge dust: in the balance once, never in a plan
             )),
             "open_residual_base": str(sum(
                 (abs(self._counted_residual(plan)) for plan in open_residuals), Decimal("0")
@@ -1104,15 +1117,18 @@ class OMS:
                 event["event_type"] == "LEGGING_CONTROL_OVERRIDE"
                 for event in self.ledger.events
             ),
+            **({"carried_dust_base": str(self.dust_balance_total())} if self.dust_on else {}),
         }
 
     def _recompute_plan_economics(
         self, plan: ParentPlan, ts_ns: int | None = None
     ) -> None:
-        plan.residual_base = plan.inherited_base + sum(
+        raw_residual = plan.inherited_base + sum(
             order.filled_quantity if order.side == Side.BUY else -order.filled_quantity
             for order in plan.children
         )
+        dust_adj = self._dust_plan_adj.get(plan.parent_id)
+        plan.residual_base = raw_residual if not dust_adj else raw_residual + dust_adj      # dust carry: what the limits read; the MARK below stays on the raw residual so plan P&L equals the equity P&L
         plan.gross_pnl = sum(
             -order.filled_quantity * order.average_price
             if order.side == Side.BUY
@@ -1120,9 +1136,9 @@ class OMS:
             for order in plan.children
         )
         plan.fees = sum(order.fee for order in plan.children)
-        if plan.residual_base:
+        if raw_residual:
             plan.residual_mark_price = self._residual_mark_price(plan)
-            plan.residual_mark_value = plan.residual_base * plan.residual_mark_price
+            plan.residual_mark_value = raw_residual * plan.residual_mark_price
         else:
             plan.residual_mark_price = Decimal("0")
             plan.residual_mark_value = Decimal("0")
@@ -1843,19 +1859,22 @@ class OMS:
                     max(0, ts_ns - plan.residual_since_ts_ns)
                     if plan.residual_since_ts_ns is not None else 0
                 )
-                self._residual_event(
-                    plan, "RESIDUAL_LIMIT_BREACH", ts_ns,
-                    max_residual_base=self.residual_policy.max_residual_base,
-                    elapsed_ns=elapsed_ns,
-                    max_residual_age_ns=self.residual_policy.max_residual_age_ns,
-                    unwind_attempts=plan.unwind_attempts,
-                )
+                if not self.dust_on or plan.parent_id not in self._dust_breach_recorded:      # dust carry (owner 16 Nov): once per breach episode, not on every tick (the older profiles keep the repeat)
+                    self._dust_breach_recorded.add(plan.parent_id)
+                    self._residual_event(
+                        plan, "RESIDUAL_LIMIT_BREACH", ts_ns,
+                        max_residual_base=self.residual_policy.max_residual_base,
+                        elapsed_ns=elapsed_ns,
+                        max_residual_age_ns=self.residual_policy.max_residual_age_ns,
+                        unwind_attempts=plan.unwind_attempts,
+                    )
                 self._raise_unwind_exhausted_alarm(plan, ts_ns)
                 self._escalate_residual_breach(plan, ts_ns)
                 return plan
             if self.router.has_pending_parent(plan.parent_id):
                 return plan
         self._residual_breach_since.pop(plan.parent_id, None)
+        self._dust_breach_recorded.discard(plan.parent_id)
         working = [
             order for order in plan.children
             if order.state in LIVE_ORDER_STATES
@@ -3624,6 +3643,10 @@ class OMS:
                         spec["requested_qty"], spec["chain_seq"] = pl["requested_qty"], pl["chain_seq"]
             if spec is None:
                 continue
+            if self.dust_on:
+                for ev in self.plan_store.events(parent_id):
+                    if ev["event_type"] == "DUST_ADJUST" and "requested_qty" in ev["payload"]:
+                        spec["requested_qty"] = ev["payload"]["requested_qty"]          # the quantity handed to a hedge or to the balance (a carried chunk opens no chain, so no HEDGE_CHAIN carries it)
             self._hedge_specs[parent_id] = dict(spec, side=Side(spec["side"]), limit_price=Decimal(str(spec["limit_price"])), max_qty=Decimal(str(spec["max_qty"])),
                                                 requested_qty=Decimal(str(spec["requested_qty"])), chain_seq=int(spec["chain_seq"]))
             for chain_id, pl in chains.items():
@@ -3634,6 +3657,8 @@ class OMS:
                     self._chain_of_child[oid] = chain
                 if chain.state is HedgeState.RETRYING:
                     self._hedge_retry_due[chain_id] = 0                 # due now: the next timer sends it (the retry was decided before the stop)
+        if self.dust_on:
+            self._recover_dust_state()
 
     # Reference values of the frozen backtester profile (perp_perp_maker_taker_v1_2) for the settings the core now has ONE value for. Not read by any rule: they are printed beside
     # the core's value so a run record shows both. The backtester keeps its own hedging until Phase D.
@@ -3682,7 +3707,7 @@ class OMS:
         if any(c.state in (HedgeState.UNWINDING, HedgeState.ESCALATED, HedgeState.FAILED) for c in chains):
             return True
         maker = next((o for o in plan.children if o.order_id == spec["maker_order_id"]), None)
-        maker_done = maker is not None and maker.state in TERMINAL_ORDER_STATES and maker.state != OrderState.TIMED_OUT
+        maker_done = bool(spec.get("dust_host")) or (maker is not None and maker.state in TERMINAL_ORDER_STATES and maker.state != OrderState.TIMED_OUT)      # a dust host has no maker: its chain is all there is
         return maker_done and not any(c.state in self._CHAIN_OPEN for c in chains)
 
     def _hedge_move(self, plan: ParentPlan, chain: HedgeLifecycle, to: HedgeState, ts_ns: int, reason: str, **kw: Any) -> None:
@@ -3711,6 +3736,9 @@ class OMS:
         self._fill_triggered_settle(plan, spec, ts_ns)
 
     def _hedge_for_maker_fill(self, plan: ParentPlan, spec: dict[str, Any], maker: ChildOrder, ts_ns: int) -> None:
+        if self.dust_on:
+            self._hedge_for_maker_fill_dust(plan, spec, maker, ts_ns)
+            return
         filled = min(self._lineage_filled(plan, maker), spec["max_qty"])      # an amended quote: the fills of every order of its lineage (the old order's late fill included), once each
         # Lot rule (owner 11 Nov): the hedge is a whole number of the hedge venue's lots. The cumulative target is floored to the lot, so a part-lot
         # residual is carried to the next maker fill (never lost) and is on record while it is open; a quantity already on the lot is unchanged.
@@ -3731,6 +3759,10 @@ class OMS:
         if delta <= 0:
             return
         spec["requested_qty"] += delta
+        self._hedge_open_chain(plan, spec, maker, delta, ts_ns)
+
+    def _hedge_open_chain(self, plan: ParentPlan, spec: dict[str, Any], maker: ChildOrder | None, delta: Decimal, ts_ns: int, dust_included: Decimal | None = None) -> None:
+        """Open one hedge chain for `delta` and try to send it. `dust_included` (dust carry only) is the signed carried exposure taken into this hedge; `maker` is None for the hedge of the carried balance alone (the dust host plan)."""
         seq = spec["chain_seq"]
         spec["chain_seq"] = seq + 1
         chain = HedgeLifecycle(
@@ -3739,12 +3771,226 @@ class OMS:
             query_attempt_limit=self.order_timeout_policy.max_queries, opened_ts=ts_ns / 1e9)
         self.hedge_chains.setdefault(plan.parent_id, {})[chain.chain_id] = chain
         self._chain_children[chain.chain_id] = []
-        self.ledger.record("HEDGE_CHAIN_OPENED", ts_ns, parent_id=plan.parent_id, chain_id=chain.chain_id, exposure_qty=str(delta), maker_order_id=maker.order_id,
-                           maker_filled=str(maker.filled_quantity))
-        self._hedge_move(plan, chain, HedgeState.HEDGE_PENDING, ts_ns, "maker fill")
+        extra = {"dust_included": str(dust_included)} if dust_included else {}
+        self.ledger.record("HEDGE_CHAIN_OPENED", ts_ns, parent_id=plan.parent_id, chain_id=chain.chain_id, exposure_qty=str(delta),
+                           maker_order_id=maker.order_id if maker is not None else "", maker_filled=str(maker.filled_quantity) if maker is not None else "0", **extra)
+        self._hedge_move(plan, chain, HedgeState.HEDGE_PENDING, ts_ns, "maker fill" if maker is not None else "carried dust")
         if self.observer is not None:
-            self.observer.chain_opened(plan, chain.chain_id, maker, spec, delta, ts_ns / 1e9)
+            if dust_included:
+                self.observer.chain_opened(plan, chain.chain_id, maker, spec, delta, ts_ns / 1e9, dust_included=float(abs(dust_included)))
+            else:
+                self.observer.chain_opened(plan, chain.chain_id, maker, spec, delta, ts_ns / 1e9)
         self._hedge_try_dispatch(plan, spec, chain, ts_ns)
+
+    # ------------------------------------------------------------------------------------------------------------------
+    # HEDGE DUST CARRY (owner 16 Nov; hedge_faults.dust_carry next_hedge; OFF by default).
+    # A hedge chunk below the hedge venue's minimum quantity or notional is not sent and not unwound: it is carried in ONE signed balance per (hedge venue, instrument), shared by every plan, and the next hedge
+    # on that venue is its own quantity plus the balance (an opposite balance reduces it; the lot rounding never loosens: what cannot be sent stays carried). When a hedge of the balance alone reaches the
+    # minimum (a price move, or fills of several plans) it is sent at once as an ordinary hedge chain (size-aware IOC cap, retries, unwind and alarm path): on the plan whose fill lifted it over the
+    # minimum, or on a small dust-host plan when only a price move did. The balance is exposure that sits on the maker venue; it never blocks new risk and never trips the breaker.
+    # Accounting: see _dust_plan_adj (set in __init__). The balance, the adjustments and the requested quantity are persisted as DUST_ADJUST plan events and replayed on a restart.
+    # ------------------------------------------------------------------------------------------------------------------
+    def dust_balance_total(self) -> Decimal:
+        """Signed carried dust exposure (base, + long) over every (venue, instrument); 0 when nothing is carried."""
+        return sum((row["exposure"] for row in self._dust.values()), Decimal("0"))
+
+    def dust_adj_closed(self) -> Decimal:
+        """Sum of the dust adjustments of CLOSED plans: added to the net that no open plan manages, it leaves the carried dust out of what a breaker flatten would try to send."""
+        return sum((adj for pid, adj in self._dust_plan_adj.items() if pid in self.plans and self.plans[pid].state == PlanState.CLOSED), Decimal("0"))
+
+    def _dust_row(self, key: tuple[str, str]) -> dict[str, Any]:
+        return self._dust.setdefault(key, {"exposure": Decimal("0"), "since_ns": None, "alarmed": False, "host": None})
+
+    def _dust_sendable(self, venue: str, instrument_id: str, side: Side, qty: Decimal, ts_ns: int, planned_limit: Decimal) -> tuple[bool, str, Decimal | None]:
+        """Would a hedge of `qty` pass the venue's own checks at the price the dispatch would use? The cap is the dispatch's (a dry run: no ledger event, no counter), so a quantity that passes here passes the
+        dispatch's validate_order. Returns (sendable, why not, the cap). Only a minimum quantity or notional makes a chunk dust; any other refusal is left to the dispatch as before."""
+        if qty <= 0:
+            return False, "below_lot", None
+        book = self._books.get((venue, instrument_id))
+        usable = book is not None and book.state == BookState.VALID and bool(book.bids) and bool(book.asks)
+        probe = {"venue": venue, "instrument_id": instrument_id, "side": side, "limit_price": planned_limit}
+        if usable:
+            touch = book.best_ask if side == Side.BUY else book.best_bid
+            cap = self._hedge_cap_value(None, None, dict(probe, limit_price=planned_limit if planned_limit is not None else touch), book, touch, qty, ts_ns, 0, record=False)
+        else:
+            tick = self.instruments.get(venue, instrument_id, ts_ns).tick_size
+            cap = planned_limit if not planned_limit % tick else limit_on_grid(side.value, planned_limit, tick)
+        child = ChildOrder(order_id="dust-probe", parent_id="", opportunity_id="", venue=venue, instrument_id=instrument_id, side=side, quantity=qty, limit_price=cap, order_role="HEDGE")
+        try:
+            self.instruments.validate_order(child, ts_ns)
+        except ValueError as exc:
+            if str(exc) in ("quantity below minimum", "notional below minimum"):
+                return False, str(exc), cap
+        return True, "", cap
+
+    def _dust_apply(self, plan: ParentPlan, key: tuple[str, str], adj_delta: Decimal, ts_ns: int, kind: str, spec: dict[str, Any] | None = None) -> tuple[Decimal, Decimal]:
+        """Move `adj_delta` of exposure between the balance and `plan` (the balance falls by it, the plan's adjustment rises by it). Returns (balance before, after). Persisted; the alarm and the clock follow the balance."""
+        row = self._dust_row(key)
+        before = row["exposure"]
+        after = before - adj_delta
+        row["exposure"] = after
+        if adj_delta:
+            self._dust_plan_adj[plan.parent_id] = self._dust_plan_adj.get(plan.parent_id, Decimal("0")) + adj_delta
+        if before == 0 and after != 0:
+            row["since_ns"] = ts_ns
+        cleared = after == 0 and before != 0
+        age_s = (ts_ns - row["since_ns"]) / 1e9 if row["since_ns"] is not None else 0.0
+        self.dust_stats["oldest_age_s"] = max(self.dust_stats["oldest_age_s"], age_s)
+        self.dust_stats["max_abs_base"] = max(self.dust_stats["max_abs_base"], abs(after))
+        self._dust_last_plan[key] = plan.parent_id
+        self._recompute_plan_economics(plan, ts_ns)
+        if cleared:
+            if row["alarmed"]:
+                self.ledger.record("HEDGE_DUST_ALARM_CLEARED", ts_ns, venue=key[0], instrument_id=key[1], age_s=age_s)
+                self._persist(plan, ts_ns, "DUST_ALARM_CLEARED", key=list(key))
+            self.ledger.record("HEDGE_DUST_CLEARED", ts_ns, parent_id=plan.parent_id, venue=key[0], instrument_id=key[1], age_s=age_s)
+            row["since_ns"], row["alarmed"] = None, False
+        self._persist(plan, ts_ns, "DUST_ADJUST", key=list(key), adj_delta=str(adj_delta), balance_after=str(after), since_ns=row["since_ns"], kind=kind,
+                      **({"requested_qty": str(spec["requested_qty"])} if spec is not None else {}))
+        return before, after
+
+    def _hedge_for_maker_fill_dust(self, plan: ParentPlan, spec: dict[str, Any], maker: ChildOrder, ts_ns: int) -> None:
+        filled = min(self._lineage_filled(plan, maker), spec["max_qty"])
+        chunk = filled - spec["requested_qty"]                       # this plan's new quantity: handed to a hedge or to the balance (never floored here: the lot remainder is carried too)
+        if chunk <= 0:
+            return
+        spec["requested_qty"] = filled
+        key = (spec["venue"], spec["instrument_id"])
+        e = chunk if spec["side"] == Side.SELL else -chunk           # exposure the chunk opened: a SELL hedge closes a long, a BUY hedge a short
+        before = self._dust_row(key)["exposure"]
+        total = before + e
+        side = Side.SELL if total > 0 else Side.BUY
+        send = self.instruments.round_quantity(spec["venue"], spec["instrument_id"], abs(total), ts_ns)
+        ok, why, cap = (False, "side", None) if side != spec["side"] else self._dust_sendable(spec["venue"], spec["instrument_id"], side, send, ts_ns, spec["limit_price"])
+        if not ok:
+            why = why if why != "side" else "opposite side"
+            if send <= 0:
+                why = "below_lot"
+            before, after = self._dust_apply(plan, key, -e, ts_ns, "carried", spec)
+            self.dust_stats["carried_events"] += 1
+            self.realism_counters["hedge_dust_carried"] = self.realism_counters.get("hedge_dust_carried", 0) + 1
+            self.ledger.record("HEDGE_DUST_CARRIED", ts_ns, parent_id=plan.parent_id, maker_order_id=maker.order_id, venue=spec["venue"], instrument_id=spec["instrument_id"], hedge_side=side.value,
+                               signed_exposure=str(e), price=str(cap if cap is not None else spec["limit_price"]), balance_before=str(before), balance_after=str(after), reason=why,
+                               min_quantity=str(self.instruments.get(spec["venue"], spec["instrument_id"], ts_ns).min_quantity),
+                               min_notional=str(self.instruments.get(spec["venue"], spec["instrument_id"], ts_ns).min_notional))
+            self._fill_triggered_settle(plan, spec, ts_ns)
+            return
+        sent_e = send if total > 0 else -send
+        before, after = self._dust_apply(plan, key, sent_e - e, ts_ns, "sent", spec)
+        taken = before - after                                       # the carried exposure this hedge actually takes in (a sub-lot remainder that stays carried is not "included")
+        if taken:
+            self.dust_stats["hedges_with_dust"] += 1
+            self.ledger.record("HEDGE_DUST_INCLUDED", ts_ns, parent_id=plan.parent_id, venue=spec["venue"], instrument_id=spec["instrument_id"], dust_included=str(taken), hedge_quantity=str(send),
+                               own_quantity=str(chunk), balance_before=str(before), balance_after=str(after))
+        if after != before and after != 0:
+            self.dust_stats["carried_events"] += 1
+            self.ledger.record("HEDGE_DUST_CARRIED", ts_ns, parent_id=plan.parent_id, maker_order_id=maker.order_id, venue=spec["venue"], instrument_id=spec["instrument_id"], hedge_side=side.value,
+                               signed_exposure=str(after), price=str(cap), balance_before=str(before), balance_after=str(after), reason="lot_remainder")
+        self._hedge_open_chain(plan, spec, maker, send, ts_ns, dust_included=taken if taken else None)
+
+    def _dust_check(self, now_ns: int) -> None:
+        """Every timer and book update: the age alarm, and the hedge of a balance that reached the minimum with no fill to carry it (a price move)."""
+        for key, row in list(self._dust.items()):
+            bal = row["exposure"]
+            if bal == 0:
+                continue
+            if not row["alarmed"] and row["since_ns"] is not None and now_ns - row["since_ns"] > int(self.hedge_policy.dust_alarm_after_s * 1e9):
+                row["alarmed"] = True
+                self.dust_stats["alarms"] += 1
+                age_s = (now_ns - row["since_ns"]) / 1e9
+                self.dust_stats["oldest_age_s"] = max(self.dust_stats["oldest_age_s"], age_s)
+                self.ledger.record("HEDGE_DUST_ALARM", now_ns, venue=key[0], instrument_id=key[1], balance=str(bal), age_s=age_s, alarm_after_s=self.hedge_policy.dust_alarm_after_s,
+                                   label="ASSUMED", **self.alert_context(now_ns))
+                last = self.plans.get(self._dust_last_plan.get(key, ""))
+                if last is not None:
+                    self._persist(last, now_ns, "DUST_ALARM", key=list(key))
+            self._dust_try_host(key, row, now_ns)
+
+    def _dust_try_host(self, key: tuple[str, str], row: dict[str, Any], now_ns: int) -> None:
+        host = row.get("host")
+        if host is not None:
+            hp = self.plans.get(host)
+            if hp is not None and hp.state != PlanState.CLOSED:
+                return                                               # one own-dust hedge at a time
+            row["host"] = None
+        if self.restart_reconcile_gate and (self._restart_unreconciled or self._restart_account_problems):
+            return
+        ctx = self.plans.get(self._dust_last_plan.get(key, ""))
+        if ctx is None:
+            return
+        bal = row["exposure"]
+        side = Side.SELL if bal > 0 else Side.BUY
+        send = self.instruments.round_quantity(key[0], key[1], abs(bal), now_ns)
+        book = self._books.get(key)
+        if send <= 0 or book is None or book.state != BookState.VALID or not book.bids or not book.asks:
+            return
+        touch = book.best_ask if side == Side.BUY else book.best_bid
+        ok, _, _ = self._dust_sendable(key[0], key[1], side, send, now_ns, touch)
+        if not ok:
+            return
+        opp0 = ctx.opportunity
+        self.dust_stats["host_plans"] += 1
+        opportunity = Opportunity(
+            opportunity_id=stable_id("dust-host-opportunity", key[0], key[1], now_ns, self.dust_stats["host_plans"]), strategy_id=opp0.strategy_id, instrument_id=key[1], observed_ts_ns=now_ns,
+            buy_venue=opp0.buy_venue, sell_venue=opp0.sell_venue, buy_price=opp0.buy_price, sell_price=opp0.sell_price, quantity=abs(bal), gross_edge_bps=Decimal("0"), estimated_net_edge_bps=Decimal("0"),
+            source_event_ids=("hedge dust", str(now_ns)))
+        plan = ParentPlan(parent_id=stable_id("dust-host-parent", opportunity.opportunity_id), opportunity=opportunity, children=[], state=PlanState.DISPATCHED,
+                          transitions=[{"ts_ns": now_ns, "state": PlanState.DISPATCHED.value, "reason": "hedge of the carried dust"}])
+        self.plans[plan.parent_id] = plan
+        self._dust_host_plans.add(plan.parent_id)
+        row["host"] = plan.parent_id
+        spec = {"venue": key[0], "side": side, "instrument_id": key[1], "limit_price": touch, "max_qty": abs(bal), "requested_qty": Decimal("0"), "maker_order_id": "", "chain_seq": 0,
+                "opportunity_id": opportunity.opportunity_id, "dust_host": True}
+        self._hedge_specs[plan.parent_id] = spec
+        self._persist(plan, now_ns, "DUST_HOST_PLAN", key=list(key), balance=str(bal))
+        self._persist(plan, now_ns, "HEDGE_SPEC", **spec)
+        self.ledger.record("HEDGE_DUST_HOST_OPENED", now_ns, parent_id=plan.parent_id, venue=key[0], instrument_id=key[1], balance=str(bal), hedge_quantity=str(send), hedge_side=side.value)
+        sent_e = send if bal > 0 else -send
+        before, after = self._dust_apply(plan, key, sent_e, now_ns, "sent_alone", spec)
+        self.dust_stats["hedges_with_dust"] += 1
+        self.ledger.record("HEDGE_DUST_INCLUDED", now_ns, parent_id=plan.parent_id, venue=key[0], instrument_id=key[1], dust_included=str(before), hedge_quantity=str(send), own_quantity="0",
+                           balance_after=str(after))
+        self._hedge_open_chain(plan, spec, None, send, now_ns, dust_included=before)
+
+    def dust_report(self, now_ns: int | None = None) -> dict[str, Any]:
+        """End-of-day figures of the dust carry: how often dust was carried, the largest balance, the oldest age (closed episodes and the one still open), and the balance at the end."""
+        oldest = self.dust_stats["oldest_age_s"]
+        if now_ns is not None:
+            for row in self._dust.values():
+                if row["exposure"] != 0 and row["since_ns"] is not None:
+                    oldest = max(oldest, (now_ns - row["since_ns"]) / 1e9)
+        return {"mode": self.hedge_policy.dust_carry, "alarm_after_s": self.hedge_policy.dust_alarm_after_s, "alarm_after_label": "ASSUMED", "carried_events": self.dust_stats["carried_events"],
+                "max_abs_base": str(self.dust_stats["max_abs_base"]), "oldest_age_s": oldest, "hedges_with_dust": self.dust_stats["hedges_with_dust"], "host_hedges": self.dust_stats["host_plans"],
+                "alarms": self.dust_stats["alarms"], "balance_end": str(self.dust_balance_total())}
+
+    def _recover_dust_state(self) -> None:
+        """After a restart: the balance, every plan's adjustment, the clock and the alarm flag from the DUST_* plan events (the sum of the deltas does not depend on the order; the clock and the flag follow the
+        last event by time). Runs before the ledger is rebuilt, so the first residual computation already has the adjustments."""
+        rows: list[tuple[int, int, str, dict[str, Any]]] = []
+        for pid in self.plans:
+            for ev in self.plan_store.events(pid):
+                if ev["event_type"] in ("DUST_ADJUST", "DUST_ALARM", "DUST_ALARM_CLEARED"):
+                    rows.append((ev["ts_ns"], ev["version"], pid, ev))
+                elif ev["event_type"] == "DUST_HOST_PLAN":
+                    self._dust_host_plans.add(pid)
+        rows.sort(key=lambda r: (r[0], r[1]))
+        for _, _, pid, ev in rows:
+            pl = ev["payload"]
+            key = (pl["key"][0], pl["key"][1])
+            row = self._dust_row(key)
+            if ev["event_type"] == "DUST_ADJUST":
+                delta = Decimal(pl["adj_delta"])
+                self._dust_plan_adj[pid] = self._dust_plan_adj.get(pid, Decimal("0")) + delta
+                row["exposure"] -= delta
+                row["since_ns"] = pl["since_ns"]
+                if row["exposure"] == 0:
+                    row["alarmed"] = False
+                self._dust_last_plan[key] = pid
+            else:
+                row["alarmed"] = ev["event_type"] == "DUST_ALARM"
+        for key, row in self._dust.items():
+            hosts = [pid for pid in self._dust_host_plans if pid in self.plans and self.plans[pid].state != PlanState.CLOSED and self._hedge_specs.get(pid, {}).get("venue") == key[0]]
+            row["host"] = hosts[-1] if hosts else None
 
     def _hedge_dispatch_refusal(self, spec: dict[str, Any], ts_ns: int) -> str | None:
         """EMS01 at dispatch: the hedge book must be usable now. Returns why not, or None. (The price is not a refusal: see _hedge_try_dispatch.)"""
@@ -3760,7 +4006,7 @@ class OMS:
             return "hedge_book_stale"
         return None
 
-    def _size_aware_cap(self, plan, chain, spec, book, touch: Decimal, qty: Decimal, ts_ns: int, attempt: int) -> Decimal:
+    def _size_aware_cap(self, plan, chain, spec, book, touch: Decimal, qty: Decimal, ts_ns: int, attempt: int, record: bool = True) -> Decimal:
         """Cap rule size_aware (owner 12 Nov, EMS note price-cap construction), re-taken on every attempt from the bot's VIEW of the hedge book (`self._books`, never the venue's own truth book).
         Where the touch covers the size it is touch_slack exactly. Where the view book holds no level beyond the touch (best bid/ask only, as Binance in March 2024) and the touch cannot cover the
         size, the rule falls back to touch_slack and says so (HEDGE_CAP_SIZE_AWARE, fallback). Every decision is a ledger event; the absolute limit binding is counted."""
@@ -3775,6 +4021,8 @@ class OMS:
             cap, binds = hedge_cap_on_grid(side.value, touch, policy.touch_slack_bps, tick), False
         else:
             cap, binds = hedge_cap_size_aware(side.value, touch, deepest, policy.touch_slack_bps, vol_bps, policy.max_slip_bps, tick)
+        if not record:                                            # a dry run (the dust sendability check): the same cap, no counter and no ledger event
+            return cap
         if binds:
             self.realism_counters["hedge_cap_abs_limit_binds"] = self.realism_counters.get("hedge_cap_abs_limit_binds", 0) + 1
         if fallback:
@@ -3785,6 +4033,23 @@ class OMS:
             cap=str(cap), abs_limit_binds=binds, vol_term_bps=vol_bps, vol_source="none" if vol_bps == 0.0 else "hedge_short_vol_bps",
             fallback="touch_slack: the view book holds no depth beyond the touch" if fallback else "", book="view",
         )
+        return cap
+
+    def _hedge_cap_value(self, plan, chain, spec, book, touch: Decimal, qty: Decimal, ts_ns: int, attempt: int, record: bool = True) -> Decimal:
+        """The cap of one hedge attempt (the body of the dispatch's cap rule, shared with the dust sendability dry run, which calls it with record False: same price, no ledger event, no counter)."""
+        cap = spec["limit_price"]
+        tick = self.instruments.get(spec["venue"], spec["instrument_id"]).tick_size
+        if cap % tick:                                            # a planned price off the grid is moved to the grid without loosening it (buy down, sell up), never sent as it is
+            cap = limit_on_grid(spec["side"].value, cap, tick)
+        if self.hedge_policy.size_aware and self.hedge_policy.touch_slack_bps is not None:
+            cap = self._size_aware_cap(plan, chain, spec, book, touch, qty, ts_ns, attempt, record)
+        elif self.hedge_policy.touch_slack_bps is not None:      # cap rule touch_slack: re-taken from the CURRENT hedge touch on every attempt, on the venue's price grid, never inside the cap
+            basis = touch
+            if self.hedge_policy.cap_basis == "size_vwap" and qty > 0:       # owner 12 Nov option: start from the executable VWAP of the hedge size (the touch when the book cannot cover it)
+                filled, vwap = book.walk(spec["side"], qty, Decimal("Infinity") if spec["side"] == Side.BUY else Decimal("0"))
+                if filled >= qty and vwap > 0:
+                    basis = vwap
+            cap = hedge_cap_on_grid(spec["side"].value, basis, self.hedge_policy.touch_slack_bps, self.instruments.get(spec["venue"], spec["instrument_id"]).tick_size)
         return cap
 
     def _hedge_try_dispatch(self, plan: ParentPlan, spec: dict[str, Any], chain: HedgeLifecycle, ts_ns: int) -> bool:
@@ -3802,19 +4067,7 @@ class OMS:
         done = sum((o.filled_quantity for o in plan.children if o.order_id in self._chain_children[chain.chain_id]), Decimal("0"))
         qty = Decimal(str(chain.exposure_qty)) - done
         attempt = len(self._chain_children[chain.chain_id])
-        cap = spec["limit_price"]
-        tick = self.instruments.get(spec["venue"], spec["instrument_id"]).tick_size
-        if cap % tick:                                            # a planned price off the grid is moved to the grid without loosening it (buy down, sell up), never sent as it is
-            cap = limit_on_grid(spec["side"].value, cap, tick)
-        if self.hedge_policy.size_aware and self.hedge_policy.touch_slack_bps is not None:
-            cap = self._size_aware_cap(plan, chain, spec, book, touch, qty, ts_ns, attempt)
-        elif self.hedge_policy.touch_slack_bps is not None:      # cap rule touch_slack: re-taken from the CURRENT hedge touch on every attempt, on the venue's price grid, never inside the cap
-            basis = touch
-            if self.hedge_policy.cap_basis == "size_vwap" and qty > 0:       # owner 12 Nov option: start from the executable VWAP of the hedge size (the touch when the book cannot cover it)
-                filled, vwap = book.walk(spec["side"], qty, Decimal("Infinity") if spec["side"] == Side.BUY else Decimal("0"))
-                if filled >= qty and vwap > 0:
-                    basis = vwap
-            cap = hedge_cap_on_grid(spec["side"].value, basis, self.hedge_policy.touch_slack_bps, self.instruments.get(spec["venue"], spec["instrument_id"]).tick_size)
+        cap = self._hedge_cap_value(plan, chain, spec, book, touch, qty, ts_ns, attempt)
         if touch_past_planned:
             # Track A (owner 11 Nov): the old name, HEDGE_CAP_BREACH_AT_DISPATCH, read like a breach of the order's price cap. It is not: the cap of the child that is sent (`child_cap`) is always taken from the CURRENT touch and
             # is never breached. What this records is that by dispatch time the market had moved past the hedge price the opportunity PLANNED (`planned_limit`). The hedge reduces exposure just taken, so it is still sent
@@ -3972,6 +4225,9 @@ class OMS:
 
     def _hedge_timer_candidates(self) -> list[int]:
         out = list(self._hedge_retry_due.values())
+        if self.dust_on:
+            out += [row["since_ns"] + int(self.hedge_policy.dust_alarm_after_s * 1e9) + 1 for row in self._dust.values()
+                    if row["exposure"] != 0 and row["since_ns"] is not None and not row["alarmed"]]          # the age alarm fires on time, not at the next event
         for parent_id, chains in self.hedge_chains.items():
             for c in chains.values():
                 if c.max_residual_age_s is not None and c.state in self._CHAIN_OPEN and c.exposure_closed_ts is None:
@@ -3981,6 +4237,8 @@ class OMS:
     def _hedge_progress_all(self, now_ns: int) -> None:
         if self._hedge_dispatching or self._hedge_finalizing:
             return
+        if self.dust_on:
+            self._dust_check(now_ns)
         for parent_id in list(self.hedge_chains):
             plan = self.plans.get(parent_id)
             if plan is not None and plan.state != PlanState.CLOSED:
