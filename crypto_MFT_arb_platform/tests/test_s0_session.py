@@ -162,5 +162,42 @@ class FaultsAndLimits(unittest.TestCase):
         self.assertEqual(events(rep, "AMEND_REQUESTED"), [])
 
 
+class AmendPriceOnGrid(unittest.TestCase):
+    """Found by case 2i on v1_10 (16 Nov): the controller's target is a float price; the first amend of the arb on the capture was refused 'price violates tick'. The amend price is moved onto the venue's grid without
+    loosening it (a bid rounds down, an ask up), and the move is counted."""
+
+    def amend(self, side, target):
+        from decimal import Decimal
+        from types import SimpleNamespace
+        from crypto_stat_arb.session import TradingSession
+        sent = []
+        oms = SimpleNamespace(instruments=SimpleNamespace(get=lambda venue, instrument, ts: SimpleNamespace(tick_size=Decimal("0.01"))),
+                              request_amend=lambda order_id, price, ts, reason: sent.append(price) or "REQUESTED")
+        counters = {}
+        fake = SimpleNamespace(router=SimpleNamespace(quote_has_room=lambda *a: True), oms=oms, reprice_counters=counters, _reprice_pending={},
+                               _count_reprice=lambda key: counters.__setitem__(key, counters.get(key, 0) + 1))
+        c = {"venue": "BYBIT", "instrument_id": "SOL-USDT-PERP", "order_id": "o1", "parent_id": "p1", "side": side}
+        st = SimpleNamespace(last_request_ts=0.0, pending=False, reprices=0)
+        TradingSession._amend_for_reprice(fake, c, st, 1.0, 10**9, SimpleNamespace(price=target, reason="adverse_move"))
+        return sent, counters
+
+    def test_a_bid_target_off_the_grid_rounds_down_and_is_counted(self):
+        from decimal import Decimal
+        sent, c = self.amend("buy", 100.2879)
+        self.assertEqual(sent, [Decimal("100.28")])
+        self.assertEqual((c["amend_price_snapped_to_tick"], c["amend_requests"]), (1, 1))
+
+    def test_an_ask_target_off_the_grid_rounds_up(self):
+        from decimal import Decimal
+        sent, _ = self.amend("sell", 100.2821)
+        self.assertEqual(sent, [Decimal("100.29")])
+
+    def test_a_target_on_the_grid_is_sent_as_it_is_and_not_counted_as_snapped(self):
+        from decimal import Decimal
+        sent, c = self.amend("buy", 100.28)
+        self.assertEqual(sent, [Decimal("100.28")])
+        self.assertNotIn("amend_price_snapped_to_tick", c)
+
+
 if __name__ == "__main__":
     unittest.main()

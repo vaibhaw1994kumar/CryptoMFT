@@ -16,12 +16,28 @@
   "evidence": "runs/scn_2a_quote_withdraw/session_ems_path_coverage.json"
  },
  {
+  "case": "J2/J3 checks, 2a_v110",
+  "covering_layer": "execution layer, router",
+  "count": 9,
+  "result": "PASS",
+  "detail": "off_tick=0, tactic_violations=0",
+  "evidence": "runs/scn_2a_v110/session_ems_path_coverage.json"
+ },
+ {
   "case": "J2/J3 checks, 2b_cancel_latency",
   "covering_layer": "execution layer, router",
   "count": 14,
   "result": "PASS",
   "detail": "off_tick=0, tactic_violations=0",
   "evidence": "runs/scn_2b_cancel_latency/session_ems_path_coverage.json"
+ },
+ {
+  "case": "J2/J3 checks, 2b_v110",
+  "covering_layer": "execution layer, router",
+  "count": 11,
+  "result": "PASS",
+  "detail": "off_tick=0, tactic_violations=0",
+  "evidence": "runs/scn_2b_v110/session_ems_path_coverage.json"
  },
  {
   "case": "J2/J3 checks, 2c_partial_then_fill",
@@ -104,6 +120,14 @@
   "evidence": "runs/scn_2f_rate_limit/session_ems_path_coverage.json"
  },
  {
+  "case": "J2/J3 checks, 2f_v110",
+  "covering_layer": "execution layer, router",
+  "count": 8,
+  "result": "PASS",
+  "detail": "off_tick=0, tactic_violations=0",
+  "evidence": "runs/scn_2f_v110/session_ems_path_coverage.json"
+ },
+ {
   "case": "J2/J3 checks, 2i_control_v19",
   "covering_layer": "execution layer, router",
   "count": 4,
@@ -176,6 +200,62 @@
   "evidence": "runs/scn_2i_s0_timeout/session_ems_path_coverage.json"
  },
  {
+  "case": "J2/J3 checks, 2i_v110",
+  "covering_layer": "execution layer, router",
+  "count": 0,
+  "result": "PASS",
+  "detail": "off_tick=0, tactic_violations=0",
+  "evidence": "runs/scn_2i_v110/session_ems_path_coverage.json"
+ },
+ {
+  "case": "J2/J3 checks, 2i_v110_dense",
+  "covering_layer": "execution layer, router",
+  "count": 24,
+  "result": "PASS",
+  "detail": "off_tick=0, tactic_violations=0",
+  "evidence": "runs/scn_2i_v110_dense/session_ems_path_coverage.json"
+ },
+ {
+  "case": "J2/J3 checks, 2i_v110_disconnect",
+  "covering_layer": "execution layer, router",
+  "count": 20,
+  "result": "PASS",
+  "detail": "off_tick=0, tactic_violations=0",
+  "evidence": "runs/scn_2i_v110_disconnect/session_ems_path_coverage.json"
+ },
+ {
+  "case": "J2/J3 checks, 2i_v110_dup_filled",
+  "covering_layer": "execution layer, router",
+  "count": 24,
+  "result": "PASS",
+  "detail": "off_tick=0, tactic_violations=0",
+  "evidence": "runs/scn_2i_v110_dup_filled/session_ems_path_coverage.json"
+ },
+ {
+  "case": "J2/J3 checks, 2i_v110_reject",
+  "covering_layer": "execution layer, router",
+  "count": 24,
+  "result": "PASS",
+  "detail": "off_tick=0, tactic_violations=0",
+  "evidence": "runs/scn_2i_v110_reject/session_ems_path_coverage.json"
+ },
+ {
+  "case": "J2/J3 checks, 2i_v110_short",
+  "covering_layer": "execution layer, router",
+  "count": 3,
+  "result": "PASS",
+  "detail": "off_tick=0, tactic_violations=0",
+  "evidence": "runs/scn_2i_v110_short/session_ems_path_coverage.json"
+ },
+ {
+  "case": "J2/J3 checks, 2i_v110_timeout",
+  "covering_layer": "execution layer, router",
+  "count": 18,
+  "result": "PASS",
+  "detail": "off_tick=0, tactic_violations=0",
+  "evidence": "runs/scn_2i_v110_timeout/session_ems_path_coverage.json"
+ },
+ {
   "case": "J2/J3 checks, 2j_duplicate_filled",
   "covering_layer": "execution layer, router",
   "count": 13,
@@ -224,12 +304,36 @@
   "evidence": "runs/scn_2m_p999/session_ems_path_coverage.json"
  },
  {
+  "case": "J2/J3 checks, 2m_p999_v110",
+  "covering_layer": "execution layer, router",
+  "count": 6,
+  "result": "PASS",
+  "detail": "off_tick=0, tactic_violations=0",
+  "evidence": "runs/scn_2m_p999_v110/session_ems_path_coverage.json"
+ },
+ {
+  "case": "J2/J3 checks, 2m_p99_v110",
+  "covering_layer": "execution layer, router",
+  "count": 5,
+  "result": "PASS",
+  "detail": "off_tick=0, tactic_violations=0",
+  "evidence": "runs/scn_2m_p99_v110/session_ems_path_coverage.json"
+ },
+ {
   "case": "J2/J3 checks, 2m_processing",
   "covering_layer": "execution layer, router",
   "count": 11,
   "result": "PASS",
   "detail": "off_tick=0, tactic_violations=0",
   "evidence": "runs/scn_2m_processing/session_ems_path_coverage.json"
+ },
+ {
+  "case": "J2/J3 checks, 2m_processing_v110",
+  "covering_layer": "execution layer, router",
+  "count": 9,
+  "result": "PASS",
+  "detail": "off_tick=0, tactic_violations=0",
+  "evidence": "runs/scn_2m_processing_v110/session_ems_path_coverage.json"
  },
  {
   "case": "J2/J3 checks, 2n_size1",
@@ -240,6 +344,14 @@
   "evidence": "runs/scn_2n_size1/session_ems_path_coverage.json"
  },
  {
+  "case": "J2/J3 checks, 2n_size1_v110",
+  "covering_layer": "execution layer, router",
+  "count": 9,
+  "result": "PASS",
+  "detail": "off_tick=0, tactic_violations=0",
+  "evidence": "runs/scn_2n_size1_v110/session_ems_path_coverage.json"
+ },
+ {
   "case": "J2/J3 checks, 2n_size25",
   "covering_layer": "execution layer, router",
   "count": 45,
@@ -248,12 +360,28 @@
   "evidence": "runs/scn_2n_size25/session_ems_path_coverage.json"
  },
  {
+  "case": "J2/J3 checks, 2n_size25_v110",
+  "covering_layer": "execution layer, router",
+  "count": 20,
+  "result": "PASS",
+  "detail": "off_tick=0, tactic_violations=0",
+  "evidence": "runs/scn_2n_size25_v110/session_ems_path_coverage.json"
+ },
+ {
   "case": "J2/J3 checks, 2n_size5",
   "covering_layer": "execution layer, router",
   "count": 16,
   "result": "PASS",
   "detail": "off_tick=0, tactic_violations=0",
   "evidence": "runs/scn_2n_size5/session_ems_path_coverage.json"
+ },
+ {
+  "case": "J2/J3 checks, 2n_size5_v110",
+  "covering_layer": "execution layer, router",
+  "count": 14,
+  "result": "PASS",
+  "detail": "off_tick=0, tactic_violations=0",
+  "evidence": "runs/scn_2n_size5_v110/session_ems_path_coverage.json"
  },
  {
   "case": "J2/J3 checks, H1a",
@@ -450,10 +578,82 @@
  {
   "case": "2h New-level vs queued fills: every maker fill carries queue_class",
   "covering_layer": "simulator observation rows",
-  "count": 164,
+  "count": 263,
   "result": "PASS",
-  "detail": "maker fills with the field 164 in 25 runs (scn_2a_quote_withdraw, scn_2c_partial_then_fill, scn_2c_thin_top, scn_2c_zero_exhausted, scn_2c_zero_exhausted_layeronly, scn_2c_zero_then_fill, scn_2c_zero_then_fill_layeronly, scn_2d_ghost3, scn_2d_ghost30, scn_2e_feed_gap, scn_2f_rate_limit, scn_2i_control_v19, scn_2i_s0, scn_2j_duplicate_filled, scn_2k_breaker_pause, scn_2k_breaker_trip, scn_2l_maker_outage, scn_2m_p99, scn_2m_p999, scn_2m_processing, scn_2n_size1, scn_2n_size25, scn_2n_size5, scn_H1a, scn_H1b): {'queued': 164}. The class is read from the placement of the same order (new_level: no displayed size at our price when we placed, queued: behind displayed size, unknown: queue not known); it sits on the maker_fill rows of maker_observations.jsonl, an observation-only file, so no existing output changed. Agreement with real fills is a Track C result and is NOT claimed",
+  "detail": "maker fills with the field 263 in 39 runs (scn_2a_quote_withdraw, scn_2a_v110, scn_2b_v110, scn_2c_partial_then_fill, scn_2c_thin_top, scn_2c_zero_exhausted, scn_2c_zero_exhausted_layeronly, scn_2c_zero_then_fill, scn_2c_zero_then_fill_layeronly, scn_2d_ghost3, scn_2d_ghost30, scn_2e_feed_gap, scn_2f_rate_limit, scn_2f_v110, scn_2i_control_v19, scn_2i_s0, scn_2i_v110_dense, scn_2i_v110_disconnect, scn_2i_v110_dup_filled, scn_2i_v110_reject, scn_2i_v110_short, scn_2i_v110_timeout, scn_2j_duplicate_filled, scn_2k_breaker_pause, scn_2k_breaker_trip, scn_2l_maker_outage, scn_2m_p99, scn_2m_p999, scn_2m_p999_v110, scn_2m_processing, scn_2m_processing_v110, scn_2n_size1, scn_2n_size1_v110, scn_2n_size25, scn_2n_size25_v110, scn_2n_size5, scn_2n_size5_v110, scn_H1a, scn_H1b): {'queued': 263}. The class is read from the placement of the same order (new_level: no displayed size at our price when we placed, queued: behind displayed size, unknown: queue not known); it sits on the maker_fill rows of maker_observations.jsonl, an observation-only file, so no existing output changed. Agreement with real fills is a Track C result and is NOT claimed",
   "evidence": "runs/scn_*/maker_observations.jsonl"
+ },
+ {
+  "case": "2a v1_10: Binance move before the timer tick (quote_withdraw on)",
+  "covering_layer": "strategy, OMS, router, simulator",
+  "count": 5,
+  "result": "PASS",
+  "detail": "withdrawn on the event 5, order rows with the reason 5, fills during cancel pending 0; maker filled 2 hedge filled 2; residual at end FLAT_NET",
+  "evidence": "scn_2a_v110"
+ },
+ {
+  "case": "2b v1_10: fill during cancel pending (cancel latency 800 ms); late fill after the cancel",
+  "covering_layer": "OMS, simulator",
+  "count": 2,
+  "result": "PASS",
+  "detail": "during cancel pending 2, late after cancel 0; fill ids unique True; maker filled 4 hedge filled 4; residual at end FLAT_NET",
+  "evidence": "scn_2b_v110"
+ },
+ {
+  "case": "2f v1_10: rate-limit pressure (6 requests / 10 s; quote share 80%, 2 always free)",
+  "covering_layer": "router, rate limiter, session",
+  "count": 11,
+  "result": "PASS",
+  "detail": "hedges refused 0 (rule: 0); quotes skipped before a plan existed 5; queued dispatches 6; maker filled 2 hedge filled 2; residual at end FLAT_NET",
+  "evidence": "scn_2f_v110"
+ },
+ {
+  "case": "2m v1_10: latency processing 5+5 ms",
+  "covering_layer": "router, timing, OMS, hedge lifecycle",
+  "count": 2,
+  "result": "PASS",
+  "detail": "unhedged interval p50 0.04742312431335449 s, max 0.04984641075134277 s (n 2); fills during cancel pending 0, late fills 0, hedge retries 0, unwind orders 0, kill switch transitions 0; maker filled 2 hedge filled 2; residual FLAT_NET",
+  "evidence": "scn_2m_processing_v110"
+ },
+ {
+  "case": "2m v1_10: latency p99",
+  "covering_layer": "router, timing, OMS, hedge lifecycle",
+  "count": 0,
+  "result": "NOT COVERED",
+  "detail": "unhedged interval p50 None s, max None s (n 0); fills during cancel pending 0, late fills 0, hedge retries 0, unwind orders 0, kill switch transitions 0; maker filled 0 hedge filled 0; residual FLAT_NET THE EVENT THIS CASE IS ABOUT DID NOT HAPPEN IN THIS RUN: NOT COVERED, not PASS (rule 6).",
+  "evidence": "scn_2m_p99_v110"
+ },
+ {
+  "case": "2m v1_10: latency p99.9",
+  "covering_layer": "router, timing, OMS, hedge lifecycle",
+  "count": 1,
+  "result": "PASS",
+  "detail": "unhedged interval p50 0.4450850486755371 s, max 0.4450850486755371 s (n 1); fills during cancel pending 1, late fills 0, hedge retries 0, unwind orders 0, kill switch transitions 0; maker filled 1 hedge filled 1; residual FLAT_NET",
+  "evidence": "scn_2m_p999_v110"
+ },
+ {
+  "case": "2n v1_10: size 1 SOL (size_aware cap, participation cap on)",
+  "covering_layer": "OMS, size_aware cap, simulator, E3",
+  "count": 2,
+  "result": "PASS",
+  "detail": "hedge IOC full 2, partial 0, zero 0, unwind orders 0; maker filled 2 hedge filled 2; residual at end FLAT_NET; withdrawn 5",
+  "evidence": "scn_2n_size1_v110"
+ },
+ {
+  "case": "2n v1_10: size 5 SOL (size_aware cap, participation cap on)",
+  "covering_layer": "OMS, size_aware cap, simulator, E3",
+  "count": 7,
+  "result": "PASS",
+  "detail": "hedge IOC full 7, partial 0, zero 0, unwind orders 0; maker filled 10 hedge filled 10; residual at end FLAT_NET; withdrawn 5",
+  "evidence": "scn_2n_size5_v110"
+ },
+ {
+  "case": "2n v1_10: size 25 SOL (size_aware cap, participation cap on)",
+  "covering_layer": "OMS, size_aware cap, simulator, E3",
+  "count": 12,
+  "result": "PASS",
+  "detail": "hedge IOC full 12, partial 0, zero 0, unwind orders 0; maker filled 36.1 hedge filled 36.1; residual at end FLAT_NET; withdrawn 5",
+  "evidence": "scn_2n_size25_v110"
  },
  {
   "case": "2g Restart: exchange-side reconciliation (open orders, executions, positions fetched from the venue; OMS level, scripted venue)",
@@ -485,6 +685,14 @@
   "count": null,
   "result": "NOT COVERED",
   "detail": "amend requests per run: {'2i_s0': 0, '2i_s0_B': 0, '2i_s0_reject': 0, '2i_s0_timeout': 0, '2i_s0_disconnect': 0, '2i_s0_dup_filled': 0}. invariant rules 1-3 (two live orders 0, duplicate fills 0, lineage overfill 0, hedged = filled) hold in 6 of 6 runs. Unit/OMS level: tests/test_oms_amend.py (11 lineage cases) and tests/test_s0_session.py (controller: amend, band, min interval, reject, timeout, no room, no target). NO amend request was made on the capture windows (rule 6: NOT COVERED, never PASS by emptiness): the arb's quotes rest on or near the touch, where a repricing target either sits inside the band or does not exist, so the amend path (paths a-j) is exercised by the synthetic stream tests only, not by the real capture. Reason recorded, not claimed.",
+  "evidence": "see detail"
+ },
+ {
+  "case": "2i Amend paths on v1_10 (INJECTED hedge move on the real 29 Oct feed; reject, timeout, disconnect, duplicate Filled)",
+  "covering_layer": "OMS amend lineage + session controller on v1_10",
+  "count": null,
+  "result": "NOT COVERED",
+  "detail": "INJECTED hedge-venue move on the real capture (2 ticks every 20 s for 8 s; entry threshold lowered to -2.0 bps and the validity tolerance widened to 2.5 bps FOR THE CASE, labelled in arb_overrides). 2i_v110_dense (injected move only): shifts 360, amends requested 1 confirmed 1 rejected 0 timed out 0 fallback to cancel 0, fills during AMEND_PENDING 0, late fills on the old order 0, cancels during a pending amend 0, quotes withdrawn 1, venue queries after it 0, two live orders 0, duplicate fills booked twice 0, maker filled 4.9 = hedge filled 4.9: True || 2i_v110_reject (every amend rejected): shifts 360, amends requested 1 confirmed 0 rejected 1 timed out 0 fallback to cancel 0, fills during AMEND_PENDING 0, late fills on the old order 0, cancels during a pending amend 0, quotes withdrawn 2, venue queries after it 1, two live orders 0, duplicate fills booked twice 0, maker filled 4.9 = hedge filled 4.9: True || 2i_v110_timeout (every amend unanswered): shifts 360, amends requested 1 confirmed 0 rejected 1 timed out 0 fallback to cancel 0, fills during AMEND_PENDING 1, late fills on the old order 1, cancels during a pending amend 3, quotes withdrawn 0, venue queries after it 1, two live orders 0, duplicate fills booked twice 0, maker filled 5.0 = hedge filled 5.0: True || 2i_v110_disconnect (Bybit order entry and private stream down over the amend): shifts 360, amends requested 1 confirmed 0 rejected 0 timed out 1 fallback to cancel 0, fills during AMEND_PENDING 0, late fills on the old order 1, cancels during a pending amend 0, quotes withdrawn 0, venue queries after it 0, two live orders 0, duplicate fills booked twice 0, maker filled 5.0 = hedge filled 5.0: True || 2i_v110_dup_filled (every Filled report delivered twice): shifts 360, amends requested 1 confirmed 1 rejected 0 timed out 0 fallback to cancel 0, fills during AMEND_PENDING 0, late fills on the old order 0, cancels during a pending amend 0, quotes withdrawn 1, venue queries after it 0, two live orders 0, duplicate fills booked twice 0, maker filled 4.9 = hedge filled 4.9: True. NO VENUE QUERY recorded after the reject or timeout in ['2i_v110_disconnect'] (a timeout must end in a query): NOT COVERED for that path",
   "evidence": "see detail"
  }
 ]

@@ -61,6 +61,27 @@ CASES = {
     "2n_size1": dict(profile="perp_perp_maker_taker_v1_9", window=A, size=1.0, gross=5.0, cap=True),
     "2n_size5": dict(profile="perp_perp_maker_taker_v1_9", window=A, size=5.0, gross=25.0, cap=True),
     "2n_size25": dict(profile="perp_perp_maker_taker_v1_9", window=A, size=25.0, gross=125.0, cap=True),
+    # v1_10 (owner 16 Nov): withdrawal + S0 repricing + dust carry + 1 s no-requote ON. Case 2i on v1_10: an INJECTED hedge-venue move on the real capture (labelled INJECTED): every 20 s the Binance book is shifted
+    # by 2 bps (two ticks; alternating down and up, so a resting bid and a resting ask are each hit) for 8 s, shifted books and prints, then restored by a snapshot. Beyond the 1 bp S0 band and inside the withdrawal tolerance at the lowered entry threshold, so the controller amends: the quotes enter at about -1.9 bps and a 2-tick move is 2.0 bps, which the profile's 1.5 bp validity tolerance would withdraw, so the case widens the tolerance to 2.5 bps (labelled in arb_overrides). On this capture the dense variant makes ONE amend (11:01:23 UTC, a quote already 0.9 of 1.0 filled): the reject and timeout variants fail every amend request so that one meets the fault, and the disconnect variant takes Bybit order entry and the private stream down from 11:01:23.291 to 11:01:53, over the amend (sent at 11:01:23.289). Only one real amend is met per variant: reported as such. Plus reject / timeout / disconnect /
+    # duplicate Filled acting on real amends. v1_10 on the capture runs the hedge venue minimum at 5 USDT (the real Binance SOLUSDT rule) so the dust rule is live.
+    "2i_v110": dict(profile="perp_perp_maker_taker_v1_10", window=A, inject_move=dict(venue="BINANCE", bps=2.0, every_s=20.0, offset_s=5.0, dur_s=8.0), hedge_min_notional=5.0),
+    "2i_v110_reject": dict(profile="perp_perp_maker_taker_v1_10", window=A, inject_move=dict(venue="BINANCE", bps=2.0, every_s=20.0, offset_s=5.0, dur_s=8.0), amend_reject_every=1, hedge_min_notional=5.0, arb_overrides={"min_net_edge_bps": -2.0, "participation_max": 0.0, "quote_withdraw_hysteresis_bps": 2.5}),
+    "2i_v110_timeout": dict(profile="perp_perp_maker_taker_v1_10", window=A, inject_move=dict(venue="BINANCE", bps=2.0, every_s=20.0, offset_s=5.0, dur_s=8.0), amend_timeout_every=1, hedge_min_notional=5.0, arb_overrides={"min_net_edge_bps": -2.0, "participation_max": 0.0, "quote_withdraw_hysteresis_bps": 2.5}),
+    "2i_v110_disconnect": dict(profile="perp_perp_maker_taker_v1_10", window=A, inject_move=dict(venue="BINANCE", bps=2.0, every_s=20.0, offset_s=5.0, dur_s=8.0), maker_outage=[("11:01:23.291", "11:01:53")], hedge_min_notional=5.0, arb_overrides={"min_net_edge_bps": -2.0, "participation_max": 0.0, "quote_withdraw_hysteresis_bps": 2.5}),
+    "2i_v110_dup_filled": dict(profile="perp_perp_maker_taker_v1_10", window=A, inject_move=dict(venue="BINANCE", bps=2.0, every_s=20.0, offset_s=5.0, dur_s=8.0), duplicate_filled=True, hedge_min_notional=5.0, arb_overrides={"min_net_edge_bps": -2.0, "participation_max": 0.0, "quote_withdraw_hysteresis_bps": 2.5}),
+    # DENSE variant: the capture window has 2 signals at the profile's entry edge, too few for an injected move to meet a resting quote. The entry threshold is lowered and the participation limit lifted FOR THE CASE (labelled in the result: arb_overrides), so more quotes rest.
+    "2i_v110_dense": dict(profile="perp_perp_maker_taker_v1_10", window=A, inject_move=dict(venue="BINANCE", bps=2.0, every_s=20.0, offset_s=5.0, dur_s=8.0), hedge_min_notional=5.0, arb_overrides={"min_net_edge_bps": -2.0, "participation_max": 0.0, "quote_withdraw_hysteresis_bps": 2.5}),
+    "2i_v110_timeout_short": dict(profile="perp_perp_maker_taker_v1_10", window=("11:00", "11:03"), inject_move=dict(venue="BINANCE", bps=2.0, every_s=20.0, offset_s=5.0, dur_s=8.0), amend_timeout_every=1, hedge_min_notional=5.0, arb_overrides={"min_net_edge_bps": -2.0, "participation_max": 0.0, "quote_withdraw_hysteresis_bps": 2.5}),
+    "2i_v110_short": dict(profile="perp_perp_maker_taker_v1_10", window=("11:00", "11:04"), inject_move=dict(venue="BINANCE", bps=2.0, every_s=20.0, offset_s=5.0, dur_s=8.0), hedge_min_notional=5.0),
+    "2a_v110": dict(profile="perp_perp_maker_taker_v1_10", window=A),
+    "2b_v110": dict(profile="perp_perp_maker_taker_v1_10", window=A, cancel_ms={"bybit": 800.0}),
+    "2f_v110": dict(profile="perp_perp_maker_taker_v1_10", window=A, rate_limit=True),
+    "2m_processing_v110": dict(profile="perp_perp_maker_taker_v1_10", window=A, processing_ms={"strategy": 5.0, "risk": 5.0}),
+    "2m_p99_v110": dict(profile="perp_perp_maker_taker_v1_10", window=A, latency_q=0.99),
+    "2m_p999_v110": dict(profile="perp_perp_maker_taker_v1_10", window=A, latency_q=0.999),
+    "2n_size1_v110": dict(profile="perp_perp_maker_taker_v1_10", window=A, size=1.0, gross=5.0, cap=True),
+    "2n_size5_v110": dict(profile="perp_perp_maker_taker_v1_10", window=A, size=5.0, gross=25.0, cap=True),
+    "2n_size25_v110": dict(profile="perp_perp_maker_taker_v1_10", window=A, size=25.0, gross=125.0, cap=True),
 }
 
 
@@ -108,7 +129,9 @@ if st.get("latency_q"):
                                             fill_report=spec(fill, vt.fill_report), cancel=spec(at(grids["cancel_rest_rtt_ms"]) / 2, vt.cancel), cancel_report=spec(at(grids["cancel_rest_rtt_ms"]) / 2, vt.cancel_report))
     cfg.timing = dataclasses.replace(cfg.timing, venues=venues)
 kw = {}
-if st["profile"] in ("perp_perp_maker_taker_v1_9", "perp_perp_maker_taker_v1_9s"):
+if st["profile"] in ("perp_perp_maker_taker_v1_9", "perp_perp_maker_taker_v1_9s", "perp_perp_maker_taker_v1_10"):
+    if st.get("hedge_min_notional") is not None:
+        kw["hedge_min_notional"] = st["hedge_min_notional"]       # owner 16 Nov: the hedge venue's real minimum for this run (the replay default is 1 USDT)
     if layer_only:
         kw["layer_risk_mode"] = "enforce"
     else:
@@ -127,7 +150,7 @@ if st.get("maker_outage"):
     kw["hedge_fault_injection"] = True
 replay = SessionReplay(cfg, profile, ticks=dated_ticks("2026-10-29"), recorded=True, decompose_markouts=True, mark_from_mid=True, lifecycle_report=True, regime_boundaries=BND, **kw)
 
-if st.get("profile") in ("perp_perp_maker_taker_v1_9", "perp_perp_maker_taker_v1_9s"):
+if st.get("profile") in ("perp_perp_maker_taker_v1_9", "perp_perp_maker_taker_v1_9s", "perp_perp_maker_taker_v1_10"):
     assert replay.session.oms.maker_ack_deadline, "v1_9 carries oms.maker_ack_deadline (owner 13 Nov)"      # from the profile now, not set here
 if st.get("thin_view_top"):                   # the bot sees the same thin touch (the market's touch IS thin): the size_aware cap is taken from this view, every deeper level is the real one
     import copy
@@ -204,6 +227,7 @@ if st.get("debug_requote"):                    # diagnosis only (owner 14 Nov): 
 t0, t1 = hms(st["window"][0] + ":00"), hms(st["window"][1] + ":00")
 gap = None if not st.get("gap") else (hms(st["gap"][0]), hms(st["gap"][1]))
 market_rows = []
+inj_events = []                                   # the injected shifts (aggregates are written to session_injection.json)
 
 
 ARMED_EDGE = replay.strategy.config.min_net_edge_bps
@@ -212,9 +236,45 @@ replay.strategy.config.min_net_edge_bps = 1e9      # warm-up: the books are fed 
 
 def events():
     armed, reset_done, n, reconnected, shadow = False, False, 0, False, {}
+    inj = st.get("inject_move")                                  # INJECTED hedge-venue move (owner 16 Nov, case 2i on v1_10): see CASES
+    inj_on = {"shift": None}
+    import copy as _copy
+    inj_shadow = {"book": _copy.deepcopy(replay.session.books[(inj["venue"], replay.instrument_id)]) if inj is not None else None}
     for ev in iter_recorded_events(SESSION):
         ts = ev.receive_ts_ns / 1e9
         n += 1
+        if inj is not None:
+            from crypto_stat_arb.models import Level, TradeEvent
+            true_ev = ev
+            k = int((ts - t0 - inj["offset_s"]) // inj["every_s"]) if ts >= t0 + inj["offset_s"] else -1
+            into = (ts - t0 - inj["offset_s"]) - k * inj["every_s"] if k >= 0 else None
+            active = k >= 0 and into < inj["dur_s"] and ts < t1 - 1
+            book = inj_shadow["book"]
+            book_ok = book.state.value in ("VALID", "STALE") and bool(book.bids) and bool(book.asks)      # a shadow of the venue's book with the session book's own delta rules, fed the TRUE stream with no latency: its sequence is the one the next delta continues from
+            at_delta = isinstance(ev, MarketEvent) and ev.venue == inj["venue"] and ev.event_type.value == "BOOK_DELTA"      # the snapshot is placed right before a delta of the venue and carries that delta's start id minus 1, so the delta bridges it (Binance chains on pu after the first bridging delta)
+            if active and inj_on["shift"] is None and book_ok and at_delta:
+                mid = (book.best_bid + book.best_ask) / 2
+                tick = Decimal("0.01")
+                shift = (Decimal(str(mid)) * Decimal(str(inj["bps"])) / Decimal(10000) / tick).to_integral_value() * tick * (-1 if k % 2 == 0 else 1)      # down at even periods (hits a resting bid), up at odd (a resting ask)
+                inj_on["shift"] = shift
+                yield MarketEvent.from_dict({"event_type": "BOOK_SNAPSHOT", "venue": inj["venue"], "instrument_id": book.instrument_id, "exchange_ts_ns": ev.exchange_ts_ns, "receive_ts_ns": ev.receive_ts_ns,
+                                             "sequence": ev.sequence_start - 1, "bids": [[str(Decimal(str(p)) + shift), str(q)] for p, q in sorted(book.bids.items(), reverse=True)], "asks": [[str(Decimal(str(p)) + shift), str(q)] for p, q in sorted(book.asks.items())]})
+                inj_events.append({"ts": ts, "shift": str(shift), "mid": float(mid)})
+            elif not active and inj_on["shift"] is not None and book_ok and at_delta:
+                sh0 = inj_on["shift"]
+                inj_on["shift"] = None
+                yield MarketEvent.from_dict({"event_type": "BOOK_SNAPSHOT", "venue": inj["venue"], "instrument_id": book.instrument_id, "exchange_ts_ns": ev.exchange_ts_ns, "receive_ts_ns": ev.receive_ts_ns,
+                                             "sequence": ev.sequence_start - 1, "bids": [[str(Decimal(str(p))), str(q)] for p, q in sorted(book.bids.items(), reverse=True)], "asks": [[str(Decimal(str(p))), str(q)] for p, q in sorted(book.asks.items())]})
+            if inj_on["shift"] is not None and ev.venue == inj["venue"]:
+                sh = inj_on["shift"]
+                if isinstance(ev, MarketEvent):
+                    import dataclasses as _dc
+                    ev = _dc.replace(ev, bids=tuple(Level(l.price + sh, l.quantity) for l in ev.bids), asks=tuple(Level(l.price + sh, l.quantity) for l in ev.asks))
+                elif isinstance(ev, TradeEvent):
+                    import dataclasses as _dc
+                    ev = _dc.replace(ev, price=ev.price + sh)
+            if isinstance(true_ev, MarketEvent) and true_ev.venue == inj["venue"]:
+                inj_shadow["book"].apply(true_ev)                    # the true event, after any snapshot above was taken (a snapshot never contains the event that follows it)
         if st.get("reset_after_s") and not reset_done and n % 200 == 0:                      # the operator's manual reset, scripted: once the breaker has tripped and the wait is over
             trips = [e["ts_ns"] / 1e9 for e in replay.session.ledger.events if e["event_type"] == "BREAKER_TRIP"]
             if trips and ts >= trips[0] + st["reset_after_s"]:
@@ -248,6 +308,8 @@ if safety:                                   # the safety events of the run in f
     (out / "session_safety_events.jsonl").write_text("".join(json.dumps({k: (str(v) if not isinstance(v, (int, float, bool, type(None), list, dict)) else v) for k, v in e.items()}, sort_keys=True, default=str) + "\n" for e in safety))
 else:
     (out / "session_safety_events.jsonl").unlink(missing_ok=True)      # a rerun with no safety events must not leave the previous run's file behind
+if st.get("inject_move"):
+    (out / "session_injection.json").write_text(json.dumps({"label": "INJECTED: a scripted shift of the hedge venue's book on the real capture (not a market event)", "setting": st["inject_move"], "shifts_applied": len(inj_events), "events": inj_events}, indent=1))
 from new_backtest.session_replay import s0_audit
 (out / "session_s0_audit.json").write_text(json.dumps(s0_audit(replay.session.ledger.events, replay.session.oms.plans, replay.session.reprice_counters), indent=1, default=str))       # owner 14 Nov: the counts for case 2i (a-j)
 sigs = result["signals"]

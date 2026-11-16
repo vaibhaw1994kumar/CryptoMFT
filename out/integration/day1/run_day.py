@@ -111,6 +111,7 @@ rejects = getattr(replay.strategy, "rejects", None)
 doc = {"label": "EXPLORATORY: every counter of the run; counts are complete (nothing truncated)",
        "ledger_event_type_counts": dict(sorted(collections.Counter(e["event_type"] for e in led).items())),
        "stop_quoting": {"signals_blocked_by_breaker": sess.signals_blocked_by_breaker, "breaker": sess.breaker_report().get("breaker"), "breaker_alarms": list(sess.breaker_alarms), "hedge_dust_carry": sess.breaker_report().get("hedge_dust_carry"),
+                        "no_requote": sess.breaker_report().get("no_requote"), "amend_guard": sess.breaker_report().get("amend_guard"), "reprice_counters": dict(sess.reprice_counters), "amend_refusals": {k: v for k, v in sess.oms.realism_counters.items() if "amend" in k},
                         "margin_price_paused_at_end": sess.margin_price_paused, "signals_blocked_by_margin_price": sess.signals_blocked_by_margin_price,
                         "quotes_skipped_rate_limit": sess.quotes_skipped_rate_limit, "quotes_withdrawn": sess.quotes_withdrawn, "risk_gate_refusals_by_reason": dict(sess.gate_counts),
                         "kill_switch": bool(sess.oms.risk.kill_switch), "kill_switch_reason": getattr(sess.oms.risk, "kill_switch_reason", ""),

@@ -161,6 +161,10 @@ SWITCHES: tuple[Switch, ...] = (
     Switch("maker.unknown_queue_dist", "CALIBRATED", note="floor in v1 (hand-set 25); v1.1: fitted on strictly earlier days, floor 0, flagged fallback 25 where the fit has no data (unknown_queue_fallback)"),
     Switch("oms.account_fee_check", "LEGACY_COMPAT", note="absent in every profile up to v1_8; v1_9 (owner 13 Nov) true: a declaration only (a backtest has no account to read): a live or paper session started with this profile reads the account's SOLUSDT maker/taker rates on both venues and refuses to start if they differ from fee_presets. REQUIRED for any profile used with real orders (crypto_stat_arb.config.REAL_ORDER_REQUIRED)"),
     Switch("oms.maker_ack_deadline", "LEGACY_COMPAT", note="off in every profile up to v1_8 (a sent PostOnly quote with no answer stays SENT, unwatched); v1_9 (owner 13 Nov) ON: it is watched from the send and, unanswered, queried, TIMED_OUT, kill switch. REQUIRED for any profile used with real orders (crypto_stat_arb.config.REAL_ORDER_REQUIRED)"),
+    Switch("arb.requote_delay_after_withdraw_s", "CALIBRATED", note="absent (0 = off, bit-identical) in every profile up to v1_9; v1_10 (owner 16 Nov) 1.0 ASSUMED: a quote withdrawn by validity is not placed again on the same venue and side for this long; counted (requote_blocked_after_withdraw)"),
+    Switch("margin.mark_stamp", "LEGACY_COMPAT", note="restamp in every profile up to v1_9 (LEGACY: a mark is stamped with the time the evaluation saw it, so it lives 9-10 s against the 5 s limit); v1_10 (owner 16 Nov) own_timestamp: a mark older than 5 s by its OWN timestamp pauses, nothing is re-stamped"),
+    Switch("seed", "LEGACY_COMPAT", note="owner 16 Nov: the run seed (latency draws, queue) is a profile key from v1_10 on, with the current default 7 (outputs unchanged); every session manifest records the effective seeds, frozen profiles included"),
+    Switch("hedge_faults.seed", "LEGACY_COMPAT", note="owner 16 Nov: the hedge-fault seed is a profile key from v1_10 on, default 11 (outputs unchanged); recorded in the manifest"),
     Switch("hedge_faults.dust_carry", "LEGACY_COMPAT", note="absent (off) in every profile up to v1_9; v1_10 (owner 16 Nov) next_hedge: a hedge chunk below the hedge venue's minimum is carried in one signed balance per venue and added to the next hedge, instead of being refused and left open. REQUIRED for any profile used with real orders"),
     Switch("hedge_faults.dust_alarm_after_s", "LEGACY_COMPAT", note="ASSUMED 60 s (owner 16 Nov): carried dust older than this raises HEDGE_DUST_ALARM once; read only with dust_carry on"),
     Switch("hedge_faults.silent_carry_bound", "LEGACY_COMPAT", note="position_size in every profile up to v1_8 (a residual under the position size is carried with no action); v1_9 (owner 13 Nov) below_one_lot: a failed hedge unwinds whatever its size, only a sub-lot remainder is carried. REQUIRED for any profile used with real orders"),
@@ -269,7 +273,7 @@ def apply_profile(doc: dict, dataset: str | None = None, **overrides):
             spec = dict(spec)
             tiers = tuple(MarginTier(**x) for x in spec.pop("tiers"))
             venues[v] = VenueMargin(tiers=tiers, **spec)
-        rest = {k: v for k, v in m.items() if k != "venues"}
+        rest = {k: v for k, v in m.items() if k not in ("venues", "mark_stamp")}      # mark_stamp is the session runtime's rule (core MarginConfig), not the backtester's margin model
         cfg_kw["margin"] = MarginModelConfig(venues=venues, **rest)
     ex = doc.get("execution")
     if ex is not None:

@@ -270,6 +270,56 @@ class UnknownThenReconciled(unittest.TestCase):
         self.assertAlmostEqual(h.bt._pending_exposure().buys.get(BYBIT, 0.0), 0.0)         # the reservation is released once the order is resolved
 
 
+class FrozenV1_9(unittest.TestCase):
+    """Owner 16 Nov: perp_perp_maker_taker_v1_9 is FROZEN as the v1_9 reference (it was edited in place five times before). The file is pinned by sha256 in profiles/perp_perp_maker_taker_v1_9.freeze.json, with v1_9s;
+    a change must be a new profile version (v1_10), never an edit of v1_9. v1_10 = v1_9 + exactly the owner's keys (below)."""
+    def _manifest(self):
+        import json
+        from pathlib import Path
+        return json.loads((Path(__file__).resolve().parents[1] / "profiles" / "perp_perp_maker_taker_v1_9.freeze.json").read_text())
+
+    def test_v1_9_is_byte_for_byte_the_frozen_one(self):
+        from new_backtest.profiles import load_profile
+        self.assertEqual(load_profile("perp_perp_maker_taker_v1_9")["_sha256"], self._manifest()["profile_sha256"])
+
+    def test_v1_9s_is_unchanged(self):
+        from new_backtest.profiles import load_profile
+        for name, sha in self._manifest()["reference_profiles_sha256"].items():
+            self.assertEqual(load_profile(name)["_sha256"], sha, name)
+
+    def test_v1_10_differs_from_v1_9_only_by_the_owners_keys(self):
+        from new_backtest.profiles import load_profile
+
+        def flat(d, prefix=""):
+            out = {}
+            for k, v in d.items():
+                if k.startswith("_"):
+                    continue
+                if isinstance(v, dict):
+                    out.update(flat(v, prefix + k + "."))
+                else:
+                    out[prefix + k] = v
+            return out
+        a, b = flat(load_profile("perp_perp_maker_taker_v1_9")), flat(load_profile("perp_perp_maker_taker_v1_10"))
+        changed = {k for k in set(a) | set(b) if a.get(k) != b.get(k)}
+        self.assertEqual(changed, {
+            "name", "description",
+            "arb.quote_withdraw", "arb.quote_withdraw_hysteresis_bps",                                             # withdrawal ON
+            "execution.primary.reprice.enabled", "execution.primary.reprice.source", "execution.primary.reprice.band_down_bps",
+            "execution.primary.reprice.min_interval_ms", "execution.primary.reprice.max_age_s",                    # S0 repricing ON (ILLUSTRATIVE_NOT_FITTED)
+            "hedge_faults.dust_carry", "hedge_faults.dust_alarm_after_s",                                          # hedge dust carry
+            "arb.requote_delay_after_withdraw_s",                                                                   # the 1 s no-requote
+            "margin.mark_stamp",                                                                                    # the 5 s mark rule fixed
+            "seed", "hedge_faults.seed",                                                                            # seeds as profile keys (current defaults)
+            "decision_status.case2i_passed", "decision_status.testnet_amend_drill_passed",                         # the real-order amend guard flags
+        })
+        self.assertEqual((b["arb.quote_withdraw"], b["arb.quote_withdraw_hysteresis_bps"], b["execution.primary.reprice.band_down_bps"], b["execution.primary.reprice.min_interval_ms"],
+                          b["execution.primary.reprice.max_age_s"], b["execution.primary.reprice.source"], b["hedge_faults.dust_carry"]),
+                         (True, 1.5, 1.0, 1000.0, 15.0, "ILLUSTRATIVE_NOT_FITTED", "next_hedge"))
+        self.assertEqual((b["seed"], b["hedge_faults.seed"]), (7, 11))
+        self.assertIs(b["decision_status.case2i_passed"], False)
+
+
 class FrozenV1_2(unittest.TestCase):
     """Owner 7 Nov: perp_perp_maker_taker_v1_2 is FROZEN as the simulator-correct baseline (strategy unchanged). The profile file is pinned by sha256 in profiles/perp_perp_maker_taker_v1_2.freeze.json;
     a change to the file must be a new profile version (v1_3), never an edit of v1_2."""

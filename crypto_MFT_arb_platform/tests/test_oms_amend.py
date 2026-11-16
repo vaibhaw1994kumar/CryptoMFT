@@ -6,6 +6,7 @@ cancel and never leaves two live orders. The simulator side (queue_adapter._repl
 import sys
 import tempfile
 import unittest
+from dataclasses import replace
 from decimal import Decimal
 from pathlib import Path
 
@@ -68,11 +69,13 @@ class AmendTests(unittest.TestCase):
     def setUp(self):
         self.t = 100 * MS
 
-    def build(self, mode="confirm", enabled=True, directory=None):
+    def build(self, mode="confirm", enabled=True, directory=None, policy=None, hedge_min_notional=None, hedge_script=("fill",)):
         inst = _ft_instruments()
-        self.bybit, self.binance = AmendVenue("BYBIT", mode), ScriptedVenue("BINANCE", ["fill"], price="60000")
+        if hedge_min_notional is not None:                                                  # a hedge-venue minimum notional above one lot, so a one-lot partial fill is dust
+            inst._versions[("BINANCE", INSTR_FT)][0] = replace(inst.get("BINANCE", INSTR_FT), min_notional=Decimal(hedge_min_notional))
+        self.bybit, self.binance = AmendVenue("BYBIT", mode), ScriptedVenue("BINANCE", list(hedge_script), price="60000")
         self.oms = OMS(inst, risk(), Ledger(), router=StrategyDirectedRouter(inst, adapters={"BYBIT": self.bybit, "BINANCE": self.binance}),
-                       dispatch_policy=DispatchPolicy.FILL_TRIGGERED, hedge_policy=HedgePolicy(retry_limit=1))
+                       dispatch_policy=DispatchPolicy.FILL_TRIGGERED, hedge_policy=policy or HedgePolicy(retry_limit=1))
         self.oms.amend_enabled = enabled
         self.plan = self.oms.execute(_ft_opportunity(), _ft_books(), maker_venue="BYBIT")
         self.maker = self.plan.children[0]
@@ -148,6 +151,33 @@ class AmendTests(unittest.TestCase):
         self.assertEqual(self.oms.lineage_remaining(new.order_id), Decimal("0"))
         self.assertEqual(sum((Decimal(str(f["fill_quantity"])) for f in self.fills() if f.get("venue") == "BYBIT"), Decimal("0")), Decimal("0.010"))
         self.assertEqual(self.oms.carried_residual_base(), Decimal("0"))
+
+    def test_an_amend_confirmed_after_a_partial_fill_that_was_carried_as_dust_keeps_the_plan_partial(self):
+        """Found by the v1_10 case 2i / 2n replays (16 Nov): a partial fill below the hedge minimum is carried (no hedge chain), the quote is then amended; the confirmation moves the quote's head to the replacement, which has no
+        fill of its own, and the plan was judged ACKNOWLEDGED, an illegal PARTIAL -> ACKNOWLEDGED. The quote's lineage fill keeps it PARTIAL."""
+        self.build("accept_only", policy=HedgePolicy(retry_limit=1, dust_carry="next_hedge"), hedge_min_notional="100")
+        self.oms.ingest_order_update(stream_update(self.plan, self.maker, 1, ExecutionEventType.PARTIAL, "0.001", self.t + MS))       # 60 USDT of BTC against a 100 USDT minimum: carried
+        self.assertEqual(self.binance.submits, [])
+        self.assertEqual(self.plan.state, PlanState.PARTIAL)
+        self.assertEqual(self.oms.request_amend(self.maker.order_id, Decimal("60070.0"), self.t + 2 * MS), "REQUESTED")
+        new = self.replacement()
+        self.oms.ingest_order_update(stream_update(self.plan, new, 1, ExecutionEventType.ACKNOWLEDGED, "0", self.t + 5 * MS, price="60070"))
+        self.assertEqual(len(self.events("AMEND_CONFIRMED")), 1)
+        self.assertEqual((self.maker.state, new.state), (OrderState.CANCELLED, OrderState.ACKNOWLEDGED))
+        self.assertEqual(self.plan.state, PlanState.PARTIAL)                              # never back to ACKNOWLEDGED
+
+    def test_an_amend_pending_on_a_part_filled_quote_with_an_acknowledged_hedge_keeps_the_plan_partial(self):
+        """Found by the v1_10 case 2i timeout variant (16 Nov): the quote is 0.4 filled, its hedge IOC is acknowledged and not yet filled, an amend is pending (the old order reads AMEND_PENDING, which no plan state maps to):
+        the plan was judged by the acknowledged hedge alone, ACKNOWLEDGED, an illegal move back from PARTIAL."""
+        self.build("accept_only", hedge_script=("ack",))
+        self.oms.ingest_order_update(stream_update(self.plan, self.maker, 1, ExecutionEventType.PARTIAL, "0.004", self.t + MS))
+        hedges = [o for o in self.plan.children if o.order_role == "HEDGE"]
+        self.assertEqual([h.state for h in hedges], [OrderState.ACKNOWLEDGED])
+        self.assertEqual(self.plan.state, PlanState.PARTIAL)
+        self.assertEqual(self.oms.request_amend(self.maker.order_id, Decimal("60070.0"), self.t + 2 * MS), "REQUESTED")
+        self.assertEqual(self.maker.state, OrderState.AMEND_PENDING)
+        self.oms.ingest_order_update(stream_update(self.plan, hedges[0], 1, ExecutionEventType.ACKNOWLEDGED, "0", self.t + 3 * MS, price="60000"))   # a report about the hedge while the amend is pending
+        self.assertEqual(self.plan.state, PlanState.PARTIAL)
 
     def test_an_amend_timeout_then_a_late_success_makes_no_duplicate(self):
         self.build("silent")

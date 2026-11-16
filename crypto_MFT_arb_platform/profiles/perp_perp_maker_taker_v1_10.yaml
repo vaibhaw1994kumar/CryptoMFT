@@ -58,6 +58,8 @@ decision_status:                         # carried into every result's release_i
   breaker: DECISION_PENDING_CALIBRATION
   unwind_band_bps: DECISION_PENDING_CALIBRATION
   unwind_max_attempts: DECISION_PENDING_CALIBRATION
+  case2i_passed: false                   # owner 16 Nov: the real-order amend guard (config.amend_guard_from_profile): with real orders no amend is sent until BOTH flags are true; set by the owner after case 2i on this profile and the testnet amend drill
+  testnet_amend_drill_passed: false
   residual_limit: DECISION_PENDING_CALIBRATION   # owner 8 Nov 2026: the core's two stages, hold new risk at 5 s and kill switch at 30 s (the backtester's own 5 s net-exposure breaker stays until Phase D)
   unwind_band_core: DECISION_PENDING_CALIBRATION   # owner 8 Nov 2026: 15 bps in the core too (it was 10)
   hedge_unknown_escalation: DECISION_PENDING_CALIBRATION   # H16, accepted 8 Nov 2026: FAILED with alarm and kill switch, in the core
@@ -72,6 +74,7 @@ decision_status:                         # carried into every result's release_i
   data_manifest: REQUIRED_AT_RUN                  # ladder step 1: the runner supplies the manifest path; a truncated day needs a written reason
   unknown_queue_fit: PER_DAY_FILE_FROM_STRICTLY_EARLIER_DAYS   # ladder step 6: the runner supplies the day's fit; the profile alone cannot run a fitted queue
 product_fee_consistency: true            # MANDATORY: fee presets must be perp presets
+seed: 7                                  # owner 16 Nov: the run seed as a profile key (the current default; outputs unchanged)
 latency_preset: singapore                # ASSUMED (host co-located with Bybit, ~35 ms to Binance) until ollog measurements replace it.
                                          # Owner decision 2026-11-02: was colocated_both, which config.py calls physically impossible
                                          # (sensitivity upper bound only); every v1 result before 2026-11-02 used colocated_both.
@@ -119,6 +122,7 @@ arb:
   participation_window_s: 60
   quote_withdraw: true                   # v1_9s (owner 14 Nov): quote validity runs first on every book update (a quote that lost its edge is withdrawn), then the S0 controller
   quote_withdraw_hysteresis_bps: 1.5     # ASSUMED, WIDER than v1_8's 0.5 on purpose: the S0 stickiness band (1.0 bp) must be inside the withdrawal tolerance, or validity would always cancel a quote before the repricing rule could move it. Repricing acts at a 1.0 bp adverse move; validity withdraws only when the edge is still gone at 1.5 bps (an amend that has not taken effect yet, or no target)
+  requote_delay_after_withdraw_s: 1.0   # owner 16 Nov (approved; ASSUMED 1 s): a quote withdrawn by validity is not placed again on the same venue and side for this long; counted
   funding_window_s: 30                   # owner 14 Nov: no new quote within 30 s before a funding timestamp on either venue (next funding time from the derivative stream); resting quotes are withdrawn when the window starts; quoting resumes when the stream shows the next settlement. No next-funding time = "not evaluable", counted (funding_window_not_evaluable), nothing blocked
   entry_hedge_price: vwap                # owner 13 Nov (edge calibration item 1): the hedge is priced at the VWAP the hedge-venue book gives for the quote's size, in the quote price and the entry edge (the same walk quote_validity uses); every earlier profile: touch (the ArbConfig default). expected_hedge_slippage_bps stays 0 by design.
   round_quotes_to_tick: true             # v1.1 step 9b: the quote is rounded onto the venue's price grid before the improve-the-touch check and the edge (the runner supplies arb.venue_ticks)
@@ -196,6 +200,7 @@ oms:
   maker_ack_deadline: true               # owner 13 Nov: a sent PostOnly quote is watched from the send, not only from its ack (a submit or ack lost in a gateway outage ends TIMED_OUT with the kill switch instead of sitting SENT unwatched; 565 s in the 2l replay). Earlier profiles: off. REQUIRED for any profile used with real orders (config.REAL_ORDER_REQUIRED)
   account_fee_check: true                # owner 13 Nov (edge calibration item 2): a declaration for live/paper: the session reads the account's SOLUSDT maker/taker rates on both venues at start-up and refuses to start if they differ from fee_presets (crypto_stat_arb.fees.verify_account_fee_rates). No effect on a backtest. REQUIRED for any profile used with real orders
 hedge_faults:                            # the response policy (recovery), not injected faults
+  seed: 11                               # owner 16 Nov: the hedge-fault seed as a profile key (the current default; outputs unchanged)
   response: retry_unwind                 # MANDATORY (not the legacy oracle)
   query_before_replace: true             # OMS03 (v1_2, Phase B): a hedge that gets no answer in an outage is queried before any retry or unwind is sent (the query waits for the gateway and for a ghost to land). v1.1: false
   max_retries: 2
@@ -209,6 +214,7 @@ hedge_faults:                            # the response policy (recovery), not i
   unknown_query_max_attempts: 3
 margin:                                  # MANDATORY in a perp profile; tiers ASSUMED, prefunded capital per venue
   check_every_s: 1.0
+  mark_stamp: own_timestamp              # owner 16 Nov: the 5 s mark rule fixed from v1_10: a mark older than 5 s by its OWN timestamp pauses, nothing is re-stamped (v1_9 and earlier re-stamp: marks live 9-10 s, LEGACY)
   flatten_other_venue: true
   above_last_tier: breach                # A9 (owner Phase B, the core rule wins): a position above the venue's last tier is a margin breach (POSITION_ABOVE_RISK_LIMIT, fail closed). v1.1: ignore
   venues:

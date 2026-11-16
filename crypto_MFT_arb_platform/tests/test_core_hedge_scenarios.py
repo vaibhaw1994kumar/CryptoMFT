@@ -930,3 +930,21 @@ class HedgeDustCarry(Scenario):
         self.assertEqual((self.events_of("HEDGE_DUST_CARRIED"), self.oms.dust_on, self.oms._dust, self.oms._dust_plan_adj), ([], False, {}, {}))
         self.assertNotIn("carried_dust_base", self.oms.residual_risk_snapshot())
 
+
+
+class HeldHedgeTimerConverges(Scenario):
+    """Found by case 2i on v1_10 (16 Nov): a hedge held on a book that is not valid is escalated by the residual age (5 s). The timer for it was taken as int((opened + age) * 1e9) + 1 ns, but the breach test works in float
+    seconds, and at today's epoch one float step is about 240 ns: the timer could land just BEFORE the breach, so advance_time never converged ('EMS timers did not converge'). The timer now lands where the test is true."""
+
+    def test_the_age_timer_of_a_held_hedge_lands_where_the_breach_test_is_true(self):
+        from crypto_stat_arb.models import BookState
+        t0 = 1793271751938324225                                  # the opening time that failed in the 2i replay (float seconds 1793271751.9383242)
+        self.build(hedge=[("fill", None)], qty="1.0")
+        self.oms._books[("BINANCE", INSTR)].state = BookState.STALE      # the hedge book is not valid: the hedge is held
+        self.maker_fill("0.5", t0)
+        (chain,) = self.oms.hedge_chains[self.plan.parent_id].values()
+        self.assertEqual(chain.state, H.HEDGE_PENDING)
+        due = [t for t in self.oms._hedge_timer_candidates()]
+        self.assertTrue(due and all(t / 1e9 - chain.opened_ts > chain.max_residual_age_s for t in due))
+        self.oms.advance_time(t0 + 7 * S)                           # converges (used to raise) and the residual age escalated the chain
+        self.assertNotEqual(chain.state, H.HEDGE_PENDING)

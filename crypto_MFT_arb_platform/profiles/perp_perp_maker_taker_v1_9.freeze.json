@@ -1,0 +1,18 @@
+{
+ "freeze": {
+  "profile": "perp_perp_maker_taker_v1_9",
+  "status": "FROZEN as the v1_9 reference (edited in place in five commits before the freeze). New work goes on perp_perp_maker_taker_v1_10 (v1_9 + quote withdrawal + S0 repricing + dust carry + the new limits + 1 s no-requote); v1_9s stays unchanged; v1_8 stays as it is.",
+  "frozen_utc": "2026-11-16",
+  "approved_by": "owner, 16 Nov 2026 (relayed by the integration session)"
+ },
+ "profile_file": "crypto_MFT_arb_platform/profiles/perp_perp_maker_taker_v1_9.yaml",
+ "profile_sha256": "f798ac62497da2f26b93c845b383ea5f47dd6d7409e6122c3f733d7b857be8cb",
+ "reference_profiles_sha256": {
+  "perp_perp_maker_taker_v1_9s": "3d037d2be19a2ffbf8cc3586bbcbbc7ee6ed20e5f17553b936b3aba2d1cf1d0a"
+ },
+ "git": {
+  "outer_head_at_freeze": "fb94de8aa631a401118b2b883a8238bb785452f8",
+  "core_head_at_freeze": "c24289cba4cebc17e43070cceff34c9343c6573e",
+  "note": "the v1_9 file is unchanged since commit af84a04 (its last edit)"
+ }
+}

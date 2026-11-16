@@ -158,6 +158,10 @@ class SessionReplay:
         self.app_config, self.raw_config = config_from_raw(raw)
         self.config_notes["fees"] = "PROFILE_FEES: a replay books the profile's fee_presets; no account rates are read (a live or paper session that sends real orders refuses to start unless the account's rates equal them)"        # owner 14 Nov
         self.config_notes["funding_window"] = "evaluated only where the run has derivative data (next funding times); without it every evaluation counts funding_window_not_evaluable and nothing is blocked"
+        # Owner 16 Nov (seeds, the 5 s mark rule): every manifest records the seeds the run used (a profile key from v1_10, the current defaults before) and the mark-stamp rule, frozen profiles included.
+        self.config_notes["effective_seeds"] = {"run_seed": config.seed, "hedge_fault_seed": getattr(config.hedge_faults, "seed", None), "latency_seed": config.seed,
+                                                "source": "profile key (seed, hedge_faults.seed)" if ("seed" in profile or "seed" in (profile.get("hedge_faults") or {})) else "code defaults (the profile sets none)"}
+        self.config_notes["mark_stamp"] = getattr(self.app_config.margin, "mark_stamp", "restamp") + (" (LEGACY: a mark is re-stamped with the evaluation time and lives up to about 2 x the 5 s limit; the fix is margin.mark_stamp own_timestamp, v1_10 onward)" if getattr(self.app_config.margin, "mark_stamp", "restamp") == "restamp" else " (a mark older than the limit by its own timestamp pauses; nothing is re-stamped)")
         self.config_notes["real_order_requirements"] = check_real_order_profile(profile) or "met"     # owner 13 Nov: a profile used with real orders must meet crypto_stat_arb.config.REAL_ORDER_REQUIRED; a backtest of an older profile may not, and says so here
         self.instrument_id = self.app_config.instrument_id
         self.feed = CanonicalFeed(self.instrument_id, venue_names=self.names, delta_semantics={v: s.delta_semantics for v, s in self.venue_specs.items()},
@@ -1183,6 +1187,10 @@ def live_paper_setup(profile_name: str) -> dict:
                                    instrument_id=paper.cfg.instrument_id, venue_names=names, eligibility_policy=session.alignment_policy,
                                    view_books=lambda: {v: paper._views[names[v]] for v in venues})]
 
+    from crypto_stat_arb.config import amend_guard_from_profile
+    guard = amend_guard_from_profile(profile)
+    if guard is not None:
+        session_kwargs["amend_guard"] = guard             # owner 16 Nov: read by TradingSession only when it sends real orders
     return {"session_kwargs": session_kwargs, "queue_simulation": asdict(cfg.maker), "strategy_builder": build}
 
 

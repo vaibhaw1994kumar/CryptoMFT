@@ -390,6 +390,55 @@ if tot:
         f"maker fills with the field {tot} in {len(rows_seen)} runs ({', '.join(rows_seen)}): {cnt}. The class is read from the placement of the same order (new_level: no displayed size at our price when we placed, queued: behind displayed size, unknown: queue not known); "
         f"it sits on the maker_fill rows of maker_observations.jsonl, an observation-only file, so no existing output changed. Agreement with real fills is a Track C result and is NOT claimed", "runs/scn_*/maker_observations.jsonl")
 
+# ---- v1_10 reruns (owner 16 Nov, Order 2): cases 2a, 2b, 2f, 2m, 2n on v1_10 (withdrawal + S0 + dust carry + 1 s no-requote + the 5 s mark rule). The same rules as the v1_9 rows; a case whose event never happened is NOT COVERED, never PASS.
+def v110_row(case, title, layer, event_count, rule_ok, detail, evidence):
+    if rule_ok is False:
+        add(title, layer, event_count, False, detail, evidence)
+    elif not event_count:
+        add(title, layer, event_count, None, detail + " THE EVENT THIS CASE IS ABOUT DID NOT HAPPEN IN THIS RUN: NOT COVERED, not PASS (rule 6).", evidence)
+    else:
+        add(title, layer, event_count, True, detail, evidence)
+
+
+def v110_common(r):
+    res = r["manifest"]["residual_at_end"]
+    qm = sum(float(o["filled_quantity"]) for o in r["orders"] if o["venue"] == "BYBIT"); qh = sum(float(o["filled_quantity"]) for o in r["orders"] if o["venue"] == "BINANCE")
+    dust = (r["manifest"].get("manifest", {}).get("hedge_dust_carry") or {})
+    return res, qm, qh, abs(qm - qh) < 1e-9 or res.get("flag") in ("FLAT_NET",) and abs(float(res.get("net_position_base", 0))) < 1e-9
+
+
+r = load("2a_v110")
+if r:
+    c = r["cov"]["paths"]; res, qm, qh, bal = v110_common(r)
+    withdrawn = [o for o in r["orders"] if (o.get("cancel_reason") or "").startswith("quote_withdrawn")]
+    v110_row("2a_v110", "2a v1_10: Binance move before the timer tick (quote_withdraw on)", "strategy, OMS, router, simulator", c["maker_withdrawn_on_event"], r["cov"]["checks"]["pass"] and len(withdrawn) <= max(c["maker_withdrawn_on_event"], 0) and bal,
+             f"withdrawn on the event {c['maker_withdrawn_on_event']}, order rows with the reason {len(withdrawn)}, fills during cancel pending {c['fills_during_cancel_pending']}; maker filled {qm:g} hedge filled {qh:g}; residual at end {res['flag']}", str(r["dir"].name))
+r = load("2b_v110")
+if r:
+    c = r["cov"]["paths"]; ids = [f["fill_id"] for f in r["fills"]]; res, qm, qh, bal = v110_common(r)
+    v110_row("2b_v110", "2b v1_10: fill during cancel pending (cancel latency 800 ms); late fill after the cancel", "OMS, simulator", c["fills_during_cancel_pending"] + c["late_fills_after_cancel"],
+             len(ids) == len(set(ids)) and bal and r["cov"]["checks"]["pass"], f"during cancel pending {c['fills_during_cancel_pending']}, late after cancel {c['late_fills_after_cancel']}; fill ids unique {len(ids) == len(set(ids))}; maker filled {qm:g} hedge filled {qh:g}; residual at end {res['flag']}", str(r["dir"].name))
+r = load("2f_v110")
+if r:
+    c = r["cov"]["paths"]; res, qm, qh, bal = v110_common(r)
+    refused_h = sum(1 for o in r["orders"] if o["venue"] == "BINANCE" and o.get("cancel_reason") == "scoped_rate_limited")
+    skipped = r["manifest"].get("ledger_event_counts", {}).get("QUOTE_SKIPPED_RATE_LIMIT", 0)
+    v110_row("2f_v110", "2f v1_10: rate-limit pressure (6 requests / 10 s; quote share 80%, 2 always free)", "router, rate limiter, session", c["rate_limit_deferral"] + skipped, refused_h == 0 and bal and res["flag"] == "FLAT_NET",
+             f"hedges refused {refused_h} (rule: 0); quotes skipped before a plan existed {skipped}; queued dispatches {c['rate_limit_deferral']}; maker filled {qm:g} hedge filled {qh:g}; residual at end {res['flag']}", str(r["dir"].name))
+for case, q in (("2m_processing_v110", "processing 5+5 ms"), ("2m_p99_v110", "p99"), ("2m_p999_v110", "p99.9")):
+    r = load(case)
+    if r:
+        paths = r["cov"]["paths"]; res, qm, qh, bal = v110_common(r); u = r["life"]["total"]["residual_exposure"]["unhedged_interval_s"]
+        ok = paths["kill_switch_transitions"] == 0 and paths["hedge_alarm"] == 0 and paths["unwind_exhausted_alarm"] == 0 and r["cov"]["checks"]["pass"] and abs(float(res["net_position_base"])) < 1.0 and res["open_residual_plans"] == 0 and bal
+        v110_row(case, f"2m v1_10: latency {q}", "router, timing, OMS, hedge lifecycle", u.get("n", 0), ok,
+                 f"unhedged interval p50 {u.get('p50')} s, max {u.get('max')} s (n {u.get('n', 0)}); fills during cancel pending {paths['fills_during_cancel_pending']}, late fills {paths['late_fills_after_cancel']}, hedge retries {paths['hedge_retry']}, unwind orders {paths['unwind_orders']}, kill switch transitions {paths['kill_switch_transitions']}; maker filled {qm:g} hedge filled {qh:g}; residual {res['flag']}", str(r["dir"].name))
+for sz in ("1", "5", "25"):
+    r = load(f"2n_size{sz}_v110")
+    if r:
+        h = hedge_orders(r); res, qm, qh, bal = v110_common(r); paths = r["cov"]["paths"]
+        v110_row(f"2n_size{sz}_v110", f"2n v1_10: size {sz} SOL (size_aware cap, participation cap on)", "OMS, size_aware cap, simulator, E3", len(h), r["cov"]["checks"]["pass"] and bal,
+                 f"hedge IOC full {paths['hedge_ioc_full']}, partial {paths['hedge_ioc_partial']}, zero {paths['hedge_ioc_zero']}, unwind orders {paths['unwind_orders']}; maker filled {qm:g} hedge filled {qh:g}; residual at end {res['flag']}; withdrawn {paths['maker_withdrawn_on_event']}", str(r["dir"].name))
+
 # ---- cases covered at unit / OMS level only, and the ones not covered
 def _case_2i():
     """Owner 14 Nov: S0 in the session runtime, rules of v1_9_TOLERANCES.md section O (written before the runs). Reads runs/scn_2i_* (session_s0_audit.json). A run with no amend request cannot pass the amend rules (rule 6)."""
@@ -409,10 +458,51 @@ def _case_2i():
     return ("session controller + OMS amend lineage", detail, "PASS")
 
 
+def _case_2i_v110():
+    """Owner 16 Nov, Order 2: case 2i on v1_10 with an INJECTED hedge-venue move on the real 29 Oct feed, and reject / timeout / disconnect / duplicate Filled acting on REAL amends. Reads runs/scn_2i_v110_* (session_s0_audit.json,
+    session_injection.json). Never passes on emptiness: a variant whose fault did not meet an amend is NOT COVERED, and any broken invariant is FAIL."""
+    variants = (("2i_v110_dense", "injected move only", lambda a, c: a["amend_requests"] >= 1),
+                ("2i_v110_reject", "every amend rejected", lambda a, c: a["amends_rejected"] >= 1),
+                ("2i_v110_timeout", "every amend unanswered", lambda a, c: a["amend_requests"] >= 1 and a["amends_confirmed"] == 0 and (a["amend_timeouts"] >= 1 or a["fills_during_amend_pending"] >= 1 or a["cancels_during_amend"] >= 1)),
+                ("2i_v110_disconnect", "Bybit order entry and private stream down over the amend", lambda a, c: a["amend_timeouts"] >= 1 or a["amend_fallback_cancel"] >= 1 or a["amends_rejected"] >= 1),
+                ("2i_v110_dup_filled", "every Filled report delivered twice", lambda a, c: a["amend_requests"] >= 1 and c["paths"].get("duplicate_updates_suppressed", 0) > 0))
+    got, missing, queries = {}, [], {}
+    for name, what, acted in variants:
+        d = RUNS / f"scn_{name}"
+        if not (d / "session_s0_audit.json").exists():
+            missing.append(name)
+            continue
+        queries[name] = json.loads((d / "session_manifest.json").read_text()).get("ledger_event_counts", {}).get("VENUE_ORDER_QUERY", 0)
+        got[name] = (what, acted, json.loads((d / "session_s0_audit.json").read_text()), json.loads((d / "session_ems_path_coverage.json").read_text()),
+                     json.loads((d / "session_injection.json").read_text()) if (d / "session_injection.json").exists() else {})
+    if not got:
+        return ("OMS amend lineage + session controller on v1_10", "no 2i v1_10 run found", "NOT COVERED")
+    bad = [n for n, (w, f, a, c, i) in got.items() if a["two_live_orders"] or a["duplicate_fills_booked_twice"] or a["lineage_overfill"] or a["lineage_overfill_alarms"] or not a["hedged_equals_filled"]]
+    not_acted = [n for n, (w, f, a, c, i) in got.items() if not f(a, c)]
+    no_query = [n for n in ("2i_v110_reject", "2i_v110_timeout", "2i_v110_disconnect") if n in got and not queries.get(n)]          # a reject or a timeout must end in a venue query, never a blind second order
+    parts = []
+    for n, (w, f, a, c, i) in got.items():
+        parts.append(f"{n} ({w}): shifts {i.get('shifts_applied', 0)}, amends requested {a['amend_requests']} confirmed {a['amends_confirmed']} rejected {a['amends_rejected']} timed out {a['amend_timeouts']} fallback to cancel {a['amend_fallback_cancel']}, "
+                     f"fills during AMEND_PENDING {a['fills_during_amend_pending']}, late fills on the old order {a['late_fills_reducing_replacement']}, cancels during a pending amend {a['cancels_during_amend']}, quotes withdrawn {a['quotes_withdrawn']}, "
+                     f"venue queries after it {queries.get(n, 0)}, two live orders {a['two_live_orders']}, duplicate fills booked twice {a['duplicate_fills_booked_twice']}, maker filled {a['maker_filled']} = hedge filled {a['hedge_filled']}: {a['hedged_equals_filled']}")
+    zero_paths = [k for k in ("fills_during_amend_pending", "late_fills_reducing_replacement", "cancels_during_amend") if not any(a[k] for (w, f, a, c, i) in got.values())]
+    detail = ("INJECTED hedge-venue move on the real capture (2 ticks every 20 s for 8 s; entry threshold lowered to -2.0 bps and the validity tolerance widened to 2.5 bps FOR THE CASE, labelled in arb_overrides). " + " || ".join(parts)
+              + (f". Not run: {missing}" if missing else "")
+              + (f". PATHS NEVER MET ON THE REAL CAPTURE (NOT COVERED here; covered by tests/test_oms_amend.py and tests/test_s0_session.py only): {zero_paths}" if zero_paths else "")
+              + (f". Variants whose fault did not meet a real amend: {not_acted}" if not_acted else "")
+              + (f". NO VENUE QUERY recorded after the reject or timeout in {no_query} (a timeout must end in a query): NOT COVERED for that path" if no_query else ""))
+    if bad:
+        return ("OMS amend lineage + session controller on v1_10", detail + f". INVARIANT BROKEN in {bad}", "FAIL")
+    if not_acted or missing or zero_paths or no_query:
+        return ("OMS amend lineage + session controller on v1_10", detail, "NOT COVERED")
+    return ("OMS amend lineage + session controller on v1_10", detail, "PASS")
+
+
 unit = {
     "2g Restart with open orders, inside a replay": ("session, OMS, plan store", "NOT COVERED at replay level (owner 13 Nov: reason accepted): the replay driver holds about 30 references to one session object, and a faithful restart rebuilds the session from the plan store and re-subscribes the books. Covered instead at OMS level, against a scripted venue: see the next row", "NOT COVERED"),
     **({} if tot else {"2h New-level vs queued fills": ("simulator", "field built (maker_observations.jsonl maker_fill rows) but no run has been made with it yet", "NOT COVERED")}),
     "2i Amend paths (S0 profile v1_9s)": _case_2i(),
+    "2i Amend paths on v1_10 (INJECTED hedge move on the real 29 Oct feed; reject, timeout, disconnect, duplicate Filled)": _case_2i_v110(),
 }
 ev10 = CASES / "case10_exchange_side_restart_reconciliation_missed_fill.jsonl"
 if ev10.exists():

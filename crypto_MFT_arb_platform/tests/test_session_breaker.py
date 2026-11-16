@@ -449,3 +449,89 @@ class MissingMarginPrice(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class V1_10Rules(unittest.TestCase):
+    """Owner 16 Nov (v1_10): the 5 s mark rule by the mark's own timestamp (boundary 4.9 / 5.0 / 5.1 s), the real-order amend guard, and the 1 s no-requote after a validity withdrawal."""
+
+    def sess(self, stamp):
+        from dataclasses import replace
+        s = session()
+        s.margin_config = replace(s.margin_config, mark_stamp=stamp)
+        return s
+
+    def test_a_mark_older_than_5_s_by_its_own_timestamp_is_missing_4_9_5_0_5_1(self):
+        for age_s, usable in ((4.9, True), (5.0, True), (5.1, False)):
+            s = self.sess("own_timestamp")
+            s.exchange_marks[(A, INSTR)] = (10 * S, Decimal("100"))
+            now = 10 * S + int(age_s * S)
+            marks = s._margin_marks(now)
+            self.assertEqual((A, INSTR) in marks, usable, age_s)
+
+    def test_nothing_is_restamped_so_a_mark_never_outlives_5_s_by_its_own_time(self):
+        s = self.sess("own_timestamp")
+        s.exchange_marks[(A, INSTR)] = (10 * S, Decimal("100"))
+        self.assertIn((A, INSTR), s._margin_marks(10 * S + int(4.9 * S)))       # seen at 4.9 s ...
+        self.assertNotIn((A, INSTR), s._margin_marks(10 * S + int(9.8 * S)))     # ... and gone at 9.8 s: the legacy rule re-stamped it at 4.9 s and kept it to 9.9 s
+
+    def test_the_legacy_rule_still_restamps_and_is_labelled_legacy(self):
+        s = self.sess("restamp")
+        s.exchange_marks[(A, INSTR)] = (10 * S, Decimal("100"))
+        s._margin_marks(10 * S + int(4.9 * S))
+        self.assertIn((A, INSTR), s._margin_marks(10 * S + int(9.8 * S)))        # lives 9.8 s: what every profile up to v1_9 does
+        from crypto_stat_arb.margin import MarginConfig
+        self.assertEqual(MarginConfig().mark_stamp, "restamp")                    # the default: frozen profiles keep it
+
+    def test_a_newer_mark_replaces_the_older_one(self):
+        s = self.sess("own_timestamp")
+        s.exchange_marks[(A, INSTR)] = (10 * S, Decimal("100"))
+        s._margin_marks(11 * S)
+        s.exchange_marks[(A, INSTR)] = (14 * S, Decimal("101"))
+        self.assertEqual(s._margin_marks(18 * S)[(A, INSTR)], Decimal("101"))
+
+    def test_the_amend_guard_blocks_real_orders_until_both_proofs_are_recorded(self):
+        from crypto_stat_arb.config import amend_guard_from_profile
+        from crypto_stat_arb.session import ExecutionMode
+        from crypto_stat_arb.ems.tactics.passive import RepriceConfig
+        prof = {"execution": {"primary": {"reprice": {"enabled": True, "amend_first": True}}}, "decision_status": {"case2i_passed": True}}
+        guard = amend_guard_from_profile(prof)
+        self.assertEqual(guard["recorded"], {"case2i_passed": True, "testnet_amend_drill_passed": False})
+        s = session()
+        s._reprice_cfg = RepriceConfig(enabled=True, band_down_bps=1.0, min_interval_ms=1000.0, max_age_s=15.0, amend_first=True)
+        s.oms.amend_enabled = True
+        s._apply_amend_guard(guard, ExecutionMode.INTERNAL_SIMULATION)             # a replay is not restricted
+        self.assertIsNone(s.amend_guard_state)
+        s._apply_amend_guard(guard, ExecutionMode.VENUE_TESTNET)
+        self.assertEqual(s.amend_guard_state["missing"], ["testnet_amend_drill_passed"])
+        self.assertFalse(s._reprice_cfg.amend_first)                                # every reprice is a cancel and a fresh quote
+        self.assertEqual(s.oms.request_amend("x", Decimal("1"), 1), "REFUSED:amend_guard:testnet_amend_drill_passed")
+        self.assertEqual(s.oms.realism_counters["amend_refused_real_order_guard"], 1)
+        both = amend_guard_from_profile({**prof, "decision_status": {"case2i_passed": True, "testnet_amend_drill_passed": True}})
+        s2 = session()
+        s2._reprice_cfg = RepriceConfig(enabled=True, band_down_bps=1.0, min_interval_ms=1000.0, max_age_s=15.0, amend_first=True)
+        s2._apply_amend_guard(both, ExecutionMode.VENUE_TESTNET)
+        self.assertIsNone(s2.amend_guard_state)
+        self.assertTrue(s2._reprice_cfg.amend_first)
+        self.assertIsNone(amend_guard_from_profile({"execution": {"primary": {"reprice": {"enabled": False}}}}))
+
+    def test_a_validity_withdrawal_blocks_the_same_venue_and_side_for_the_delay_and_is_counted(self):
+        from types import SimpleNamespace
+        from crypto_stat_arb.strategies.arb_strategy import ArbSessionStrategy
+        st = ArbSessionStrategy.__new__(ArbSessionStrategy)
+        sig = SimpleNamespace(maker_venue="bybit", buy_venue="bybit")               # a passive bid on bybit
+        st.strategy = SimpleNamespace(evaluate=lambda *a, **k: sig, config=SimpleNamespace(count_pending_exposure=False, requote_delay_after_withdraw_s=1.0))
+        st.eligibility_policy, st.entry_gate, st.view_books = None, None, (lambda: {})
+        st.pending_and_live_makers = lambda: (None, 0)
+        st.inventory = lambda: None
+        st.to_opportunity = lambda *a, **k: SimpleNamespace(opportunity_id="o1")
+        st.signals, st.last_signal = {}, None
+        st._no_requote_until_ns, st.requote_blocked_after_withdraw, st.withdrawn_by_validity = {}, 0, 0
+        st.states = {}
+        self.assertIsNotNone(st.evaluate({}, 5 * S))                                  # nothing withdrawn yet
+        st.note_quote_withdrawn({"venue_feed": "bybit", "side": "buy"}, 10 * S)
+        self.assertIsNone(st.evaluate({}, 10 * S + 999_000_000))                      # 0.999 s later: blocked
+        self.assertIsNotNone(st.evaluate({}, 11 * S))                                 # 1.0 s later: quoting again
+        self.assertEqual((st.requote_blocked_after_withdraw, st.withdrawn_by_validity), (1, 1))
+        st.strategy.config.requote_delay_after_withdraw_s = 0.0                       # off: a later withdrawal starts no delay
+        st.note_quote_withdrawn({"venue_feed": "bybit", "side": "buy"}, 20 * S)
+        self.assertIsNotNone(st.evaluate({}, 20 * S + 1))
