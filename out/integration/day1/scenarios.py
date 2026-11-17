@@ -92,6 +92,8 @@ CASES = {
     "3c_clock_none_v110": dict(profile="perp_perp_maker_taker_v1_10", window=A, hedge_min_notional=5.0, arb_overrides=DENSE),
     "3d_margin_warning_v110": dict(profile="perp_perp_maker_taker_v1_10", window=A, hedge_min_notional=5.0, arb_overrides=DENSE, profile_set={"margin.venues.bybit.initial_capital": 30.0, "margin.venues.binance.initial_capital": 30.0}),
     "3e_missing_marks_v110": dict(profile="perp_perp_maker_taker_v1_10", window=A, hedge_min_notional=5.0, arb_overrides=DENSE, gap=("11:20:00", "11:22:30"), gap_venue="BINANCE"),
+    # ORDER 3 B: the pair-close switch ON (arb.close_pairs reduce_only_quote, NOT in v1_10), on the dense window of the baseline (3x): the same run with the switch on. Labelled: the dense entry is a case override.
+    "3g_close_pairs_on_v110": dict(profile="perp_perp_maker_taker_v1_10", window=A, hedge_min_notional=5.0, arb_overrides={**DENSE, "close_pairs": "reduce_only_quote"}),
     "3x_baseline_v110": dict(profile="perp_perp_maker_taker_v1_10", window=A, hedge_min_notional=5.0, arb_overrides=DENSE),
 }
 

@@ -500,6 +500,27 @@ if r and lim:
     _o3("3e_missing_marks_v110", "3e A5 missing marks (INJECTED: the Binance feed lost for 150 s, 11:20:00 to 11:22:30)", "session, OMS kill switch (keep_risk_reducing)", lim["counters"].get("missing_marks_trips", 0),
         kill is not None and kill["paused_s"] > 60.0 and lim["counters"].get("missing_marks_trips", 0) == 1,
         f"the price pause began at 11:20:05, the kill switch tripped once after {kill['paused_s']:.2f} s (limit 60 s); no hedge was in flight and the day's later signals were already over, so the stop on new quotes is shown by the unit test, not by this run; after the injected reconnect the Binance feed stayed in a price pause for more than an hour: an artefact of the injected snapshot, not a market fact" if kill else "no trip")
+r, lim = load("3g_close_pairs_on_v110"), None
+if r and base3:
+    c = r["manifest"]["ledger_event_counts"]
+    fills_by = sorted((f for f in r["fills"] if f["venue"] == "BYBIT"), key=lambda f: f["ts_ns"])
+    pos, lo, hi, closes, close_qty = 0.0, 0.0, 0.0, 0, 0.0
+    for f in fills_by:
+        q = float(f["fill_quantity"]); sell = f["side"] == "SELL"
+        if sell and pos > 1e-9:
+            closes += 1; close_qty += q
+        pos += -q if sell else q
+        lo, hi = min(lo, pos), max(hi, pos)
+    bin_buy = sum(float(f["fill_quantity"]) for f in r["fills"] if f["venue"] == "BINANCE" and f["side"] == "BUY")
+    bin_sell = sum(float(f["fill_quantity"]) for f in r["fills"] if f["venue"] == "BINANCE" and f["side"] == "SELL")
+    maker_buy = sum(float(f["fill_quantity"]) for f in fills_by if f["side"] == "BUY"); maker_sell = sum(float(f["fill_quantity"]) for f in fills_by if f["side"] == "SELL")
+    quotes = c.get("CLOSE_PAIR_QUOTE", 0)
+    bad = c.get("CLOSE_PAIR_BEYOND_FLAT", 0) or lo < -1e-9
+    carried = abs((maker_buy - maker_sell) + (bin_sell - bin_buy) * -1 - 0)         # unhedged remainder of maker fills (dust carried): maker net - hedge net
+    gap = abs((maker_buy - maker_sell) - (bin_sell - bin_buy))
+    _o3("3g_close_pairs_on_v110", "3g B pair close ON (arb.close_pairs reduce_only_quote, NOT in v1_10; the dense window of 3x with the switch on)", "strategy, OMS (reduce-only quote and hedge), session", closes,
+        not bad and gap < 0.05 and r["cov"]["checks"]["pass"],
+        f"closing quotes placed {quotes}, closing fills {closes} ({close_qty:g} SOL sold against longs on the maker venue); the maker venue position stayed between {lo:g} and {hi:g} (never below flat: never beyond flat, never opens a short); CLOSE_PAIR_BEYOND_FLAT {c.get('CLOSE_PAIR_BEYOND_FLAT', 0)}; hedge buys on the other venue {bin_buy:g} against closing fills {close_qty:g} (reduce-only), hedge sells {bin_sell:g} for maker buys {maker_buy:g}: hedged equals filled up to the dust carried ({gap:.4f} SOL, HEDGE_DUST_CARRIED {c.get('HEDGE_DUST_CARRIED', 0)}); signals {len(r['signals'])} against {len(base3['signals'])} with the switch off (3x), maker fills {len(fills_by)} against {sum(1 for f in base3['fills'] if f['venue'] == 'BYBIT')}")
 add("3f A6 tier table and A8 account check at start-up (recorded messages)", "testnet transports, sdk, paper_live start-up", 21, True,
     "21 tests in tests/test_session_limits_startup.py: the Binance leverageBracket and Bybit risk-limit reads become ordered tiers (initial rate 1/leverage, deductions, order of brackets), an error or an unexpected shape raises, the read asks for the READ permission only, a spot transport says it has none; the start-up refuses when any venue's tiers cannot be read and replaces the ASSUMED tiers (source ACCOUNT_READ) when they can; verify_account refuses hedge mode, another margin mode or leverage, a missing leverage row, collects every problem, and labels reduce-only acceptance DERIVED_FROM_ONE_WAY_MODE and UNVERIFIED. HAND-WRITTEN messages in the documented shapes: the endpoint shapes are UNVERIFIED against the live endpoints, and the replays have no account (a replay keeps the ASSUMED tiers, labelled)", "tests/test_session_limits_startup.py")
 

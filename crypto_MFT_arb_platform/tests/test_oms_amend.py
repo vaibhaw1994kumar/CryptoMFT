@@ -69,7 +69,7 @@ class AmendTests(unittest.TestCase):
     def setUp(self):
         self.t = 100 * MS
 
-    def build(self, mode="confirm", enabled=True, directory=None, policy=None, hedge_min_notional=None, hedge_script=("fill",)):
+    def build(self, mode="confirm", enabled=True, directory=None, policy=None, hedge_min_notional=None, hedge_script=("fill",), close_pair=False):
         inst = _ft_instruments()
         if hedge_min_notional is not None:                                                  # a hedge-venue minimum notional above one lot, so a one-lot partial fill is dust
             inst._versions[("BINANCE", INSTR_FT)][0] = replace(inst.get("BINANCE", INSTR_FT), min_notional=Decimal(hedge_min_notional))
@@ -77,7 +77,7 @@ class AmendTests(unittest.TestCase):
         self.oms = OMS(inst, risk(), Ledger(), router=StrategyDirectedRouter(inst, adapters={"BYBIT": self.bybit, "BINANCE": self.binance}),
                        dispatch_policy=DispatchPolicy.FILL_TRIGGERED, hedge_policy=policy or HedgePolicy(retry_limit=1))
         self.oms.amend_enabled = enabled
-        self.plan = self.oms.execute(_ft_opportunity(), _ft_books(), maker_venue="BYBIT")
+        self.plan = self.oms.execute(_ft_opportunity(), _ft_books(), maker_venue="BYBIT", **({"close_pair": True} if close_pair else {}))
         self.maker = self.plan.children[0]
         self.assertEqual(self.maker.state, OrderState.ACKNOWLEDGED)
 
@@ -178,6 +178,19 @@ class AmendTests(unittest.TestCase):
         self.assertEqual(self.maker.state, OrderState.AMEND_PENDING)
         self.oms.ingest_order_update(stream_update(self.plan, hedges[0], 1, ExecutionEventType.ACKNOWLEDGED, "0", self.t + 3 * MS, price="60000"))   # a report about the hedge while the amend is pending
         self.assertEqual(self.plan.state, PlanState.PARTIAL)
+
+    def test_an_amended_closing_quote_stays_reduce_only_and_its_hedge_too(self):
+        """Order 3 B, lineage unchanged: the replacement of a closing quote is reduce-only like the quote, the lineage's fills are counted once and the hedge that follows is reduce-only."""
+        self.build("confirm", close_pair=True)
+        self.assertTrue(self.maker.reduce_only)
+        self.assertEqual(self.oms.request_amend(self.maker.order_id, Decimal("60070.0"), self.t), "REQUESTED")
+        new = self.replacement()
+        self.assertTrue(new.reduce_only)                                                    # the replacement carries the flag
+        self.assertTrue(self.oms._hedge_specs[self.plan.parent_id]["close_pair"])
+        self.oms.ingest_order_update(stream_update(self.plan, new, 2, ExecutionEventType.FILLED, "0.010", self.t + 5 * MS, price="60070"))
+        (hedge,) = [o for o in self.plan.children if o.order_role == "HEDGE"]
+        self.assertTrue(hedge.reduce_only)
+        self.assertEqual(hedge.quantity, Decimal("0.010"))                                  # hedged = filled, once
 
     def test_an_amend_timeout_then_a_late_success_makes_no_duplicate(self):
         self.build("silent")

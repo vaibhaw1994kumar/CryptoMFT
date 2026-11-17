@@ -1,0 +1,618 @@
+{"event": "OPPORTUNITY", "stage": "decision", "ts": 1793271601.6559591}
+{"kind": "book", "stage": "market_event_received", "ts": 1793271601.6559591, "venue": "signal-trigger"}
+{"cumulative_filled_quantity": "0", "event": "ORDER_LIFECYCLE", "order_id": "45e96642-e838-5bf1-aa12-976c91785f02", "reason": "", "source": "INTERNAL", "stage": "request_sent", "ts": 1793271601.6559591, "venue": "BYBIT"}
+{"cumulative_filled_quantity": "0", "event": "ORDER_LIFECYCLE", "order_id": "45e96642-e838-5bf1-aa12-976c91785f02", "reason": "", "source": "ADAPTER_CALLBACK", "stage": "exchange_effective_notified", "ts": 1793271601.6638165, "venue": "BYBIT"}
+{"cumulative_filled_quantity": "1.0", "event": "FILL", "fill_price": "100.57", "fill_quantity": "1.0", "order_id": "45e96642-e838-5bf1-aa12-976c91785f02", "side": "BUY", "stage": "fill_booked", "ts": 1793271602.350808, "venue": "BYBIT"}
+{"cumulative_filled_quantity": "1.0", "event": "ORDER_LIFECYCLE", "order_id": "45e96642-e838-5bf1-aa12-976c91785f02", "reason": "", "source": "ADAPTER_CALLBACK", "stage": "fill_notified", "ts": 1793271602.350808, "venue": "BYBIT"}
+{"cap": "100.53", "event": "HEDGE_CAP_SIZE_AWARE", "side": "SELL", "stage": "hedge_cap_decided", "touch": "100.5800", "touch_covers": true, "ts": 1793271602.350808}
+{"event": "HEDGE_CHAIN_OPENED", "stage": "hedge_chain_opened", "ts": 1793271602.350808}
+{"event": "HEDGE_SUBMIT", "stage": "hedge_sent", "ts": 1793271602.350808}
+{"cumulative_filled_quantity": "0", "event": "ORDER_LIFECYCLE", "order_id": "3a755d44-3ff3-579e-bbe7-269a50c1ed8b", "reason": "", "source": "INTERNAL", "stage": "request_sent", "ts": 1793271602.350808, "venue": "BINANCE"}
+{"cumulative_filled_quantity": "0", "event": "ORDER_LIFECYCLE", "order_id": "3a755d44-3ff3-579e-bbe7-269a50c1ed8b", "reason": "", "source": "ADAPTER_CALLBACK", "stage": "exchange_effective_notified", "ts": 1793271602.385808, "venue": "BINANCE"}
+{"cumulative_filled_quantity": "1.0", "event": "FILL", "fill_price": "100.5800", "fill_quantity": "1.0", "order_id": "3a755d44-3ff3-579e-bbe7-269a50c1ed8b", "side": "SELL", "stage": "fill_booked", "ts": 1793271602.385808, "venue": "BINANCE"}
+{"cumulative_filled_quantity": "1.0", "event": "ORDER_LIFECYCLE", "order_id": "3a755d44-3ff3-579e-bbe7-269a50c1ed8b", "reason": "", "source": "ADAPTER_CALLBACK", "stage": "fill_notified", "ts": 1793271602.385808, "venue": "BINANCE"}
+{"event": "OPPORTUNITY", "stage": "decision", "ts": 1793271627.7960112}
+{"cumulative_filled_quantity": "0", "event": "ORDER_LIFECYCLE", "order_id": "f5a5c365-4a32-5104-9dac-d5cea21cb21c", "reason": "", "source": "INTERNAL", "stage": "request_sent", "ts": 1793271627.7960112, "venue": "BYBIT"}
+{"kind": "book", "stage": "market_event_received", "ts": 1793271627.7960114, "venue": "signal-trigger"}
+{"cumulative_filled_quantity": "0", "event": "ORDER_LIFECYCLE", "order_id": "f5a5c365-4a32-5104-9dac-d5cea21cb21c", "reason": "", "source": "ADAPTER_CALLBACK", "stage": "exchange_effective_notified", "ts": 1793271627.80417, "venue": "BYBIT"}
+{"cumulative_filled_quantity": "0.099035040185", "event": "FILL", "fill_price": "100.52", "fill_quantity": "0.099035040185", "order_id": "f5a5c365-4a32-5104-9dac-d5cea21cb21c", "side": "BUY", "stage": "fill_booked", "ts": 1793271635.5708232, "venue": "BYBIT"}
+{"cumulative_filled_quantity": "0.199035040185", "event": "FILL", "fill_price": "100.52", "fill_quantity": "0.100000000000", "order_id": "f5a5c365-4a32-5104-9dac-d5cea21cb21c", "side": "BUY", "stage": "fill_booked", "ts": 1793271635.5708232, "venue": "BYBIT"}
+{"cumulative_filled_quantity": "1.0", "event": "FILL", "fill_price": "100.52", "fill_quantity": "0.800964959815", "order_id": "f5a5c365-4a32-5104-9dac-d5cea21cb21c", "side": "BUY", "stage": "fill_booked", "ts": 1793271635.5708232, "venue": "BYBIT"}
+{"cumulative_filled_quantity": "0.099035040185", "event": "ORDER_LIFECYCLE", "order_id": "f5a5c365-4a32-5104-9dac-d5cea21cb21c", "reason": "", "source": "ADAPTER_CALLBACK", "stage": "fill_notified", "ts": 1793271635.5708232, "venue": "BYBIT"}
+{"cumulative_filled_quantity": "0.199035040185", "event": "ORDER_LIFECYCLE", "order_id": "f5a5c365-4a32-5104-9dac-d5cea21cb21c", "reason": "", "source": "ADAPTER_CALLBACK", "stage": "fill_notified", "ts": 1793271635.5708232, "venue": "BYBIT"}
+{"cumulative_filled_quantity": "1.0", "event": "ORDER_LIFECYCLE", "order_id": "f5a5c365-4a32-5104-9dac-d5cea21cb21c", "reason": "", "source": "ADAPTER_CALLBACK", "stage": "fill_notified", "ts": 1793271635.5708232, "venue": "BYBIT"}
+{"cap": "100.48", "event": "HEDGE_CAP_SIZE_AWARE", "side": "SELL", "stage": "hedge_cap_decided", "touch": "100.5300", "touch_covers": true, "ts": 1793271635.5708232}
+{"cap": "100.48", "event": "HEDGE_CAP_SIZE_AWARE", "side": "SELL", "stage": "hedge_cap_decided", "touch": "100.5300", "touch_covers": true, "ts": 1793271635.5708232}
+{"cap": "100.48", "event": "HEDGE_CAP_SIZE_AWARE", "side": "SELL", "stage": "hedge_cap_decided", "touch": "100.5300", "touch_covers": true, "ts": 1793271635.5708232}
+{"event": "HEDGE_CHAIN_OPENED", "stage": "hedge_chain_opened", "ts": 1793271635.5708232}
+{"event": "HEDGE_CHAIN_OPENED", "stage": "hedge_chain_opened", "ts": 1793271635.5708232}
+{"event": "HEDGE_CHAIN_OPENED", "stage": "hedge_chain_opened", "ts": 1793271635.5708232}
+{"event": "HEDGE_SUBMIT", "stage": "hedge_sent", "ts": 1793271635.5708232}
+{"event": "HEDGE_SUBMIT", "stage": "hedge_sent", "ts": 1793271635.5708232}
+{"event": "HEDGE_SUBMIT", "stage": "hedge_sent", "ts": 1793271635.5708232}
+{"cumulative_filled_quantity": "0", "event": "ORDER_LIFECYCLE", "order_id": "1688213f-de10-56ed-9365-880fe25056e4", "reason": "", "source": "INTERNAL", "stage": "request_sent", "ts": 1793271635.5708232, "venue": "BINANCE"}
+{"cumulative_filled_quantity": "0", "event": "ORDER_LIFECYCLE", "order_id": "9d5034d3-5489-5ce9-97f4-ba598ae14eac", "reason": "", "source": "INTERNAL", "stage": "request_sent", "ts": 1793271635.5708232, "venue": "BINANCE"}
+{"cumulative_filled_quantity": "0", "event": "ORDER_LIFECYCLE", "order_id": "a1efedb3-9b03-5037-a63d-4fb7102b7717", "reason": "", "source": "INTERNAL", "stage": "request_sent", "ts": 1793271635.5708232, "venue": "BINANCE"}
+{"cumulative_filled_quantity": "0", "event": "ORDER_LIFECYCLE", "order_id": "9d5034d3-5489-5ce9-97f4-ba598ae14eac", "reason": "", "source": "ADAPTER_CALLBACK", "stage": "exchange_effective_notified", "ts": 1793271635.6058233, "venue": "BINANCE"}
+{"cumulative_filled_quantity": "0.1", "event": "FILL", "fill_price": "100.5300", "fill_quantity": "0.1", "order_id": "9d5034d3-5489-5ce9-97f4-ba598ae14eac", "side": "SELL", "stage": "fill_booked", "ts": 1793271635.6058233, "venue": "BINANCE"}
+{"cumulative_filled_quantity": "0.1", "event": "ORDER_LIFECYCLE", "order_id": "9d5034d3-5489-5ce9-97f4-ba598ae14eac", "reason": "", "source": "ADAPTER_CALLBACK", "stage": "fill_notified", "ts": 1793271635.6058233, "venue": "BINANCE"}
+{"cumulative_filled_quantity": "0", "event": "ORDER_LIFECYCLE", "order_id": "a1efedb3-9b03-5037-a63d-4fb7102b7717", "reason": "", "source": "ADAPTER_CALLBACK", "stage": "exchange_effective_notified", "ts": 1793271635.610092, "venue": "BINANCE"}
+{"cumulative_filled_quantity": "0.81", "event": "FILL", "fill_price": "100.5300", "fill_quantity": "0.81", "order_id": "a1efedb3-9b03-5037-a63d-4fb7102b7717", "side": "SELL", "stage": "fill_booked", "ts": 1793271635.610092, "venue": "BINANCE"}
+{"cumulative_filled_quantity": "0.81", "event": "ORDER_LIFECYCLE", "order_id": "a1efedb3-9b03-5037-a63d-4fb7102b7717", "reason": "", "source": "ADAPTER_CALLBACK", "stage": "fill_notified", "ts": 1793271635.610092, "venue": "BINANCE"}
+{"cumulative_filled_quantity": "0", "event": "ORDER_LIFECYCLE", "order_id": "1688213f-de10-56ed-9365-880fe25056e4", "reason": "", "source": "ADAPTER_CALLBACK", "stage": "exchange_effective_notified", "ts": 1793271635.6106694, "venue": "BINANCE"}
+{"cumulative_filled_quantity": "0.09", "event": "FILL", "fill_price": "100.5300", "fill_quantity": "0.09", "order_id": "1688213f-de10-56ed-9365-880fe25056e4", "side": "SELL", "stage": "fill_booked", "ts": 1793271635.6106694, "venue": "BINANCE"}
+{"cumulative_filled_quantity": "0.09", "event": "ORDER_LIFECYCLE", "order_id": "1688213f-de10-56ed-9365-880fe25056e4", "reason": "", "source": "ADAPTER_CALLBACK", "stage": "fill_notified", "ts": 1793271635.6106694, "venue": "BINANCE"}
+{"event": "OPPORTUNITY", "stage": "decision", "ts": 1793271682.8449905}
+{"kind": "book", "stage": "market_event_received", "ts": 1793271682.8449905, "venue": "signal-trigger"}
+{"cumulative_filled_quantity": "0", "event": "ORDER_LIFECYCLE", "order_id": "193608a0-a937-59d8-969c-23a0529ea980", "reason": "", "source": "INTERNAL", "stage": "request_sent", "ts": 1793271682.8449905, "venue": "BYBIT"}
+{"cumulative_filled_quantity": "0", "event": "ORDER_LIFECYCLE", "order_id": "193608a0-a937-59d8-969c-23a0529ea980", "reason": "", "source": "ADAPTER_CALLBACK", "stage": "exchange_effective_notified", "ts": 1793271682.8540487, "venue": "BYBIT"}
+{"cumulative_filled_quantity": "0.1", "event": "FILL", "fill_price": "100.57", "fill_quantity": "0.1", "order_id": "193608a0-a937-59d8-969c-23a0529ea980", "side": "BUY", "stage": "fill_booked", "ts": 1793271683.2878253, "venue": "BYBIT"}
+{"cumulative_filled_quantity": "0.4", "event": "FILL", "fill_price": "100.57", "fill_quantity": "0.3", "order_id": "193608a0-a937-59d8-969c-23a0529ea980", "side": "BUY", "stage": "fill_booked", "ts": 1793271683.2878253, "venue": "BYBIT"}
+{"cumulative_filled_quantity": "0.7", "event": "FILL", "fill_price": "100.57", "fill_quantity": "0.3", "order_id": "193608a0-a937-59d8-969c-23a0529ea980", "side": "BUY", "stage": "fill_booked", "ts": 1793271683.2878253, "venue": "BYBIT"}
+{"cumulative_filled_quantity": "0.8", "event": "FILL", "fill_price": "100.57", "fill_quantity": "0.1", "order_id": "193608a0-a937-59d8-969c-23a0529ea980", "side": "BUY", "stage": "fill_booked", "ts": 1793271683.2878253, "venue": "BYBIT"}
+{"cumulative_filled_quantity": "0.9", "event": "FILL", "fill_price": "100.57", "fill_quantity": "0.1", "order_id": "193608a0-a937-59d8-969c-23a0529ea980", "side": "BUY", "stage": "fill_booked", "ts": 1793271683.2878253, "venue": "BYBIT"}
+{"cumulative_filled_quantity": "0.1", "event": "ORDER_LIFECYCLE", "order_id": "193608a0-a937-59d8-969c-23a0529ea980", "reason": "", "source": "ADAPTER_CALLBACK", "stage": "fill_notified", "ts": 1793271683.2878253, "venue": "BYBIT"}
+{"cumulative_filled_quantity": "0.4", "event": "ORDER_LIFECYCLE", "order_id": "193608a0-a937-59d8-969c-23a0529ea980", "reason": "", "source": "ADAPTER_CALLBACK", "stage": "fill_notified", "ts": 1793271683.2878253, "venue": "BYBIT"}
+{"cumulative_filled_quantity": "0.7", "event": "ORDER_LIFECYCLE", "order_id": "193608a0-a937-59d8-969c-23a0529ea980", "reason": "", "source": "ADAPTER_CALLBACK", "stage": "fill_notified", "ts": 1793271683.2878253, "venue": "BYBIT"}
+{"cumulative_filled_quantity": "0.8", "event": "ORDER_LIFECYCLE", "order_id": "193608a0-a937-59d8-969c-23a0529ea980", "reason": "", "source": "ADAPTER_CALLBACK", "stage": "fill_notified", "ts": 1793271683.2878253, "venue": "BYBIT"}
+{"cumulative_filled_quantity": "0.9", "event": "ORDER_LIFECYCLE", "order_id": "193608a0-a937-59d8-969c-23a0529ea980", "reason": "", "source": "ADAPTER_CALLBACK", "stage": "fill_notified", "ts": 1793271683.2878253, "venue": "BYBIT"}
+{"cap": "100.53", "event": "HEDGE_CAP_SIZE_AWARE", "side": "SELL", "stage": "hedge_cap_decided", "touch": "100.5800", "touch_covers": true, "ts": 1793271683.2878253}
+{"cap": "100.53", "event": "HEDGE_CAP_SIZE_AWARE", "side": "SELL", "stage": "hedge_cap_decided", "touch": "100.5800", "touch_covers": true, "ts": 1793271683.2878253}
+{"cap": "100.53", "event": "HEDGE_CAP_SIZE_AWARE", "side": "SELL", "stage": "hedge_cap_decided", "touch": "100.5800", "touch_covers": true, "ts": 1793271683.2878253}
+{"cap": "100.53", "event": "HEDGE_CAP_SIZE_AWARE", "side": "SELL", "stage": "hedge_cap_decided", "touch": "100.5800", "touch_covers": true, "ts": 1793271683.2878253}
+{"cap": "100.53", "event": "HEDGE_CAP_SIZE_AWARE", "side": "SELL", "stage": "hedge_cap_decided", "touch": "100.5800", "touch_covers": true, "ts": 1793271683.2878253}
+{"event": "HEDGE_CHAIN_OPENED", "stage": "hedge_chain_opened", "ts": 1793271683.2878253}
+{"event": "HEDGE_CHAIN_OPENED", "stage": "hedge_chain_opened", "ts": 1793271683.2878253}
+{"event": "HEDGE_CHAIN_OPENED", "stage": "hedge_chain_opened", "ts": 1793271683.2878253}
+{"event": "HEDGE_CHAIN_OPENED", "stage": "hedge_chain_opened", "ts": 1793271683.2878253}
+{"event": "HEDGE_CHAIN_OPENED", "stage": "hedge_chain_opened", "ts": 1793271683.2878253}
+{"event": "HEDGE_SUBMIT", "stage": "hedge_sent", "ts": 1793271683.2878253}
+{"event": "HEDGE_SUBMIT", "stage": "hedge_sent", "ts": 1793271683.2878253}
+{"event": "HEDGE_SUBMIT", "stage": "hedge_sent", "ts": 1793271683.2878253}
+{"event": "HEDGE_SUBMIT", "stage": "hedge_sent", "ts": 1793271683.2878253}
+{"event": "HEDGE_SUBMIT", "stage": "hedge_sent", "ts": 1793271683.2878253}
+{"cumulative_filled_quantity": "0", "event": "ORDER_LIFECYCLE", "order_id": "b0f45da8-7bec-598a-b363-e8ae0eb561a2", "reason": "", "source": "INTERNAL", "stage": "request_sent", "ts": 1793271683.2878253, "venue": "BINANCE"}
+{"cumulative_filled_quantity": "0", "event": "ORDER_LIFECYCLE", "order_id": "0ab4c67b-416a-5e21-bb01-cc27752c428b", "reason": "", "source": "INTERNAL", "stage": "request_sent", "ts": 1793271683.2878253, "venue": "BINANCE"}
+{"cumulative_filled_quantity": "0", "event": "ORDER_LIFECYCLE", "order_id": "b7b49032-702c-5d10-85d2-d4d981b35a0b", "reason": "", "source": "INTERNAL", "stage": "request_sent", "ts": 1793271683.2878253, "venue": "BINANCE"}
+{"cumulative_filled_quantity": "0", "event": "ORDER_LIFECYCLE", "order_id": "cbdb566e-d65b-51ed-b36e-a969c9815054", "reason": "", "source": "INTERNAL", "stage": "request_sent", "ts": 1793271683.2878253, "venue": "BINANCE"}
+{"cumulative_filled_quantity": "0", "event": "ORDER_LIFECYCLE", "order_id": "cbfcd277-6990-52c1-abf6-6a35a0227f4a", "reason": "", "source": "INTERNAL", "stage": "request_sent", "ts": 1793271683.2878253, "venue": "BINANCE"}
+{"event": "AMEND_REQUESTED", "order_id": "193608a0-a937-59d8-969c-23a0529ea980", "reason": "reprice:adverse_move", "replacement_order_id": "7572bd4a-56ff-59c2-8c2a-6834a57f0f78", "stage": "amend_requested", "ts": 1793271683.2888303, "venue": "BYBIT"}
+{"cumulative_filled_quantity": "0.9", "event": "ORDER_LIFECYCLE", "order_id": "193608a0-a937-59d8-969c-23a0529ea980", "reason": "", "source": "INTERNAL", "stage": "amend_requested", "ts": 1793271683.2888303, "venue": "BYBIT"}
+{"cumulative_filled_quantity": "0", "event": "ORDER_LIFECYCLE", "order_id": "7572bd4a-56ff-59c2-8c2a-6834a57f0f78", "reason": "", "source": "INTERNAL", "stage": "request_sent", "ts": 1793271683.2888303, "venue": "BYBIT"}
+{"event": "AMEND_CONFIRMED", "order_id": "193608a0-a937-59d8-969c-23a0529ea980", "replacement_order_id": "7572bd4a-56ff-59c2-8c2a-6834a57f0f78", "stage": "amend_confirmed", "ts": 1793271683.294088, "venue": "BYBIT"}
+{"cumulative_filled_quantity": "0", "event": "ORDER_LIFECYCLE", "order_id": "7572bd4a-56ff-59c2-8c2a-6834a57f0f78", "reason": "", "source": "ADAPTER_CALLBACK", "stage": "amend_confirmed_notified", "ts": 1793271683.294088, "venue": "BYBIT"}
+{"cumulative_filled_quantity": "0.9", "event": "ORDER_LIFECYCLE", "order_id": "193608a0-a937-59d8-969c-23a0529ea980", "reason": "replaced by 7572bd4a-56ff-59c2-8c2a-6834a57f0f78", "source": "ADAPTER_CALLBACK", "stage": "cancel_notified", "ts": 1793271683.294088, "venue": "BYBIT"}
+{"cumulative_filled_quantity": "0", "event": "ORDER_LIFECYCLE", "order_id": "7572bd4a-56ff-59c2-8c2a-6834a57f0f78", "reason": "no valid book at arrival", "source": "ADAPTER_CALLBACK", "stage": "reject_notified", "ts": 1793271683.2983756, "venue": "BYBIT"}
+{"cumulative_filled_quantity": "0", "event": "ORDER_LIFECYCLE", "order_id": "b0f45da8-7bec-598a-b363-e8ae0eb561a2", "reason": "", "source": "ADAPTER_CALLBACK", "stage": "exchange_effective_notified", "ts": 1793271683.3228254, "venue": "BINANCE"}
+{"cumulative_filled_quantity": "0", "event": "ORDER_LIFECYCLE", "order_id": "0ab4c67b-416a-5e21-bb01-cc27752c428b", "reason": "", "source": "ADAPTER_CALLBACK", "stage": "exchange_effective_notified", "ts": 1793271683.3228254, "venue": "BINANCE"}
+{"cumulative_filled_quantity": "0", "event": "ORDER_LIFECYCLE", "order_id": "cbfcd277-6990-52c1-abf6-6a35a0227f4a", "reason": "", "source": "ADAPTER_CALLBACK", "stage": "exchange_effective_notified", "ts": 1793271683.3228254, "venue": "BINANCE"}
+{"cumulative_filled_quantity": "0.1", "event": "FILL", "fill_price": "100.5600", "fill_quantity": "0.1", "order_id": "b0f45da8-7bec-598a-b363-e8ae0eb561a2", "side": "SELL", "stage": "fill_booked", "ts": 1793271683.3228254, "venue": "BINANCE"}
+{"cumulative_filled_quantity": "0.3", "event": "FILL", "fill_price": "100.5600", "fill_quantity": "0.3", "order_id": "0ab4c67b-416a-5e21-bb01-cc27752c428b", "side": "SELL", "stage": "fill_booked", "ts": 1793271683.3228254, "venue": "BINANCE"}
+{"cumulative_filled_quantity": "0.1", "event": "FILL", "fill_price": "100.5600", "fill_quantity": "0.1", "order_id": "cbfcd277-6990-52c1-abf6-6a35a0227f4a", "side": "SELL", "stage": "fill_booked", "ts": 1793271683.3228254, "venue": "BINANCE"}
+{"cumulative_filled_quantity": "0.1", "event": "ORDER_LIFECYCLE", "order_id": "b0f45da8-7bec-598a-b363-e8ae0eb561a2", "reason": "", "source": "ADAPTER_CALLBACK", "stage": "fill_notified", "ts": 1793271683.3228254, "venue": "BINANCE"}
+{"cumulative_filled_quantity": "0.3", "event": "ORDER_LIFECYCLE", "order_id": "0ab4c67b-416a-5e21-bb01-cc27752c428b", "reason": "", "source": "ADAPTER_CALLBACK", "stage": "fill_notified", "ts": 1793271683.3228254, "venue": "BINANCE"}
+{"cumulative_filled_quantity": "0.1", "event": "ORDER_LIFECYCLE", "order_id": "cbfcd277-6990-52c1-abf6-6a35a0227f4a", "reason": "", "source": "ADAPTER_CALLBACK", "stage": "fill_notified", "ts": 1793271683.3228254, "venue": "BINANCE"}
+{"cumulative_filled_quantity": "0", "event": "ORDER_LIFECYCLE", "order_id": "b7b49032-702c-5d10-85d2-d4d981b35a0b", "reason": "", "source": "ADAPTER_CALLBACK", "stage": "exchange_effective_notified", "ts": 1793271683.3239558, "venue": "BINANCE"}
+{"cumulative_filled_quantity": "0.3", "event": "FILL", "fill_price": "100.5600", "fill_quantity": "0.3", "order_id": "b7b49032-702c-5d10-85d2-d4d981b35a0b", "side": "SELL", "stage": "fill_booked", "ts": 1793271683.3239558, "venue": "BINANCE"}
+{"cumulative_filled_quantity": "0.3", "event": "ORDER_LIFECYCLE", "order_id": "b7b49032-702c-5d10-85d2-d4d981b35a0b", "reason": "", "source": "ADAPTER_CALLBACK", "stage": "fill_notified", "ts": 1793271683.3239558, "venue": "BINANCE"}
+{"cumulative_filled_quantity": "0", "event": "ORDER_LIFECYCLE", "order_id": "cbdb566e-d65b-51ed-b36e-a969c9815054", "reason": "", "source": "ADAPTER_CALLBACK", "stage": "exchange_effective_notified", "ts": 1793271683.3320205, "venue": "BINANCE"}
+{"cumulative_filled_quantity": "0.1", "event": "FILL", "fill_price": "100.5600", "fill_quantity": "0.1", "order_id": "cbdb566e-d65b-51ed-b36e-a969c9815054", "side": "SELL", "stage": "fill_booked", "ts": 1793271683.3320205, "venue": "BINANCE"}
+{"cumulative_filled_quantity": "0.1", "event": "ORDER_LIFECYCLE", "order_id": "cbdb566e-d65b-51ed-b36e-a969c9815054", "reason": "", "source": "ADAPTER_CALLBACK", "stage": "fill_notified", "ts": 1793271683.3320205, "venue": "BINANCE"}
+{"event": "OPPORTUNITY", "stage": "decision", "ts": 1793271684.2983997}
+{"kind": "book", "stage": "market_event_received", "ts": 1793271684.2983997, "venue": "signal-trigger"}
+{"cumulative_filled_quantity": "0", "event": "ORDER_LIFECYCLE", "order_id": "8af55ac2-7241-5efd-9f92-b4f7dcec4c52", "reason": "", "source": "INTERNAL", "stage": "request_sent", "ts": 1793271684.2983997, "venue": "BYBIT"}
+{"cumulative_filled_quantity": "0", "event": "ORDER_LIFECYCLE", "order_id": "8af55ac2-7241-5efd-9f92-b4f7dcec4c52", "reason": "", "source": "ADAPTER_CALLBACK", "stage": "exchange_effective_notified", "ts": 1793271684.3036766, "venue": "BYBIT"}
+{"cumulative_filled_quantity": "0.3", "event": "FILL", "fill_price": "100.54", "fill_quantity": "0.3", "order_id": "8af55ac2-7241-5efd-9f92-b4f7dcec4c52", "side": "BUY", "stage": "fill_booked", "ts": 1793271684.4484324, "venue": "BYBIT"}
+{"cumulative_filled_quantity": "0.3", "event": "ORDER_LIFECYCLE", "order_id": "8af55ac2-7241-5efd-9f92-b4f7dcec4c52", "reason": "", "source": "ADAPTER_CALLBACK", "stage": "fill_notified", "ts": 1793271684.4484324, "venue": "BYBIT"}
+{"cap": "100.50", "event": "HEDGE_CAP_SIZE_AWARE", "side": "SELL", "stage": "hedge_cap_decided", "touch": "100.5500", "touch_covers": true, "ts": 1793271684.4484324}
+{"event": "HEDGE_CHAIN_OPENED", "stage": "hedge_chain_opened", "ts": 1793271684.4484324}
+{"event": "HEDGE_SUBMIT", "stage": "hedge_sent", "ts": 1793271684.4484324}
+{"cumulative_filled_quantity": "0", "event": "ORDER_LIFECYCLE", "order_id": "af69fa64-1cfb-5b3a-b978-3519af5cf1a9", "reason": "", "source": "INTERNAL", "stage": "request_sent", "ts": 1793271684.4484324, "venue": "BINANCE"}
+{"cumulative_filled_quantity": "0.3", "event": "ORDER_LIFECYCLE", "order_id": "8af55ac2-7241-5efd-9f92-b4f7dcec4c52", "reason": "", "source": "INTERNAL", "stage": "cancel_requested", "ts": 1793271684.457136, "venue": "BYBIT"}
+{"cumulative_filled_quantity": "0.3", "event": "ORDER_LIFECYCLE", "order_id": "8af55ac2-7241-5efd-9f92-b4f7dcec4c52", "reason": "", "source": "INTERNAL", "stage": "cancel_requested", "ts": 1793271684.457136, "venue": "BYBIT"}
+{"event": "QUOTE_WITHDRAWN", "net_edge_bps": -3.947126560458063, "order_id": "8af55ac2-7241-5efd-9f92-b4f7dcec4c52", "reason": "edge_below_threshold", "stage": "quote_withdrawn", "ts": 1793271684.457136, "venue": "BYBIT"}
+{"cumulative_filled_quantity": "0.3", "event": "ORDER_LIFECYCLE", "order_id": "8af55ac2-7241-5efd-9f92-b4f7dcec4c52", "reason": "", "source": "ADAPTER_CALLBACK", "stage": "cancel_notified", "ts": 1793271684.463476, "venue": "BYBIT"}
+{"cumulative_filled_quantity": "0", "event": "ORDER_LIFECYCLE", "order_id": "af69fa64-1cfb-5b3a-b978-3519af5cf1a9", "reason": "", "source": "ADAPTER_CALLBACK", "stage": "exchange_effective_notified", "ts": 1793271684.4961576, "venue": "BINANCE"}
+{"cumulative_filled_quantity": "0.3", "event": "FILL", "fill_price": "100.5400", "fill_quantity": "0.3", "order_id": "af69fa64-1cfb-5b3a-b978-3519af5cf1a9", "side": "SELL", "stage": "fill_booked", "ts": 1793271684.4961576, "venue": "BINANCE"}
+{"cumulative_filled_quantity": "0.3", "event": "ORDER_LIFECYCLE", "order_id": "af69fa64-1cfb-5b3a-b978-3519af5cf1a9", "reason": "", "source": "ADAPTER_CALLBACK", "stage": "fill_notified", "ts": 1793271684.4961576, "venue": "BINANCE"}
+{"event": "OPPORTUNITY", "stage": "decision", "ts": 1793271686.1848323}
+{"kind": "book", "stage": "market_event_received", "ts": 1793271686.1848323, "venue": "signal-trigger"}
+{"cumulative_filled_quantity": "0", "event": "ORDER_LIFECYCLE", "order_id": "bfa7313a-08e9-5ede-8580-ae3822a2679c", "reason": "", "source": "INTERNAL", "stage": "request_sent", "ts": 1793271686.1848323, "venue": "BYBIT"}
+{"cumulative_filled_quantity": "0", "event": "ORDER_LIFECYCLE", "order_id": "bfa7313a-08e9-5ede-8580-ae3822a2679c", "reason": "", "source": "ADAPTER_CALLBACK", "stage": "exchange_effective_notified", "ts": 1793271686.1980934, "venue": "BYBIT"}
+{"cumulative_filled_quantity": "0", "event": "ORDER_LIFECYCLE", "order_id": "bfa7313a-08e9-5ede-8580-ae3822a2679c", "reason": "", "source": "INTERNAL", "stage": "cancel_requested", "ts": 1793271686.2295008, "venue": "BYBIT"}
+{"cumulative_filled_quantity": "0", "event": "ORDER_LIFECYCLE", "order_id": "bfa7313a-08e9-5ede-8580-ae3822a2679c", "reason": "", "source": "INTERNAL", "stage": "cancel_requested", "ts": 1793271686.2295008, "venue": "BYBIT"}
+{"event": "QUOTE_WITHDRAWN", "net_edge_bps": -4.210343225456084, "order_id": "bfa7313a-08e9-5ede-8580-ae3822a2679c", "reason": "edge_below_threshold", "stage": "quote_withdrawn", "ts": 1793271686.2295008, "venue": "BYBIT"}
+{"cumulative_filled_quantity": "0.0", "event": "ORDER_LIFECYCLE", "order_id": "bfa7313a-08e9-5ede-8580-ae3822a2679c", "reason": "", "source": "ADAPTER_CALLBACK", "stage": "cancel_notified", "ts": 1793271686.2406187, "venue": "BYBIT"}
+{"event": "OPPORTUNITY", "stage": "decision", "ts": 1793271690.95449}
+{"kind": "book", "stage": "market_event_received", "ts": 1793271690.95449, "venue": "signal-trigger"}
+{"cumulative_filled_quantity": "0", "event": "ORDER_LIFECYCLE", "order_id": "5249fb6f-9eb6-533a-b3ca-956ad44d0222", "reason": "", "source": "INTERNAL", "stage": "request_sent", "ts": 1793271690.95449, "venue": "BYBIT"}
+{"cumulative_filled_quantity": "0", "event": "ORDER_LIFECYCLE", "order_id": "5249fb6f-9eb6-533a-b3ca-956ad44d0222", "reason": "", "source": "ADAPTER_CALLBACK", "stage": "exchange_effective_notified", "ts": 1793271690.9620638, "venue": "BYBIT"}
+{"cumulative_filled_quantity": "0.2", "event": "FILL", "fill_price": "100.49", "fill_quantity": "0.2", "order_id": "5249fb6f-9eb6-533a-b3ca-956ad44d0222", "side": "BUY", "stage": "fill_booked", "ts": 1793271691.040109, "venue": "BYBIT"}
+{"cumulative_filled_quantity": "0.2", "event": "ORDER_LIFECYCLE", "order_id": "5249fb6f-9eb6-533a-b3ca-956ad44d0222", "reason": "", "source": "ADAPTER_CALLBACK", "stage": "fill_notified", "ts": 1793271691.040109, "venue": "BYBIT"}
+{"cap": "100.45", "event": "HEDGE_CAP_SIZE_AWARE", "side": "SELL", "stage": "hedge_cap_decided", "touch": "100.5000", "touch_covers": true, "ts": 1793271691.040109}
+{"event": "HEDGE_CHAIN_OPENED", "stage": "hedge_chain_opened", "ts": 1793271691.040109}
+{"event": "HEDGE_SUBMIT", "stage": "hedge_sent", "ts": 1793271691.040109}
+{"cumulative_filled_quantity": "0", "event": "ORDER_LIFECYCLE", "order_id": "2889c0dc-dc6f-5383-98bf-0ffcfadfa22b", "reason": "", "source": "INTERNAL", "stage": "request_sent", "ts": 1793271691.040109, "venue": "BINANCE"}
+{"cumulative_filled_quantity": "0", "event": "ORDER_LIFECYCLE", "order_id": "2889c0dc-dc6f-5383-98bf-0ffcfadfa22b", "reason": "", "source": "ADAPTER_CALLBACK", "stage": "exchange_effective_notified", "ts": 1793271691.089481, "venue": "BINANCE"}
+{"cumulative_filled_quantity": "0.2", "event": "FILL", "fill_price": "100.5000", "fill_quantity": "0.2", "order_id": "2889c0dc-dc6f-5383-98bf-0ffcfadfa22b", "side": "SELL", "stage": "fill_booked", "ts": 1793271691.089481, "venue": "BINANCE"}
+{"cumulative_filled_quantity": "0.2", "event": "ORDER_LIFECYCLE", "order_id": "2889c0dc-dc6f-5383-98bf-0ffcfadfa22b", "reason": "", "source": "ADAPTER_CALLBACK", "stage": "fill_notified", "ts": 1793271691.089481, "venue": "BINANCE"}
+{"cumulative_filled_quantity": "0.2", "event": "ORDER_LIFECYCLE", "order_id": "5249fb6f-9eb6-533a-b3ca-956ad44d0222", "reason": "", "source": "INTERNAL", "stage": "cancel_requested", "ts": 1793271691.1046083, "venue": "BYBIT"}
+{"cumulative_filled_quantity": "0.2", "event": "ORDER_LIFECYCLE", "order_id": "5249fb6f-9eb6-533a-b3ca-956ad44d0222", "reason": "", "source": "INTERNAL", "stage": "cancel_requested", "ts": 1793271691.1046083, "venue": "BYBIT"}
+{"event": "QUOTE_WITHDRAWN", "net_edge_bps": -3.9471265604586296, "order_id": "5249fb6f-9eb6-533a-b3ca-956ad44d0222", "reason": "edge_below_threshold", "stage": "quote_withdrawn", "ts": 1793271691.1046083, "venue": "BYBIT"}
+{"cumulative_filled_quantity": "0.2", "event": "ORDER_LIFECYCLE", "order_id": "5249fb6f-9eb6-533a-b3ca-956ad44d0222", "reason": "", "source": "ADAPTER_CALLBACK", "stage": "cancel_notified", "ts": 1793271691.1094568, "venue": "BYBIT"}
+{"event": "OPPORTUNITY", "stage": "decision", "ts": 1793271692.2398727}
+{"kind": "book", "stage": "market_event_received", "ts": 1793271692.2398727, "venue": "signal-trigger"}
+{"cumulative_filled_quantity": "0", "event": "ORDER_LIFECYCLE", "order_id": "4498c5d1-a9ba-5d04-8621-b2a1793cedad", "reason": "", "source": "INTERNAL", "stage": "request_sent", "ts": 1793271692.2398727, "venue": "BYBIT"}
+{"cumulative_filled_quantity": "0", "event": "ORDER_LIFECYCLE", "order_id": "4498c5d1-a9ba-5d04-8621-b2a1793cedad", "reason": "", "source": "ADAPTER_CALLBACK", "stage": "exchange_effective_notified", "ts": 1793271692.245772, "venue": "BYBIT"}
+{"cumulative_filled_quantity": "0", "event": "ORDER_LIFECYCLE", "order_id": "4498c5d1-a9ba-5d04-8621-b2a1793cedad", "reason": "", "source": "INTERNAL", "stage": "cancel_requested", "ts": 1793271707.245772, "venue": "BYBIT"}
+{"cumulative_filled_quantity": "0", "event": "ORDER_LIFECYCLE", "order_id": "4498c5d1-a9ba-5d04-8621-b2a1793cedad", "reason": "", "source": "INTERNAL", "stage": "cancel_requested", "ts": 1793271707.245772, "venue": "BYBIT"}
+{"cumulative_filled_quantity": "0.0", "event": "ORDER_LIFECYCLE", "order_id": "4498c5d1-a9ba-5d04-8621-b2a1793cedad", "reason": "", "source": "ADAPTER_CALLBACK", "stage": "cancel_notified", "ts": 1793271707.2613037, "venue": "BYBIT"}
+{"event": "OPPORTUNITY", "stage": "decision", "ts": 1793271707.331637}
+{"kind": "book", "stage": "market_event_received", "ts": 1793271707.331637, "venue": "signal-trigger"}
+{"cumulative_filled_quantity": "0", "event": "ORDER_LIFECYCLE", "order_id": "81bd5157-49af-575a-8336-403f40861092", "reason": "", "source": "INTERNAL", "stage": "request_sent", "ts": 1793271707.331637, "venue": "BYBIT"}
+{"cumulative_filled_quantity": "0", "event": "ORDER_LIFECYCLE", "order_id": "81bd5157-49af-575a-8336-403f40861092", "reason": "", "source": "ADAPTER_CALLBACK", "stage": "exchange_effective_notified", "ts": 1793271707.3374205, "venue": "BYBIT"}
+{"cumulative_filled_quantity": "0", "event": "ORDER_LIFECYCLE", "order_id": "81bd5157-49af-575a-8336-403f40861092", "reason": "", "source": "INTERNAL", "stage": "cancel_requested", "ts": 1793271708.0760133, "venue": "BYBIT"}
+{"cumulative_filled_quantity": "0", "event": "ORDER_LIFECYCLE", "order_id": "81bd5157-49af-575a-8336-403f40861092", "reason": "", "source": "INTERNAL", "stage": "cancel_requested", "ts": 1793271708.0760133, "venue": "BYBIT"}
+{"event": "QUOTE_WITHDRAWN", "net_edge_bps": -3.9471265604586296, "order_id": "81bd5157-49af-575a-8336-403f40861092", "reason": "edge_below_threshold", "stage": "quote_withdrawn", "ts": 1793271708.0760133, "venue": "BYBIT"}
+{"cumulative_filled_quantity": "0.0", "event": "ORDER_LIFECYCLE", "order_id": "81bd5157-49af-575a-8336-403f40861092", "reason": "", "source": "ADAPTER_CALLBACK", "stage": "cancel_notified", "ts": 1793271708.0847826, "venue": "BYBIT"}
+{"kind": "book", "stage": "market_event_received", "ts": 1793271713.2386794, "venue": "signal-trigger"}
+{"event": "OPPORTUNITY", "stage": "decision", "ts": 1793271713.2386796}
+{"cumulative_filled_quantity": "0", "event": "ORDER_LIFECYCLE", "order_id": "c23852cb-33aa-5a8e-a08b-129a7befc3c3", "reason": "", "source": "INTERNAL", "stage": "request_sent", "ts": 1793271713.2386796, "venue": "BYBIT"}
+{"cumulative_filled_quantity": "0", "event": "ORDER_LIFECYCLE", "order_id": "c23852cb-33aa-5a8e-a08b-129a7befc3c3", "reason": "", "source": "ADAPTER_CALLBACK", "stage": "exchange_effective_notified", "ts": 1793271713.2410977, "venue": "BYBIT"}
+{"cumulative_filled_quantity": "0", "event": "ORDER_LIFECYCLE", "order_id": "c23852cb-33aa-5a8e-a08b-129a7befc3c3", "reason": "", "source": "INTERNAL", "stage": "cancel_requested", "ts": 1793271728.2410977, "venue": "BYBIT"}
+{"cumulative_filled_quantity": "0", "event": "ORDER_LIFECYCLE", "order_id": "c23852cb-33aa-5a8e-a08b-129a7befc3c3", "reason": "", "source": "INTERNAL", "stage": "cancel_requested", "ts": 1793271728.2410977, "venue": "BYBIT"}
+{"cumulative_filled_quantity": "0.0", "event": "ORDER_LIFECYCLE", "order_id": "c23852cb-33aa-5a8e-a08b-129a7befc3c3", "reason": "", "source": "ADAPTER_CALLBACK", "stage": "cancel_notified", "ts": 1793271728.249675, "venue": "BYBIT"}
+{"event": "OPPORTUNITY", "stage": "decision", "ts": 1793271730.94825}
+{"kind": "book", "stage": "market_event_received", "ts": 1793271730.94825, "venue": "signal-trigger"}
+{"cumulative_filled_quantity": "0", "event": "ORDER_LIFECYCLE", "order_id": "47baac25-464d-5f5f-97ea-ec1b6f7d0899", "reason": "", "source": "INTERNAL", "stage": "request_sent", "ts": 1793271730.94825, "venue": "BYBIT"}
+{"cumulative_filled_quantity": "0", "event": "ORDER_LIFECYCLE", "order_id": "47baac25-464d-5f5f-97ea-ec1b6f7d0899", "reason": "postonly_would_take_liquidity", "source": "ADAPTER_CALLBACK", "stage": "reject_notified", "ts": 1793271730.9555476, "venue": "BYBIT"}
+{"event": "OPPORTUNITY", "stage": "decision", "ts": 1793271730.95965}
+{"kind": "book", "stage": "market_event_received", "ts": 1793271730.95965, "venue": "signal-trigger"}
+{"cumulative_filled_quantity": "0", "event": "ORDER_LIFECYCLE", "order_id": "bcb7b2e9-d98f-5441-8e9a-1c9942cb3178", "reason": "", "source": "INTERNAL", "stage": "request_sent", "ts": 1793271730.95965, "venue": "BYBIT"}
+{"cumulative_filled_quantity": "0", "event": "ORDER_LIFECYCLE", "order_id": "bcb7b2e9-d98f-5441-8e9a-1c9942cb3178", "reason": "", "source": "ADAPTER_CALLBACK", "stage": "exchange_effective_notified", "ts": 1793271730.970605, "venue": "BYBIT"}
+{"cumulative_filled_quantity": "1.0", "event": "FILL", "fill_price": "100.45", "fill_quantity": "1.0", "order_id": "bcb7b2e9-d98f-5441-8e9a-1c9942cb3178", "side": "BUY", "stage": "fill_booked", "ts": 1793271742.8521385, "venue": "BYBIT"}
+{"cumulative_filled_quantity": "1.0", "event": "ORDER_LIFECYCLE", "order_id": "bcb7b2e9-d98f-5441-8e9a-1c9942cb3178", "reason": "", "source": "ADAPTER_CALLBACK", "stage": "fill_notified", "ts": 1793271742.8521385, "venue": "BYBIT"}
+{"cap": "100.41", "event": "HEDGE_CAP_SIZE_AWARE", "side": "SELL", "stage": "hedge_cap_decided", "touch": "100.4600", "touch_covers": true, "ts": 1793271742.8521385}
+{"event": "HEDGE_CHAIN_OPENED", "stage": "hedge_chain_opened", "ts": 1793271742.8521385}
+{"event": "HEDGE_SUBMIT", "stage": "hedge_sent", "ts": 1793271742.8521385}
+{"cumulative_filled_quantity": "0", "event": "ORDER_LIFECYCLE", "order_id": "9de47e69-af2d-5043-8d74-6375d61bda39", "reason": "", "source": "INTERNAL", "stage": "request_sent", "ts": 1793271742.8521385, "venue": "BINANCE"}
+{"cumulative_filled_quantity": "0", "event": "ORDER_LIFECYCLE", "order_id": "9de47e69-af2d-5043-8d74-6375d61bda39", "reason": "", "source": "ADAPTER_CALLBACK", "stage": "exchange_effective_notified", "ts": 1793271742.9004164, "venue": "BINANCE"}
+{"cumulative_filled_quantity": "1.0", "event": "FILL", "fill_price": "100.4600", "fill_quantity": "1.0", "order_id": "9de47e69-af2d-5043-8d74-6375d61bda39", "side": "SELL", "stage": "fill_booked", "ts": 1793271742.9004164, "venue": "BINANCE"}
+{"cumulative_filled_quantity": "1.0", "event": "ORDER_LIFECYCLE", "order_id": "9de47e69-af2d-5043-8d74-6375d61bda39", "reason": "", "source": "ADAPTER_CALLBACK", "stage": "fill_notified", "ts": 1793271742.9004164, "venue": "BINANCE"}
+{"event": "OPPORTUNITY", "stage": "decision", "ts": 1793271751.9383242}
+{"kind": "book", "stage": "market_event_received", "ts": 1793271751.9383242, "venue": "signal-trigger"}
+{"cumulative_filled_quantity": "0", "event": "ORDER_LIFECYCLE", "order_id": "6a2e2daa-5536-5da2-985d-d5ad350d9083", "reason": "", "source": "INTERNAL", "stage": "request_sent", "ts": 1793271751.9383242, "venue": "BYBIT"}
+{"cumulative_filled_quantity": "0", "event": "ORDER_LIFECYCLE", "order_id": "6a2e2daa-5536-5da2-985d-d5ad350d9083", "reason": "", "source": "ADAPTER_CALLBACK", "stage": "exchange_effective_notified", "ts": 1793271751.9418068, "venue": "BYBIT"}
+{"cumulative_filled_quantity": "0", "event": "ORDER_LIFECYCLE", "order_id": "6a2e2daa-5536-5da2-985d-d5ad350d9083", "reason": "", "source": "INTERNAL", "stage": "cancel_requested", "ts": 1793271766.9418068, "venue": "BYBIT"}
+{"cumulative_filled_quantity": "0", "event": "ORDER_LIFECYCLE", "order_id": "6a2e2daa-5536-5da2-985d-d5ad350d9083", "reason": "", "source": "INTERNAL", "stage": "cancel_requested", "ts": 1793271766.9418068, "venue": "BYBIT"}
+{"cumulative_filled_quantity": "0.0", "event": "ORDER_LIFECYCLE", "order_id": "6a2e2daa-5536-5da2-985d-d5ad350d9083", "reason": "", "source": "ADAPTER_CALLBACK", "stage": "cancel_notified", "ts": 1793271766.9458435, "venue": "BYBIT"}
+{"event": "OPPORTUNITY", "stage": "decision", "ts": 1793271780.8581045}
+{"cumulative_filled_quantity": "0", "event": "ORDER_LIFECYCLE", "order_id": "2aa6e4e5-98b4-5f59-8f6d-bf8f8c049e1f", "reason": "", "source": "INTERNAL", "stage": "request_sent", "ts": 1793271780.8581045, "venue": "BYBIT"}
+{"kind": "book", "stage": "market_event_received", "ts": 1793271780.8581047, "venue": "signal-trigger"}
+{"cumulative_filled_quantity": "0", "event": "ORDER_LIFECYCLE", "order_id": "2aa6e4e5-98b4-5f59-8f6d-bf8f8c049e1f", "reason": "", "source": "ADAPTER_CALLBACK", "stage": "exchange_effective_notified", "ts": 1793271780.8684235, "venue": "BYBIT"}
+{"cumulative_filled_quantity": "0.5", "event": "FILL", "fill_price": "100.47", "fill_quantity": "0.5", "order_id": "2aa6e4e5-98b4-5f59-8f6d-bf8f8c049e1f", "side": "BUY", "stage": "fill_booked", "ts": 1793271782.4873817, "venue": "BYBIT"}
+{"cumulative_filled_quantity": "0.5", "event": "ORDER_LIFECYCLE", "order_id": "2aa6e4e5-98b4-5f59-8f6d-bf8f8c049e1f", "reason": "", "source": "ADAPTER_CALLBACK", "stage": "fill_notified", "ts": 1793271782.4873817, "venue": "BYBIT"}
+{"cap": "100.43", "event": "HEDGE_CAP_SIZE_AWARE", "side": "SELL", "stage": "hedge_cap_decided", "touch": "100.4800", "touch_covers": true, "ts": 1793271782.4873817}
+{"event": "HEDGE_CHAIN_OPENED", "stage": "hedge_chain_opened", "ts": 1793271782.4873817}
+{"event": "HEDGE_SUBMIT", "stage": "hedge_sent", "ts": 1793271782.4873817}
+{"cumulative_filled_quantity": "0", "event": "ORDER_LIFECYCLE", "order_id": "eee9acc3-4e19-5451-a91e-edc13ca001c3", "reason": "", "source": "INTERNAL", "stage": "request_sent", "ts": 1793271782.4873817, "venue": "BINANCE"}
+{"cumulative_filled_quantity": "0", "event": "ORDER_LIFECYCLE", "order_id": "eee9acc3-4e19-5451-a91e-edc13ca001c3", "reason": "", "source": "ADAPTER_CALLBACK", "stage": "exchange_effective_notified", "ts": 1793271782.5223818, "venue": "BINANCE"}
+{"cumulative_filled_quantity": "0.5", "event": "FILL", "fill_price": "100.4800", "fill_quantity": "0.5", "order_id": "eee9acc3-4e19-5451-a91e-edc13ca001c3", "side": "SELL", "stage": "fill_booked", "ts": 1793271782.5223818, "venue": "BINANCE"}
+{"cumulative_filled_quantity": "0.5", "event": "ORDER_LIFECYCLE", "order_id": "eee9acc3-4e19-5451-a91e-edc13ca001c3", "reason": "", "source": "ADAPTER_CALLBACK", "stage": "fill_notified", "ts": 1793271782.5223818, "venue": "BINANCE"}
+{"event": "OPPORTUNITY", "stage": "decision", "ts": 1793272526.6074421}
+{"cumulative_filled_quantity": "0", "event": "ORDER_LIFECYCLE", "order_id": "0f38ccad-62f1-53ca-a471-1113fdd54089", "reason": "", "source": "INTERNAL", "stage": "request_sent", "ts": 1793272526.6074421, "venue": "BYBIT"}
+{"kind": "book", "stage": "market_event_received", "ts": 1793272526.6074424, "venue": "signal-trigger"}
+{"cumulative_filled_quantity": "0", "event": "ORDER_LIFECYCLE", "order_id": "0f38ccad-62f1-53ca-a471-1113fdd54089", "reason": "", "source": "ADAPTER_CALLBACK", "stage": "exchange_effective_notified", "ts": 1793272526.6097121, "venue": "BYBIT"}
+{"event": "OPPORTUNITY", "stage": "decision", "ts": 1793272526.6110146}
+{"cumulative_filled_quantity": "0", "event": "ORDER_LIFECYCLE", "order_id": "322a1a3e-1848-5bb3-9f5a-1b6edf1637eb", "reason": "", "source": "INTERNAL", "stage": "request_sent", "ts": 1793272526.6110146, "venue": "BYBIT"}
+{"kind": "book", "stage": "market_event_received", "ts": 1793272526.6110148, "venue": "signal-trigger"}
+{"event": "OPPORTUNITY", "stage": "decision", "ts": 1793272526.6123297}
+{"kind": "book", "stage": "market_event_received", "ts": 1793272526.6123297, "venue": "signal-trigger"}
+{"cumulative_filled_quantity": "0", "event": "ORDER_LIFECYCLE", "order_id": "62a3bebc-a59f-5469-830b-176c706d730a", "reason": "", "source": "INTERNAL", "stage": "request_sent", "ts": 1793272526.6123297, "venue": "BYBIT"}
+{"cumulative_filled_quantity": "0", "event": "ORDER_LIFECYCLE", "order_id": "62a3bebc-a59f-5469-830b-176c706d730a", "reason": "", "source": "ADAPTER_CALLBACK", "stage": "exchange_effective_notified", "ts": 1793272526.6189628, "venue": "BYBIT"}
+{"cumulative_filled_quantity": "0", "event": "ORDER_LIFECYCLE", "order_id": "322a1a3e-1848-5bb3-9f5a-1b6edf1637eb", "reason": "", "source": "ADAPTER_CALLBACK", "stage": "exchange_effective_notified", "ts": 1793272526.6193812, "venue": "BYBIT"}
+{"cumulative_filled_quantity": "0", "event": "ORDER_LIFECYCLE", "order_id": "0f38ccad-62f1-53ca-a471-1113fdd54089", "reason": "", "source": "INTERNAL", "stage": "cancel_requested", "ts": 1793272526.7565274, "venue": "BYBIT"}
+{"cumulative_filled_quantity": "0", "event": "ORDER_LIFECYCLE", "order_id": "0f38ccad-62f1-53ca-a471-1113fdd54089", "reason": "", "source": "INTERNAL", "stage": "cancel_requested", "ts": 1793272526.7565274, "venue": "BYBIT"}
+{"cumulative_filled_quantity": "0", "event": "ORDER_LIFECYCLE", "order_id": "322a1a3e-1848-5bb3-9f5a-1b6edf1637eb", "reason": "", "source": "INTERNAL", "stage": "cancel_requested", "ts": 1793272526.7565274, "venue": "BYBIT"}
+{"cumulative_filled_quantity": "0", "event": "ORDER_LIFECYCLE", "order_id": "322a1a3e-1848-5bb3-9f5a-1b6edf1637eb", "reason": "", "source": "INTERNAL", "stage": "cancel_requested", "ts": 1793272526.7565274, "venue": "BYBIT"}
+{"cumulative_filled_quantity": "0", "event": "ORDER_LIFECYCLE", "order_id": "62a3bebc-a59f-5469-830b-176c706d730a", "reason": "", "source": "INTERNAL", "stage": "cancel_requested", "ts": 1793272526.7565274, "venue": "BYBIT"}
+{"cumulative_filled_quantity": "0", "event": "ORDER_LIFECYCLE", "order_id": "62a3bebc-a59f-5469-830b-176c706d730a", "reason": "", "source": "INTERNAL", "stage": "cancel_requested", "ts": 1793272526.7565274, "venue": "BYBIT"}
+{"event": "QUOTE_WITHDRAWN", "net_edge_bps": -5.204663300266024, "order_id": "0f38ccad-62f1-53ca-a471-1113fdd54089", "reason": "edge_below_threshold", "stage": "quote_withdrawn", "ts": 1793272526.7565274, "venue": "BYBIT"}
+{"event": "QUOTE_WITHDRAWN", "net_edge_bps": -5.204663300266024, "order_id": "322a1a3e-1848-5bb3-9f5a-1b6edf1637eb", "reason": "edge_below_threshold", "stage": "quote_withdrawn", "ts": 1793272526.7565274, "venue": "BYBIT"}
+{"event": "QUOTE_WITHDRAWN", "net_edge_bps": -5.204663300266024, "order_id": "62a3bebc-a59f-5469-830b-176c706d730a", "reason": "edge_below_threshold", "stage": "quote_withdrawn", "ts": 1793272526.7565274, "venue": "BYBIT"}
+{"cumulative_filled_quantity": "0.0", "event": "ORDER_LIFECYCLE", "order_id": "62a3bebc-a59f-5469-830b-176c706d730a", "reason": "", "source": "ADAPTER_CALLBACK", "stage": "cancel_notified", "ts": 1793272526.7604578, "venue": "BYBIT"}
+{"cumulative_filled_quantity": "0.0", "event": "ORDER_LIFECYCLE", "order_id": "0f38ccad-62f1-53ca-a471-1113fdd54089", "reason": "", "source": "ADAPTER_CALLBACK", "stage": "cancel_notified", "ts": 1793272526.7649322, "venue": "BYBIT"}
+{"cumulative_filled_quantity": "0.0", "event": "ORDER_LIFECYCLE", "order_id": "322a1a3e-1848-5bb3-9f5a-1b6edf1637eb", "reason": "", "source": "ADAPTER_CALLBACK", "stage": "cancel_notified", "ts": 1793272526.7660573, "venue": "BYBIT"}
+{"event": "OPPORTUNITY", "stage": "decision", "ts": 1793272784.350106}
+{"kind": "book", "stage": "market_event_received", "ts": 1793272784.350106, "venue": "signal-trigger"}
+{"cumulative_filled_quantity": "0", "event": "ORDER_LIFECYCLE", "order_id": "0a7bb999-8cd3-5d31-8106-75cc45cac7c1", "reason": "", "source": "INTERNAL", "stage": "request_sent", "ts": 1793272784.350106, "venue": "BYBIT"}
+{"cumulative_filled_quantity": "0", "event": "ORDER_LIFECYCLE", "order_id": "0a7bb999-8cd3-5d31-8106-75cc45cac7c1", "reason": "", "source": "ADAPTER_CALLBACK", "stage": "exchange_effective_notified", "ts": 1793272784.353517, "venue": "BYBIT"}
+{"event": "OPPORTUNITY", "stage": "decision", "ts": 1793272784.3565805}
+{"kind": "book", "stage": "market_event_received", "ts": 1793272784.3565805, "venue": "signal-trigger"}
+{"cumulative_filled_quantity": "0", "event": "ORDER_LIFECYCLE", "order_id": "93bfced4-bd17-5e78-85af-1f636aca5ebf", "reason": "", "source": "INTERNAL", "stage": "request_sent", "ts": 1793272784.3565805, "venue": "BYBIT"}
+{"cumulative_filled_quantity": "0", "event": "ORDER_LIFECYCLE", "order_id": "93bfced4-bd17-5e78-85af-1f636aca5ebf", "reason": "", "source": "ADAPTER_CALLBACK", "stage": "exchange_effective_notified", "ts": 1793272784.3645597, "venue": "BYBIT"}
+{"event": "OPPORTUNITY", "stage": "decision", "ts": 1793272784.4942331}
+{"kind": "book", "stage": "market_event_received", "ts": 1793272784.4942331, "venue": "signal-trigger"}
+{"cumulative_filled_quantity": "0", "event": "ORDER_LIFECYCLE", "order_id": "12af38dc-01d8-5139-9dab-f9bdd3f02d43", "reason": "", "source": "INTERNAL", "stage": "request_sent", "ts": 1793272784.4942331, "venue": "BYBIT"}
+{"event": "OPPORTUNITY", "stage": "decision", "ts": 1793272784.4954314}
+{"kind": "book", "stage": "market_event_received", "ts": 1793272784.4954314, "venue": "signal-trigger"}
+{"cumulative_filled_quantity": "0", "event": "ORDER_LIFECYCLE", "order_id": "e32e7e3e-afe1-53fe-954d-b24a6dfb7cee", "reason": "", "source": "INTERNAL", "stage": "request_sent", "ts": 1793272784.4954314, "venue": "BYBIT"}
+{"cumulative_filled_quantity": "0", "event": "ORDER_LIFECYCLE", "order_id": "e32e7e3e-afe1-53fe-954d-b24a6dfb7cee", "reason": "", "source": "ADAPTER_CALLBACK", "stage": "exchange_effective_notified", "ts": 1793272784.4982808, "venue": "BYBIT"}
+{"event": "OPPORTUNITY", "stage": "decision", "ts": 1793272784.5007164}
+{"cumulative_filled_quantity": "0", "event": "ORDER_LIFECYCLE", "order_id": "70aff7d9-13b8-5d5c-8c6f-e5d04609039c", "reason": "", "source": "INTERNAL", "stage": "request_sent", "ts": 1793272784.5007164, "venue": "BYBIT"}
+{"kind": "book", "stage": "market_event_received", "ts": 1793272784.5007167, "venue": "signal-trigger"}
+{"cumulative_filled_quantity": "0", "event": "ORDER_LIFECYCLE", "order_id": "12af38dc-01d8-5139-9dab-f9bdd3f02d43", "reason": "", "source": "ADAPTER_CALLBACK", "stage": "exchange_effective_notified", "ts": 1793272784.505787, "venue": "BYBIT"}
+{"cumulative_filled_quantity": "0", "event": "ORDER_LIFECYCLE", "order_id": "70aff7d9-13b8-5d5c-8c6f-e5d04609039c", "reason": "", "source": "ADAPTER_CALLBACK", "stage": "exchange_effective_notified", "ts": 1793272784.5067022, "venue": "BYBIT"}
+{"cumulative_filled_quantity": "0", "event": "ORDER_LIFECYCLE", "order_id": "0a7bb999-8cd3-5d31-8106-75cc45cac7c1", "reason": "", "source": "INTERNAL", "stage": "cancel_requested", "ts": 1793272784.5179577, "venue": "BYBIT"}
+{"cumulative_filled_quantity": "0", "event": "ORDER_LIFECYCLE", "order_id": "0a7bb999-8cd3-5d31-8106-75cc45cac7c1", "reason": "", "source": "INTERNAL", "stage": "cancel_requested", "ts": 1793272784.5179577, "venue": "BYBIT"}
+{"cumulative_filled_quantity": "0", "event": "ORDER_LIFECYCLE", "order_id": "93bfced4-bd17-5e78-85af-1f636aca5ebf", "reason": "", "source": "INTERNAL", "stage": "cancel_requested", "ts": 1793272784.5179577, "venue": "BYBIT"}
+{"cumulative_filled_quantity": "0", "event": "ORDER_LIFECYCLE", "order_id": "93bfced4-bd17-5e78-85af-1f636aca5ebf", "reason": "", "source": "INTERNAL", "stage": "cancel_requested", "ts": 1793272784.5179577, "venue": "BYBIT"}
+{"cumulative_filled_quantity": "0", "event": "ORDER_LIFECYCLE", "order_id": "12af38dc-01d8-5139-9dab-f9bdd3f02d43", "reason": "", "source": "INTERNAL", "stage": "cancel_requested", "ts": 1793272784.5179577, "venue": "BYBIT"}
+{"cumulative_filled_quantity": "0", "event": "ORDER_LIFECYCLE", "order_id": "12af38dc-01d8-5139-9dab-f9bdd3f02d43", "reason": "", "source": "INTERNAL", "stage": "cancel_requested", "ts": 1793272784.5179577, "venue": "BYBIT"}
+{"cumulative_filled_quantity": "0", "event": "ORDER_LIFECYCLE", "order_id": "e32e7e3e-afe1-53fe-954d-b24a6dfb7cee", "reason": "", "source": "INTERNAL", "stage": "cancel_requested", "ts": 1793272784.5179577, "venue": "BYBIT"}
+{"cumulative_filled_quantity": "0", "event": "ORDER_LIFECYCLE", "order_id": "e32e7e3e-afe1-53fe-954d-b24a6dfb7cee", "reason": "", "source": "INTERNAL", "stage": "cancel_requested", "ts": 1793272784.5179577, "venue": "BYBIT"}
+{"cumulative_filled_quantity": "0", "event": "ORDER_LIFECYCLE", "order_id": "70aff7d9-13b8-5d5c-8c6f-e5d04609039c", "reason": "", "source": "INTERNAL", "stage": "cancel_requested", "ts": 1793272784.5179577, "venue": "BYBIT"}
+{"cumulative_filled_quantity": "0", "event": "ORDER_LIFECYCLE", "order_id": "70aff7d9-13b8-5d5c-8c6f-e5d04609039c", "reason": "", "source": "INTERNAL", "stage": "cancel_requested", "ts": 1793272784.5179577, "venue": "BYBIT"}
+{"event": "QUOTE_WITHDRAWN", "net_edge_bps": -3.926347357582033, "order_id": "0a7bb999-8cd3-5d31-8106-75cc45cac7c1", "reason": "edge_below_threshold", "stage": "quote_withdrawn", "ts": 1793272784.5179577, "venue": "BYBIT"}
+{"event": "QUOTE_WITHDRAWN", "net_edge_bps": -3.926347357582033, "order_id": "93bfced4-bd17-5e78-85af-1f636aca5ebf", "reason": "edge_below_threshold", "stage": "quote_withdrawn", "ts": 1793272784.5179577, "venue": "BYBIT"}
+{"event": "QUOTE_WITHDRAWN", "net_edge_bps": -3.926347357582033, "order_id": "12af38dc-01d8-5139-9dab-f9bdd3f02d43", "reason": "edge_below_threshold", "stage": "quote_withdrawn", "ts": 1793272784.5179577, "venue": "BYBIT"}
+{"event": "QUOTE_WITHDRAWN", "net_edge_bps": -3.926347357582033, "order_id": "e32e7e3e-afe1-53fe-954d-b24a6dfb7cee", "reason": "edge_below_threshold", "stage": "quote_withdrawn", "ts": 1793272784.5179577, "venue": "BYBIT"}
+{"event": "QUOTE_WITHDRAWN", "net_edge_bps": -3.926347357582033, "order_id": "70aff7d9-13b8-5d5c-8c6f-e5d04609039c", "reason": "edge_below_threshold", "stage": "quote_withdrawn", "ts": 1793272784.5179577, "venue": "BYBIT"}
+{"cumulative_filled_quantity": "0.0", "event": "ORDER_LIFECYCLE", "order_id": "70aff7d9-13b8-5d5c-8c6f-e5d04609039c", "reason": "", "source": "ADAPTER_CALLBACK", "stage": "cancel_notified", "ts": 1793272784.521295, "venue": "BYBIT"}
+{"cumulative_filled_quantity": "0.0", "event": "ORDER_LIFECYCLE", "order_id": "12af38dc-01d8-5139-9dab-f9bdd3f02d43", "reason": "", "source": "ADAPTER_CALLBACK", "stage": "cancel_notified", "ts": 1793272784.5214183, "venue": "BYBIT"}
+{"cumulative_filled_quantity": "0.0", "event": "ORDER_LIFECYCLE", "order_id": "e32e7e3e-afe1-53fe-954d-b24a6dfb7cee", "reason": "", "source": "ADAPTER_CALLBACK", "stage": "cancel_notified", "ts": 1793272784.5220196, "venue": "BYBIT"}
+{"cumulative_filled_quantity": "0.0", "event": "ORDER_LIFECYCLE", "order_id": "93bfced4-bd17-5e78-85af-1f636aca5ebf", "reason": "", "source": "ADAPTER_CALLBACK", "stage": "cancel_notified", "ts": 1793272784.522912, "venue": "BYBIT"}
+{"cumulative_filled_quantity": "0.0", "event": "ORDER_LIFECYCLE", "order_id": "0a7bb999-8cd3-5d31-8106-75cc45cac7c1", "reason": "", "source": "ADAPTER_CALLBACK", "stage": "cancel_notified", "ts": 1793272784.5234272, "venue": "BYBIT"}
+{"event": "OPPORTUNITY", "stage": "decision", "ts": 1793277010.2390394}
+{"cumulative_filled_quantity": "0", "event": "ORDER_LIFECYCLE", "order_id": "3406377c-3681-515f-9533-788189825b5c", "reason": "", "source": "INTERNAL", "stage": "request_sent", "ts": 1793277010.2390394, "venue": "BYBIT"}
+{"kind": "book", "stage": "market_event_received", "ts": 1793277010.2390397, "venue": "signal-trigger"}
+{"event": "OPPORTUNITY", "stage": "decision", "ts": 1793277010.2428052}
+{"kind": "book", "stage": "market_event_received", "ts": 1793277010.2428052, "venue": "signal-trigger"}
+{"cumulative_filled_quantity": "0", "event": "ORDER_LIFECYCLE", "order_id": "bde75093-5ee1-5071-8f61-30513ade8782", "reason": "", "source": "INTERNAL", "stage": "request_sent", "ts": 1793277010.2428052, "venue": "BYBIT"}
+{"event": "OPPORTUNITY", "stage": "decision", "ts": 1793277010.2479672}
+{"kind": "book", "stage": "market_event_received", "ts": 1793277010.2479672, "venue": "signal-trigger"}
+{"cumulative_filled_quantity": "0", "event": "ORDER_LIFECYCLE", "order_id": "ffd4f9d4-df40-551c-8921-54d6127499ac", "reason": "", "source": "INTERNAL", "stage": "request_sent", "ts": 1793277010.2479672, "venue": "BYBIT"}
+{"cumulative_filled_quantity": "0", "event": "ORDER_LIFECYCLE", "order_id": "bde75093-5ee1-5071-8f61-30513ade8782", "reason": "postonly_would_take_liquidity", "source": "ADAPTER_CALLBACK", "stage": "reject_notified", "ts": 1793277010.248258, "venue": "BYBIT"}
+{"cumulative_filled_quantity": "0", "event": "ORDER_LIFECYCLE", "order_id": "3406377c-3681-515f-9533-788189825b5c", "reason": "postonly_would_take_liquidity", "source": "ADAPTER_CALLBACK", "stage": "reject_notified", "ts": 1793277010.2484148, "venue": "BYBIT"}
+{"event": "OPPORTUNITY", "stage": "decision", "ts": 1793277010.2515802}
+{"kind": "book", "stage": "market_event_received", "ts": 1793277010.2515802, "venue": "signal-trigger"}
+{"cumulative_filled_quantity": "0", "event": "ORDER_LIFECYCLE", "order_id": "58425bf7-200e-5ad1-8e8b-ad91fb68a644", "reason": "", "source": "INTERNAL", "stage": "request_sent", "ts": 1793277010.2515802, "venue": "BYBIT"}
+{"event": "OPPORTUNITY", "stage": "decision", "ts": 1793277010.254814}
+{"kind": "book", "stage": "market_event_received", "ts": 1793277010.254814, "venue": "signal-trigger"}
+{"cumulative_filled_quantity": "0", "event": "ORDER_LIFECYCLE", "order_id": "6a509dcf-ab70-5b81-811d-cf2d1d88a772", "reason": "", "source": "INTERNAL", "stage": "request_sent", "ts": 1793277010.254814, "venue": "BYBIT"}
+{"cumulative_filled_quantity": "0", "event": "ORDER_LIFECYCLE", "order_id": "ffd4f9d4-df40-551c-8921-54d6127499ac", "reason": "", "source": "ADAPTER_CALLBACK", "stage": "exchange_effective_notified", "ts": 1793277010.255336, "venue": "BYBIT"}
+{"event": "OPPORTUNITY", "stage": "decision", "ts": 1793277010.255852}
+{"kind": "book", "stage": "market_event_received", "ts": 1793277010.255852, "venue": "signal-trigger"}
+{"cumulative_filled_quantity": "0", "event": "ORDER_LIFECYCLE", "order_id": "58425bf7-200e-5ad1-8e8b-ad91fb68a644", "reason": "", "source": "ADAPTER_CALLBACK", "stage": "exchange_effective_notified", "ts": 1793277010.2563176, "venue": "BYBIT"}
+{"cumulative_filled_quantity": "0", "event": "ORDER_LIFECYCLE", "order_id": "6a509dcf-ab70-5b81-811d-cf2d1d88a772", "reason": "", "source": "ADAPTER_CALLBACK", "stage": "exchange_effective_notified", "ts": 1793277010.2612884, "venue": "BYBIT"}
+{"event": "OPPORTUNITY", "stage": "decision", "ts": 1793277010.4201083}
+{"kind": "book", "stage": "market_event_received", "ts": 1793277010.4201083, "venue": "signal-trigger"}
+{"kind": "book", "stage": "market_event_received", "ts": 1793277010.4301097, "venue": "signal-trigger"}
+{"event": "OPPORTUNITY", "stage": "decision", "ts": 1793277010.43011}
+{"event": "OPPORTUNITY", "stage": "decision", "ts": 1793277010.4396324}
+{"kind": "book", "stage": "market_event_received", "ts": 1793277010.4396324, "venue": "signal-trigger"}
+{"event": "OPPORTUNITY", "stage": "decision", "ts": 1793277010.4615557}
+{"kind": "book", "stage": "market_event_received", "ts": 1793277010.4615557, "venue": "signal-trigger"}
+{"cumulative_filled_quantity": "0", "event": "ORDER_LIFECYCLE", "order_id": "ffd4f9d4-df40-551c-8921-54d6127499ac", "reason": "", "source": "INTERNAL", "stage": "cancel_requested", "ts": 1793277010.7554665, "venue": "BYBIT"}
+{"cumulative_filled_quantity": "0", "event": "ORDER_LIFECYCLE", "order_id": "ffd4f9d4-df40-551c-8921-54d6127499ac", "reason": "", "source": "INTERNAL", "stage": "cancel_requested", "ts": 1793277010.7554665, "venue": "BYBIT"}
+{"cumulative_filled_quantity": "0", "event": "ORDER_LIFECYCLE", "order_id": "58425bf7-200e-5ad1-8e8b-ad91fb68a644", "reason": "", "source": "INTERNAL", "stage": "cancel_requested", "ts": 1793277010.7554665, "venue": "BYBIT"}
+{"cumulative_filled_quantity": "0", "event": "ORDER_LIFECYCLE", "order_id": "58425bf7-200e-5ad1-8e8b-ad91fb68a644", "reason": "", "source": "INTERNAL", "stage": "cancel_requested", "ts": 1793277010.7554665, "venue": "BYBIT"}
+{"cumulative_filled_quantity": "0", "event": "ORDER_LIFECYCLE", "order_id": "6a509dcf-ab70-5b81-811d-cf2d1d88a772", "reason": "", "source": "INTERNAL", "stage": "cancel_requested", "ts": 1793277010.7554665, "venue": "BYBIT"}
+{"cumulative_filled_quantity": "0", "event": "ORDER_LIFECYCLE", "order_id": "6a509dcf-ab70-5b81-811d-cf2d1d88a772", "reason": "", "source": "INTERNAL", "stage": "cancel_requested", "ts": 1793277010.7554665, "venue": "BYBIT"}
+{"event": "QUOTE_WITHDRAWN", "net_edge_bps": -6.7719574544550385, "order_id": "ffd4f9d4-df40-551c-8921-54d6127499ac", "reason": "edge_below_threshold", "stage": "quote_withdrawn", "ts": 1793277010.7554665, "venue": "BYBIT"}
+{"event": "QUOTE_WITHDRAWN", "net_edge_bps": -6.7719574544550385, "order_id": "58425bf7-200e-5ad1-8e8b-ad91fb68a644", "reason": "edge_below_threshold", "stage": "quote_withdrawn", "ts": 1793277010.7554665, "venue": "BYBIT"}
+{"event": "QUOTE_WITHDRAWN", "net_edge_bps": -6.7719574544550385, "order_id": "6a509dcf-ab70-5b81-811d-cf2d1d88a772", "reason": "edge_below_threshold", "stage": "quote_withdrawn", "ts": 1793277010.7554665, "venue": "BYBIT"}
+{"cumulative_filled_quantity": "0.0", "event": "ORDER_LIFECYCLE", "order_id": "6a509dcf-ab70-5b81-811d-cf2d1d88a772", "reason": "", "source": "ADAPTER_CALLBACK", "stage": "cancel_notified", "ts": 1793277010.7636008, "venue": "BYBIT"}
+{"cumulative_filled_quantity": "0.0", "event": "ORDER_LIFECYCLE", "order_id": "58425bf7-200e-5ad1-8e8b-ad91fb68a644", "reason": "", "source": "ADAPTER_CALLBACK", "stage": "cancel_notified", "ts": 1793277010.7638042, "venue": "BYBIT"}
+{"cumulative_filled_quantity": "0.0", "event": "ORDER_LIFECYCLE", "order_id": "ffd4f9d4-df40-551c-8921-54d6127499ac", "reason": "", "source": "ADAPTER_CALLBACK", "stage": "cancel_notified", "ts": 1793277010.7652814, "venue": "BYBIT"}
+{"event": "OPPORTUNITY", "stage": "decision", "ts": 1793277013.7168767}
+{"kind": "book", "stage": "market_event_received", "ts": 1793277013.7168767, "venue": "signal-trigger"}
+{"cumulative_filled_quantity": "0", "event": "ORDER_LIFECYCLE", "order_id": "53aab5c4-4e7e-5aa0-91d7-adaee012ac03", "reason": "", "source": "INTERNAL", "stage": "request_sent", "ts": 1793277013.7168767, "venue": "BYBIT"}
+{"cumulative_filled_quantity": "0", "event": "ORDER_LIFECYCLE", "order_id": "53aab5c4-4e7e-5aa0-91d7-adaee012ac03", "reason": "", "source": "ADAPTER_CALLBACK", "stage": "exchange_effective_notified", "ts": 1793277013.7206979, "venue": "BYBIT"}
+{"event": "OPPORTUNITY", "stage": "decision", "ts": 1793277013.7341127}
+{"kind": "book", "stage": "market_event_received", "ts": 1793277013.7341127, "venue": "signal-trigger"}
+{"cumulative_filled_quantity": "0", "event": "ORDER_LIFECYCLE", "order_id": "e9a7d63c-14bf-51dd-9599-400932da38d3", "reason": "", "source": "INTERNAL", "stage": "request_sent", "ts": 1793277013.7341127, "venue": "BYBIT"}
+{"cumulative_filled_quantity": "0", "event": "ORDER_LIFECYCLE", "order_id": "e9a7d63c-14bf-51dd-9599-400932da38d3", "reason": "", "source": "ADAPTER_CALLBACK", "stage": "exchange_effective_notified", "ts": 1793277013.7388868, "venue": "BYBIT"}
+{"event": "OPPORTUNITY", "stage": "decision", "ts": 1793277013.74152}
+{"kind": "book", "stage": "market_event_received", "ts": 1793277013.74152, "venue": "signal-trigger"}
+{"cumulative_filled_quantity": "0", "event": "ORDER_LIFECYCLE", "order_id": "522e4290-f9c6-5ed6-b0f8-9524561ecadf", "reason": "", "source": "INTERNAL", "stage": "request_sent", "ts": 1793277013.74152, "venue": "BYBIT"}
+{"cumulative_filled_quantity": "0", "event": "ORDER_LIFECYCLE", "order_id": "522e4290-f9c6-5ed6-b0f8-9524561ecadf", "reason": "", "source": "ADAPTER_CALLBACK", "stage": "exchange_effective_notified", "ts": 1793277013.7461684, "venue": "BYBIT"}
+{"event": "OPPORTUNITY", "stage": "decision", "ts": 1793277013.7591653}
+{"kind": "book", "stage": "market_event_received", "ts": 1793277013.7591653, "venue": "signal-trigger"}
+{"cumulative_filled_quantity": "0", "event": "ORDER_LIFECYCLE", "order_id": "f3a81048-3011-50a1-9dba-aec9fddf1ee1", "reason": "", "source": "INTERNAL", "stage": "request_sent", "ts": 1793277013.7591653, "venue": "BYBIT"}
+{"cumulative_filled_quantity": "0", "event": "ORDER_LIFECYCLE", "order_id": "f3a81048-3011-50a1-9dba-aec9fddf1ee1", "reason": "", "source": "ADAPTER_CALLBACK", "stage": "exchange_effective_notified", "ts": 1793277013.7643192, "venue": "BYBIT"}
+{"kind": "book", "stage": "market_event_received", "ts": 1793277013.7797167, "venue": "signal-trigger"}
+{"event": "OPPORTUNITY", "stage": "decision", "ts": 1793277013.779717}
+{"cumulative_filled_quantity": "0", "event": "ORDER_LIFECYCLE", "order_id": "6bf33d4e-1e08-5663-9649-132b4ecd6948", "reason": "", "source": "INTERNAL", "stage": "request_sent", "ts": 1793277013.779717, "venue": "BYBIT"}
+{"cumulative_filled_quantity": "0", "event": "ORDER_LIFECYCLE", "order_id": "6bf33d4e-1e08-5663-9649-132b4ecd6948", "reason": "", "source": "ADAPTER_CALLBACK", "stage": "exchange_effective_notified", "ts": 1793277013.785293, "venue": "BYBIT"}
+{"cumulative_filled_quantity": "1.0", "event": "FILL", "fill_price": "100.47", "fill_quantity": "1.0", "order_id": "53aab5c4-4e7e-5aa0-91d7-adaee012ac03", "side": "SELL", "stage": "fill_booked", "ts": 1793277013.9539762, "venue": "BYBIT"}
+{"cumulative_filled_quantity": "1.0", "event": "FILL", "fill_price": "100.47", "fill_quantity": "1.0", "order_id": "e9a7d63c-14bf-51dd-9599-400932da38d3", "side": "SELL", "stage": "fill_booked", "ts": 1793277013.9539762, "venue": "BYBIT"}
+{"cumulative_filled_quantity": "1.0", "event": "FILL", "fill_price": "100.47", "fill_quantity": "1.0", "order_id": "522e4290-f9c6-5ed6-b0f8-9524561ecadf", "side": "SELL", "stage": "fill_booked", "ts": 1793277013.9539762, "venue": "BYBIT"}
+{"cumulative_filled_quantity": "1.0", "event": "FILL", "fill_price": "100.47", "fill_quantity": "1.0", "order_id": "f3a81048-3011-50a1-9dba-aec9fddf1ee1", "side": "SELL", "stage": "fill_booked", "ts": 1793277013.9539762, "venue": "BYBIT"}
+{"cumulative_filled_quantity": "0.9", "event": "FILL", "fill_price": "100.47", "fill_quantity": "0.9", "order_id": "6bf33d4e-1e08-5663-9649-132b4ecd6948", "side": "SELL", "stage": "fill_booked", "ts": 1793277013.9539762, "venue": "BYBIT"}
+{"cumulative_filled_quantity": "1.0", "event": "ORDER_LIFECYCLE", "order_id": "53aab5c4-4e7e-5aa0-91d7-adaee012ac03", "reason": "", "source": "ADAPTER_CALLBACK", "stage": "fill_notified", "ts": 1793277013.9539762, "venue": "BYBIT"}
+{"cumulative_filled_quantity": "1.0", "event": "ORDER_LIFECYCLE", "order_id": "e9a7d63c-14bf-51dd-9599-400932da38d3", "reason": "", "source": "ADAPTER_CALLBACK", "stage": "fill_notified", "ts": 1793277013.9539762, "venue": "BYBIT"}
+{"cumulative_filled_quantity": "1.0", "event": "ORDER_LIFECYCLE", "order_id": "522e4290-f9c6-5ed6-b0f8-9524561ecadf", "reason": "", "source": "ADAPTER_CALLBACK", "stage": "fill_notified", "ts": 1793277013.9539762, "venue": "BYBIT"}
+{"cumulative_filled_quantity": "1.0", "event": "ORDER_LIFECYCLE", "order_id": "f3a81048-3011-50a1-9dba-aec9fddf1ee1", "reason": "", "source": "ADAPTER_CALLBACK", "stage": "fill_notified", "ts": 1793277013.9539762, "venue": "BYBIT"}
+{"cumulative_filled_quantity": "0.9", "event": "ORDER_LIFECYCLE", "order_id": "6bf33d4e-1e08-5663-9649-132b4ecd6948", "reason": "", "source": "ADAPTER_CALLBACK", "stage": "fill_notified", "ts": 1793277013.9539762, "venue": "BYBIT"}
+{"cap": "100.48", "event": "HEDGE_CAP_SIZE_AWARE", "side": "BUY", "stage": "hedge_cap_decided", "touch": "100.4300", "touch_covers": true, "ts": 1793277013.9539762}
+{"cap": "100.48", "event": "HEDGE_CAP_SIZE_AWARE", "side": "BUY", "stage": "hedge_cap_decided", "touch": "100.4300", "touch_covers": true, "ts": 1793277013.9539762}
+{"cap": "100.48", "event": "HEDGE_CAP_SIZE_AWARE", "side": "BUY", "stage": "hedge_cap_decided", "touch": "100.4300", "touch_covers": true, "ts": 1793277013.9539762}
+{"cap": "100.48", "event": "HEDGE_CAP_SIZE_AWARE", "side": "BUY", "stage": "hedge_cap_decided", "touch": "100.4300", "touch_covers": true, "ts": 1793277013.9539762}
+{"cap": "100.48", "event": "HEDGE_CAP_SIZE_AWARE", "side": "BUY", "stage": "hedge_cap_decided", "touch": "100.4300", "touch_covers": true, "ts": 1793277013.9539762}
+{"event": "HEDGE_CHAIN_OPENED", "stage": "hedge_chain_opened", "ts": 1793277013.9539762}
+{"event": "HEDGE_CHAIN_OPENED", "stage": "hedge_chain_opened", "ts": 1793277013.9539762}
+{"event": "HEDGE_CHAIN_OPENED", "stage": "hedge_chain_opened", "ts": 1793277013.9539762}
+{"event": "HEDGE_CHAIN_OPENED", "stage": "hedge_chain_opened", "ts": 1793277013.9539762}
+{"event": "HEDGE_CHAIN_OPENED", "stage": "hedge_chain_opened", "ts": 1793277013.9539762}
+{"event": "HEDGE_SUBMIT", "stage": "hedge_sent", "ts": 1793277013.9539762}
+{"event": "HEDGE_SUBMIT", "stage": "hedge_sent", "ts": 1793277013.9539762}
+{"event": "HEDGE_SUBMIT", "stage": "hedge_sent", "ts": 1793277013.9539762}
+{"event": "HEDGE_SUBMIT", "stage": "hedge_sent", "ts": 1793277013.9539762}
+{"event": "HEDGE_SUBMIT", "stage": "hedge_sent", "ts": 1793277013.9539762}
+{"cumulative_filled_quantity": "0", "event": "ORDER_LIFECYCLE", "order_id": "37e768bd-9ac3-5550-9f5b-bff6e28609c9", "reason": "", "source": "INTERNAL", "stage": "request_sent", "ts": 1793277013.9539762, "venue": "BINANCE"}
+{"cumulative_filled_quantity": "0", "event": "ORDER_LIFECYCLE", "order_id": "f5969834-8091-5f9b-b567-00e853297a07", "reason": "", "source": "INTERNAL", "stage": "request_sent", "ts": 1793277013.9539762, "venue": "BINANCE"}
+{"cumulative_filled_quantity": "0", "event": "ORDER_LIFECYCLE", "order_id": "0554fe45-29aa-5f93-9ec8-b6bd2af88a37", "reason": "", "source": "INTERNAL", "stage": "request_sent", "ts": 1793277013.9539762, "venue": "BINANCE"}
+{"cumulative_filled_quantity": "0", "event": "ORDER_LIFECYCLE", "order_id": "717d5feb-c2ff-566a-8d10-b89e3d2d6c1a", "reason": "", "source": "INTERNAL", "stage": "request_sent", "ts": 1793277013.9539762, "venue": "BINANCE"}
+{"cumulative_filled_quantity": "0", "event": "ORDER_LIFECYCLE", "order_id": "588de0cd-b16e-55e1-b23c-ebfcb8617d28", "reason": "", "source": "INTERNAL", "stage": "request_sent", "ts": 1793277013.9539762, "venue": "BINANCE"}
+{"cumulative_filled_quantity": "0", "event": "ORDER_LIFECYCLE", "order_id": "37e768bd-9ac3-5550-9f5b-bff6e28609c9", "reason": "", "source": "ADAPTER_CALLBACK", "stage": "exchange_effective_notified", "ts": 1793277013.9889762, "venue": "BINANCE"}
+{"cumulative_filled_quantity": "1.0", "event": "FILL", "fill_price": "100.4200", "fill_quantity": "1.0", "order_id": "37e768bd-9ac3-5550-9f5b-bff6e28609c9", "side": "BUY", "stage": "fill_booked", "ts": 1793277013.9889762, "venue": "BINANCE"}
+{"cumulative_filled_quantity": "1.0", "event": "ORDER_LIFECYCLE", "order_id": "37e768bd-9ac3-5550-9f5b-bff6e28609c9", "reason": "", "source": "ADAPTER_CALLBACK", "stage": "fill_notified", "ts": 1793277013.9889762, "venue": "BINANCE"}
+{"cumulative_filled_quantity": "0", "event": "ORDER_LIFECYCLE", "order_id": "0554fe45-29aa-5f93-9ec8-b6bd2af88a37", "reason": "", "source": "ADAPTER_CALLBACK", "stage": "exchange_effective_notified", "ts": 1793277013.9925456, "venue": "BINANCE"}
+{"cumulative_filled_quantity": "1.0", "event": "FILL", "fill_price": "100.4200", "fill_quantity": "1.0", "order_id": "0554fe45-29aa-5f93-9ec8-b6bd2af88a37", "side": "BUY", "stage": "fill_booked", "ts": 1793277013.9925456, "venue": "BINANCE"}
+{"cumulative_filled_quantity": "1.0", "event": "ORDER_LIFECYCLE", "order_id": "0554fe45-29aa-5f93-9ec8-b6bd2af88a37", "reason": "", "source": "ADAPTER_CALLBACK", "stage": "fill_notified", "ts": 1793277013.9925456, "venue": "BINANCE"}
+{"cumulative_filled_quantity": "0", "event": "ORDER_LIFECYCLE", "order_id": "717d5feb-c2ff-566a-8d10-b89e3d2d6c1a", "reason": "", "source": "ADAPTER_CALLBACK", "stage": "exchange_effective_notified", "ts": 1793277013.993282, "venue": "BINANCE"}
+{"cumulative_filled_quantity": "1.0", "event": "FILL", "fill_price": "100.4200", "fill_quantity": "1.0", "order_id": "717d5feb-c2ff-566a-8d10-b89e3d2d6c1a", "side": "BUY", "stage": "fill_booked", "ts": 1793277013.993282, "venue": "BINANCE"}
+{"cumulative_filled_quantity": "1.0", "event": "ORDER_LIFECYCLE", "order_id": "717d5feb-c2ff-566a-8d10-b89e3d2d6c1a", "reason": "", "source": "ADAPTER_CALLBACK", "stage": "fill_notified", "ts": 1793277013.993282, "venue": "BINANCE"}
+{"cumulative_filled_quantity": "0", "event": "ORDER_LIFECYCLE", "order_id": "588de0cd-b16e-55e1-b23c-ebfcb8617d28", "reason": "", "source": "ADAPTER_CALLBACK", "stage": "exchange_effective_notified", "ts": 1793277013.9968781, "venue": "BINANCE"}
+{"cumulative_filled_quantity": "0.9", "event": "FILL", "fill_price": "100.4200", "fill_quantity": "0.9", "order_id": "588de0cd-b16e-55e1-b23c-ebfcb8617d28", "side": "BUY", "stage": "fill_booked", "ts": 1793277013.9968781, "venue": "BINANCE"}
+{"cumulative_filled_quantity": "0.9", "event": "ORDER_LIFECYCLE", "order_id": "588de0cd-b16e-55e1-b23c-ebfcb8617d28", "reason": "", "source": "ADAPTER_CALLBACK", "stage": "fill_notified", "ts": 1793277013.9968781, "venue": "BINANCE"}
+{"cumulative_filled_quantity": "0", "event": "ORDER_LIFECYCLE", "order_id": "f5969834-8091-5f9b-b567-00e853297a07", "reason": "", "source": "ADAPTER_CALLBACK", "stage": "exchange_effective_notified", "ts": 1793277014.0059915, "venue": "BINANCE"}
+{"cumulative_filled_quantity": "1.0", "event": "FILL", "fill_price": "100.4200", "fill_quantity": "1.0", "order_id": "f5969834-8091-5f9b-b567-00e853297a07", "side": "BUY", "stage": "fill_booked", "ts": 1793277014.0059915, "venue": "BINANCE"}
+{"cumulative_filled_quantity": "1.0", "event": "ORDER_LIFECYCLE", "order_id": "f5969834-8091-5f9b-b567-00e853297a07", "reason": "", "source": "ADAPTER_CALLBACK", "stage": "fill_notified", "ts": 1793277014.0059915, "venue": "BINANCE"}
+{"event": "OPPORTUNITY", "stage": "decision", "ts": 1793277015.0048878}
+{"kind": "book", "stage": "market_event_received", "ts": 1793277015.0048878, "venue": "signal-trigger"}
+{"cumulative_filled_quantity": "0", "event": "ORDER_LIFECYCLE", "order_id": "876e9696-eae4-5814-8c3b-4acbaf0a4abd", "reason": "", "source": "INTERNAL", "stage": "request_sent", "ts": 1793277015.0048878, "venue": "BYBIT"}
+{"cumulative_filled_quantity": "0", "event": "ORDER_LIFECYCLE", "order_id": "876e9696-eae4-5814-8c3b-4acbaf0a4abd", "reason": "", "source": "ADAPTER_CALLBACK", "stage": "exchange_effective_notified", "ts": 1793277015.0077436, "venue": "BYBIT"}
+{"cumulative_filled_quantity": "0", "event": "ORDER_LIFECYCLE", "order_id": "876e9696-eae4-5814-8c3b-4acbaf0a4abd", "reason": "", "source": "INTERNAL", "stage": "cancel_requested", "ts": 1793277015.1537912, "venue": "BYBIT"}
+{"cumulative_filled_quantity": "0", "event": "ORDER_LIFECYCLE", "order_id": "876e9696-eae4-5814-8c3b-4acbaf0a4abd", "reason": "", "source": "INTERNAL", "stage": "cancel_requested", "ts": 1793277015.1537912, "venue": "BYBIT"}
+{"event": "QUOTE_WITHDRAWN", "net_edge_bps": -3.9471265604585737, "order_id": "876e9696-eae4-5814-8c3b-4acbaf0a4abd", "reason": "edge_below_threshold", "stage": "quote_withdrawn", "ts": 1793277015.1537912, "venue": "BYBIT"}
+{"cumulative_filled_quantity": "0.0", "event": "ORDER_LIFECYCLE", "order_id": "876e9696-eae4-5814-8c3b-4acbaf0a4abd", "reason": "", "source": "ADAPTER_CALLBACK", "stage": "cancel_notified", "ts": 1793277015.1625316, "venue": "BYBIT"}
+{"event": "OPPORTUNITY", "stage": "decision", "ts": 1793277016.158883}
+{"kind": "book", "stage": "market_event_received", "ts": 1793277016.158883, "venue": "signal-trigger"}
+{"cumulative_filled_quantity": "0", "event": "ORDER_LIFECYCLE", "order_id": "4732eaca-6b4b-57f4-b027-e5239c70ac01", "reason": "", "source": "INTERNAL", "stage": "request_sent", "ts": 1793277016.158883, "venue": "BYBIT"}
+{"cumulative_filled_quantity": "0", "event": "ORDER_LIFECYCLE", "order_id": "4732eaca-6b4b-57f4-b027-e5239c70ac01", "reason": "", "source": "ADAPTER_CALLBACK", "stage": "exchange_effective_notified", "ts": 1793277016.1689866, "venue": "BYBIT"}
+{"cumulative_filled_quantity": "0", "event": "ORDER_LIFECYCLE", "order_id": "4732eaca-6b4b-57f4-b027-e5239c70ac01", "reason": "", "source": "INTERNAL", "stage": "cancel_requested", "ts": 1793277031.1689866, "venue": "BYBIT"}
+{"cumulative_filled_quantity": "0", "event": "ORDER_LIFECYCLE", "order_id": "4732eaca-6b4b-57f4-b027-e5239c70ac01", "reason": "", "source": "INTERNAL", "stage": "cancel_requested", "ts": 1793277031.1689866, "venue": "BYBIT"}
+{"cumulative_filled_quantity": "0.0", "event": "ORDER_LIFECYCLE", "order_id": "4732eaca-6b4b-57f4-b027-e5239c70ac01", "reason": "", "source": "ADAPTER_CALLBACK", "stage": "cancel_notified", "ts": 1793277031.1734364, "venue": "BYBIT"}
+{"event": "OPPORTUNITY", "stage": "decision", "ts": 1793277031.5993834}
+{"kind": "book", "stage": "market_event_received", "ts": 1793277031.5993834, "venue": "signal-trigger"}
+{"cumulative_filled_quantity": "0", "event": "ORDER_LIFECYCLE", "order_id": "33ec88e7-4645-5d95-bc9d-481afd4b5882", "reason": "", "source": "INTERNAL", "stage": "request_sent", "ts": 1793277031.5993834, "venue": "BYBIT"}
+{"cumulative_filled_quantity": "0", "event": "ORDER_LIFECYCLE", "order_id": "33ec88e7-4645-5d95-bc9d-481afd4b5882", "reason": "", "source": "ADAPTER_CALLBACK", "stage": "exchange_effective_notified", "ts": 1793277031.6105554, "venue": "BYBIT"}
+{"cumulative_filled_quantity": "0.1", "event": "FILL", "fill_price": "100.6", "fill_quantity": "0.1", "order_id": "33ec88e7-4645-5d95-bc9d-481afd4b5882", "side": "BUY", "stage": "fill_booked", "ts": 1793277031.6775024, "venue": "BYBIT"}
+{"cumulative_filled_quantity": "0.2", "event": "FILL", "fill_price": "100.6", "fill_quantity": "0.1", "order_id": "33ec88e7-4645-5d95-bc9d-481afd4b5882", "side": "BUY", "stage": "fill_booked", "ts": 1793277031.6775024, "venue": "BYBIT"}
+{"cumulative_filled_quantity": "0.3", "event": "FILL", "fill_price": "100.6", "fill_quantity": "0.1", "order_id": "33ec88e7-4645-5d95-bc9d-481afd4b5882", "side": "BUY", "stage": "fill_booked", "ts": 1793277031.6775024, "venue": "BYBIT"}
+{"cumulative_filled_quantity": "1.0", "event": "FILL", "fill_price": "100.6", "fill_quantity": "0.7", "order_id": "33ec88e7-4645-5d95-bc9d-481afd4b5882", "side": "BUY", "stage": "fill_booked", "ts": 1793277031.6775024, "venue": "BYBIT"}
+{"cumulative_filled_quantity": "0.1", "event": "ORDER_LIFECYCLE", "order_id": "33ec88e7-4645-5d95-bc9d-481afd4b5882", "reason": "", "source": "ADAPTER_CALLBACK", "stage": "fill_notified", "ts": 1793277031.6775024, "venue": "BYBIT"}
+{"cumulative_filled_quantity": "0.2", "event": "ORDER_LIFECYCLE", "order_id": "33ec88e7-4645-5d95-bc9d-481afd4b5882", "reason": "", "source": "ADAPTER_CALLBACK", "stage": "fill_notified", "ts": 1793277031.6775024, "venue": "BYBIT"}
+{"cumulative_filled_quantity": "0.3", "event": "ORDER_LIFECYCLE", "order_id": "33ec88e7-4645-5d95-bc9d-481afd4b5882", "reason": "", "source": "ADAPTER_CALLBACK", "stage": "fill_notified", "ts": 1793277031.6775024, "venue": "BYBIT"}
+{"cumulative_filled_quantity": "1.0", "event": "ORDER_LIFECYCLE", "order_id": "33ec88e7-4645-5d95-bc9d-481afd4b5882", "reason": "", "source": "ADAPTER_CALLBACK", "stage": "fill_notified", "ts": 1793277031.6775024, "venue": "BYBIT"}
+{"cap": "100.57", "event": "HEDGE_CAP_SIZE_AWARE", "side": "SELL", "stage": "hedge_cap_decided", "touch": "100.6200", "touch_covers": true, "ts": 1793277031.6775024}
+{"cap": "100.57", "event": "HEDGE_CAP_SIZE_AWARE", "side": "SELL", "stage": "hedge_cap_decided", "touch": "100.6200", "touch_covers": true, "ts": 1793277031.6775024}
+{"cap": "100.57", "event": "HEDGE_CAP_SIZE_AWARE", "side": "SELL", "stage": "hedge_cap_decided", "touch": "100.6200", "touch_covers": true, "ts": 1793277031.6775024}
+{"cap": "100.57", "event": "HEDGE_CAP_SIZE_AWARE", "side": "SELL", "stage": "hedge_cap_decided", "touch": "100.6200", "touch_covers": true, "ts": 1793277031.6775024}
+{"event": "HEDGE_CHAIN_OPENED", "stage": "hedge_chain_opened", "ts": 1793277031.6775024}
+{"event": "HEDGE_CHAIN_OPENED", "stage": "hedge_chain_opened", "ts": 1793277031.6775024}
+{"event": "HEDGE_CHAIN_OPENED", "stage": "hedge_chain_opened", "ts": 1793277031.6775024}
+{"event": "HEDGE_CHAIN_OPENED", "stage": "hedge_chain_opened", "ts": 1793277031.6775024}
+{"event": "HEDGE_SUBMIT", "stage": "hedge_sent", "ts": 1793277031.6775024}
+{"event": "HEDGE_SUBMIT", "stage": "hedge_sent", "ts": 1793277031.6775024}
+{"event": "HEDGE_SUBMIT", "stage": "hedge_sent", "ts": 1793277031.6775024}
+{"event": "HEDGE_SUBMIT", "stage": "hedge_sent", "ts": 1793277031.6775024}
+{"cumulative_filled_quantity": "0", "event": "ORDER_LIFECYCLE", "order_id": "09787ef3-a1f4-5c9b-b456-bf0227ac7a8b", "reason": "", "source": "INTERNAL", "stage": "request_sent", "ts": 1793277031.6775024, "venue": "BINANCE"}
+{"cumulative_filled_quantity": "0", "event": "ORDER_LIFECYCLE", "order_id": "4a3677b6-a07b-5d57-9f3f-49bf39fdb82e", "reason": "", "source": "INTERNAL", "stage": "request_sent", "ts": 1793277031.6775024, "venue": "BINANCE"}
+{"cumulative_filled_quantity": "0", "event": "ORDER_LIFECYCLE", "order_id": "675fe662-3c0b-596e-add3-4c8860d34d91", "reason": "", "source": "INTERNAL", "stage": "request_sent", "ts": 1793277031.6775024, "venue": "BINANCE"}
+{"cumulative_filled_quantity": "0", "event": "ORDER_LIFECYCLE", "order_id": "662f045c-c326-5088-b66b-56837955f152", "reason": "", "source": "INTERNAL", "stage": "request_sent", "ts": 1793277031.6775024, "venue": "BINANCE"}
+{"cumulative_filled_quantity": "0", "event": "ORDER_LIFECYCLE", "order_id": "4a3677b6-a07b-5d57-9f3f-49bf39fdb82e", "reason": "", "source": "ADAPTER_CALLBACK", "stage": "exchange_effective_notified", "ts": 1793277031.7125025, "venue": "BINANCE"}
+{"cumulative_filled_quantity": "0.1", "event": "FILL", "fill_price": "100.6200", "fill_quantity": "0.1", "order_id": "4a3677b6-a07b-5d57-9f3f-49bf39fdb82e", "side": "SELL", "stage": "fill_booked", "ts": 1793277031.7125025, "venue": "BINANCE"}
+{"cumulative_filled_quantity": "0.1", "event": "ORDER_LIFECYCLE", "order_id": "4a3677b6-a07b-5d57-9f3f-49bf39fdb82e", "reason": "", "source": "ADAPTER_CALLBACK", "stage": "fill_notified", "ts": 1793277031.7125025, "venue": "BINANCE"}
+{"cumulative_filled_quantity": "0", "event": "ORDER_LIFECYCLE", "order_id": "662f045c-c326-5088-b66b-56837955f152", "reason": "", "source": "ADAPTER_CALLBACK", "stage": "exchange_effective_notified", "ts": 1793277031.7207487, "venue": "BINANCE"}
+{"cumulative_filled_quantity": "0.7", "event": "FILL", "fill_price": "100.6200", "fill_quantity": "0.7", "order_id": "662f045c-c326-5088-b66b-56837955f152", "side": "SELL", "stage": "fill_booked", "ts": 1793277031.7207487, "venue": "BINANCE"}
+{"cumulative_filled_quantity": "0.7", "event": "ORDER_LIFECYCLE", "order_id": "662f045c-c326-5088-b66b-56837955f152", "reason": "", "source": "ADAPTER_CALLBACK", "stage": "fill_notified", "ts": 1793277031.7207487, "venue": "BINANCE"}
+{"cumulative_filled_quantity": "0", "event": "ORDER_LIFECYCLE", "order_id": "09787ef3-a1f4-5c9b-b456-bf0227ac7a8b", "reason": "", "source": "ADAPTER_CALLBACK", "stage": "exchange_effective_notified", "ts": 1793277031.7225704, "venue": "BINANCE"}
+{"cumulative_filled_quantity": "0.1", "event": "FILL", "fill_price": "100.6200", "fill_quantity": "0.1", "order_id": "09787ef3-a1f4-5c9b-b456-bf0227ac7a8b", "side": "SELL", "stage": "fill_booked", "ts": 1793277031.7225704, "venue": "BINANCE"}
+{"cumulative_filled_quantity": "0.1", "event": "ORDER_LIFECYCLE", "order_id": "09787ef3-a1f4-5c9b-b456-bf0227ac7a8b", "reason": "", "source": "ADAPTER_CALLBACK", "stage": "fill_notified", "ts": 1793277031.7225704, "venue": "BINANCE"}
+{"cumulative_filled_quantity": "0", "event": "ORDER_LIFECYCLE", "order_id": "675fe662-3c0b-596e-add3-4c8860d34d91", "reason": "", "source": "ADAPTER_CALLBACK", "stage": "exchange_effective_notified", "ts": 1793277031.730069, "venue": "BINANCE"}
+{"cumulative_filled_quantity": "0.1", "event": "FILL", "fill_price": "100.6200", "fill_quantity": "0.1", "order_id": "675fe662-3c0b-596e-add3-4c8860d34d91", "side": "SELL", "stage": "fill_booked", "ts": 1793277031.730069, "venue": "BINANCE"}
+{"cumulative_filled_quantity": "0.1", "event": "ORDER_LIFECYCLE", "order_id": "675fe662-3c0b-596e-add3-4c8860d34d91", "reason": "", "source": "ADAPTER_CALLBACK", "stage": "fill_notified", "ts": 1793277031.730069, "venue": "BINANCE"}
+{"event": "OPPORTUNITY", "stage": "decision", "ts": 1793277033.9891858}
+{"kind": "book", "stage": "market_event_received", "ts": 1793277033.9891858, "venue": "signal-trigger"}
+{"cumulative_filled_quantity": "0", "event": "ORDER_LIFECYCLE", "order_id": "e7c6cbf9-d680-5f22-bfd7-fdf1922bf00b", "reason": "", "source": "INTERNAL", "stage": "request_sent", "ts": 1793277033.9891858, "venue": "BYBIT"}
+{"cumulative_filled_quantity": "0", "event": "ORDER_LIFECYCLE", "order_id": "e7c6cbf9-d680-5f22-bfd7-fdf1922bf00b", "reason": "", "source": "ADAPTER_CALLBACK", "stage": "exchange_effective_notified", "ts": 1793277033.998722, "venue": "BYBIT"}
+{"cumulative_filled_quantity": "0", "event": "ORDER_LIFECYCLE", "order_id": "e7c6cbf9-d680-5f22-bfd7-fdf1922bf00b", "reason": "", "source": "INTERNAL", "stage": "cancel_requested", "ts": 1793277034.0136435, "venue": "BYBIT"}
+{"cumulative_filled_quantity": "0", "event": "ORDER_LIFECYCLE", "order_id": "e7c6cbf9-d680-5f22-bfd7-fdf1922bf00b", "reason": "", "source": "INTERNAL", "stage": "cancel_requested", "ts": 1793277034.0136435, "venue": "BYBIT"}
+{"event": "QUOTE_WITHDRAWN", "net_edge_bps": -3.6135861473485207, "order_id": "e7c6cbf9-d680-5f22-bfd7-fdf1922bf00b", "reason": "edge_below_threshold", "stage": "quote_withdrawn", "ts": 1793277034.0136435, "venue": "BYBIT"}
+{"cumulative_filled_quantity": "0.0", "event": "ORDER_LIFECYCLE", "order_id": "e7c6cbf9-d680-5f22-bfd7-fdf1922bf00b", "reason": "", "source": "ADAPTER_CALLBACK", "stage": "cancel_notified", "ts": 1793277034.0206602, "venue": "BYBIT"}
+{"event": "OPPORTUNITY", "stage": "decision", "ts": 1793277035.7389042}
+{"kind": "book", "stage": "market_event_received", "ts": 1793277035.7389042, "venue": "signal-trigger"}
+{"cumulative_filled_quantity": "0", "event": "ORDER_LIFECYCLE", "order_id": "a8163fe6-2ebd-53e6-8cdf-ce15c84db700", "reason": "", "source": "INTERNAL", "stage": "request_sent", "ts": 1793277035.7389042, "venue": "BYBIT"}
+{"cumulative_filled_quantity": "0", "event": "ORDER_LIFECYCLE", "order_id": "a8163fe6-2ebd-53e6-8cdf-ce15c84db700", "reason": "", "source": "ADAPTER_CALLBACK", "stage": "exchange_effective_notified", "ts": 1793277035.7461958, "venue": "BYBIT"}
+{"event": "AMEND_REQUESTED", "order_id": "a8163fe6-2ebd-53e6-8cdf-ce15c84db700", "reason": "reprice:adverse_move", "replacement_order_id": "27c380dc-9ce6-5446-b183-606a59e174d3", "stage": "amend_requested", "ts": 1793277036.5598714, "venue": "BYBIT"}
+{"cumulative_filled_quantity": "0", "event": "ORDER_LIFECYCLE", "order_id": "a8163fe6-2ebd-53e6-8cdf-ce15c84db700", "reason": "", "source": "INTERNAL", "stage": "amend_requested", "ts": 1793277036.5598714, "venue": "BYBIT"}
+{"cumulative_filled_quantity": "0", "event": "ORDER_LIFECYCLE", "order_id": "27c380dc-9ce6-5446-b183-606a59e174d3", "reason": "", "source": "INTERNAL", "stage": "request_sent", "ts": 1793277036.5598714, "venue": "BYBIT"}
+{"event": "AMEND_CONFIRMED", "order_id": "a8163fe6-2ebd-53e6-8cdf-ce15c84db700", "replacement_order_id": "27c380dc-9ce6-5446-b183-606a59e174d3", "stage": "amend_confirmed", "ts": 1793277036.5668519, "venue": "BYBIT"}
+{"cumulative_filled_quantity": "0", "event": "ORDER_LIFECYCLE", "order_id": "27c380dc-9ce6-5446-b183-606a59e174d3", "reason": "", "source": "ADAPTER_CALLBACK", "stage": "amend_confirmed_notified", "ts": 1793277036.5668519, "venue": "BYBIT"}
+{"cumulative_filled_quantity": "0", "event": "ORDER_LIFECYCLE", "order_id": "a8163fe6-2ebd-53e6-8cdf-ce15c84db700", "reason": "replaced by 27c380dc-9ce6-5446-b183-606a59e174d3", "source": "ADAPTER_CALLBACK", "stage": "cancel_notified", "ts": 1793277036.5668519, "venue": "BYBIT"}
+{"cumulative_filled_quantity": "0", "event": "ORDER_LIFECYCLE", "order_id": "27c380dc-9ce6-5446-b183-606a59e174d3", "reason": "no valid book at arrival", "source": "ADAPTER_CALLBACK", "stage": "reject_notified", "ts": 1793277036.5682764, "venue": "BYBIT"}
+{"event": "OPPORTUNITY", "stage": "decision", "ts": 1793277036.6104107}
+{"kind": "book", "stage": "market_event_received", "ts": 1793277036.6104107, "venue": "signal-trigger"}
+{"cumulative_filled_quantity": "0", "event": "ORDER_LIFECYCLE", "order_id": "fdbac234-f21e-5039-9b6a-51b3375831c1", "reason": "", "source": "INTERNAL", "stage": "request_sent", "ts": 1793277036.6104107, "venue": "BYBIT"}
+{"cumulative_filled_quantity": "0", "event": "ORDER_LIFECYCLE", "order_id": "fdbac234-f21e-5039-9b6a-51b3375831c1", "reason": "", "source": "ADAPTER_CALLBACK", "stage": "exchange_effective_notified", "ts": 1793277036.6140995, "venue": "BYBIT"}
+{"cumulative_filled_quantity": "0", "event": "ORDER_LIFECYCLE", "order_id": "fdbac234-f21e-5039-9b6a-51b3375831c1", "reason": "", "source": "INTERNAL", "stage": "cancel_requested", "ts": 1793277036.8237486, "venue": "BYBIT"}
+{"cumulative_filled_quantity": "0", "event": "ORDER_LIFECYCLE", "order_id": "fdbac234-f21e-5039-9b6a-51b3375831c1", "reason": "", "source": "INTERNAL", "stage": "cancel_requested", "ts": 1793277036.8237486, "venue": "BYBIT"}
+{"event": "QUOTE_WITHDRAWN", "net_edge_bps": -3.947126560458119, "order_id": "fdbac234-f21e-5039-9b6a-51b3375831c1", "reason": "edge_below_threshold", "stage": "quote_withdrawn", "ts": 1793277036.8237486, "venue": "BYBIT"}
+{"cumulative_filled_quantity": "0.0", "event": "ORDER_LIFECYCLE", "order_id": "fdbac234-f21e-5039-9b6a-51b3375831c1", "reason": "", "source": "ADAPTER_CALLBACK", "stage": "cancel_notified", "ts": 1793277036.8314943, "venue": "BYBIT"}
+{"event": "OPPORTUNITY", "stage": "decision", "ts": 1793277038.2944229}
+{"kind": "book", "stage": "market_event_received", "ts": 1793277038.2944229, "venue": "signal-trigger"}
+{"cumulative_filled_quantity": "0", "event": "ORDER_LIFECYCLE", "order_id": "7a0a1c97-a2b4-5dfc-ab49-513e607ed39a", "reason": "", "source": "INTERNAL", "stage": "request_sent", "ts": 1793277038.2944229, "venue": "BYBIT"}
+{"cumulative_filled_quantity": "0", "event": "ORDER_LIFECYCLE", "order_id": "7a0a1c97-a2b4-5dfc-ab49-513e607ed39a", "reason": "", "source": "ADAPTER_CALLBACK", "stage": "exchange_effective_notified", "ts": 1793277038.3043826, "venue": "BYBIT"}
+{"cumulative_filled_quantity": "1.0", "event": "FILL", "fill_price": "100.49", "fill_quantity": "1.0", "order_id": "7a0a1c97-a2b4-5dfc-ab49-513e607ed39a", "side": "BUY", "stage": "fill_booked", "ts": 1793277038.8990662, "venue": "BYBIT"}
+{"cumulative_filled_quantity": "1.0", "event": "ORDER_LIFECYCLE", "order_id": "7a0a1c97-a2b4-5dfc-ab49-513e607ed39a", "reason": "", "source": "ADAPTER_CALLBACK", "stage": "fill_notified", "ts": 1793277038.8990662, "venue": "BYBIT"}
+{"cap": "100.45", "event": "HEDGE_CAP_SIZE_AWARE", "side": "SELL", "stage": "hedge_cap_decided", "touch": "100.5000", "touch_covers": true, "ts": 1793277038.8990662}
+{"event": "HEDGE_CHAIN_OPENED", "stage": "hedge_chain_opened", "ts": 1793277038.8990662}
+{"event": "HEDGE_SUBMIT", "stage": "hedge_sent", "ts": 1793277038.8990662}
+{"cumulative_filled_quantity": "0", "event": "ORDER_LIFECYCLE", "order_id": "b61e1365-d75d-5214-9fac-e6fdffb81971", "reason": "", "source": "INTERNAL", "stage": "request_sent", "ts": 1793277038.8990662, "venue": "BINANCE"}
+{"cumulative_filled_quantity": "0", "event": "ORDER_LIFECYCLE", "order_id": "b61e1365-d75d-5214-9fac-e6fdffb81971", "reason": "", "source": "ADAPTER_CALLBACK", "stage": "exchange_effective_notified", "ts": 1793277038.934066, "venue": "BINANCE"}
+{"cumulative_filled_quantity": "1.0", "event": "FILL", "fill_price": "100.5000", "fill_quantity": "1.0", "order_id": "b61e1365-d75d-5214-9fac-e6fdffb81971", "side": "SELL", "stage": "fill_booked", "ts": 1793277038.934066, "venue": "BINANCE"}
+{"cumulative_filled_quantity": "1.0", "event": "ORDER_LIFECYCLE", "order_id": "b61e1365-d75d-5214-9fac-e6fdffb81971", "reason": "", "source": "ADAPTER_CALLBACK", "stage": "fill_notified", "ts": 1793277038.934066, "venue": "BINANCE"}
+{"kind": "book", "stage": "market_event_received", "ts": 1793277043.2186701, "venue": "signal-trigger"}
+{"event": "OPPORTUNITY", "stage": "decision", "ts": 1793277043.2186704}
+{"cumulative_filled_quantity": "0", "event": "ORDER_LIFECYCLE", "order_id": "f0ac9500-2693-58a1-8838-b0697a7a97fa", "reason": "", "source": "INTERNAL", "stage": "request_sent", "ts": 1793277043.2186704, "venue": "BYBIT"}
+{"cumulative_filled_quantity": "0", "event": "ORDER_LIFECYCLE", "order_id": "f0ac9500-2693-58a1-8838-b0697a7a97fa", "reason": "", "source": "ADAPTER_CALLBACK", "stage": "exchange_effective_notified", "ts": 1793277043.2300348, "venue": "BYBIT"}
+{"cumulative_filled_quantity": "1.0", "event": "FILL", "fill_price": "100.46", "fill_quantity": "1.0", "order_id": "f0ac9500-2693-58a1-8838-b0697a7a97fa", "side": "BUY", "stage": "fill_booked", "ts": 1793277045.174843, "venue": "BYBIT"}
+{"cumulative_filled_quantity": "1.0", "event": "ORDER_LIFECYCLE", "order_id": "f0ac9500-2693-58a1-8838-b0697a7a97fa", "reason": "", "source": "ADAPTER_CALLBACK", "stage": "fill_notified", "ts": 1793277045.174843, "venue": "BYBIT"}
+{"cap": "100.43", "event": "HEDGE_CAP_SIZE_AWARE", "side": "SELL", "stage": "hedge_cap_decided", "touch": "100.4800", "touch_covers": true, "ts": 1793277045.174843}
+{"event": "HEDGE_CHAIN_OPENED", "stage": "hedge_chain_opened", "ts": 1793277045.174843}
+{"event": "HEDGE_SUBMIT", "stage": "hedge_sent", "ts": 1793277045.174843}
+{"cumulative_filled_quantity": "0", "event": "ORDER_LIFECYCLE", "order_id": "c11d3883-ccb4-5732-a760-da87a0204504", "reason": "", "source": "INTERNAL", "stage": "request_sent", "ts": 1793277045.174843, "venue": "BINANCE"}
+{"cumulative_filled_quantity": "0", "event": "ORDER_LIFECYCLE", "order_id": "c11d3883-ccb4-5732-a760-da87a0204504", "reason": "", "source": "ADAPTER_CALLBACK", "stage": "exchange_effective_notified", "ts": 1793277045.2226377, "venue": "BINANCE"}
+{"cumulative_filled_quantity": "1.0", "event": "FILL", "fill_price": "100.4700", "fill_quantity": "1.0", "order_id": "c11d3883-ccb4-5732-a760-da87a0204504", "side": "SELL", "stage": "fill_booked", "ts": 1793277045.2226377, "venue": "BINANCE"}
+{"cumulative_filled_quantity": "1.0", "event": "ORDER_LIFECYCLE", "order_id": "c11d3883-ccb4-5732-a760-da87a0204504", "reason": "", "source": "ADAPTER_CALLBACK", "stage": "fill_notified", "ts": 1793277045.2226377, "venue": "BINANCE"}
+{"event": "OPPORTUNITY", "stage": "decision", "ts": 1793277045.8817892}
+{"kind": "book", "stage": "market_event_received", "ts": 1793277045.8817892, "venue": "signal-trigger"}
+{"cumulative_filled_quantity": "0", "event": "ORDER_LIFECYCLE", "order_id": "999fe184-9fcb-5dd1-825b-dcb173c7c6c5", "reason": "", "source": "INTERNAL", "stage": "request_sent", "ts": 1793277045.8817892, "venue": "BYBIT"}
+{"cumulative_filled_quantity": "0", "event": "ORDER_LIFECYCLE", "order_id": "999fe184-9fcb-5dd1-825b-dcb173c7c6c5", "reason": "", "source": "ADAPTER_CALLBACK", "stage": "exchange_effective_notified", "ts": 1793277045.8872657, "venue": "BYBIT"}
+{"event": "AMEND_REQUESTED", "order_id": "999fe184-9fcb-5dd1-825b-dcb173c7c6c5", "reason": "reprice:adverse_move", "replacement_order_id": "269f5fe5-758c-5ce0-aeab-2703b842942e", "stage": "amend_requested", "ts": 1793277047.2649689, "venue": "BYBIT"}
+{"cumulative_filled_quantity": "0", "event": "ORDER_LIFECYCLE", "order_id": "999fe184-9fcb-5dd1-825b-dcb173c7c6c5", "reason": "", "source": "INTERNAL", "stage": "amend_requested", "ts": 1793277047.2649689, "venue": "BYBIT"}
+{"cumulative_filled_quantity": "0", "event": "ORDER_LIFECYCLE", "order_id": "269f5fe5-758c-5ce0-aeab-2703b842942e", "reason": "", "source": "INTERNAL", "stage": "request_sent", "ts": 1793277047.2649689, "venue": "BYBIT"}
+{"event": "AMEND_CONFIRMED", "order_id": "999fe184-9fcb-5dd1-825b-dcb173c7c6c5", "replacement_order_id": "269f5fe5-758c-5ce0-aeab-2703b842942e", "stage": "amend_confirmed", "ts": 1793277047.2693489, "venue": "BYBIT"}
+{"cumulative_filled_quantity": "0", "event": "ORDER_LIFECYCLE", "order_id": "269f5fe5-758c-5ce0-aeab-2703b842942e", "reason": "", "source": "ADAPTER_CALLBACK", "stage": "amend_confirmed_notified", "ts": 1793277047.2693489, "venue": "BYBIT"}
+{"cumulative_filled_quantity": "0", "event": "ORDER_LIFECYCLE", "order_id": "999fe184-9fcb-5dd1-825b-dcb173c7c6c5", "reason": "replaced by 269f5fe5-758c-5ce0-aeab-2703b842942e", "source": "ADAPTER_CALLBACK", "stage": "cancel_notified", "ts": 1793277047.2693489, "venue": "BYBIT"}
+{"cumulative_filled_quantity": "0", "event": "ORDER_LIFECYCLE", "order_id": "269f5fe5-758c-5ce0-aeab-2703b842942e", "reason": "no valid book at arrival", "source": "ADAPTER_CALLBACK", "stage": "reject_notified", "ts": 1793277047.2703922, "venue": "BYBIT"}
+{"kind": "book", "stage": "market_event_received", "ts": 1793277047.3193133, "venue": "signal-trigger"}
+{"event": "OPPORTUNITY", "stage": "decision", "ts": 1793277047.3193135}
+{"cumulative_filled_quantity": "0", "event": "ORDER_LIFECYCLE", "order_id": "42fd4922-99d0-5772-b478-3fb9db091156", "reason": "", "source": "INTERNAL", "stage": "request_sent", "ts": 1793277047.3193135, "venue": "BYBIT"}
+{"cumulative_filled_quantity": "0", "event": "ORDER_LIFECYCLE", "order_id": "42fd4922-99d0-5772-b478-3fb9db091156", "reason": "", "source": "ADAPTER_CALLBACK", "stage": "exchange_effective_notified", "ts": 1793277047.3263032, "venue": "BYBIT"}
+{"cumulative_filled_quantity": "0.045850251162", "event": "FILL", "fill_price": "100.43", "fill_quantity": "0.045850251162", "order_id": "42fd4922-99d0-5772-b478-3fb9db091156", "side": "BUY", "stage": "fill_booked", "ts": 1793277050.286951, "venue": "BYBIT"}
+{"cumulative_filled_quantity": "0.487753767436", "event": "FILL", "fill_price": "100.43", "fill_quantity": "0.441903516274", "order_id": "42fd4922-99d0-5772-b478-3fb9db091156", "side": "BUY", "stage": "fill_booked", "ts": 1793277050.286951, "venue": "BYBIT"}
+{"cumulative_filled_quantity": "0.587753767436", "event": "FILL", "fill_price": "100.43", "fill_quantity": "0.100000000000", "order_id": "42fd4922-99d0-5772-b478-3fb9db091156", "side": "BUY", "stage": "fill_booked", "ts": 1793277050.286951, "venue": "BYBIT"}
+{"cumulative_filled_quantity": "0.687753767436", "event": "FILL", "fill_price": "100.43", "fill_quantity": "0.100000000000", "order_id": "42fd4922-99d0-5772-b478-3fb9db091156", "side": "BUY", "stage": "fill_booked", "ts": 1793277050.286951, "venue": "BYBIT"}
+{"cumulative_filled_quantity": "0.045850251162", "event": "ORDER_LIFECYCLE", "order_id": "42fd4922-99d0-5772-b478-3fb9db091156", "reason": "", "source": "ADAPTER_CALLBACK", "stage": "fill_notified", "ts": 1793277050.286951, "venue": "BYBIT"}
+{"cumulative_filled_quantity": "0.487753767436", "event": "ORDER_LIFECYCLE", "order_id": "42fd4922-99d0-5772-b478-3fb9db091156", "reason": "", "source": "ADAPTER_CALLBACK", "stage": "fill_notified", "ts": 1793277050.286951, "venue": "BYBIT"}
+{"cumulative_filled_quantity": "0.587753767436", "event": "ORDER_LIFECYCLE", "order_id": "42fd4922-99d0-5772-b478-3fb9db091156", "reason": "", "source": "ADAPTER_CALLBACK", "stage": "fill_notified", "ts": 1793277050.286951, "venue": "BYBIT"}
+{"cumulative_filled_quantity": "0.687753767436", "event": "ORDER_LIFECYCLE", "order_id": "42fd4922-99d0-5772-b478-3fb9db091156", "reason": "", "source": "ADAPTER_CALLBACK", "stage": "fill_notified", "ts": 1793277050.286951, "venue": "BYBIT"}
+{"cap": "100.39", "event": "HEDGE_CAP_SIZE_AWARE", "side": "SELL", "stage": "hedge_cap_decided", "touch": "100.4400", "touch_covers": true, "ts": 1793277050.286951}
+{"cap": "100.39", "event": "HEDGE_CAP_SIZE_AWARE", "side": "SELL", "stage": "hedge_cap_decided", "touch": "100.4400", "touch_covers": true, "ts": 1793277050.286951}
+{"cap": "100.39", "event": "HEDGE_CAP_SIZE_AWARE", "side": "SELL", "stage": "hedge_cap_decided", "touch": "100.4400", "touch_covers": true, "ts": 1793277050.286951}
+{"event": "HEDGE_CHAIN_OPENED", "stage": "hedge_chain_opened", "ts": 1793277050.286951}
+{"event": "HEDGE_CHAIN_OPENED", "stage": "hedge_chain_opened", "ts": 1793277050.286951}
+{"event": "HEDGE_CHAIN_OPENED", "stage": "hedge_chain_opened", "ts": 1793277050.286951}
+{"event": "HEDGE_SUBMIT", "stage": "hedge_sent", "ts": 1793277050.286951}
+{"event": "HEDGE_SUBMIT", "stage": "hedge_sent", "ts": 1793277050.286951}
+{"event": "HEDGE_SUBMIT", "stage": "hedge_sent", "ts": 1793277050.286951}
+{"cumulative_filled_quantity": "0", "event": "ORDER_LIFECYCLE", "order_id": "4a4698ea-2067-5591-8517-d1c75af306fb", "reason": "", "source": "INTERNAL", "stage": "request_sent", "ts": 1793277050.286951, "venue": "BINANCE"}
+{"cumulative_filled_quantity": "0", "event": "ORDER_LIFECYCLE", "order_id": "8e418fde-2ba7-5027-a796-a1a1f4404473", "reason": "", "source": "INTERNAL", "stage": "request_sent", "ts": 1793277050.286951, "venue": "BINANCE"}
+{"cumulative_filled_quantity": "0", "event": "ORDER_LIFECYCLE", "order_id": "fc28fd98-1f5e-5180-bdbf-c089c6d3a9c5", "reason": "", "source": "INTERNAL", "stage": "request_sent", "ts": 1793277050.286951, "venue": "BINANCE"}
+{"cumulative_filled_quantity": "0.687753767436", "event": "ORDER_LIFECYCLE", "order_id": "42fd4922-99d0-5772-b478-3fb9db091156", "reason": "", "source": "INTERNAL", "stage": "cancel_requested", "ts": 1793277050.2961166, "venue": "BYBIT"}
+{"cumulative_filled_quantity": "0.687753767436", "event": "ORDER_LIFECYCLE", "order_id": "42fd4922-99d0-5772-b478-3fb9db091156", "reason": "", "source": "INTERNAL", "stage": "cancel_requested", "ts": 1793277050.2961166, "venue": "BYBIT"}
+{"event": "QUOTE_WITHDRAWN", "net_edge_bps": -3.9471265604584627, "order_id": "42fd4922-99d0-5772-b478-3fb9db091156", "reason": "edge_below_threshold", "stage": "quote_withdrawn", "ts": 1793277050.2961166, "venue": "BYBIT"}
+{"cumulative_filled_quantity": "0.687753767436", "event": "ORDER_LIFECYCLE", "order_id": "42fd4922-99d0-5772-b478-3fb9db091156", "reason": "", "source": "ADAPTER_CALLBACK", "stage": "cancel_notified", "ts": 1793277050.3004615, "venue": "BYBIT"}
+{"cumulative_filled_quantity": "0", "event": "ORDER_LIFECYCLE", "order_id": "4a4698ea-2067-5591-8517-d1c75af306fb", "reason": "", "source": "ADAPTER_CALLBACK", "stage": "exchange_effective_notified", "ts": 1793277050.3219512, "venue": "BINANCE"}
+{"cumulative_filled_quantity": "0.48", "event": "FILL", "fill_price": "100.4300", "fill_quantity": "0.48", "order_id": "4a4698ea-2067-5591-8517-d1c75af306fb", "side": "SELL", "stage": "fill_booked", "ts": 1793277050.3219512, "venue": "BINANCE"}
+{"cumulative_filled_quantity": "0.48", "event": "ORDER_LIFECYCLE", "order_id": "4a4698ea-2067-5591-8517-d1c75af306fb", "reason": "", "source": "ADAPTER_CALLBACK", "stage": "fill_notified", "ts": 1793277050.3219512, "venue": "BINANCE"}
+{"cumulative_filled_quantity": "0", "event": "ORDER_LIFECYCLE", "order_id": "fc28fd98-1f5e-5180-bdbf-c089c6d3a9c5", "reason": "", "source": "ADAPTER_CALLBACK", "stage": "exchange_effective_notified", "ts": 1793277050.3223305, "venue": "BINANCE"}
+{"cumulative_filled_quantity": "0.1", "event": "FILL", "fill_price": "100.4300", "fill_quantity": "0.1", "order_id": "fc28fd98-1f5e-5180-bdbf-c089c6d3a9c5", "side": "SELL", "stage": "fill_booked", "ts": 1793277050.3223305, "venue": "BINANCE"}
+{"cumulative_filled_quantity": "0.1", "event": "ORDER_LIFECYCLE", "order_id": "fc28fd98-1f5e-5180-bdbf-c089c6d3a9c5", "reason": "", "source": "ADAPTER_CALLBACK", "stage": "fill_notified", "ts": 1793277050.3223305, "venue": "BINANCE"}
+{"cumulative_filled_quantity": "0", "event": "ORDER_LIFECYCLE", "order_id": "8e418fde-2ba7-5027-a796-a1a1f4404473", "reason": "", "source": "ADAPTER_CALLBACK", "stage": "exchange_effective_notified", "ts": 1793277050.328551, "venue": "BINANCE"}
+{"cumulative_filled_quantity": "0.1", "event": "FILL", "fill_price": "100.4300", "fill_quantity": "0.1", "order_id": "8e418fde-2ba7-5027-a796-a1a1f4404473", "side": "SELL", "stage": "fill_booked", "ts": 1793277050.328551, "venue": "BINANCE"}
+{"cumulative_filled_quantity": "0.1", "event": "ORDER_LIFECYCLE", "order_id": "8e418fde-2ba7-5027-a796-a1a1f4404473", "reason": "", "source": "ADAPTER_CALLBACK", "stage": "fill_notified", "ts": 1793277050.328551, "venue": "BINANCE"}
+{"event": "OPPORTUNITY", "stage": "decision", "ts": 1793277051.8580334}
+{"kind": "book", "stage": "market_event_received", "ts": 1793277051.8580334, "venue": "signal-trigger"}
+{"cumulative_filled_quantity": "0", "event": "ORDER_LIFECYCLE", "order_id": "cd3b75b5-5c35-5fad-b1c2-4f27878c5fa1", "reason": "", "source": "INTERNAL", "stage": "request_sent", "ts": 1793277051.8580334, "venue": "BYBIT"}
+{"cumulative_filled_quantity": "0", "event": "ORDER_LIFECYCLE", "order_id": "cd3b75b5-5c35-5fad-b1c2-4f27878c5fa1", "reason": "", "source": "ADAPTER_CALLBACK", "stage": "exchange_effective_notified", "ts": 1793277051.8606324, "venue": "BYBIT"}
+{"cumulative_filled_quantity": "1.0", "event": "FILL", "fill_price": "100.41", "fill_quantity": "1.0", "order_id": "cd3b75b5-5c35-5fad-b1c2-4f27878c5fa1", "side": "BUY", "stage": "fill_booked", "ts": 1793277053.8397093, "venue": "BYBIT"}
+{"cumulative_filled_quantity": "1.0", "event": "ORDER_LIFECYCLE", "order_id": "cd3b75b5-5c35-5fad-b1c2-4f27878c5fa1", "reason": "", "source": "ADAPTER_CALLBACK", "stage": "fill_notified", "ts": 1793277053.8397093, "venue": "BYBIT"}
+{"cap": "100.37", "event": "HEDGE_CAP_SIZE_AWARE", "side": "SELL", "stage": "hedge_cap_decided", "touch": "100.4200", "touch_covers": true, "ts": 1793277053.8397093}
+{"event": "HEDGE_CHAIN_OPENED", "stage": "hedge_chain_opened", "ts": 1793277053.8397093}
+{"event": "HEDGE_SUBMIT", "stage": "hedge_sent", "ts": 1793277053.8397093}
+{"cumulative_filled_quantity": "0", "event": "ORDER_LIFECYCLE", "order_id": "fae11132-e7a6-5b02-946a-b4d4a5f664da", "reason": "", "source": "INTERNAL", "stage": "request_sent", "ts": 1793277053.8397093, "venue": "BINANCE"}
+{"cumulative_filled_quantity": "0", "event": "ORDER_LIFECYCLE", "order_id": "fae11132-e7a6-5b02-946a-b4d4a5f664da", "reason": "", "source": "ADAPTER_CALLBACK", "stage": "exchange_effective_notified", "ts": 1793277053.8810008, "venue": "BINANCE"}
+{"cumulative_filled_quantity": "1.0", "event": "FILL", "fill_price": "100.4200", "fill_quantity": "1.0", "order_id": "fae11132-e7a6-5b02-946a-b4d4a5f664da", "side": "SELL", "stage": "fill_booked", "ts": 1793277053.8810008, "venue": "BINANCE"}
+{"cumulative_filled_quantity": "1.0", "event": "ORDER_LIFECYCLE", "order_id": "fae11132-e7a6-5b02-946a-b4d4a5f664da", "reason": "", "source": "ADAPTER_CALLBACK", "stage": "fill_notified", "ts": 1793277053.8810008, "venue": "BINANCE"}
+{"event": "OPPORTUNITY", "stage": "decision", "ts": 1793277072.086277}
+{"kind": "book", "stage": "market_event_received", "ts": 1793277072.086277, "venue": "signal-trigger"}
+{"cumulative_filled_quantity": "0", "event": "ORDER_LIFECYCLE", "order_id": "9322101a-efd3-546b-b3bc-bb58a6cb95ee", "reason": "", "source": "INTERNAL", "stage": "request_sent", "ts": 1793277072.086277, "venue": "BYBIT"}
+{"cumulative_filled_quantity": "0", "event": "ORDER_LIFECYCLE", "order_id": "9322101a-efd3-546b-b3bc-bb58a6cb95ee", "reason": "postonly_would_take_liquidity", "source": "ADAPTER_CALLBACK", "stage": "reject_notified", "ts": 1793277072.0944536, "venue": "BYBIT"}
+{"confirmed_residual_base": "0.007753767436", "event": "MARGIN_PRICE_PAUSE", "execution_blocked_reason": "margin_price_missing", "pending_hedge_qty": "0", "stage": "alert", "ts": 1793277308.1884742}
+{"event": "OPPORTUNITY", "stage": "decision", "ts": 1793277930.7993748}
+{"kind": "book", "stage": "market_event_received", "ts": 1793277930.7993748, "venue": "signal-trigger"}
+{"cumulative_filled_quantity": "0", "event": "ORDER_LIFECYCLE", "order_id": "e9704554-37f5-55e1-82a8-3f2673416fc0", "reason": "", "source": "INTERNAL", "stage": "request_sent", "ts": 1793277930.7993748, "venue": "BYBIT"}
+{"event": "OPPORTUNITY", "stage": "decision", "ts": 1793277930.8029428}
+{"kind": "book", "stage": "market_event_received", "ts": 1793277930.8029428, "venue": "signal-trigger"}
+{"cumulative_filled_quantity": "0", "event": "ORDER_LIFECYCLE", "order_id": "a6cf03e4-e179-5724-9e0f-a4a0b4337e40", "reason": "", "source": "INTERNAL", "stage": "request_sent", "ts": 1793277930.8029428, "venue": "BYBIT"}
+{"cumulative_filled_quantity": "0", "event": "ORDER_LIFECYCLE", "order_id": "a6cf03e4-e179-5724-9e0f-a4a0b4337e40", "reason": "", "source": "ADAPTER_CALLBACK", "stage": "exchange_effective_notified", "ts": 1793277930.8070817, "venue": "BYBIT"}
+{"cumulative_filled_quantity": "0", "event": "ORDER_LIFECYCLE", "order_id": "e9704554-37f5-55e1-82a8-3f2673416fc0", "reason": "", "source": "ADAPTER_CALLBACK", "stage": "exchange_effective_notified", "ts": 1793277930.807292, "venue": "BYBIT"}
+{"kind": "book", "stage": "market_event_received", "ts": 1793277930.83546, "venue": "signal-trigger"}
+{"event": "OPPORTUNITY", "stage": "decision", "ts": 1793277930.8354602}
+{"cumulative_filled_quantity": "0", "event": "ORDER_LIFECYCLE", "order_id": "7f775413-9237-5251-8194-923f550a59aa", "reason": "", "source": "INTERNAL", "stage": "request_sent", "ts": 1793277930.8354602, "venue": "BYBIT"}
+{"event": "OPPORTUNITY", "stage": "decision", "ts": 1793277930.8364127}
+{"kind": "book", "stage": "market_event_received", "ts": 1793277930.8364127, "venue": "signal-trigger"}
+{"cumulative_filled_quantity": "0", "event": "ORDER_LIFECYCLE", "order_id": "45614c51-a26b-5b60-8ac9-1d0f401248c3", "reason": "", "source": "INTERNAL", "stage": "request_sent", "ts": 1793277930.8364127, "venue": "BYBIT"}
+{"cumulative_filled_quantity": "0", "event": "ORDER_LIFECYCLE", "order_id": "7f775413-9237-5251-8194-923f550a59aa", "reason": "", "source": "ADAPTER_CALLBACK", "stage": "exchange_effective_notified", "ts": 1793277930.8440871, "venue": "BYBIT"}
+{"cumulative_filled_quantity": "0", "event": "ORDER_LIFECYCLE", "order_id": "45614c51-a26b-5b60-8ac9-1d0f401248c3", "reason": "", "source": "ADAPTER_CALLBACK", "stage": "exchange_effective_notified", "ts": 1793277930.8485286, "venue": "BYBIT"}
+{"cumulative_filled_quantity": "0", "event": "ORDER_LIFECYCLE", "order_id": "e9704554-37f5-55e1-82a8-3f2673416fc0", "reason": "", "source": "INTERNAL", "stage": "cancel_requested", "ts": 1793277930.93558, "venue": "BYBIT"}
+{"cumulative_filled_quantity": "0", "event": "ORDER_LIFECYCLE", "order_id": "e9704554-37f5-55e1-82a8-3f2673416fc0", "reason": "", "source": "INTERNAL", "stage": "cancel_requested", "ts": 1793277930.93558, "venue": "BYBIT"}
+{"cumulative_filled_quantity": "0", "event": "ORDER_LIFECYCLE", "order_id": "a6cf03e4-e179-5724-9e0f-a4a0b4337e40", "reason": "", "source": "INTERNAL", "stage": "cancel_requested", "ts": 1793277930.93558, "venue": "BYBIT"}
+{"cumulative_filled_quantity": "0", "event": "ORDER_LIFECYCLE", "order_id": "a6cf03e4-e179-5724-9e0f-a4a0b4337e40", "reason": "", "source": "INTERNAL", "stage": "cancel_requested", "ts": 1793277930.93558, "venue": "BYBIT"}
+{"cumulative_filled_quantity": "0", "event": "ORDER_LIFECYCLE", "order_id": "7f775413-9237-5251-8194-923f550a59aa", "reason": "", "source": "INTERNAL", "stage": "cancel_requested", "ts": 1793277930.93558, "venue": "BYBIT"}
+{"cumulative_filled_quantity": "0", "event": "ORDER_LIFECYCLE", "order_id": "7f775413-9237-5251-8194-923f550a59aa", "reason": "", "source": "INTERNAL", "stage": "cancel_requested", "ts": 1793277930.93558, "venue": "BYBIT"}
+{"cumulative_filled_quantity": "0", "event": "ORDER_LIFECYCLE", "order_id": "45614c51-a26b-5b60-8ac9-1d0f401248c3", "reason": "", "source": "INTERNAL", "stage": "cancel_requested", "ts": 1793277930.93558, "venue": "BYBIT"}
+{"cumulative_filled_quantity": "0", "event": "ORDER_LIFECYCLE", "order_id": "45614c51-a26b-5b60-8ac9-1d0f401248c3", "reason": "", "source": "INTERNAL", "stage": "cancel_requested", "ts": 1793277930.93558, "venue": "BYBIT"}
+{"event": "QUOTE_WITHDRAWN", "net_edge_bps": -3.926347357581058, "order_id": "e9704554-37f5-55e1-82a8-3f2673416fc0", "reason": "edge_below_threshold", "stage": "quote_withdrawn", "ts": 1793277930.93558, "venue": "BYBIT"}
+{"event": "QUOTE_WITHDRAWN", "net_edge_bps": -3.926347357581058, "order_id": "a6cf03e4-e179-5724-9e0f-a4a0b4337e40", "reason": "edge_below_threshold", "stage": "quote_withdrawn", "ts": 1793277930.93558, "venue": "BYBIT"}
+{"event": "QUOTE_WITHDRAWN", "net_edge_bps": -3.926347357581058, "order_id": "7f775413-9237-5251-8194-923f550a59aa", "reason": "edge_below_threshold", "stage": "quote_withdrawn", "ts": 1793277930.93558, "venue": "BYBIT"}
+{"event": "QUOTE_WITHDRAWN", "net_edge_bps": -3.926347357581058, "order_id": "45614c51-a26b-5b60-8ac9-1d0f401248c3", "reason": "edge_below_threshold", "stage": "quote_withdrawn", "ts": 1793277930.93558, "venue": "BYBIT"}
+{"cumulative_filled_quantity": "0.0", "event": "ORDER_LIFECYCLE", "order_id": "7f775413-9237-5251-8194-923f550a59aa", "reason": "", "source": "ADAPTER_CALLBACK", "stage": "cancel_notified", "ts": 1793277930.942687, "venue": "BYBIT"}
+{"cumulative_filled_quantity": "0.0", "event": "ORDER_LIFECYCLE", "order_id": "a6cf03e4-e179-5724-9e0f-a4a0b4337e40", "reason": "", "source": "ADAPTER_CALLBACK", "stage": "cancel_notified", "ts": 1793277930.9431248, "venue": "BYBIT"}
+{"cumulative_filled_quantity": "0.0", "event": "ORDER_LIFECYCLE", "order_id": "e9704554-37f5-55e1-82a8-3f2673416fc0", "reason": "", "source": "ADAPTER_CALLBACK", "stage": "cancel_notified", "ts": 1793277930.9441812, "venue": "BYBIT"}
+{"cumulative_filled_quantity": "0.0", "event": "ORDER_LIFECYCLE", "order_id": "45614c51-a26b-5b60-8ac9-1d0f401248c3", "reason": "", "source": "ADAPTER_CALLBACK", "stage": "cancel_notified", "ts": 1793277930.9448001, "venue": "BYBIT"}
+{"event": "OPPORTUNITY", "stage": "decision", "ts": 1793278186.4819942}
+{"kind": "book", "stage": "market_event_received", "ts": 1793278186.4819942, "venue": "signal-trigger"}
+{"cumulative_filled_quantity": "0", "event": "ORDER_LIFECYCLE", "order_id": "ed19af5f-cd52-570e-a4f0-94b123880b8d", "reason": "", "source": "INTERNAL", "stage": "request_sent", "ts": 1793278186.4819942, "venue": "BYBIT"}
+{"cumulative_filled_quantity": "0", "event": "ORDER_LIFECYCLE", "order_id": "ed19af5f-cd52-570e-a4f0-94b123880b8d", "reason": "", "source": "ADAPTER_CALLBACK", "stage": "exchange_effective_notified", "ts": 1793278186.4843342, "venue": "BYBIT"}
+{"event": "OPPORTUNITY", "stage": "decision", "ts": 1793278186.4872632}
+{"kind": "book", "stage": "market_event_received", "ts": 1793278186.4872634, "venue": "signal-trigger"}
+{"cumulative_filled_quantity": "0", "event": "ORDER_LIFECYCLE", "order_id": "0a0c30bb-d36e-50c8-b958-9d17f4eaa093", "reason": "", "source": "INTERNAL", "stage": "request_sent", "ts": 1793278186.4872634, "venue": "BYBIT"}
+{"event": "OPPORTUNITY", "stage": "decision", "ts": 1793278186.4883819}
+{"kind": "book", "stage": "market_event_received", "ts": 1793278186.4883819, "venue": "signal-trigger"}
+{"cumulative_filled_quantity": "0", "event": "ORDER_LIFECYCLE", "order_id": "470ade4f-91cc-595c-93cc-e897b9688b45", "reason": "", "source": "INTERNAL", "stage": "request_sent", "ts": 1793278186.4883819, "venue": "BYBIT"}
+{"cumulative_filled_quantity": "0", "event": "ORDER_LIFECYCLE", "order_id": "470ade4f-91cc-595c-93cc-e897b9688b45", "reason": "", "source": "ADAPTER_CALLBACK", "stage": "exchange_effective_notified", "ts": 1793278186.4912663, "venue": "BYBIT"}
+{"cumulative_filled_quantity": "0", "event": "ORDER_LIFECYCLE", "order_id": "0a0c30bb-d36e-50c8-b958-9d17f4eaa093", "reason": "", "source": "ADAPTER_CALLBACK", "stage": "exchange_effective_notified", "ts": 1793278186.491882, "venue": "BYBIT"}
+{"event": "OPPORTUNITY", "stage": "decision", "ts": 1793278186.6220515}
+{"cumulative_filled_quantity": "0", "event": "ORDER_LIFECYCLE", "order_id": "eff67831-8532-5fcd-a97e-54e5cd40ce95", "reason": "", "source": "INTERNAL", "stage": "request_sent", "ts": 1793278186.6220515, "venue": "BYBIT"}
+{"kind": "book", "stage": "market_event_received", "ts": 1793278186.6220517, "venue": "signal-trigger"}
+{"event": "OPPORTUNITY", "stage": "decision", "ts": 1793278186.6248577}
+{"kind": "book", "stage": "market_event_received", "ts": 1793278186.6248577, "venue": "signal-trigger"}
+{"cumulative_filled_quantity": "0", "event": "ORDER_LIFECYCLE", "order_id": "c96a2724-6ba8-5e63-b11a-9af0f9493a4f", "reason": "", "source": "INTERNAL", "stage": "request_sent", "ts": 1793278186.6248577, "venue": "BYBIT"}
+{"cumulative_filled_quantity": "0", "event": "ORDER_LIFECYCLE", "order_id": "c96a2724-6ba8-5e63-b11a-9af0f9493a4f", "reason": "", "source": "ADAPTER_CALLBACK", "stage": "exchange_effective_notified", "ts": 1793278186.6280024, "venue": "BYBIT"}
+{"cumulative_filled_quantity": "0", "event": "ORDER_LIFECYCLE", "order_id": "ed19af5f-cd52-570e-a4f0-94b123880b8d", "reason": "", "source": "INTERNAL", "stage": "cancel_requested", "ts": 1793278186.629757, "venue": "BYBIT"}
+{"cumulative_filled_quantity": "0", "event": "ORDER_LIFECYCLE", "order_id": "ed19af5f-cd52-570e-a4f0-94b123880b8d", "reason": "", "source": "INTERNAL", "stage": "cancel_requested", "ts": 1793278186.629757, "venue": "BYBIT"}
+{"cumulative_filled_quantity": "0", "event": "ORDER_LIFECYCLE", "order_id": "0a0c30bb-d36e-50c8-b958-9d17f4eaa093", "reason": "", "source": "INTERNAL", "stage": "cancel_requested", "ts": 1793278186.629757, "venue": "BYBIT"}
+{"cumulative_filled_quantity": "0", "event": "ORDER_LIFECYCLE", "order_id": "0a0c30bb-d36e-50c8-b958-9d17f4eaa093", "reason": "", "source": "INTERNAL", "stage": "cancel_requested", "ts": 1793278186.629757, "venue": "BYBIT"}
+{"cumulative_filled_quantity": "0", "event": "ORDER_LIFECYCLE", "order_id": "470ade4f-91cc-595c-93cc-e897b9688b45", "reason": "", "source": "INTERNAL", "stage": "cancel_requested", "ts": 1793278186.629757, "venue": "BYBIT"}
+{"cumulative_filled_quantity": "0", "event": "ORDER_LIFECYCLE", "order_id": "470ade4f-91cc-595c-93cc-e897b9688b45", "reason": "", "source": "INTERNAL", "stage": "cancel_requested", "ts": 1793278186.629757, "venue": "BYBIT"}
+{"cumulative_filled_quantity": "0", "event": "ORDER_LIFECYCLE", "order_id": "c96a2724-6ba8-5e63-b11a-9af0f9493a4f", "reason": "", "source": "INTERNAL", "stage": "cancel_requested", "ts": 1793278186.629757, "venue": "BYBIT"}
+{"cumulative_filled_quantity": "0", "event": "ORDER_LIFECYCLE", "order_id": "c96a2724-6ba8-5e63-b11a-9af0f9493a4f", "reason": "", "source": "INTERNAL", "stage": "cancel_requested", "ts": 1793278186.629757, "venue": "BYBIT"}
+{"event": "QUOTE_WITHDRAWN", "net_edge_bps": -3.926347357582106, "order_id": "ed19af5f-cd52-570e-a4f0-94b123880b8d", "reason": "edge_below_threshold", "stage": "quote_withdrawn", "ts": 1793278186.629757, "venue": "BYBIT"}
+{"event": "QUOTE_WITHDRAWN", "net_edge_bps": -3.926347357582106, "order_id": "0a0c30bb-d36e-50c8-b958-9d17f4eaa093", "reason": "edge_below_threshold", "stage": "quote_withdrawn", "ts": 1793278186.629757, "venue": "BYBIT"}
+{"event": "QUOTE_WITHDRAWN", "net_edge_bps": -3.926347357582106, "order_id": "470ade4f-91cc-595c-93cc-e897b9688b45", "reason": "edge_below_threshold", "stage": "quote_withdrawn", "ts": 1793278186.629757, "venue": "BYBIT"}
+{"event": "QUOTE_WITHDRAWN", "net_edge_bps": -3.926347357582106, "order_id": "c96a2724-6ba8-5e63-b11a-9af0f9493a4f", "reason": "edge_below_threshold", "stage": "quote_withdrawn", "ts": 1793278186.629757, "venue": "BYBIT"}
+{"cumulative_filled_quantity": "0", "event": "ORDER_LIFECYCLE", "order_id": "eff67831-8532-5fcd-a97e-54e5cd40ce95", "reason": "", "source": "ADAPTER_CALLBACK", "stage": "exchange_effective_notified", "ts": 1793278186.6314678, "venue": "BYBIT"}
+{"cumulative_filled_quantity": "0", "event": "ORDER_LIFECYCLE", "order_id": "eff67831-8532-5fcd-a97e-54e5cd40ce95", "reason": "", "source": "INTERNAL", "stage": "cancel_requested", "ts": 1793278186.6327682, "venue": "BYBIT"}
+{"cumulative_filled_quantity": "0", "event": "ORDER_LIFECYCLE", "order_id": "eff67831-8532-5fcd-a97e-54e5cd40ce95", "reason": "", "source": "INTERNAL", "stage": "cancel_requested", "ts": 1793278186.6327682, "venue": "BYBIT"}
+{"event": "QUOTE_WITHDRAWN", "net_edge_bps": -3.926347357582106, "order_id": "eff67831-8532-5fcd-a97e-54e5cd40ce95", "reason": "edge_below_threshold", "stage": "quote_withdrawn", "ts": 1793278186.6327682, "venue": "BYBIT"}
+{"cumulative_filled_quantity": "0.0", "event": "ORDER_LIFECYCLE", "order_id": "470ade4f-91cc-595c-93cc-e897b9688b45", "reason": "", "source": "ADAPTER_CALLBACK", "stage": "cancel_notified", "ts": 1793278186.633403, "venue": "BYBIT"}
+{"cumulative_filled_quantity": "0.0", "event": "ORDER_LIFECYCLE", "order_id": "c96a2724-6ba8-5e63-b11a-9af0f9493a4f", "reason": "", "source": "ADAPTER_CALLBACK", "stage": "cancel_notified", "ts": 1793278186.6337154, "venue": "BYBIT"}
+{"cumulative_filled_quantity": "0.0", "event": "ORDER_LIFECYCLE", "order_id": "0a0c30bb-d36e-50c8-b958-9d17f4eaa093", "reason": "", "source": "ADAPTER_CALLBACK", "stage": "cancel_notified", "ts": 1793278186.636265, "venue": "BYBIT"}
+{"cumulative_filled_quantity": "0.0", "event": "ORDER_LIFECYCLE", "order_id": "ed19af5f-cd52-570e-a4f0-94b123880b8d", "reason": "", "source": "ADAPTER_CALLBACK", "stage": "cancel_notified", "ts": 1793278186.6378312, "venue": "BYBIT"}
+{"cumulative_filled_quantity": "0.0", "event": "ORDER_LIFECYCLE", "order_id": "eff67831-8532-5fcd-a97e-54e5cd40ce95", "reason": "", "source": "ADAPTER_CALLBACK", "stage": "cancel_notified", "ts": 1793278186.639088, "venue": "BYBIT"}

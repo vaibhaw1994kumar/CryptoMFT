@@ -771,6 +771,81 @@ class KillSwitchKeepsHedgesInFlight(Scenario):
         self.assertEqual(self.binance.cancels, 1)
 
 
+class ClosePair(Scenario):
+    """Owner 16 Nov (Order 3 B, arb.close_pairs = reduce_only_quote): a CLOSING quote. Seeded short on the maker venue (BYBIT -2.0): the closing quote is a BUY on BYBIT for the open size, its hedge a SELL on BINANCE.
+    The quote and the hedge are reduce-only; the hedge is sent for the fill only; a fill may never increase |position| or take it through flat (an alarm is on record if it does); dust and lineage rules are the ordinary ones."""
+
+    def build(self, hedge=(), *, policy=None, timeout=None, qty="2.0", query=None, residual=None, close=True, position="-2.0"):
+        self.ledger = Ledger()
+        if position is not None:
+            self.ledger.positions[("BYBIT", INSTR)] = Decimal(position)
+        self.bybit = Venue("BYBIT", ["ack"], price="99.0")
+        self.binance = Venue("BINANCE", hedge, price="99.0", query=query)
+        self.books = scenario_books()
+        inst = scenario_instruments()
+        self.oms = OMS(inst, risk(), self.ledger, router=StrategyDirectedRouter(inst, adapters={"BYBIT": self.bybit, "BINANCE": self.binance}),
+                       dispatch_policy=DispatchPolicy.FILL_TRIGGERED, hedge_policy=policy, order_timeout_policy=timeout, residual_policy=residual)
+        opp = replace(opportunity(qty), buy_venue="BYBIT", sell_venue="BINANCE", buy_price=Decimal("100.0"), sell_price=Decimal("99.0"))
+        self.plan = self.oms.execute(opp, self.books, maker_venue="BYBIT", **({"close_pair": True} if close else {}))
+        self.maker = self.plan.children[0]
+        self.n = 0
+        return self
+
+    def events_of(self, *names):
+        return [e for e in self.ledger.events if e["event_type"] in names]
+
+    def test_the_closing_quote_and_its_hedge_are_reduce_only_and_hedged_equals_filled(self):
+        self.build(hedge=[("fill", None)])
+        self.assertTrue(self.maker.reduce_only)
+        self.assertTrue(self.maker.post_only)
+        (ev,) = self.events_of("CLOSE_PAIR_QUOTE")
+        self.assertEqual((ev["side"], ev["quantity"], ev["position_before"]), ("BUY", "2.0", "-2.0"))
+        self.assertTrue(self.oms._hedge_specs[self.plan.parent_id]["close_pair"])
+        self.maker_fill("2.0", 5 * S, ExecutionEventType.FILLED)
+        (hedge,) = [o for o in self.plan.children if o.order_role == "HEDGE"]
+        self.assertTrue(hedge.reduce_only)                                           # the hedge closes the Binance leg and may not open one
+        self.assertEqual((hedge.side.value, hedge.filled_quantity), ("SELL", Decimal("2.0")))
+        self.assertEqual(self.ledger.positions[("BYBIT", INSTR)], Decimal("0.0"))     # the maker leg closed the seeded short to flat, not beyond
+        self.assertEqual(self.events_of("CLOSE_PAIR_BEYOND_FLAT"), [])
+        self.assertEqual(self.oms.realism_counters.get("close_pair_quotes"), 1)
+
+    def test_an_ordinary_package_is_unchanged_nothing_reduce_only_and_no_close_events(self):
+        self.build(hedge=[("fill", None)], close=False, position=None)
+        self.assertFalse(self.maker.reduce_only)
+        self.maker_fill("2.0", 5 * S, ExecutionEventType.FILLED)
+        (hedge,) = [o for o in self.plan.children if o.order_role == "HEDGE"]
+        self.assertFalse(hedge.reduce_only)
+        self.assertEqual(self.events_of("CLOSE_PAIR_QUOTE", "CLOSE_PAIR_BEYOND_FLAT"), [])
+        self.assertNotIn("close_pair", self.oms._hedge_specs[self.plan.parent_id])
+        self.assertEqual(self.oms._close_pair_plans, set())
+
+    def test_a_fill_that_takes_the_position_through_flat_is_a_persistent_alarm_once(self):
+        self.build(hedge=[("fill", None)], position="-0.5")                          # only 0.5 is open but the quote is 2.0: the position moved under it
+        self.maker_fill("1.0", 5 * S)
+        self.maker_fill("2.0", 6 * S, ExecutionEventType.FILLED)
+        (alarm,) = self.events_of("CLOSE_PAIR_BEYOND_FLAT")                          # recorded once per plan, not per update
+        self.assertTrue(alarm["alarm"] and alarm["persistent"])
+        self.assertEqual((alarm["position_before"], alarm["position_after"]), ("-0.5", "0.5"))            # at the first fill that crossed flat (1.0 of the 2.0)
+        self.assertEqual(self.oms.realism_counters["close_pair_beyond_flat"], 1)
+
+    def test_a_closing_fill_below_the_hedge_minimum_goes_through_the_dust_path_unchanged(self):
+        self.build(qty="1.0", position="-1.0", policy=HedgePolicy(dust_carry="next_hedge"))
+        self.maker_fill("0.04", 5 * S)                                               # 0.04 x 99 = 3.96 USDT: below the 5 USDT minimum
+        self.assertEqual(self.binance.submits, [])                                    # not sent, not refused
+        (carried,) = self.events_of("HEDGE_DUST_CARRIED")
+        self.assertEqual(carried["signed_exposure"], "0.04")
+        self.assertEqual(self.oms.dust_balance_total(), Decimal("0.04"))
+        self.assertEqual(self.plan.residual_base, Decimal("0"))
+
+    def test_a_partial_fill_hedges_only_what_filled_with_a_reduce_only_hedge(self):
+        self.build(hedge=[("fill", None)])
+        self.maker_fill("0.8", 5 * S)
+        (hedge,) = [o for o in self.plan.children if o.order_role == "HEDGE"]
+        self.assertEqual((hedge.quantity, hedge.reduce_only), (Decimal("0.800"), True))
+        self.assertEqual(self.ledger.positions[("BYBIT", INSTR)], Decimal("-1.2"))    # still short 1.2: the rest of the quote rests, never beyond the open size
+        self.assertEqual(self.events_of("CLOSE_PAIR_BEYOND_FLAT"), [])
+
+
 class HedgeDustCarry(Scenario):
     """Owner 16 Nov (hedge dust carry; HedgePolicy dust_carry next_hedge). Maker BUY on BYBIT at 100, hedge SELL on BINANCE at 99.0 (lot 0.001, minimum notional 5: the smallest hedge is 0.051). A hedge chunk below the
     venue minimum is not sent and not unwound: it is carried in one signed balance per (hedge venue, instrument), added to the next hedge, and sent alone as soon as it reaches the minimum."""

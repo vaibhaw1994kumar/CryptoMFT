@@ -518,7 +518,7 @@ class V1_10Rules(unittest.TestCase):
         from types import SimpleNamespace
         from crypto_stat_arb.strategies.arb_strategy import ArbSessionStrategy
         st = ArbSessionStrategy.__new__(ArbSessionStrategy)
-        sig = SimpleNamespace(maker_venue="bybit", buy_venue="bybit")               # a passive bid on bybit
+        sig = SimpleNamespace(maker_venue="bybit", buy_venue="bybit", close_pair=False)               # a passive bid on bybit
         st.strategy = SimpleNamespace(evaluate=lambda *a, **k: sig, config=SimpleNamespace(count_pending_exposure=False, requote_delay_after_withdraw_s=1.0))
         st.eligibility_policy, st.entry_gate, st.view_books = None, None, (lambda: {})
         st.pending_and_live_makers = lambda: (None, 0)
@@ -526,6 +526,7 @@ class V1_10Rules(unittest.TestCase):
         st.to_opportunity = lambda *a, **k: SimpleNamespace(opportunity_id="o1")
         st.signals, st.last_signal = {}, None
         st._no_requote_until_ns, st.requote_blocked_after_withdraw, st.withdrawn_by_validity = {}, 0, 0
+        st.close_pair_ids, st.close_pair_signals = set(), 0
         st.states = {}
         self.assertIsNotNone(st.evaluate({}, 5 * S))                                  # nothing withdrawn yet
         st.note_quote_withdrawn({"venue_feed": "bybit", "side": "buy"}, 10 * S)

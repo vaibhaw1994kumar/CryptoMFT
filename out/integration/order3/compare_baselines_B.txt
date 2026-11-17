@@ -1,0 +1,9 @@
+{
+ "baseline": 93,
+ "now": 94,
+ "new_failures": [
+  "FAILED tests/test_session_breaker.py::V1_10Rules::test_a_validity_withdrawal_blocks_the_same_venue_and_side_for_the_delay_and_is_counted"
+ ],
+ "no_longer_failing": [],
+ "UNCHANGED": false
+}
