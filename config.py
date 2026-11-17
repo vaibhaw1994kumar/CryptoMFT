@@ -581,7 +581,7 @@ def feed_health_from_profile(profile: dict) -> dict | None:
     if missing:
         raise ValueError(f"feed_health: missing {missing} (every threshold is stated in the profile; none is defaulted)")
     actions = dict(block.get("actions") or {})
-    bad = sorted(set(actions) - {"block_new_quotes_on", "withdraw_quotes_on"})
+    bad = sorted(set(actions) - {"block_new_quotes_on", "withdraw_quotes_on", "withdraw_quotes_scope", "unsafe", "own_lag"})
     if bad:
         raise ValueError(f"feed_health.actions: unknown key(s) {bad}")
     out_actions = {}
@@ -590,6 +590,13 @@ def feed_health_from_profile(profile: dict) -> dict | None:
         if level not in FEED_HEALTH_ACTION_LEVELS:
             raise ValueError(f"feed_health.actions.{name} must be one of {FEED_HEALTH_ACTION_LEVELS}, got {level!r}")
         out_actions[name] = level
+    # Owner decisions of 16 Nov (queue item d): which feed's DEGRADED withdraws resting quotes (any feed, or only the hedge venue's), what UNSAFE does (cancel every resting quote and pause new
+    # ones), and what OWN_LAG does (no new quotes). Each default is the W1 behaviour (any / none / none), so a block without these keys acts as before.
+    for name, allowed, default in (("withdraw_quotes_scope", ("any", "hedge_venue"), "any"), ("unsafe", ("none", "cancel_quotes_and_pause"), "none"), ("own_lag", ("none", "no_new_quotes"), "none")):
+        value = str(actions.get(name, default))
+        if value not in allowed:
+            raise ValueError(f"feed_health.actions.{name} must be one of {allowed}, got {value!r}")
+        out_actions[name] = value
     return {"delay_degraded_ms": float(block["delay_degraded_ms"]), "delay_unsafe_ms": float(block["delay_unsafe_ms"]), "silence_degraded_ms": float(block["silence_degraded_ms"]),
             "silence_unsafe_ms": float(block["silence_unsafe_ms"]), "own_lag_ms": float(block["own_lag_ms"]), "recover_s": float(block["recover_s"]),
             "burst_window_ms": float(block.get("burst_window_ms", 100.0)), "burst_count": int(block.get("burst_count", 200)),

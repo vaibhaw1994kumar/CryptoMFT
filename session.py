@@ -39,7 +39,8 @@ from .plan_store import ParentPlanStore
 from .risk import RiskEngine
 from .strategy import AmendQuote, CancelQuote, CrossVenueSpreadStrategy, ExitInventory, PlaceQuote
 from .mean_reversion import CrossVenueMeanReversionStrategy, MeanReversionConfig
-from .time_integrity import ClockGate, ClockMeasurement, FeedHealthMonitor, FeedHealthPolicy, TimeIntegrityMonitor
+from .feed_health import FeedHealthMonitor, FeedHealthPolicy
+from .time_integrity import ClockGate, ClockMeasurement, TimeIntegrityMonitor
 from .rate_limits import OrderRateBucket
 
 
@@ -1360,13 +1361,19 @@ class TradingSession:
         if not rows:
             return
         order = {"HEALTHY": 0, "DEGRADED": 1, "UNSAFE": 2}
-        withdraw_level = self._feed_health_cfg["actions"]["withdraw_quotes_on"]
+        actions = self._feed_health_cfg["actions"]
+        withdraw_level = actions["withdraw_quotes_on"]
+        hedge_venues = {v for v in self.cfg.venues if v not in self.maker_venues} if self.maker_venues else set(self.cfg.venues)
         for row in rows:
             worse = order[row["state"]] > order[row["previous"]]
             self.feed_health_counters[f"to_{row['state']}"] = self.feed_health_counters.get(f"to_{row['state']}", 0) + 1
             self.ledger.record("FEED_HEALTH_STATE", now, venue=row["venue"], instrument_id=row["instrument_id"], stream=row["stream"], previous=row["previous"], state=row["state"], cause=row["cause"],
                                own_lag=row["own_lag"], **(self.alert_context(now) if worse else {}))
-            if worse and withdraw_level != "none" and order[row["state"]] >= order[withdraw_level]:
+            # owner 16 Nov (d): DEGRADED withdraws only on the hedge venue's feed when the scope says so; UNSAFE on ANY feed cancels every resting quote (and new ones pause through the block)
+            in_scope = actions.get("withdraw_quotes_scope", "any") == "any" or row["venue"] in hedge_venues
+            by_level = withdraw_level != "none" and order[row["state"]] >= order[withdraw_level] and in_scope
+            by_unsafe = actions.get("unsafe", "none") == "cancel_quotes_and_pause" and row["state"] == "UNSAFE"
+            if worse and (by_level or by_unsafe):
                 withdrawn = 0
                 for plan in list(self.oms.plans.values()):
                     for child in plan.children:
@@ -1378,7 +1385,13 @@ class TradingSession:
                 self.feed_health_counters["withdraw_actions"] = self.feed_health_counters.get("withdraw_actions", 0) + 1
 
     def _feed_health_blocks(self, now: int) -> bool:
-        level = self._feed_health_cfg["actions"]["block_new_quotes_on"]
+        actions = self._feed_health_cfg["actions"]
+        if actions.get("own_lag", "none") == "no_new_quotes" and self.feed_health.own_lag_active:           # owner 16 Nov (d): our own processing is behind: throttle, no new quotes
+            self.feed_health_counters["signals_blocked_by_own_lag"] = self.feed_health_counters.get("signals_blocked_by_own_lag", 0) + 1
+            return True
+        level = actions["block_new_quotes_on"]
+        if actions.get("unsafe", "none") == "cancel_quotes_and_pause" and level == "none":
+            level = "UNSAFE"                                                                                   # UNSAFE pauses new quotes even with no block level of its own
         if level == "none":
             return False
         worst, _where = self.feed_health.worst()
