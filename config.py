@@ -556,6 +556,12 @@ FEED_HEALTH_KEYS = ("delay_degraded_ms", "delay_unsafe_ms", "silence_degraded_ms
 FEED_HEALTH_ACTION_LEVELS = ("none", "UNSAFE", "DEGRADED")
 
 
+def dislocation_from_profile(profile: dict, size_base: float | None = None) -> dict | None:
+    """W6 (owner decision 5, 16 Nov): the profile's `dislocation` block as the monitor's policy, or None (absent or not enabled: nothing is built). NOTIFY-ONLY; `fail_closed.enabled` is refused."""
+    from .cross_venue import dislocation_policy
+    return dislocation_policy(profile.get("dislocation"), size_base=size_base)
+
+
 def incident_capture_from_profile(profile: dict) -> dict | None:
     """W2b (owner 17 Nov): the profile's `incident_capture` block as the validated policy the live feed service takes (live_feed.incident_policy), or None when the profile has none or it says
     `enabled: false` (every profile up to v1_11: nothing is built). It records windows of the live recording; it changes no decision, and a replay never reads it."""

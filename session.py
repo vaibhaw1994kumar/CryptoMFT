@@ -194,6 +194,7 @@ class TradingSession:
         session_limits: dict | None = None,
         clock_measurement: ClockMeasurement | None = None,
         feed_health: dict | None = None,
+        dislocation: dict | None = None,
     ) -> None:
         execution_mode = ExecutionMode(execution_mode)
         assert_execution_mode(
@@ -424,6 +425,7 @@ class TradingSession:
         )
         self.time_monitor = TimeIntegrityMonitor(cfg.time_policy, cfg.venues)
         self._init_feed_health(feed_health)
+        self._init_dislocation(dislocation)
         self.stage_timer = StageTimer()
         self.timestamp_sink: Callable[[dict[str, Any]], None] | None = None
         self.events_processed = 0
@@ -516,6 +518,8 @@ class TradingSession:
             if apply_book and event.event_type in (EventType.BOOK_SNAPSHOT, EventType.BOOK_DELTA):
                 self.books[(event.venue, event.instrument_id)].apply(event)
             self._schedule_resync(now)
+            if self.dislocation is not None and event.event_type in (EventType.BOOK_SNAPSHOT, EventType.BOOK_DELTA):
+                self._dislocation_after_book(event, assessment.flags)          # W6: a blocked event still moved the book
             return None
         if event.event_type not in (EventType.BOOK_SNAPSHOT, EventType.BOOK_DELTA):
             return None
@@ -528,6 +532,8 @@ class TradingSession:
         if apply_book:
             self.books[(event.venue, event.instrument_id)].apply(event)
         self._schedule_resync(now)                      # also when the caller applied the book itself (apply_book=False)
+        if self.dislocation is not None:
+            self._dislocation_after_book(event, assessment.flags)              # W6: notify-only, reads the books and health, decides nothing
         if self.feed_gap_hook is not None:
             gaps = self.books[(event.venue, event.instrument_id)].stats.gaps
             if gaps > self._seen_gaps.get((event.venue, event.instrument_id), 0):
@@ -1336,6 +1342,37 @@ class TradingSession:
     # One FEED_HEALTH_STATE ledger event per transition (venue, stream, previous, state, cause, own_lag); a worsening carries the alert context. Two actions, both `none` unless the profile says
     # otherwise and both waiting for an owner decision: `block_new_quotes_on` (no new quotes while any feed is at or above the level; hedges, unwinds and cancels are never held) and
     # `withdraw_quotes_on` (at a transition to that level or worse, every resting maker quote is withdrawn, once per transition).
+    # ---- W6 (owner decision 5, 16 Nov): dislocation episodes, NOTIFY-ONLY. Built only when the profile has the `dislocation` block (every earlier profile: nothing, byte-identical). The monitor reads
+    # the books, the feed-health monitor and the clock read-only; nothing reads its episodes back (no quote, hedge, risk or kill-switch decision), and it writes nothing to the ledger.
+    def _init_dislocation(self, cfg: dict | None) -> None:
+        self.dislocation = None
+        self._dislocation_flags: tuple = ()
+        if cfg is None or len(self.cfg.venues) != 2:
+            return
+        from .cross_venue import DislocationMonitor
+        from .fees import Liquidity
+        taker = {v: float(self.cfg.instruments.fee_bps(v, self.cfg.instrument_id, Liquidity.TAKER)) for v in self.cfg.venues}
+        self.dislocation = DislocationMonitor(tuple(self.cfg.venues), cfg, taker_bps=taker)
+
+    def _dislocation_health(self) -> dict:
+        fh = self.feed_health
+        clock = getattr(getattr(self.time_monitor, "host_clock", None), "state", None)
+        return {"feed_health_monitor": fh is not None, "feed_not_healthy": fh is not None and fh.worst()[0] != "HEALTHY", "clock_not_synced": clock == "UNSYNCED",
+                "own_lag": bool(fh is not None and fh.own_lag_active), "feed_delayed": "FEED_DELAYED" in self._dislocation_flags}
+
+    def _dislocation_after_book(self, event: MarketEvent, flags: tuple = ()) -> None:
+        self._dislocation_flags = tuple(flags)
+        books = {venue: self.books[(venue, self.cfg.instrument_id)] for venue in self.cfg.venues}
+        self.dislocation.observe(books, event.venue, event.receive_ts_ns, self._dislocation_health)
+
+    def dislocation_report(self, now_ns: int | None = None) -> dict:
+        if self.dislocation is None:
+            return {}
+        if now_ns is not None and self.dislocation.open is not None:
+            books = {venue: self.books[(venue, self.cfg.instrument_id)] for venue in self.cfg.venues}
+            self.dislocation.finish(now_ns, books, self._dislocation_health)
+        return self.dislocation.report()
+
     def _init_feed_health(self, cfg: dict | None) -> None:
         self.feed_health: FeedHealthMonitor | None = None
         self._feed_health_cfg = cfg
@@ -1847,6 +1884,8 @@ class TradingSession:
             hook = getattr(strategy, "on_derivative", None)
             if hook is not None:
                 hook(ticker)
+        if self.dislocation is not None:
+            self.dislocation.on_derivative(ticker)                              # W6: the venue's mark, the only venue-side signal (VENUE_EVENT needs one)
         if ticker.mark_price is not None:
             self.exchange_marks[(ticker.venue, ticker.instrument_id)] = (ticker.receive_ts_ns, Decimal(ticker.mark_price))      # the margin check prefers a fresh exchange mark to a book mid (see _margin_marks)
         if not self.funding.configured:
