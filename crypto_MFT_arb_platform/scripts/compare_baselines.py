@@ -298,13 +298,16 @@ def hashes_selftest():
             f = root / nf[0]["path"]; f.write_bytes(f.read_bytes() + b"\n# edit")
             l5, c5 = check_pins(root, gates, head=False)
             case("an edit to a NOT_FROZEN profile is INFO, not FAIL", c5["FAIL"] == 0 and any(v == "INFO" and p == nf[0]["path"] and "CHANGED" in d for v, g, p, d in l5))
-        nc = [p for p in pins if p["status"] == "NOT_CREATED"]
-        if nc:
-            f = root / nc[0]["path"]; f.parent.mkdir(parents=True, exist_ok=True); f.write_text("x")
-            l6, c6 = check_pins(root, gates, head=False)
-            case("a NOT_CREATED profile that appears gives FAIL", any(v == "FAIL" and p == nc[0]["path"] for v, g, p, d in l6))
-            f.unlink()
         gtext = gates.read_text(encoding="utf-8")
+        nc_rel = "crypto_MFT_arb_platform/profiles/selftest_not_created.yaml"       # synthetic: the real block may hold no NOT_CREATED row
+        gates.write_text(gtext.replace(PIN_END, f"profiles | NOT_CREATED | - | {nc_rel}\n{PIN_END}"), encoding="utf-8")
+        l6a, c6a = check_pins(root, gates, head=False)
+        case("a NOT_CREATED profile that is still absent is INFO", c6a["FAIL"] == 0 and any(v == "INFO" and p == nc_rel for v, g, p, d in l6a))
+        f = root / nc_rel; f.parent.mkdir(parents=True, exist_ok=True); f.write_text("x")
+        l6, c6 = check_pins(root, gates, head=False)
+        case("a NOT_CREATED profile that appears gives FAIL", any(v == "FAIL" and p == nc_rel for v, g, p, d in l6))
+        f.unlink()
+        gates.write_text(gtext, encoding="utf-8")
         gold_rel = "baselines/runs/selftest/trades.jsonl"
         gates.write_text(gtext.replace(PIN_END, f"golden | GOLDEN | {hashlib.sha256(b'x').hexdigest()} | {gold_rel}\n{PIN_END}"), encoding="utf-8")
         groot = Path(td) / "fresh_run"

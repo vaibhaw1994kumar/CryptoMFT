@@ -33,7 +33,7 @@ Computed by me on 17 Nov 2026 from the working copy `crypto_MFT_arb_platform/pro
 | v1_9 | FROZEN (owner, 16 Nov) | f798ac62497da2f26b93c845b383ea5f47dd6d7409e6122c3f733d7b857be8cb | equals `profile_sha256` in `perp_perp_maker_taker_v1_9.freeze.json` (committed in 27a838e); checked by the script |
 | v1_9s | PINNED | 3d037d2be19a2ffbf8cc3586bbcbbc7ee6ed20e5f17553b936b3aba2d1cf1d0a | listed as a reference profile in `v1_9.freeze.json`; checked by the script |
 | v1_10 | NOT FROZEN | e0fb1910fd3c890469f8d1a7da45ca4f07d415dcd36b6795fbe00774ca436a18 observed 17 Nov, NEVER pinned | still changing (BUILD_QUEUE; last commit f45fedf turned arrival stamps on). Shown as INFO. Joins the PINNED group only at its freeze |
-| v1_11 | NOT CREATED | none | planned as v1_10 + feed health (W1); the checker FAILs if the file appears while this file says NOT_CREATED |
+| v1_11 | NOT FROZEN | 4eb991d158da8a90f29b8db768673382c87e1b24d160db4766d08611be6c88e4 observed 17 Nov (equal to the value in the request of the integration session; committed in outer cc68e0a), NEVER pinned | v1_10 + feed health (W1); it will change as W2 onward add keys. Shown as INFO. Joins the PINNED group only at its freeze |
 
 Not in the "v1_3 .. v1_11" group, covered elsewhere: legacy_v0, v1, v1_1, v1_2 and `v1_2.freeze.json` are in the 14 inputs (section 4); the two spot profiles (spot_perp_basis_v1, spot_spot_maker_taker_v1) are in no pin group (A6 listed their prefixes 1de39a19 and 45a4d11b; not pinned here, owner to say if they should be).
 
@@ -101,7 +101,7 @@ profiles | PINNED | e52b22aa0bb088484838d2ea4e31c61e9c71330d5bec6383d78e035dcd1e
 profiles | FROZEN | f798ac62497da2f26b93c845b383ea5f47dd6d7409e6122c3f733d7b857be8cb | crypto_MFT_arb_platform/profiles/perp_perp_maker_taker_v1_9.yaml
 profiles | PINNED | 3d037d2be19a2ffbf8cc3586bbcbbc7ee6ed20e5f17553b936b3aba2d1cf1d0a | crypto_MFT_arb_platform/profiles/perp_perp_maker_taker_v1_9s.yaml
 profiles | NOT_FROZEN | e0fb1910fd3c890469f8d1a7da45ca4f07d415dcd36b6795fbe00774ca436a18 | crypto_MFT_arb_platform/profiles/perp_perp_maker_taker_v1_10.yaml
-profiles | NOT_CREATED | - | crypto_MFT_arb_platform/profiles/perp_perp_maker_taker_v1_11.yaml
+profiles | NOT_FROZEN | 4eb991d158da8a90f29b8db768673382c87e1b24d160db4766d08611be6c88e4 | crypto_MFT_arb_platform/profiles/perp_perp_maker_taker_v1_11.yaml
 
 # group 3: freeze files (v1_2 freeze file is in group 1)
 freeze | PINNED | c452f37087a72f1a8e04e9c00a87cdd9f0e3b33473e973a2fc1ff6301e9b4624 | crypto_MFT_arb_platform/profiles/perp_perp_maker_taker_v1_9.freeze.json
