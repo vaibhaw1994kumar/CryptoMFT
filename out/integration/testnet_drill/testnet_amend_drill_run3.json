@@ -1,0 +1,90 @@
+{
+ "label": "TESTNET drill on the platform OMS, SOLUSDT linear; aggregates only (no order ids, no raw responses)",
+ "steps": {
+  "BYBIT:A_amend_moves_the_same_order": {
+   "placed_state": "REJECTED",
+   "placed_reject_reason": "LIVE_DATA_AGE",
+   "amend_request": "REFUSED:state_rejected",
+   "amend_confirmed": 0,
+   "oms_live_orders": 0,
+   "oms_live_price_is_new": false,
+   "venue_open_drill_orders": 0,
+   "result": "FAIL",
+   "venue_open_after_cancel": 0
+  },
+  "BYBIT:B_refused_amend": {
+   "amend_request": "REQUESTED",
+   "AMEND_REJECTED": 0,
+   "AMEND_CONFIRMED": 0,
+   "AMEND_TIMEOUT": 1,
+   "oms_live_orders": 0,
+   "venue_open_drill_orders": 0,
+   "reject_reasons": [],
+   "result": "FAIL"
+  },
+  "BINANCE:A_amend_moves_the_same_order": {
+   "placed_state": "ACKNOWLEDGED",
+   "amend_request": "REQUESTED",
+   "amend_confirmed": 1,
+   "oms_live_orders": 1,
+   "oms_live_price_is_new": true,
+   "venue_open_drill_orders": 1,
+   "result": "PASS",
+   "venue_open_after_cancel": 0
+  },
+  "BINANCE:B_refused_amend": {
+   "amend_request": "REQUESTED",
+   "AMEND_REJECTED": 0,
+   "AMEND_CONFIRMED": 0,
+   "AMEND_TIMEOUT": 1,
+   "oms_live_orders": 0,
+   "venue_open_drill_orders": 0,
+   "reject_reasons": [],
+   "result": "FAIL"
+  },
+  "BINANCE:C_amend_after_a_fill": {
+   "result": "UNVERIFIED",
+   "why": "no fill within 60.0 s at one tick under the ask",
+   "filled": "0"
+  },
+  "BINANCE:D_reduce_only_at_the_minimum": {
+   "position_before": "0",
+   "open": [
+    "ACKNOWLEDGED",
+    "FILLED"
+   ],
+   "position_open": "0.07",
+   "reduce_only_0_01_events": [
+    "ACKNOWLEDGED",
+    "FILLED"
+   ],
+   "reduce_only_0_01_reject_reasons": [],
+   "reduce_only_below_min_notional": "ACCEPTED (exempt)",
+   "result": "PASS"
+  }
+ },
+ "cleanup": {
+  "BINANCE": {
+   "position_after": "0",
+   "open_drill_orders": 0
+  },
+  "BYBIT": {
+   "position_after": "0",
+   "open_drill_orders": 0
+  }
+ },
+ "counts": {
+  "ledger_event_types": {
+   "AMEND_REQUESTED": 3,
+   "AMEND_CONFIRMED": 1,
+   "AMEND_REJECTED": 0,
+   "AMEND_TIMEOUT": 2,
+   "VENUE_ORDER_QUERY": 4,
+   "FILL": 0
+  },
+  "transport_errors": {
+   "BINANCE": 0,
+   "BYBIT": 0
+  }
+ }
+}

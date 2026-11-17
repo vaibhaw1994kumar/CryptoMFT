@@ -1,0 +1,117 @@
+{
+ "label": "TESTNET drill on the platform OMS, SOLUSDT linear; aggregates only (no order ids, no raw responses)",
+ "steps": {
+  "BYBIT:A_amend_moves_the_same_order": {
+   "placed_state": "ACKNOWLEDGED",
+   "amend_request": "REQUESTED",
+   "amend_confirmed": 1,
+   "oms_live_orders": 1,
+   "oms_live_price_is_new": true,
+   "venue_open_drill_orders": 1,
+   "result": "PASS",
+   "venue_open_after_cancel": 0
+  },
+  "BYBIT:B_amend_to_a_crossing_price": {
+   "amend_request": "REQUESTED",
+   "AMEND_REJECTED": 0,
+   "AMEND_CONFIRMED": 0,
+   "AMEND_TIMEOUT": 1,
+   "oms_live_orders": 0,
+   "venue_open_drill_orders": 0,
+   "reject_reasons": [],
+   "venue_state_of_the_order": "CANCELLED",
+   "result": "PASS_ORDER_ENDED_BY_VENUE"
+  },
+  "BYBIT:B2_amend_refused_out_of_band": {
+   "amend_request": "REQUESTED",
+   "AMEND_REJECTED": 1,
+   "AMEND_CONFIRMED": 0,
+   "AMEND_TIMEOUT": 0,
+   "oms_live_orders": 1,
+   "oms_live_price_unchanged": true,
+   "venue_open_drill_orders": 1,
+   "reject_reasons": [
+    "amend rejected, order unchanged: bybit 110094: Order does not meet minimum order value 5USDT"
+   ],
+   "result": "PASS"
+  },
+  "BINANCE:A_amend_moves_the_same_order": {
+   "placed_state": "ACKNOWLEDGED",
+   "amend_request": "REQUESTED",
+   "amend_confirmed": 1,
+   "oms_live_orders": 1,
+   "oms_live_price_is_new": true,
+   "venue_open_drill_orders": 1,
+   "result": "PASS",
+   "venue_open_after_cancel": 0
+  },
+  "BINANCE:B_amend_to_a_crossing_price": {
+   "amend_request": "REQUESTED",
+   "AMEND_REJECTED": 0,
+   "AMEND_CONFIRMED": 0,
+   "AMEND_TIMEOUT": 1,
+   "oms_live_orders": 0,
+   "venue_open_drill_orders": 0,
+   "reject_reasons": [
+    "amend rejected, order unchanged: bybit 110094: Order does not meet minimum order value 5USDT"
+   ],
+   "venue_state_of_the_order": "CANCELLED",
+   "result": "PASS_ORDER_ENDED_BY_VENUE"
+  },
+  "BINANCE:B2_amend_refused_out_of_band": {
+   "amend_request": "REQUESTED",
+   "AMEND_REJECTED": 1,
+   "AMEND_CONFIRMED": 0,
+   "AMEND_TIMEOUT": 0,
+   "oms_live_orders": 1,
+   "oms_live_price_unchanged": true,
+   "venue_open_drill_orders": 1,
+   "reject_reasons": [
+    "amend rejected, order unchanged: binance -5029: Order's notional must be no smaller than 5."
+   ],
+   "result": "PASS"
+  },
+  "BINANCE:C_amend_after_a_fill": {
+   "amend_request": "REFUSED:state_filled",
+   "amend_rejected": 0,
+   "reasons": [],
+   "filled": "0.07",
+   "result": "PASS"
+  },
+  "BINANCE:D_reduce_only_at_the_minimum": {
+   "position_before": "0.07",
+   "position_open": "0.07",
+   "reduce_only_0_01_events": [
+    "ACKNOWLEDGED",
+    "FILLED"
+   ],
+   "reduce_only_0_01_reject_reasons": [],
+   "reduce_only_below_min_notional": "ACCEPTED (exempt)",
+   "result": "PASS"
+  }
+ },
+ "cleanup": {
+  "BINANCE": {
+   "position_after": "0",
+   "open_drill_orders": 0
+  },
+  "BYBIT": {
+   "position_after": "0",
+   "open_drill_orders": 0
+  }
+ },
+ "counts": {
+  "ledger_event_types": {
+   "AMEND_REQUESTED": 6,
+   "AMEND_CONFIRMED": 2,
+   "AMEND_REJECTED": 2,
+   "AMEND_TIMEOUT": 2,
+   "VENUE_ORDER_QUERY": 6,
+   "FILL": 1
+  },
+  "transport_errors": {
+   "BINANCE": 0,
+   "BYBIT": 0
+  }
+ }
+}

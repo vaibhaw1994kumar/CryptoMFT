@@ -44,10 +44,12 @@ class MatrixTests(unittest.TestCase):
             self.assertEqual(capabilities.effective(venue, "SPOT", testnet=True)["reduce_only"], "PLATFORM_ONLY")
             self.assertEqual(capabilities.effective(venue, "PERP", testnet=True)["reduce_only"], "VENUE")
 
-    def test_testnet_routes_cannot_replace_internal_ones_can(self):
+    def test_perpetual_testnet_routes_amend_in_place_spot_ones_cannot_internal_ones_can(self):
+        """(e), owner 17 Nov: the perpetual testnet transports amend in place (Bybit amend-order, Binance modify-order); the spot transports refuse an amend."""
         for venue in ("BINANCE", "BYBIT"):
+            self.assertFalse(capabilities.effective(venue, "SPOT", testnet=True)["replace"])
+            self.assertTrue(capabilities.effective(venue, "PERP", testnet=True)["replace"])
             for product in ("SPOT", "PERP"):
-                self.assertFalse(capabilities.effective(venue, product, testnet=True)["replace"])
                 self.assertTrue(capabilities.effective(venue, product, testnet=False)["replace"])
 
     def test_unknown_venue_or_product_fails_closed(self):

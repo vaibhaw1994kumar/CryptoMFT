@@ -1,0 +1,64 @@
+{
+ "label": "TESTNET drill on the platform OMS, SOLUSDT linear; aggregates only (no order ids, no raw responses)",
+ "steps": {
+  "BYBIT:A_amend_moves_the_same_order": {
+   "result": "ERROR",
+   "error": "URLError: <urlopen error [SSL: CERTIFICATE_VERIFY_FAILED] certificate verify failed: unable to get local issuer certificate (_ssl.c:1000)>"
+  },
+  "BYBIT:B_refused_amend": {
+   "result": "ERROR",
+   "error": "URLError: <urlopen error [SSL: CERTIFICATE_VERIFY_FAILED] certificate verify failed: unable to get local issuer certificate (_ssl.c:1000)>"
+  },
+  "BINANCE:A_amend_moves_the_same_order": {
+   "result": "ERROR",
+   "error": "URLError: <urlopen error [SSL: CERTIFICATE_VERIFY_FAILED] certificate verify failed: unable to get local issuer certificate (_ssl.c:1000)>"
+  },
+  "BINANCE:B_refused_amend": {
+   "result": "ERROR",
+   "error": "URLError: <urlopen error [SSL: CERTIFICATE_VERIFY_FAILED] certificate verify failed: unable to get local issuer certificate (_ssl.c:1000)>"
+  },
+  "BINANCE:C_amend_after_a_fill": {
+   "result": "ERROR",
+   "error": "URLError: <urlopen error [SSL: CERTIFICATE_VERIFY_FAILED] certificate verify failed: unable to get local issuer certificate (_ssl.c:1000)>"
+  },
+  "BINANCE:D_reduce_only_at_the_minimum": {
+   "position_before": "0",
+   "open": [
+    "ACKNOWLEDGED",
+    "FILLED"
+   ],
+   "position_open": "0.07",
+   "reduce_only_0_01_events": [
+    "ACKNOWLEDGED",
+    "FILLED"
+   ],
+   "reduce_only_0_01_reject_reasons": [],
+   "reduce_only_below_min_notional": "ACCEPTED (exempt)",
+   "result": "PASS"
+  }
+ },
+ "cleanup": {
+  "BINANCE": {
+   "position_after": "0",
+   "open_drill_orders": 0
+  },
+  "BYBIT": {
+   "position_after": "0",
+   "open_drill_orders": 0
+  }
+ },
+ "counts": {
+  "ledger_event_types": {
+   "AMEND_REQUESTED": 0,
+   "AMEND_CONFIRMED": 0,
+   "AMEND_REJECTED": 0,
+   "AMEND_TIMEOUT": 0,
+   "VENUE_ORDER_QUERY": 0,
+   "FILL": 0
+  },
+  "transport_errors": {
+   "BINANCE": 0,
+   "BYBIT": 0
+  }
+ }
+}
