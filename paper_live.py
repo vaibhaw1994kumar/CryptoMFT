@@ -92,6 +92,7 @@ class LivePaperSession:
         strategy_builder: Callable[["LivePaperSession"], list] | None = None,
         fee_readers: dict[str, Any] | None = None,
         require_account_fees: bool = False,
+        journal_stream: bool = True,
         session_limits: dict | None = None,
         clock_source: str | None = None,
     ) -> None:
@@ -177,6 +178,8 @@ class LivePaperSession:
             "w", encoding="utf-8"
         )
         self.session.timestamp_sink = self._write_row
+        self.settings = settings
+        self._open_journals(journal_stream)
         self.events: list[MarketEvent] = []
         self.dropped_from_memory = 0
         self.max_events_in_memory = max_events_in_memory
@@ -193,6 +196,78 @@ class LivePaperSession:
 
     def _write_row(self, row: dict[str, Any]) -> None:
         self._timestamps.write(json.dumps(row, sort_keys=True, default=json_default) + "\n")
+        if row.get("record_type") != "EVENT":
+            self._timestamps.flush()                      # a decision, a status change, a failed probe: on disk (OS) at once. EVENT rows (one per market frame) follow the recorder's bounded flush
+            self._journal_sync()
+        else:
+            self._event_rows_unflushed += 1
+            if self._event_rows_unflushed >= self.settings.recorder_flush_writes or time.monotonic_ns() - self._journal_fsync_mono_ns >= self._journal_interval_ns:
+                self._timestamps.flush()
+                self._event_rows_unflushed = 0
+                self._journal_sync()
+
+    # ---- W2a (owner 17 Nov; audit A2 2.1): the session's own journals on disk AS THEY HAPPEN, so a killed process leaves every decision, order and intent row up to the kill.
+    # DURABILITY POLICY, stated separately for the two kinds of file:
+    #   recorder files (wire, raw, canonical, trace, trades; one or more rows per market frame): the A9 bounded flush: every `recorder_flush_writes` write calls or `recorder_flush_interval_seconds`,
+    #     the monitor tick for a quiet feed, always at part close and shutdown. A hard kill can lose that window of the newest FRAMES.
+    #   journals (ledger_stream.jsonl = every ledger event, orders and fills included; session_intent_journal.jsonl; the non-EVENT rows of paper_timestamps.jsonl): appended and FLUSHED PER RECORD
+    #     (they are few: one per decision, order update or fill), so a hard kill of the process loses none of them. The EVENT rows of paper_timestamps.jsonl (one per market frame) follow the recorder's bound.
+    #   fsync (power loss, not process death): only with `durable`, and for the journals at the same bounded interval, never per record (a per-record fsync costs milliseconds on this Mac).
+    # `journal_manifest.json` is written at start with sealed false and rewritten at the normal end with sealed true and the counts: a recording whose manifest says sealed false was killed.
+    def _open_journals(self, enabled: bool) -> None:
+        self._event_rows_unflushed = 0
+        self._journal_fsync_mono_ns = time.monotonic_ns()
+        self._journal_interval_ns = int(self.settings.recorder_flush_interval_seconds * 1_000_000_000)
+        self._journal_counts = {"ledger_events": 0, "intent_records": 0}
+        self.journal_max_lag_ns = 0
+        self._ledger_stream = self._intent_stream = None
+        self.journal_stream = enabled
+        if not enabled:
+            return
+        self._ledger_stream = (self.output_dir / "ledger_stream.jsonl").open("w", encoding="utf-8")
+        for row in self.session.ledger.events:                # what the session recorded while it was built (opening balances)
+            self._ledger_row(row)
+        self.session.ledger.event_sink = self._ledger_row
+        if self.session.intent_observer is not None:
+            self._intent_stream = (self.output_dir / "session_intent_journal.jsonl").open("w", encoding="utf-8")
+            self.session.intent_observer.layer.journal.sink = self._intent_row
+        self._write_journal_manifest(sealed=False)
+
+    def _ledger_row(self, row: dict[str, Any]) -> None:
+        self._ledger_stream.write(json.dumps(row, sort_keys=True, default=json_default) + "\n")
+        self._ledger_stream.flush()
+        self._journal_counts["ledger_events"] += 1
+        ts = row.get("ts_ns")
+        if isinstance(ts, int) and ts > 10 ** 18:                 # a wall-clock stamp: how long after the event the row reached the file
+            self.journal_max_lag_ns = max(self.journal_max_lag_ns, self.clock_ns() - ts)
+        self._journal_sync()
+
+    def _intent_row(self, row: dict[str, Any]) -> None:
+        self._intent_stream.write(json.dumps(row, sort_keys=True, default=str) + "\n")
+        self._intent_stream.flush()
+        self._journal_counts["intent_records"] += 1
+        self._journal_sync()
+
+    def _journal_sync(self) -> None:
+        if not self.settings.durable:
+            return
+        now = time.monotonic_ns()
+        if now - self._journal_fsync_mono_ns < self._journal_interval_ns:
+            return
+        self._journal_fsync_mono_ns = now
+        import os
+        for handle in (self._timestamps, self._ledger_stream, self._intent_stream):
+            if handle is not None and not handle.closed:
+                handle.flush()
+                os.fsync(handle.fileno())
+
+    def _write_journal_manifest(self, sealed: bool) -> None:
+        doc = {"sealed": sealed, "label": "sealed false = the process ended without finalize (killed): the journal files hold every record up to that moment",
+               "policy": {"journals": "append and flush per record", "paper_timestamps EVENT rows": "the recorder's bounded flush", "fsync": "bounded interval, only with durable",
+                          "recorder_flush_writes": self.settings.recorder_flush_writes, "recorder_flush_interval_seconds": self.settings.recorder_flush_interval_seconds, "durable": self.settings.durable},
+               "files": ["paper_timestamps.jsonl", "ledger_stream.jsonl"] + (["session_intent_journal.jsonl"] if self._intent_stream is not None else []),
+               "counts": dict(self._journal_counts), "journal_max_lag_ns": self.journal_max_lag_ns}
+        (self.output_dir / "journal_manifest.json").write_text(json.dumps(doc, indent=2, sort_keys=True), encoding="utf-8")
 
     def _cancel(self, reason: str, now_ns: int) -> int:
         session = getattr(self, "session", None)
@@ -316,6 +391,14 @@ class LivePaperSession:
         )
         self.session.finalize_funding()
         self._timestamps.close()
+        if self.journal_stream:
+            self.session.ledger.event_sink = None
+            for handle in (self._ledger_stream, self._intent_stream):
+                if handle is not None:
+                    handle.close()
+            if self.session.intent_observer is not None:
+                self.session.intent_observer.layer.journal.sink = None
+            self._write_journal_manifest(sealed=True)
         canonical = self.output_dir / "canonical_events.jsonl"
         with canonical.open("w", encoding="utf-8") as handle:
             # processing_ordinal: the order this session applied its events, which a

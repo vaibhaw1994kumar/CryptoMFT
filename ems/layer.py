@@ -29,6 +29,28 @@ from .tactics import get_tactic
 from .venue_selector import RestHedgeVenue, assign_rest_hedge
 
 JOURNAL_MAX = 200_000
+
+
+class _Journal(list):
+    """The intent journal: a list, as before, with two additions (W2a, owner 17 Nov; audit A2 0.2d and 2.1). `room()` is the old `len < JOURNAL_MAX` test and COUNTS every record that is not kept once the
+    journal is full (`truncated`: until now it stopped at 200,000 silently). `sink`, when set, is called with each record as it is appended (a paper session streams the journal to disk, appended
+    and flushed per record). Neither changes a record or its order."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.truncated = 0
+        self.sink = None
+
+    def room(self) -> bool:
+        if len(self) < JOURNAL_MAX:
+            return True
+        self.truncated += 1
+        return False
+
+    def append(self, rec: dict) -> None:
+        super().append(rec)
+        if self.sink is not None:
+            self.sink(rec)
 FILLS_MAX = 2_000_000
 _KIND = {"primary": "P", "hedge": "H", "unwind": "U", "rebalance": "R", "flatten": "F"}
 
@@ -112,7 +134,7 @@ class ExecutionLayer:
         self.instrument = instrument
         self.dispatch_mode = dispatch_mode
         self.intents: dict[str, ExecutionIntent] = {}
-        self.journal: list[dict] = []
+        self.journal: _Journal = _Journal()
         self.fills: list[dict] = []                          # every fill the engine booked (4h.5); not capped by JOURNAL_MAX
         self._serial: Counter = Counter()
         self._tactics: dict[str, object] = {}
@@ -215,7 +237,7 @@ class ExecutionLayer:
                              signal_id=signal_id, created_ts=now, dust_included=dust_included)
         self.intents[iid] = it
         self._by_signal.setdefault(signal_id, []).append(iid)
-        if len(self.journal) < JOURNAL_MAX:
+        if self.journal.room():
             rec = {"seq": len(self.journal), "event": "intent", **it.as_record()}
             ev = self._evidence(venues, side, now, qty)
             if ev is not None:
@@ -272,7 +294,7 @@ class ExecutionLayer:
             return
         frm = it.state
         it.move(to)
-        if len(self.journal) < JOURNAL_MAX:
+        if self.journal.room():
             self.journal.append({"seq": len(self.journal), "event": "state", "intent_id": it.intent_id, "from": frm.value,
                                  "to": to.value, "why": why, "ts": now})
 
@@ -301,7 +323,7 @@ class ExecutionLayer:
         old = intent.worst_price
         intent.worst_price = worst_price
         self.counts["retargets"] += 1
-        if len(self.journal) < JOURNAL_MAX:
+        if self.journal.room():
             self.journal.append({"seq": len(self.journal), "event": "retarget", "intent_id": intent.intent_id, "from": old,
                                  "to": worst_price, "reason": reason})
 
@@ -368,7 +390,7 @@ class ExecutionLayer:
         self.intent_of_origin[(origin_id or order_id, intent.role)] = intent.intent_id
         self.counts["children"] += 1
         self.counts["children_" + tactic] += 1
-        if len(self.journal) < JOURNAL_MAX:
+        if self.journal.room():
             rec = {"seq": len(self.journal), "event": "child", "intent_id": intent.intent_id, "order_id": order_id, "tactic": tactic, "ts": now}
             ev = self._evidence(intent.venues, intent.side, now, intent.qty)
             if ev is not None:
@@ -481,7 +503,7 @@ class ExecutionLayer:
     def note_instant(self, *, role: str, side: str, qty: float, venue: str, now: float, signal_id: int, reason: str) -> None:
         """A latency-free flatten that bypasses the sender (legacy oracle _unwind): journaled, not routed."""
         self.counts["instant_flattens"] += 1
-        if len(self.journal) < JOURNAL_MAX:
+        if self.journal.room():
             self.journal.append({"seq": len(self.journal), "event": "instant", "role": role, "side": side, "qty": qty, "venue": venue,
                                  "ts": now, "signal_id": signal_id, "reason": reason, "tactic": "MARKET_BANDED"})
 
@@ -489,7 +511,7 @@ class ExecutionLayer:
     def report(self) -> dict:
         by_state = Counter(i.state.value for i in self.intents.values())
         return {"config": self.cfg.as_dict(), "config_sha256": self.cfg.sha256(), "intents": len(self.intents),
-                "intents_by_state": dict(by_state), "counts": dict(self.counts), "journal_entries": len(self.journal),
+                "intents_by_state": dict(by_state), "counts": dict(self.counts), "journal_entries": len(self.journal), **({"journal_truncated": True, "journal_records_dropped": self.journal.truncated} if self.journal.truncated else {}),
                 "fills_journaled": len(self.fills),
                 "one_hedge_child_mode": self.cfg.one_hedge_child, "risk_reservation_mode": self.cfg.risk_reservation,
                 "violations": list(self.violations), "risk_refusals": list(self.refusals),
@@ -576,14 +598,14 @@ class IntentObserver:
         decision = self.layer.decide_route(role=role, passive=passive, order_venue=order.venue)
         if decision.venue != order.venue:
             self.layer.counts["route_decision_differs_from_order_venue"] += 1
-        if len(self.layer.journal) < JOURNAL_MAX and decision.venue != order.venue:
+        if decision.venue != order.venue and self.layer.journal.room():
             self.layer.journal.append({"seq": len(self.layer.journal), "event": "route_decision_differs", "order_id": order.order_id, "order_venue": order.venue, "decided": decision.venue, "reason": decision.reason, "ts": now})
         return decision.venue
 
     def route_rejected(self, plan, order, reason: str, now: float) -> None:
         """A route check failed at the router: the order goes back to the layer as a rejection. It is never sent to another venue (one eligible venue, no reroute)."""
         self.counts["route_rejected_back_to_layer"] += 1
-        if len(self.layer.journal) < JOURNAL_MAX:
+        if self.layer.journal.room():
             self.layer.journal.append({"seq": len(self.layer.journal), "event": "route_rejected", "order_id": order.order_id, "venue": order.venue, "reason": reason, "ts": now})
 
     def plan_opened(self, plan, now: float) -> str | None:

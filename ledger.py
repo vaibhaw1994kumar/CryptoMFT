@@ -89,6 +89,7 @@ class VenueCapitalState:
 
 class Ledger:
     def __init__(self) -> None:
+        self.event_sink = None
         self.events: list[dict] = []
         self.positions: dict[tuple[str, str], Decimal] = {}
         self.cash_deltas: dict[str, Decimal] = {}
@@ -121,6 +122,8 @@ class Ledger:
             "ts_ns": ts_ns,
             **payload,
         })
+        if self.event_sink is not None:          # W2a (owner 17 Nov): a paper session streams every ledger event to disk as it is recorded (append and flush per record); None (the default) = nothing
+            self.event_sink(self.events[-1])
 
     def record_order_action(
         self,
