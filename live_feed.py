@@ -225,6 +225,9 @@ class LiveFeedSettings:
     # W1 (owner 17 Nov): the recorder writes a `feed_health` block into each part manifest (per venue: frames, canonical events, delay statistics, silences, reconnects, backlog, exchange-time substitutions).
     # Off (the default): the part manifest is exactly as before.
     feed_health_block: bool = False
+    # W2b (owner 17 Nov): incident capture (see IncidentCapture). None (the default): nothing is built, no mark is taken, no directory is made. A dict = the validated `incident_capture` block
+    # (incident_policy): a trigger cuts the last pre_seconds and the next post_seconds of the recording into <session>/incidents/<id>/ as a small recording of its own.
+    incident_capture: dict | None = None
     # Periodic REST cross-check of each VALID book (None: off). A best bid/ask
     # disagreement forces a resync; deeper-level differences are reported.
     rest_reconcile_seconds: float | None = None
@@ -425,6 +428,15 @@ class RotatingLiveRecorder:
         """The monitor tick's call: data that sat longer than the interval with no write after it (a quiet feed) is flushed now."""
         if self._deferred and not self._closed and (self._unflushed or self._raw_writer is not None) and time.monotonic_ns() - self._last_flush_mono_ns >= self.flush_interval_ns:
             self.flush_now()
+
+    def open_files(self) -> dict[str, Path]:
+        """The open part's files by stream (W2b: the incident ring measures them at each mark). Empty before the first frame."""
+        if self._part_dir is None or self._raw_writer is None:
+            return {}
+        out = {name: self._part_dir / f"{name}.jsonl" for name in ("wire", "raw", "canonical", "trades", "trace", "quarantine")}
+        if self._derivative_handle is not None:
+            out["derivatives"] = self._part_dir / "derivatives.jsonl"
+        return out
 
     def _open_part(self, now_ns: int) -> None:
         self.part_number += 1
@@ -809,6 +821,474 @@ class RotatingLiveRecorder:
         return manifest
 
 
+# ---- W2b (owner 17 Nov; audit A2 2.1-2.3, Q3): incident capture ------------------------------------------------------------------------------------------------------------------
+# The recorder writes the whole session. An INCIDENT is a short window of it, cut on a trigger and kept as its own small recording: a normal `part-000001` directory (the same files, the same rows) that
+# `iter_recorded_events` and the session replay open with no change, plus `incident_manifest.json` (rule, symbol, window, frame counts, hashes, completeness).
+#   Ring: one MARK every `mark_seconds` (5 s): the size of every recorder file at that moment and a copy of each venue's real book. Nothing is buffered in memory per frame; the rows are already on disk.
+#   Trigger: `trigger(rule, ts)` from the trigger table (INCIDENT_RULES). The window runs from the newest mark at least `pre_seconds` (90 s) before the trigger to `post_seconds` (5 s) after it.
+#   Cut: the byte ranges between the two marks are copied (in a worker thread: the event loop is never blocked by the copy), each venue's book at the window start is written as the first rows,
+#        labelled SEEDED_AT_WINDOW_START (a COPY of the real book at that mark, never built), so the window's deltas chain onto it.
+#   Never silent: a window shorter than asked, a gap between marks (a stalled loop), disk pressure, a write error or a recorder error make the capture INCOMPLETE with the reason; a trigger that is
+#        suppressed (cooldown, the capture limit, a disabled rule) is counted.
+# OFF unless `LiveFeedSettings.incident_capture` is given (a profile block from the version after v1_11). It records; it changes no decision, no order and no file of the session recording.
+INCIDENT_SCHEMA = "1.0.0"
+SEED_LABEL = "SEEDED_AT_WINDOW_START"
+INCIDENT_PART_STREAMS = ("wire", "raw", "canonical", "trades", "derivatives", "trace", "quarantine")
+INCIDENT_INCOMPLETE = ("PRE_WINDOW_SHORT", "POST_WINDOW_SHORT", "MARK_GAP", "DISK_PRESSURE", "WRITE_ERROR", "RECORDER_ERROR", "SOURCE_MISSING")
+# The trigger table. `ledger`: a ledger event of that type (and, with `where`, those field values) raises the rule; `service`: raised by the feed service itself; `source: NOT_BUILT` rows are named so the
+# table is complete, and nothing raises them yet. Every rule can be switched off in the profile block (`rules: {name: false}`).
+INCIDENT_RULES: dict[str, dict[str, Any]] = {
+    "feed_unsafe": {"ledger": [{"event_type": "FEED_HEALTH_STATE", "where": {"state": "UNSAFE"}}], "service": ["BOOK_STREAM_SILENCE"]},
+    "book_invalid": {"service": ["BOOK_STATE:GAP_DETECTED", "BOOK_STATE:INVALID_DATA", "BOOK_STATE:PRICE_ANOMALY", "BOOK_STATE:CHECKSUM_FAILED"]},
+    "breaker_trip": {"ledger": [{"event_type": "BREAKER_TRIP"}]},
+    "kill_switch": {"ledger": [{"event_type": "KILL_SWITCH_STATE_TRANSITION", "where": {"state": "ACTIVE"}}]},
+    "hedge_unfilled": {"ledger": [{"event_type": "HEDGE_ALARM"}, {"event_type": "UNWIND_EXHAUSTED_ALARM"}, {"event_type": "HEDGE_LOT_RESIDUAL_ALARM"}]},
+    "ghost_hedge": {"ledger": [{"event_type": "HEDGE_LATE_FILL"}, {"event_type": "LATE_REPORT_FOR_CLOSED_PLAN"}]},
+    "unknown_order_state": {"ledger": [{"event_type": "NEW_RISK_HELD_HEDGE_UNKNOWN"}, {"event_type": "HEDGE_CHAINS_ESCALATED"}, {"event_type": "AMEND_TIMEOUT"}]},
+    "reconciliation_mismatch": {"ledger": [{"event_type": "RECONCILIATION_DISAGREEMENT"}]},
+    "limit_stop": {"ledger": [{"event_type": "LIMIT_STATE", "where": {"state": "ACTIVE"}}]},
+    "manual": {"service": ["MANUAL"]},
+    "markout_worse_than": {"source": "NOT_BUILT (W7: needs the markout trigger)"},
+    "venue_dislocation": {"source": "NOT_BUILT (W6: needs the dislocation episode record)"},
+}
+INCIDENT_DEFAULTS: dict[str, Any] = {"pre_seconds": 90.0, "post_seconds": 5.0, "mark_seconds": 5.0, "cooldown_seconds": 30.0, "max_captures": 50, "min_free_bytes": 1 << 30, "background": True}
+
+
+def incident_policy(block: dict | None) -> dict | None:
+    """The `incident_capture` block, validated and filled with the defaults; None when the block is absent or `enabled` is false (nothing is built)."""
+    if not block or not block.get("enabled", True):
+        return None
+    unknown = sorted(set(block) - set(INCIDENT_DEFAULTS) - {"enabled", "rules"})
+    if unknown:
+        raise ValueError(f"incident_capture: unknown key(s) {unknown}")
+    rules = dict(block.get("rules") or {})
+    bad = sorted(set(rules) - set(INCIDENT_RULES))
+    if bad:
+        raise ValueError(f"incident_capture.rules: unknown rule(s) {bad}")
+    out = {k: type(v)(block.get(k, v)) for k, v in INCIDENT_DEFAULTS.items()}
+    if out["pre_seconds"] <= 0 or out["post_seconds"] < 0 or out["mark_seconds"] <= 0 or out["mark_seconds"] > out["pre_seconds"]:
+        raise ValueError("incident_capture: pre_seconds and mark_seconds must be positive, mark_seconds at most pre_seconds, post_seconds not negative")
+    out["rules"] = {name: bool(rules.get(name, True)) and "source" not in spec for name, spec in INCIDENT_RULES.items()}
+    return out
+
+
+def book_copy(book: OrderBook, ts_ns: int) -> tuple | None:
+    """The cheap part of a seed, taken on the event loop at each mark: the book's levels, sequence and state COPIED as they stand. None when the book has no usable state (syncing, a gap, an empty
+    side): a window is never given a book that did not exist."""
+    if book.sequence is None or not book.bids or not book.asks or book.state not in (BookState.VALID, BookState.STALE):
+        return None
+    return (book.venue, book.instrument_id, int(book.sequence), dict(book.bids), dict(book.asks), book.state, ts_ns)
+
+
+def seed_row(copy: tuple | None) -> dict[str, Any] | None:
+    """A book copy as one BOOK_SNAPSHOT row labelled SEEDED_AT_WINDOW_START (sorting, text and the book hash: done at the cut, off the event loop)."""
+    if copy is None:
+        return None
+    venue, instrument_id, sequence, bids, asks, state, ts_ns = copy
+    shadow = OrderBook(venue, instrument_id)
+    shadow.bids, shadow.asks, shadow.sequence, shadow.state = bids, asks, sequence, state
+    return {"event_id": f"seed-{venue}-{sequence}-{ts_ns}", "event_type": "BOOK_SNAPSHOT", "venue": venue, "instrument_id": instrument_id,
+            "exchange_ts_ns": ts_ns, "source_ts_ns": ts_ns, "receive_ts_ns": ts_ns, "sequence": sequence, "sequence_start": sequence,
+            "adapter_version": "incident-seed-v1", "quality_flags": [SEED_LABEL],
+            "bids": [{"price": str(p), "quantity": str(q)} for p, q in sorted(bids.items(), reverse=True)],
+            "asks": [{"price": str(p), "quantity": str(q)} for p, q in sorted(asks.items())],
+            "native": {"seed": SEED_LABEL, "book_sequence": sequence, "book_state": state.value, "snapshot_hash": shadow.snapshot_hash()}}
+
+
+def book_seed_row(book: OrderBook, ts_ns: int) -> dict[str, Any] | None:
+    """The book as it stands, as one labelled seed row (a COPY of the real levels and the real sequence), or None when it has no usable state."""
+    return seed_row(book_copy(book, ts_ns))
+
+
+def _bridge_seed(seed: dict[str, Any], canonical_lines: list[bytes]) -> dict[str, Any]:
+    """Binance USD-M deltas chain by `pu` (the previous delta's last id), and their first id is not last + 1. A seed taken at sequence S is followed by a delta with pu == S: the seed's sequence is then
+    written as that delta's first id minus one, so the ordinary snapshot rule accepts it (the true sequence stays in native.book_sequence). A delta that does NOT follow the seed is left alone: the gap is real."""
+    for line in canonical_lines:
+        if seed["venue"].encode() not in line:
+            continue
+        row = json.loads(line)
+        if row.get("venue") != seed["venue"]:
+            continue
+        native = row.get("native") if isinstance(row.get("native"), dict) else {}
+        if row.get("event_type") == "BOOK_DELTA" and native.get("pu") is not None and int(native["pu"]) == seed["native"]["book_sequence"] and int(row["sequence_start"]) > seed["sequence"] + 1:
+            seed = {**seed, "sequence": int(row["sequence_start"]) - 1, "sequence_start": int(row["sequence_start"]) - 1, "native": {**seed["native"], "sequence_bridged_to": int(row["sequence_start"]) - 1}}
+        break
+    return seed
+
+
+def write_incident(out_dir: Path, *, incident_id: str, rule: str, triggers: list[dict], instrument_id: str, venues: tuple[str, ...], window: dict[str, Any], lines: dict[str, list[bytes]],
+                   seeds: dict[str, dict | None], flags: list[str], source: dict[str, Any], extra: dict[str, list[bytes]] | None = None, seed_source: str = "copied from the live book at the window's first mark") -> dict[str, Any]:
+    """Write one incident: `out_dir/part-000001/` in the recorder's own layout (the window's rows, with each venue's seed snapshot first in canonical.jsonl and trace.jsonl), the paper journals of the
+    window under `out_dir/paper/` when given, and `incident_manifest.json`. Returns the manifest. `lines` = the window's rows per recorder stream, as they are on disk."""
+    part = out_dir / "part-000001"
+    part.mkdir(parents=True, exist_ok=False)
+    canonical = list(lines.get("canonical", []))
+    seed_rows, seed_report = [], {}
+    for venue in venues:
+        seed = seeds.get(venue)
+        if seed is None:
+            seed_report[venue] = {"status": "NO_VALID_BOOK_AT_WINDOW_START", "note": "the venue's book was not usable at the first mark; the window's own snapshot rebuilds it, if it holds one"}
+            continue
+        seed = _bridge_seed(seed, canonical)
+        seed_rows.append(seed)
+        seed_report[venue] = {"status": SEED_LABEL, "source": seed_source, "book_sequence": seed["native"]["book_sequence"], "sequence_written": seed["sequence"], "levels": [len(seed["bids"]), len(seed["asks"])],
+                              "snapshot_hash": seed["native"].get("snapshot_hash"), "ts_ns": seed["receive_ts_ns"]}
+    seed_canonical = [(json.dumps(row, sort_keys=True) + "\n").encode() for row in seed_rows]
+    seed_trace = [(json.dumps({"canonical_event_id": row["event_id"], "disposition": "CANONICAL", "instrument_id": row["instrument_id"], "receive_ts_ns": row["receive_ts_ns"], "sequence": row["sequence"],
+                               "sequence_start": row["sequence_start"], "venue": row["venue"], "seed": SEED_LABEL}, sort_keys=True, separators=(",", ":")) + "\n").encode() for row in seed_rows]
+    files, counts = {}, {}
+    for name in INCIDENT_PART_STREAMS:
+        body = list(lines.get(name, []))
+        if name not in lines and name not in ("canonical", "trades", "trace"):
+            continue                                                  # a stream the session never opened (no derivatives file) is not invented
+        prefix = seed_canonical if name == "canonical" else seed_trace if name == "trace" else []
+        path = part / f"{name}.jsonl"
+        copied = sha256()
+        with path.open("wb") as handle:
+            for line in prefix:
+                handle.write(line)
+            for line in body:
+                handle.write(line)
+                copied.update(line)
+        digest = sha256()
+        for line in prefix:
+            digest.update(line)
+        for line in body:
+            digest.update(line)
+        files[name] = {"path": str(path), "sha256": digest.hexdigest(), "bytes": path.stat().st_size, "copied_sha256": copied.hexdigest(), "copied_rows": len(body), "seed_rows": len(prefix)}
+        counts[name] = len(body)
+    paper = {}
+    for name, body in (extra or {}).items():
+        (out_dir / "paper").mkdir(exist_ok=True)
+        path = out_dir / "paper" / name
+        with path.open("wb") as handle:
+            handle.writelines(body)
+        paper[name] = {"path": str(path), "sha256": sha256(b"".join(body)).hexdigest(), "rows": len(body)}
+    incomplete = [f for f in flags if f.split(":")[0] in INCIDENT_INCOMPLETE]
+    first_wire = json.loads(lines["wire"][0]) if lines.get("wire") else None
+    manifest = {"schema_version": INCIDENT_SCHEMA, "incident_id": incident_id, "rule": rule, "triggers": triggers, "instrument_id": instrument_id, "venues": list(venues), "window": window,
+                "completeness": "INCOMPLETE" if incomplete else "COMPLETE", "incomplete_reasons": incomplete, "flags": flags, "frame_counts": counts, "files": files, "paper": paper,
+                "seeds": seed_report, "source": source,
+                "wire_chain": None if first_wire is None else {"note": "a window is a CUT of the session's hash chain: its first record's previous hash is not the genesis hash; each record's own hash still verifies",
+                                                                "first_previous_record_hash": first_wire.get("previous_record_hash")},
+                "label": "an incident window of a live recording; the seed books are constructed state (a copy of the real book): never use a window for a profit figure"}
+    (part / "live_part_manifest.json").write_text(json.dumps({"part": 1, "directory": str(part), "started_ts_ns": window["start_ns"], "closed_ts_ns": window["end_ns"], "incident_id": incident_id,
+                                                              "files": {n: {"path": f["path"], "sha256": f["sha256"]} for n, f in files.items()}, "seeds": seed_report,
+                                                              "stage_counts": {n: {"recorded": counts[n], "on_disk": counts[n] + files[n]["seed_rows"]} for n in ("canonical", "trades") if n in counts}}, indent=2, sort_keys=True), encoding="utf-8")
+    (out_dir / "incident_manifest.json").write_text(json.dumps(manifest, indent=2, sort_keys=True, default=json_default), encoding="utf-8")
+    return manifest
+
+
+class IncidentCapture:
+    """The live ring and the trigger handling (see the block comment above). `files()` returns the recorder's open files {stream: path}; `books()` the live books {venue: OrderBook}; `flush()` puts
+    everything written so far on disk. `extra_files()` (a paper session's journals) are cut by the same marks into `paper/`."""
+
+    def __init__(self, session_dir: Path, policy: dict[str, Any], *, instrument_id: str, venues: tuple[str, ...], files: Callable[[], dict[str, Path]], books: Callable[[], dict[str, OrderBook]],
+                 flush: Callable[[], None], clock_ns: Callable[[], int] = time.time_ns, monotonic_ns: Callable[[], int] = time.monotonic_ns, session_id: str = "") -> None:
+        self.dir = session_dir / "incidents"
+        self.policy = policy
+        self.instrument_id, self.venues, self.session_id = instrument_id, tuple(venues), session_id
+        self._files, self._books, self._flush = files, books, flush
+        self.extra_files: Callable[[], dict[str, Path]] | None = None
+        self.extra_flush: Callable[[], None] | None = None
+        self.clock_ns, self.monotonic_ns = clock_ns, monotonic_ns
+        self.pre_ns, self.post_ns, self.mark_ns = (int(policy[k] * 1_000_000_000) for k in ("pre_seconds", "post_seconds", "mark_seconds"))
+        self.cooldown_ns = int(policy["cooldown_seconds"] * 1_000_000_000)
+        self.marks: deque[dict[str, Any]] = deque()
+        self.pending: dict[str, Any] | None = None
+        self.last_cut_ns: int | None = None
+        self.captures: list[dict[str, Any]] = []
+        self.counts: dict[str, int] = {"triggers": 0, "captures": 0, "joined_pending": 0, "suppressed_cooldown": 0, "suppressed_limit": 0, "suppressed_disabled": 0, "marks": 0, "mark_errors": 0, "unknown_rule": 0}
+        self.by_rule: dict[str, int] = {}
+        self._threads: list[Any] = []
+        self._ledger_rules = [(name, spec) for name, rule in INCIDENT_RULES.items() for spec in rule.get("ledger", ())]
+        self.max_mark_gap_ns = 0
+
+    # ---- the ring
+    def tick(self, now_ns: int) -> None:
+        """Called after a book frame and on the monitor tick: take a mark when one is due, and cut the pending capture when its post window has passed."""
+        if not self.marks or now_ns - self.marks[-1]["ts_ns"] >= self.mark_ns:
+            self._mark(now_ns)
+        if self.pending is not None and now_ns >= self.pending["cut_at_ns"]:
+            self._cut(now_ns)
+
+    def _sizes(self) -> dict[str, tuple[Path, int]]:
+        out = {name: (path, path.stat().st_size) for name, path in self._files().items() if path.exists()}
+        if self.extra_files is not None:
+            out.update({f"paper/{name}": (path, path.stat().st_size) for name, path in self.extra_files().items() if path.exists()})
+        return out
+
+    def _mark(self, now_ns: int) -> None:
+        try:
+            self._flush()
+            if self.extra_flush is not None:
+                self.extra_flush()
+            sizes = self._sizes()
+        except (OSError, PersistenceFailure) as exc:
+            self.counts["mark_errors"] += 1
+            self.marks.append({"ts_ns": now_ns, "error": f"{type(exc).__name__}: {exc}"})
+            return
+        if self.marks and "error" not in self.marks[-1]:
+            self.max_mark_gap_ns = max(self.max_mark_gap_ns, now_ns - self.marks[-1]["ts_ns"])
+        self.marks.append({"ts_ns": now_ns, "files": sizes, "books": {venue: book_copy(book, now_ns) for venue, book in self._books().items()}})      # levels copied here; the seed rows are built at the cut
+        self.counts["marks"] += 1
+        keep_from = now_ns - self.pre_ns - 2 * self.mark_ns - (self.post_ns if self.pending is None else now_ns - self.pending["trigger_ns"] + self.post_ns)
+        while len(self.marks) > 2 and self.marks[1]["ts_ns"] <= keep_from:        # keep one mark at or before the earliest window start that can still be asked for
+            self.marks.popleft()
+
+    # ---- triggers
+    def on_ledger_event(self, row: dict[str, Any]) -> None:
+        kind = row.get("event_type")
+        for name, spec in self._ledger_rules:
+            if spec["event_type"] == kind and all(str(row.get(k)) == str(v) for k, v in (spec.get("where") or {}).items()):
+                self.trigger(name, int(row.get("ts_ns") or self.clock_ns()), detail=kind, source="ledger")
+                return
+
+    def trigger(self, rule: str, ts_ns: int, detail: str = "", source: str = "service") -> str | None:
+        """Raise a rule. Returns the incident id the trigger belongs to, or None when it was suppressed (counted)."""
+        self.counts["triggers"] += 1
+        self.by_rule[rule] = self.by_rule.get(rule, 0) + 1
+        if rule not in self.policy["rules"]:
+            self.counts["unknown_rule"] += 1
+            return None
+        if not self.policy["rules"][rule]:
+            self.counts["suppressed_disabled"] += 1
+            return None
+        row = {"rule": rule, "ts_ns": ts_ns, "detail": detail, "source": source}
+        if self.pending is not None:
+            self.pending["triggers"].append(row)                      # a second trigger inside an open window belongs to the same incident
+            self.counts["joined_pending"] += 1
+            return self.pending["incident_id"]
+        if self.last_cut_ns is not None and ts_ns - self.last_cut_ns < self.cooldown_ns:
+            self.counts["suppressed_cooldown"] += 1
+            return None
+        if self.counts["captures"] >= self.policy["max_captures"]:
+            self.counts["suppressed_limit"] += 1
+            return None
+        self.counts["captures"] += 1
+        incident_id = f"inc-{self.counts['captures']:04d}-{rule}-{ts_ns}"
+        self.pending = {"incident_id": incident_id, "rule": rule, "trigger_ns": ts_ns, "cut_at_ns": ts_ns + self.post_ns, "triggers": [row]}
+        return incident_id
+
+    def check_trigger_file(self, now_ns: int) -> None:
+        """MANUAL: a file named TRIGGER in the incidents directory raises the `manual` rule once; it is renamed, not deleted, so the request stays on record."""
+        path = self.dir / "TRIGGER"
+        if path.exists():
+            with suppress(OSError):
+                detail = path.read_text(encoding="utf-8", errors="replace").strip()[:200]
+                path.rename(self.dir / f"TRIGGER.taken-{now_ns}")
+                self.trigger("manual", now_ns, detail=detail or "trigger file", source="trigger_file")
+
+    # ---- the cut
+    def _cut(self, now_ns: int, *, closing: bool = False) -> None:
+        pending, self.pending = self.pending, None
+        self.last_cut_ns = now_ns
+        flags: list[str] = []
+        if closing and now_ns < pending["cut_at_ns"]:
+            flags.append(f"POST_WINDOW_SHORT:the session ended {(now_ns - pending['trigger_ns']) / 1e9:.3f} s after the trigger")
+        self._mark(now_ns)                                             # the end of the window: everything written so far is on disk and measured
+        end = self.marks[-1]
+        good = [m for m in self.marks if "error" not in m]
+        if "error" in end or not good:
+            flags.append(f"RECORDER_ERROR:{end.get('error', 'no usable mark')}")
+            self._record(pending, None, None, {}, {}, flags, now_ns)
+            return
+        wanted = pending["trigger_ns"] - self.pre_ns
+        start = next((m for m in reversed(good) if m["ts_ns"] <= wanted), None)
+        if start is None:
+            start = good[0]
+            flags.append(f"PRE_WINDOW_SHORT:the ring starts {(pending['trigger_ns'] - start['ts_ns']) / 1e9:.3f} s before the trigger (asked {self.pre_ns / 1e9:.0f} s)")
+        inside = [m for m in self.marks if start["ts_ns"] <= m["ts_ns"] <= end["ts_ns"]]
+        if any("error" in m for m in inside):
+            flags.append("RECORDER_ERROR:a mark inside the window failed")
+        usable = [m for m in inside if "error" not in m]
+        gap = max((b["ts_ns"] - a["ts_ns"] for a, b in zip(usable, usable[1:])), default=0)
+        if gap > 2 * self.mark_ns + self.post_ns:
+            flags.append(f"MARK_GAP:{gap / 1e9:.3f} s between two marks inside the window (a stalled loop or an overload; the rows are still whole)")
+        ranges: dict[str, list[tuple[Path, int, int | None]]] = {}
+        for name in sorted({n for m in usable for n in m["files"]}):
+            segments: list[tuple[Path, int, int | None]] = []
+            current: tuple[Path, int] | None = start["files"].get(name)
+            for m in usable[1:]:
+                seen = m["files"].get(name)
+                if seen is None:
+                    continue
+                if current is None:
+                    current = (seen[0], 0)                             # a file that first appears inside the window (derivatives, a new part)
+                elif seen[0] != current[0]:
+                    segments.append((current[0], current[1], None))    # the part was rotated inside the window: the old file to its end, the new one from its start
+                    current = (seen[0], 0)
+            if current is not None:
+                segments.append((current[0], current[1], end["files"][name][1] if name in end["files"] and end["files"][name][0] == current[0] else None))
+            ranges[name] = segments
+        try:
+            import shutil
+            free = shutil.disk_usage(self.dir.parent).free
+        except OSError:
+            free = None
+        if free is not None and free < self.policy["min_free_bytes"]:
+            flags.append(f"DISK_PRESSURE:{free} bytes free, below {self.policy['min_free_bytes']}; the window was not copied")
+            self._record(pending, start, end, {}, {}, flags, now_ns)
+            return
+        job = (pending, start, end, ranges, flags, now_ns)
+        if self.policy["background"]:
+            import threading
+            thread = threading.Thread(target=self._copy, args=job, name=f"incident-{pending['incident_id']}", daemon=True)
+            self._threads.append(thread)
+            thread.start()
+        else:
+            self._copy(*job)
+
+    def _copy(self, pending, start, end, ranges, flags, now_ns) -> None:
+        started = time.monotonic_ns()
+        lines: dict[str, list[bytes]] = {}
+        extra: dict[str, list[bytes]] = {}
+        try:
+            for name, segments in ranges.items():
+                body: list[bytes] = []
+                for path, begin, stop in segments:
+                    if not path.exists():
+                        flags.append(f"SOURCE_MISSING:{path.name}")
+                        continue
+                    with path.open("rb") as handle:
+                        handle.seek(begin)
+                        body.extend((handle.read() if stop is None else handle.read(stop - begin)).splitlines(keepends=True))
+                (extra if name.startswith("paper/") else lines)[name.split("/", 1)[-1] if name.startswith("paper/") else name] = body
+            self._record(pending, start, end, lines, extra, flags, now_ns, ranges=ranges, copy_ns=time.monotonic_ns() - started)
+        except OSError as exc:
+            flags.append(f"WRITE_ERROR:{type(exc).__name__}: {exc}")
+            with suppress(OSError):
+                self._record(pending, start, end, {}, {}, flags, now_ns)
+
+    def _record(self, pending, start, end, lines, extra, flags, now_ns, *, ranges=None, copy_ns: int | None = None) -> None:
+        out = self.dir / pending["incident_id"]
+        window = {"start_ns": None if start is None else start["ts_ns"], "trigger_ns": pending["trigger_ns"], "end_ns": None if end is None else end["ts_ns"],
+                  "pre_seconds": None if start is None else (pending["trigger_ns"] - start["ts_ns"]) / 1e9, "post_seconds": None if end is None else (end["ts_ns"] - pending["trigger_ns"]) / 1e9,
+                  "requested_pre_seconds": self.pre_ns / 1e9, "requested_post_seconds": self.post_ns / 1e9, "mark_seconds": self.mark_ns / 1e9}
+        source = {"session_id": self.session_id, "cut_at_ns": now_ns, "copy_ms": None if copy_ns is None else copy_ns / 1e6,
+                  "ranges": {name: [{"file": f"{path.parent.name}/{path.name}", "from": begin, "to": stop} for path, begin, stop in segments] for name, segments in (ranges or {}).items()}}
+        if not lines:
+            out.mkdir(parents=True, exist_ok=True)
+            manifest = {"schema_version": INCIDENT_SCHEMA, "incident_id": pending["incident_id"], "rule": pending["rule"], "triggers": pending["triggers"], "instrument_id": self.instrument_id,
+                        "venues": list(self.venues), "window": window, "completeness": "INCOMPLETE", "incomplete_reasons": [f for f in flags if f.split(":")[0] in INCIDENT_INCOMPLETE], "flags": flags,
+                        "frame_counts": {}, "files": {}, "paper": {}, "seeds": {}, "source": source, "label": "no window was copied: see incomplete_reasons"}
+            (out / "incident_manifest.json").write_text(json.dumps(manifest, indent=2, sort_keys=True, default=json_default), encoding="utf-8")
+        else:
+            manifest = write_incident(out, incident_id=pending["incident_id"], rule=pending["rule"], triggers=pending["triggers"], instrument_id=self.instrument_id, venues=self.venues, window=window,
+                                      lines=lines, seeds={venue: seed_row(copy) for venue, copy in start["books"].items()}, flags=flags, source=source, extra=extra)
+        self.captures.append({"incident_id": manifest["incident_id"], "rule": manifest["rule"], "completeness": manifest["completeness"], "incomplete_reasons": manifest["incomplete_reasons"],
+                              "window": manifest["window"], "frame_counts": manifest["frame_counts"], "triggers": len(manifest["triggers"]), "directory": str(out)})
+
+    def wait(self, timeout: float = 30.0) -> None:
+        """Join the copy threads (tests, and the session's close)."""
+        for thread in self._threads:
+            thread.join(timeout)
+        self._threads = [t for t in self._threads if t.is_alive()]
+
+    def close(self, now_ns: int) -> None:
+        """The session is ending: a pending capture is cut now (flagged when its post window is short), and every copy is finished before the recorder is sealed."""
+        if self.pending is not None:
+            self._cut(now_ns, closing=True)
+        self.wait()
+
+    def report(self) -> dict[str, Any]:
+        return {"policy": {k: v for k, v in self.policy.items()}, "rules": {name: {"enabled": self.policy["rules"].get(name, False), **({"source": spec["source"]} if "source" in spec else {})} for name, spec in INCIDENT_RULES.items()},
+                "counts": dict(self.counts), "triggers_by_rule": dict(self.by_rule), "captures": list(self.captures), "marks_in_ring": len(self.marks), "max_mark_gap_s": self.max_mark_gap_ns / 1e9,
+                "pending": None if self.pending is None else self.pending["incident_id"]}
+
+
+_RECEIVE_TS = None
+
+
+def _line_receive_ts(line: bytes) -> int | None:
+    """The row's receive_ts_ns read from the line's text (every recorder row has one); None when it has none."""
+    global _RECEIVE_TS
+    if _RECEIVE_TS is None:
+        import re
+        _RECEIVE_TS = re.compile(rb'"receive_ts_ns": ?(\d+)')
+    found = _RECEIVE_TS.search(line)
+    return int(found.group(1)) if found else None
+
+
+def _open_recorded(path: Path):
+    """A recorder file for reading as bytes: `name.jsonl`, or `name.jsonl.gz` when the plain file is not there. None when neither exists."""
+    import gzip
+    if path.exists():
+        return path.open("rb")
+    packed = path.with_name(path.name + ".gz")
+    return gzip.open(packed, "rb") if packed.exists() else None
+
+
+def cut_recording_window(session_dir: Path, out_dir: Path, trigger_ns: int, *, pre_seconds: float = 90.0, post_seconds: float = 5.0, rule: str = "manual", detail: str = "",
+                         instrument_id: str = "", venues: tuple[str, ...] = ()) -> dict[str, Any]:
+    """The OFFLINE cut (W2b, Q3 dry run): the same incident layout from a recording that already exists (plain or gzip parts), read-only on it. The window is every row whose receive time lies in
+    [trigger - pre_seconds, trigger + post_seconds]. Each venue's seed is the book REBUILT by applying the recording's own canonical events up to the window start (the stored events rebuild the live
+    book: session_audit.orderbook_replay checks exactly that), labelled SEEDED_AT_WINDOW_START with that source. A window that reaches before the recording's first row or after its last is flagged."""
+    session_dir, out_dir = Path(session_dir), Path(out_dir)
+    start_ns, end_ns = trigger_ns - int(pre_seconds * 1_000_000_000), trigger_ns + int(post_seconds * 1_000_000_000)
+    parts = sorted(p for p in session_dir.glob("part-*") if p.is_dir())
+    if not parts:
+        raise FileNotFoundError(f"no part-* directory in {session_dir}")
+    lines: dict[str, list[bytes]] = {}
+    books: dict[str, OrderBook] = {}
+    first_ts = last_ts = None
+    used_parts = []
+    for part in parts:
+        took = False
+        part_first = part_last = None
+        for name in ("trace",) + tuple(n for n in INCIDENT_PART_STREAMS if n != "trace"):       # the trace first: it gives the part's time range, so a part outside the window is not read further
+            if name != "trace" and part_first is not None and (part_first > end_ns or (part_last < start_ns and name != "canonical")):
+                continue
+            handle = _open_recorded(part / f"{name}.jsonl")
+            if handle is None:
+                continue
+            with handle:
+                for line in handle:
+                    ts = _line_receive_ts(line)
+                    if ts is None:
+                        continue
+                    if name == "trace":
+                        part_first = ts if part_first is None else min(part_first, ts)
+                        part_last = ts if part_last is None else max(part_last, ts)
+                    if ts < start_ns:
+                        if name == "canonical":                    # before the window: the events that build the book the window starts from
+                            event = MarketEvent.from_dict(json.loads(line))
+                            book = books.get(event.venue)
+                            if book is None:
+                                book = books[event.venue] = OrderBook(event.venue, event.instrument_id, max_mid_jump_bps=None, max_spread_bps=None)
+                            book.apply(event)
+                        continue
+                    if ts > end_ns:
+                        if name != "trace":
+                            break                                  # rows are in arrival order: nothing later in this file is inside the window
+                        continue
+                    lines.setdefault(name, []).append(line if line.endswith(b"\n") else line + b"\n")
+                    took = True
+        if part_first is not None:
+            first_ts = part_first if first_ts is None else min(first_ts, part_first)
+            last_ts = part_last if last_ts is None else max(last_ts, part_last)
+        if took:
+            used_parts.append(part.name)
+        if part_first is not None and part_first > end_ns:
+            break
+    flags: list[str] = []
+    if first_ts is None or first_ts > start_ns:
+        flags.append(f"PRE_WINDOW_SHORT:the recording starts {'after the window start' if first_ts is not None else 'with no rows'}")
+    if last_ts is None or last_ts < end_ns:
+        flags.append("POST_WINDOW_SHORT:the recording ends before the window end")
+    if not lines.get("canonical") and not lines.get("trades"):
+        flags.append("SOURCE_MISSING:no book or trade row in the window")
+    venues = tuple(venues) or tuple(sorted(books) or sorted({json.loads(l).get("venue") for l in lines.get("canonical", [])[:2000]}))
+    if not instrument_id:
+        instrument_id = next((b.instrument_id for b in books.values()), "")
+    seeds = {venue: (book_seed_row(books[venue], start_ns) if venue in books else None) for venue in venues}
+    window = {"start_ns": start_ns, "trigger_ns": trigger_ns, "end_ns": end_ns, "pre_seconds": pre_seconds, "post_seconds": post_seconds, "requested_pre_seconds": pre_seconds, "requested_post_seconds": post_seconds}
+    incident_id = f"cut-{rule}-{trigger_ns}"
+    return write_incident(out_dir, incident_id=incident_id, rule=rule, triggers=[{"rule": rule, "ts_ns": trigger_ns, "detail": detail, "source": "offline_cut"}], instrument_id=instrument_id, venues=venues,
+                          window=window, lines=lines, seeds=seeds, flags=flags, source={"session_dir": str(session_dir), "parts": used_parts, "mode": "OFFLINE_CUT of an existing recording (read-only)"},
+                          seed_source="rebuilt from the recording's own canonical events up to the window start")
+
+
 async def public_http_get(url: str, timeout_seconds: float) -> tuple[str | bytes, int]:
     def fetch() -> tuple[bytes, int]:
         from .testnet import verified_ssl_context
@@ -949,6 +1429,12 @@ class LiveOrderBookService:
         )
         if self.settings.feed_health_block:
             self.recorder.health_provider = self.feed_health_snapshot
+        self.incidents: IncidentCapture | None = None            # W2b: off unless the settings carry the block
+        policy = incident_policy(self.settings.incident_capture)
+        if policy is not None:
+            self.incidents = IncidentCapture(self.recorder.session_dir, policy, instrument_id=self.config.instrument_id, venues=tuple(self.settings.venues), files=self.recorder.open_files,
+                                             books=lambda: self.books, flush=self.recorder.flush_now, clock_ns=self.clock_ns, session_id=session_id)
+            self.incidents.dir.mkdir(parents=True, exist_ok=True)
         self.structured_logs = StructuredLogStore(
             self.recorder.session_dir / "structured_logs.jsonl",
             self.recorder.session_dir / "structured_logs.sqlite",
@@ -1162,6 +1648,9 @@ class LiveOrderBookService:
         return self._seal_recorder()
 
     def _seal_recorder(self) -> dict[str, Any]:
+        if self.incidents is not None:
+            with suppress(OSError, PersistenceFailure):
+                self.incidents.close(self.clock_ns())          # a pending window is cut and every copy finished while the part files are still open and whole
         try:
             self._check_stage_counts()
             return self.recorder.close(self._service_summary())
@@ -1216,6 +1705,10 @@ class LiveOrderBookService:
         while not self.stop_event.is_set():
             self._write_monitoring(self.clock_ns(), final=False)
             self._check_runtime_watchdog()
+            if self.incidents is not None:              # W2b: a quiet feed still gets its marks and its pending cut, and the manual trigger file is looked for
+                now = self.clock_ns()
+                self.incidents.check_trigger_file(now)
+                self.incidents.tick(now)
             with suppress(PersistenceFailure):
                 self.recorder.flush_if_due()            # owner 17 Nov (A9 fix a): data older than the flush interval on a quiet feed; a failure here is raised again by the next write
             try:
@@ -2069,6 +2562,8 @@ class LiveOrderBookService:
             book.mark_stale_age(age, self.config.max_book_age_ns)
         self.stats[venue].book_stream_silences += 1
         self.stats[venue].stale_disconnects += 1
+        if self.incidents is not None:
+            self.incidents.trigger("feed_unsafe", self.clock_ns(), detail=f"BOOK_STREAM_SILENCE:{venue}")
         self.book_gate.allow(tuple(self.books.values()), self.clock_ns(), self._book_ages())
         self._publish_book(book, None)
 
@@ -2470,6 +2965,10 @@ class LiveOrderBookService:
             )
         if self.event_listener is not None:
             self.event_listener(event, book, state, accepted)
+        if self.incidents is not None:                         # W2b: after the frame is recorded, applied and seen by the session: the files and the books agree at this point
+            if state != previous_state and state in (BookState.GAP_DETECTED, BookState.INVALID_DATA, BookState.PRICE_ANOMALY, BookState.CHECKSUM_FAILED):
+                self.incidents.trigger("book_invalid", event.receive_ts_ns, detail=f"BOOK_STATE:{state.value}:{event.venue}")
+            self.incidents.tick(event.receive_ts_ns)
         self.events_seen += 1
         if (
             self.settings.max_events is not None
@@ -2525,6 +3024,7 @@ class LiveOrderBookService:
                 (self.stopped_ts_ns or 0) - (self.started_ts_ns or 0)
             ),
             "instrument_id": self.config.instrument_id,
+            **({"incident_capture": self.incidents.report()} if self.incidents is not None else {}),
             "symbols": self.symbols,
             "max_book_age_ns": self.config.max_book_age_ns,
             "events_seen": self.events_seen,
@@ -2592,10 +3092,13 @@ def default_live_session_id() -> str:
     return datetime.now(timezone.utc).strftime("live-%Y%m%dT%H%M%SZ")
 
 
-def verify_wire_file(path: Path) -> dict[str, Any]:
+def verify_wire_file(path: Path, *, window: bool = False) -> dict[str, Any]:
+    """`window` (W2b): the file is a CUT of a session's wire file (an incident window): the chain starts at the first record's own previous hash, and may restart at the genesis hash where the
+    session rotated a part inside the window (counted). Every record's own hash and frame checksum are verified exactly as for a whole file. Default: a whole part, chained from the genesis hash."""
     import base64
 
     previous = GENESIS_HASH
+    restarts = 0
     count = 0
     first_ref = None
     last_ref = None
@@ -2603,6 +3106,11 @@ def verify_wire_file(path: Path) -> dict[str, Any]:
         for line_number, line in enumerate(handle, start=1):
             record = json.loads(line)
             recorded_hash = record.pop("record_hash")
+            if window and line_number == 1:
+                previous = record.get("previous_record_hash")
+            elif window and record.get("previous_record_hash") == GENESIS_HASH and previous != GENESIS_HASH:
+                previous = GENESIS_HASH
+                restarts += 1
             if record.get("previous_record_hash") != previous:
                 raise ValueError(f"wire hash-chain break at line {line_number}")
             if record.get("frame_encoding") == "BASE64":
@@ -2627,4 +3135,5 @@ def verify_wire_file(path: Path) -> dict[str, Any]:
         "last_wire_ref": last_ref,
         "terminal_record_hash": previous,
         "wire_file_sha256": RotatingLiveRecorder._file_sha256(path),
+        **({"window": True, "chain_restarts_at_part_rotation": restarts} if window else {}),
     }

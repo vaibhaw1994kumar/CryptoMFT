@@ -706,3 +706,114 @@ def audit_session(
         lines.append(f"| {name} | {component.status} | {'; '.join(bad)[:500] or '-'} |")
     (output_dir / "session_audit.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
     return audit
+
+
+def audit_incident(incident_dir: Path, output_dir: Path | None = None, *, source_session_dir: Path | None = None) -> dict[str, Any]:
+    """W2b (owner 17 Nov; audit A2 2.3): the diagnostics of ONE incident window (live_feed.IncidentCapture or cut_recording_window), by one call, read-only on it.
+      manifest      present, schema, completeness and its reasons
+      files         every file's sha256 and row count equal the manifest
+      wire          every wire record's own hash and frame checksum verify; the chain is whole inside the window (it is a cut: it starts at the first record's previous hash)
+      trace         every CANONICAL / TRADE / DERIVATIVE trace row points at a row that is in the window
+      books         the window's book events applied in order, per venue, starting from the seed: states counted, the first event after each seed applied, the time span against the manifest's window
+      source_books  only with `source_session_dir` (the recording the window was cut from): the same events applied from the START of that recording give, event for event inside the window, the same
+                    book state and sequence, and the same final book, as the window gives from its seed
+    Returns {"ok", "checks": {...}}; with `output_dir` also writes incident_audit.json there (never inside the incident)."""
+    from hashlib import sha256
+    from .live_feed import SEED_LABEL, verify_wire_file
+    from .models import MarketEvent
+    from .orderbook import OrderBook
+
+    incident_dir = Path(incident_dir)
+    part = incident_dir / "part-000001"
+    manifest = _read_json(incident_dir / "incident_manifest.json")
+    checks: dict[str, Any] = {}
+    if not manifest:
+        result = {"ok": False, "incident_dir": str(incident_dir), "checks": {"manifest": {"ok": False, "detail": "incident_manifest.json missing or unreadable"}}}
+    else:
+        checks["manifest"] = {"ok": manifest.get("schema_version") is not None and manifest.get("completeness") in ("COMPLETE", "INCOMPLETE"), "completeness": manifest.get("completeness"),
+                              "incomplete_reasons": manifest.get("incomplete_reasons"), "rule": manifest.get("rule"), "window": manifest.get("window")}
+        bad = {}
+        for name, entry in (manifest.get("files") or {}).items():
+            path = part / f"{name}.jsonl"
+            if not path.exists():
+                bad[name] = "missing"
+                continue
+            body = path.read_bytes()
+            if sha256(body).hexdigest() != entry["sha256"] or body.count(b"\n") != entry["copied_rows"] + entry["seed_rows"]:
+                bad[name] = "sha256 or row count differs from the manifest"
+        checks["files"] = {"ok": not bad and bool(manifest.get("files")), "files": len(manifest.get("files") or {}), "bad": bad}
+        try:
+            wire = verify_wire_file(part / "wire.jsonl", window=True) if (part / "wire.jsonl").exists() else None
+            checks["wire"] = {"ok": wire is not None, **({"records": wire["record_count"], "chain_restarts_at_part_rotation": wire["chain_restarts_at_part_rotation"]} if wire else {"detail": "no wire file in the window"})}
+        except ValueError as exc:
+            checks["wire"] = {"ok": False, "detail": str(exc)}
+        ids = {name: {row["event_id"] for row in _read_jsonl(part / f"{name}.jsonl")} for name in ("canonical", "trades", "derivatives") if (part / f"{name}.jsonl").exists()}
+        by = {"CANONICAL": "canonical", "TRADE": "trades", "DERIVATIVE": "derivatives"}
+        dangling = [row.get("canonical_event_id") for row in _read_jsonl(part / "trace.jsonl") if row.get("disposition") in by and row.get("canonical_event_id") not in ids.get(by[row["disposition"]], set())]
+        checks["trace"] = {"ok": not dangling, "rows": _count_lines(part / "trace.jsonl"), "dangling": len(dangling)}
+        books: dict[str, OrderBook] = {}
+        states: dict[str, dict[str, int]] = {}
+        per_event: list[tuple[str, str, int | None]] = []
+        after_seed: dict[str, str] = {}
+        seeded: set[str] = set()
+        first_ts = last_ts = None
+        for row in _read_jsonl(part / "canonical.jsonl"):
+            event = MarketEvent.from_dict(row)
+            book = books.setdefault(event.venue, OrderBook(event.venue, event.instrument_id, max_mid_jump_bps=None, max_spread_bps=None))
+            state = book.apply(event).value
+            if SEED_LABEL in event.quality_flags:
+                seeded.add(event.venue)
+            else:
+                if event.venue in seeded and event.venue not in after_seed:
+                    after_seed[event.venue] = state                       # the first real event after the seed: VALID means the window chains onto it
+                states.setdefault(event.venue, {})[state] = states.setdefault(event.venue, {}).get(state, 0) + 1
+                per_event.append((event.event_id, state, book.sequence))
+                first_ts = event.receive_ts_ns if first_ts is None else min(first_ts, event.receive_ts_ns)
+                last_ts = event.receive_ts_ns if last_ts is None else max(last_ts, event.receive_ts_ns)
+        window = manifest.get("window") or {}
+        inside = first_ts is None or (window.get("start_ns") is None or first_ts >= window["start_ns"]) and (window.get("end_ns") is None or last_ts <= window["end_ns"])
+        unchained = sorted(v for v, state in after_seed.items() if state != "VALID")
+        checks["books"] = {"ok": inside and not unchained, "seeded_venues": sorted(seeded), "first_event_after_seed": after_seed, "states_by_venue": states,
+                           **({"detail": f"the first event after the seed did not apply VALID for {unchained}: a real gap at the window start or a seed that does not chain; pass source_session_dir to tell which"} if unchained else {}),
+                           "first_receive_ts_ns": first_ts, "last_receive_ts_ns": last_ts, "rows_inside_the_manifest_window": inside,
+                           "final_book_hash": {venue: book.snapshot_hash() for venue, book in sorted(books.items())}}
+        if source_session_dir is not None and last_ts is not None:
+            from .live_feed import _line_receive_ts, _open_recorded
+            full_books: dict[str, OrderBook] = {}
+            full: list[tuple[str, str, int | None]] = []
+            for source_part in sorted(p for p in Path(source_session_dir).glob("part-*") if p.is_dir()):
+                handle = _open_recorded(source_part / "canonical.jsonl")
+                if handle is None:
+                    continue
+                done = False
+                with handle:
+                    for line in handle:
+                        ts = _line_receive_ts(line)
+                        if ts is None:
+                            continue
+                        if ts > last_ts:
+                            done = True
+                            break
+                        event = MarketEvent.from_dict(json.loads(line))
+                        book = full_books.setdefault(event.venue, OrderBook(event.venue, event.instrument_id, max_mid_jump_bps=None, max_spread_bps=None))
+                        state = book.apply(event).value
+                        if ts >= first_ts:
+                            full.append((event.event_id, state, book.sequence))
+                if done:
+                    break
+            differ = next((i for i, (a, b) in enumerate(zip(per_event, full)) if a != b), None if len(per_event) == len(full) else min(len(per_event), len(full)))
+            same_final = {venue: (venue in full_books and (book.bids, book.asks, book.sequence) == (full_books[venue].bids, full_books[venue].asks, full_books[venue].sequence)) for venue, book in sorted(books.items())}
+            checks["source_books"] = {"ok": differ is None and all(same_final.values()), "events_compared": len(per_event), "events_in_the_source_interval": len(full),
+                                      "first_difference": None if differ is None else {"index": differ, "window": per_event[differ] if differ < len(per_event) else None, "source": full[differ] if differ < len(full) else None},
+                                      "final_book_equal": same_final}
+            if checks["source_books"]["ok"] and unchained and inside:
+                checks["books"].update({"ok": True, "detail": f"the first event after the seed is not VALID for {unchained}, and the SOURCE recording has the same state at the same event: the gap is in the recording, at the window start"})
+        result = {"ok": all(c["ok"] for c in checks.values()), "incident_id": manifest.get("incident_id"), "incident_dir": str(incident_dir), "checks": checks,
+                  "label": "diagnostics of one incident window; a GAP or STALE state inside the window is the incident itself, not an audit failure"}
+    if output_dir is not None:
+        output_dir = Path(output_dir)
+        if incident_dir.resolve() in (output_dir.resolve(), *output_dir.resolve().parents):
+            raise ValueError("the audit of an incident is never written inside the incident")
+        output_dir.mkdir(parents=True, exist_ok=True)
+        (output_dir / "incident_audit.json").write_text(json.dumps(result, indent=2, sort_keys=True, default=str), encoding="utf-8")
+    return result

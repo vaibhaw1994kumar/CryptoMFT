@@ -93,6 +93,7 @@ class LivePaperSession:
         fee_readers: dict[str, Any] | None = None,
         require_account_fees: bool = False,
         journal_stream: bool = True,
+        incident_capture: dict | None = None,
         session_limits: dict | None = None,
         clock_source: str | None = None,
     ) -> None:
@@ -111,9 +112,13 @@ class LivePaperSession:
         # Owner 16 Nov (Order 3): the start-up checks of the session limits. Any mode that sends real orders (or has account readers) READS the account before anything starts and refuses to start when the
         # account is not as the profile expects (A8: one-way mode, margin mode, leverage, reduce-only accepted) or its own risk tiers cannot be read (A6: they replace the ASSUMED margin tiers); a real-order
         # session with a clock-offset gate (A3) refuses to start without a clock source. A purely simulated session with no account and no readers has nothing to read and starts as before (the checks are not run, and say so).
+        if session_limits is None:
+            session_limits = (session_kwargs or {}).get("session_limits")     # W2b: the profile setup carries the limits in the session arguments; the paper session's own start-up steps (arrival stamps, account checks) read the same block
         self.session_limits = session_limits
         if session_limits is not None and session_limits.get("feed_arrival_stamp"):
             settings = _dc_replace(settings, arrival_stamp=True)          # owner 17 Nov (A9 fix b): book frames stamped at arrival
+        if incident_capture is not None:
+            settings = _dc_replace(settings, incident_capture=incident_capture)      # W2b: the profile's incident_capture block (None, the default: nothing is built)
         if (session_kwargs or {}).get("feed_health") and (session_kwargs or {})["feed_health"].get("recorder_health_block"):
             settings = _dc_replace(settings, feed_health_block=True)      # W1: the recorder's part manifests carry the feed-health block
         self.account_checks: dict[str, Any] = {}
@@ -222,7 +227,13 @@ class LivePaperSession:
         self.journal_max_lag_ns = 0
         self._ledger_stream = self._intent_stream = None
         self.journal_stream = enabled
+        incidents = getattr(self.service, "incidents", None)
+        if incidents is not None:                             # W2b: a ledger event can raise an incident, and the window's journal rows are cut with the recording
+            incidents.extra_flush = self._timestamps.flush
+            incidents.extra_files = lambda: {name: self.output_dir / name for name in ("paper_timestamps.jsonl", "ledger_stream.jsonl", "session_intent_journal.jsonl")}
         if not enabled:
+            if incidents is not None:
+                self.session.ledger.event_sink = incidents.on_ledger_event
             return
         self._ledger_stream = (self.output_dir / "ledger_stream.jsonl").open("w", encoding="utf-8")
         for row in self.session.ledger.events:                # what the session recorded while it was built (opening balances)
@@ -237,6 +248,8 @@ class LivePaperSession:
         self._ledger_stream.write(json.dumps(row, sort_keys=True, default=json_default) + "\n")
         self._ledger_stream.flush()
         self._journal_counts["ledger_events"] += 1
+        if self.service.incidents is not None:
+            self.service.incidents.on_ledger_event(row)
         ts = row.get("ts_ns")
         if isinstance(ts, int) and ts > 10 ** 18:                 # a wall-clock stamp: how long after the event the row reached the file
             self.journal_max_lag_ns = max(self.journal_max_lag_ns, self.clock_ns() - ts)

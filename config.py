@@ -556,6 +556,16 @@ FEED_HEALTH_KEYS = ("delay_degraded_ms", "delay_unsafe_ms", "silence_degraded_ms
 FEED_HEALTH_ACTION_LEVELS = ("none", "UNSAFE", "DEGRADED")
 
 
+def incident_capture_from_profile(profile: dict) -> dict | None:
+    """W2b (owner 17 Nov): the profile's `incident_capture` block as the validated policy the live feed service takes (live_feed.incident_policy), or None when the profile has none or it says
+    `enabled: false` (every profile up to v1_11: nothing is built). It records windows of the live recording; it changes no decision, and a replay never reads it."""
+    block = profile.get("incident_capture")
+    if not block:
+        return None
+    from .live_feed import incident_policy
+    return incident_policy(dict(block))
+
+
 def feed_health_from_profile(profile: dict) -> dict | None:
     """W1 (owner 17 Nov): the profile's `feed_health` block, validated and normalised; None when the profile has none (every profile up to v1_10: nothing is built and nothing is written).
     The state model, the rollups and the report are OBSERVATION. The two actions are switches that are `none` unless the profile says otherwise, and each waits for an owner decision:

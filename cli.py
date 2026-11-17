@@ -119,7 +119,7 @@ async def _run_live_paper(args: argparse.Namespace) -> dict:
         )
     settings = _live_settings(args)
     queue_simulation = {} if args.queue_sim else None
-    session_kwargs, strategy_builder = None, None
+    session_kwargs, strategy_builder, incident_capture = None, None, None
     if args.strategy_setup:
         # D7d (owner 9 Nov): the profile's own strategy and simulator settings, from a setup function named on the command line (`package.module:function`, called with `--strategy-profile`);
         # it returns {"session_kwargs", "queue_simulation", "strategy_builder"}. Imported by name so the core imports no backtester package.
@@ -132,6 +132,7 @@ async def _run_live_paper(args: argparse.Namespace) -> dict:
         setup = getattr(importlib.import_module(module_name), function)(args.strategy_profile)
         session_kwargs, strategy_builder = setup["session_kwargs"], setup["strategy_builder"]
         queue_simulation = dict(setup["queue_simulation"])
+        incident_capture = setup.get("incident_capture")          # W2b: the profile's incident_capture block (None for every profile without it)
     paper = LivePaperSession(
         args.config, args.output_dir,
         args.session_id or default_live_session_id(), settings,
@@ -139,6 +140,7 @@ async def _run_live_paper(args: argparse.Namespace) -> dict:
         status_poll_seconds=max(args.status_poll_seconds, 1.0),
         flatten_lead_seconds=args.flatten_lead_seconds,
         queue_simulation=queue_simulation, session_kwargs=session_kwargs, strategy_builder=strategy_builder,
+        incident_capture=incident_capture,
     )
     if args.maker_dry_run:
         paper.cfg.strategies.setdefault("maker_simulation", {})["enabled"] = True
@@ -296,6 +298,20 @@ def main() -> None:
     verify_raw.add_argument("--raw", type=Path, required=True)
     verify_wire = sub.add_parser("verify-wire")
     verify_wire.add_argument("--wire", type=Path, required=True)
+    verify_wire.add_argument("--window", action="store_true", help="the file is an incident window (a cut of a session's wire file): the chain starts at its first record")
+    # W2b (owner 17 Nov): an incident window from a recording that already exists (read-only on it), and the diagnostics of one window. No network, no orders.
+    incident_cut = sub.add_parser("incident-cut", help="cut a window of an existing recording into an incident directory (part-000001 + incident_manifest.json)")
+    incident_cut.add_argument("--session-dir", type=Path, required=True)
+    incident_cut.add_argument("--output-dir", type=Path, required=True)
+    incident_cut.add_argument("--trigger-ns", type=int, required=True, help="the trigger's receive time in nanoseconds")
+    incident_cut.add_argument("--pre-seconds", type=float, default=90.0)
+    incident_cut.add_argument("--post-seconds", type=float, default=5.0)
+    incident_cut.add_argument("--rule", default="manual")
+    incident_cut.add_argument("--detail", default="")
+    incident_audit = sub.add_parser("incident-audit", help="the diagnostics of one incident window (manifest, hashes, wire records, trace, books from the seed)")
+    incident_audit.add_argument("--incident-dir", type=Path, required=True)
+    incident_audit.add_argument("--source-session-dir", type=Path, default=None, help="the recording the window was cut from: the window's book states are compared with it event for event")
+    incident_audit.add_argument("--output-dir", type=Path, default=None)
     pipeline_run = sub.add_parser("pipeline-run")
     pipeline_run.add_argument("--config", type=Path, required=True)
     pipeline_run.add_argument("--state-db", type=Path, default=Path("data/pipeline/state.sqlite"))
@@ -542,7 +558,17 @@ def main() -> None:
     elif args.command == "verify-raw":
         print(json.dumps(verify_raw_file(args.raw), indent=2))
     elif args.command == "verify-wire":
-        print(json.dumps(verify_wire_file(args.wire), indent=2))
+        print(json.dumps(verify_wire_file(args.wire, window=args.window), indent=2))
+    elif args.command == "incident-cut":
+        from .live_feed import cut_recording_window
+        manifest = cut_recording_window(args.session_dir, args.output_dir, args.trigger_ns, pre_seconds=args.pre_seconds, post_seconds=args.post_seconds, rule=args.rule, detail=args.detail)
+        print(json.dumps({k: manifest[k] for k in ("incident_id", "rule", "completeness", "incomplete_reasons", "window", "frame_counts", "seeds")}, indent=2, default=str))
+    elif args.command == "incident-audit":
+        from .session_audit import audit_incident
+        result = audit_incident(args.incident_dir, args.output_dir, source_session_dir=args.source_session_dir)
+        print(json.dumps(result, indent=2, default=str))
+        if not result["ok"]:
+            raise SystemExit(1)
     elif args.command == "pipeline-run":
         spec = PartitionSpec(args.partition_id, args.raw, args.output)
         with PipelineOrchestrator.for_canonical_pipeline(args.state_db, args.config) as pipeline:
