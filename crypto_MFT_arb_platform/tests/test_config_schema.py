@@ -77,3 +77,17 @@ class ConfigSchemaTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestnetExampleConfig(unittest.TestCase):
+    """Queue item (f), owner decision 16 Nov: config.testnet.example.yaml follows the schema and loads (it was an unloadable YAML file), and it carries no key, secret or token."""
+
+    def test_the_testnet_example_loads_and_holds_no_secret(self):
+        import re
+        from crypto_stat_arb.config import load_config
+        path = Path(__file__).resolve().parents[1] / "src/crypto_stat_arb/config.testnet.example.yaml"
+        cfg, _ = load_config(path)
+        self.assertEqual(set(cfg.venues), {"BINANCE", "BYBIT"})
+        text = path.read_text()
+        self.assertIsNone(re.search(r"[A-Za-z0-9]{32,}", text))
+        self.assertNotIn("api_secret", text.lower())

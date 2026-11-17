@@ -1,0 +1,127 @@
+environment: development
+symbol: BTCUSDT
+binance:
+  rest_base_url: https://api.binance.com
+  websocket_base_url: wss://stream.binance.com:9443
+  depth_levels: 1000
+  stale_after_ms: 2000
+data_quality:
+  max_market_data_delay_ms: 2000
+  max_future_skew_ms: 1000
+  max_timestamp_regression_ms: 0
+  max_trade_timestamp_difference_ms: 1000
+  min_price: "0.00000001"
+  max_price: "100000000"
+  min_trade_quantity: "0.00000001"
+  max_trade_quantity: "1000"
+  max_price_move_bps: "1000"
+  max_spread_bps: "500"
+  min_book_depth: 5
+  max_retained_anomalies: 10000
+  max_retained_book_checksums: 10000
+  reject_stale_market_data: true
+  reject_abnormal_price_moves: false
+  reject_wide_spreads: true
+risk:
+  max_order_notional: "1000"
+  max_net_position: "0.05"
+  max_open_orders: 10
+  max_daily_loss: "100"
+  price_collar_bps: 100
+strategy:
+  name: spread_capture
+  spread_threshold_bps: "0.001"
+  order_notional: "25"
+  quote_cooldown_ms: 1000
+paper:
+  maker_fee_bps: "1"
+  taker_fee_bps: "2"
+  acknowledgement_latency_ms: 5
+  cancellation_latency_ms: 5
+storage:
+  data_directory: data
+  report_directory: reports
+operations:
+  status_host: 127.0.0.1
+  status_port: 8000
+binance_execution:
+  environment: testnet
+  rest_base_url: https://testnet.binance.vision
+  api_key_environment_variable: BINANCE_TESTNET_API_KEY
+  api_secret_environment_variable: BINANCE_TESTNET_API_SECRET
+  recv_window_ms: 5000
+  request_timeout_seconds: 10
+  allow_live_trading: false
+okx_demo_execution:
+  rest_base_url: https://us.okx.com
+  api_key_environment_variable: OKX_DEMO_API_KEY
+  api_secret_environment_variable: OKX_DEMO_API_SECRET
+  passphrase_environment_variable: OKX_DEMO_PASSPHRASE
+  request_timeout_seconds: 10
+  transaction_expiry_ms: 5000
+  instrument_type: SPOT
+  trade_mode: cash
+deribit_test_execution:
+  rest_base_url: https://test.deribit.com/api/v2
+  client_id_environment_variable: DERIBIT_TEST_CLIENT_ID
+  client_secret_environment_variable: DERIBIT_TEST_CLIENT_SECRET
+  request_timeout_seconds: 10
+  transaction_expiry_ms: 5000
+  instrument_kind: future
+ems:
+  enabled_venues:
+    - binance
+    - okx
+    - deribit
+  dispatch_policy: sequential
+  max_reserved_notional: "1000000"
+  latency_penalty_bps_per_ms: "0"
+  instruments:
+    BTCUSDT:
+      compatibility_group: btc-usdt-spot
+      canonical_quantity_unit: base
+      venues:
+        binance:
+          symbol: BTCUSDT
+          compatibility_group: btc-usdt-spot
+          quantity_unit: base
+        okx:
+          symbol: BTC-USDT
+          compatibility_group: btc-usdt-spot
+          quantity_unit: base
+    ETHUSDT:
+      compatibility_group: eth-usdt-spot
+      canonical_quantity_unit: base
+      venues:
+        binance:
+          symbol: ETHUSDT
+          compatibility_group: eth-usdt-spot
+          quantity_unit: base
+        okx:
+          symbol: ETH-USDT
+          compatibility_group: eth-usdt-spot
+          quantity_unit: base
+    BTC-PERPETUAL:
+      compatibility_group: btc-usd-inverse-perpetual
+      canonical_quantity_unit: base
+      venues:
+        deribit:
+          symbol: BTC-PERPETUAL
+          compatibility_group: btc-usd-inverse-perpetual
+          quantity_unit: quote
+
+minreq:
+  dataset_root: datasets
+  report_root: reports/minreq
+  venues:
+    - binance
+    - okx
+  economic_group: BTC/USDT.SPOT
+  seed: 20260817
+  steps: 400
+  entry_z: "1.2"
+  exit_z: "0.3"
+  target_quantity: "0.05"
+  max_gross_notional: "200000"
+  max_order_notional: "25000"
+  execution_mode: internal_simulation
