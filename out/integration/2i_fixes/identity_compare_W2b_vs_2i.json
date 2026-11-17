@@ -1,0 +1,80 @@
+{
+ "a": "/Users/vaibhav/Documents/Newproject/out/integration/w2b/identity_1sol_W2b",
+ "b": "/Users/vaibhav/Documents/Newproject/out/integration/2i_fixes/identity_B",
+ "equal": false,
+ "files_compared": 14,
+ "different": [
+  "maker_observations.jsonl"
+ ],
+ "skipped": [
+  "session_run_record.json"
+ ],
+ "files": {
+  "maker_observations.jsonl": {
+   "status": "DIFFERENT",
+   "row": 2,
+   "rows_a": 21,
+   "rows_b": 21,
+   "first_difference": {
+    "at": "fill.model_settings_sha256",
+    "a": "'e900d03a03cd2034e29ddae1607a9eeb657d87c2ffe9d3606b3f18ad2e9db67f'",
+    "b": "'d8a79567d7ff57bd2db3ecca9af575cec99b94a4a0cd5ce75f303f284d476c7f'"
+   }
+  },
+  "session_decision_events.jsonl": {
+   "status": "EQUAL",
+   "bytes": 3996
+  },
+  "session_fills.jsonl": {
+   "status": "EQUAL",
+   "bytes": 48925
+  },
+  "session_intent_fills.jsonl": {
+   "status": "EQUAL",
+   "bytes": 4339
+  },
+  "session_intent_journal.jsonl": {
+   "status": "EQUAL",
+   "bytes": 10590
+  },
+  "session_limits_and_stops.json": {
+   "status": "EQUAL",
+   "bytes": 6181
+  },
+  "session_manifest.json": {
+   "status": "EQUAL_EXCEPT_EXCLUDED",
+   "excluded": [
+    "run",
+    "manifest.release_identity"
+   ]
+  },
+  "session_markouts_decomposed.jsonl": {
+   "status": "EQUAL",
+   "bytes": 16491
+  },
+  "session_orders.jsonl": {
+   "status": "EQUAL",
+   "bytes": 4669
+  },
+  "session_pair_economics.json": {
+   "status": "EQUAL",
+   "bytes": 2183
+  },
+  "session_pair_economics.jsonl": {
+   "status": "EQUAL",
+   "bytes": 5995
+  },
+  "session_participation_audit.json": {
+   "status": "EQUAL",
+   "bytes": 958
+  },
+  "session_safety_events.jsonl": {
+   "status": "EQUAL",
+   "bytes": 20645
+  },
+  "session_signals.jsonl": {
+   "status": "EQUAL",
+   "bytes": 1116
+  }
+ }
+}

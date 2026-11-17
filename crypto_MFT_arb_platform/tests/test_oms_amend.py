@@ -48,6 +48,10 @@ class AmendVenue:
                 return (_cb(req, ExecutionEventType.AMEND_ACCEPTED),)
             if self.mode == "reject":
                 return (_cb(req, ExecutionEventType.REJECTED, reason="amend rejected: order not modifiable"),)
+            if self.mode == "replaced_then_reject":           # the simulated venue's old defect (2i, 17 Nov): the old order is gone, REPLACED is reported, then the replacement is rejected
+                self.open.pop(req.target_order_id, None)
+                self.status[req.target_order_id] = (ExecutionEventType.CANCELLED, "0", "60060")
+                return (_cb(req, ExecutionEventType.REPLACED), _cb(req, ExecutionEventType.REJECTED, reason="no valid book at arrival"))
             return ()                                       # silent
         self.submits.append(req)
         self.open[req.order_id] = req.price
@@ -215,6 +219,97 @@ class AmendTests(unittest.TestCase):
         # and it fills once, hedged once
         self.oms.ingest_order_update(stream_update(self.plan, new, 2, ExecutionEventType.FILLED, "0.010", self.t + 91 * 1_000_000_000, price="60070"))
         self.assertEqual(len(self.binance.submits), 1)
+
+    def test_a_replaced_report_followed_by_a_reject_of_the_replacement_is_not_a_confirmed_amend(self):
+        """2i item 1a (owner 17 Nov): the amend counts only on the venue's report that the replacement is LIVE at the new price. A REPLACED report followed by a reject of the replacement is AMEND_REJECTED, the
+        quote's true state comes from a query, and the OMS never shows a live quote the venue does not have."""
+        self.build("replaced_then_reject")
+        self.assertEqual(self.oms.request_amend(self.maker.order_id, Decimal("60070.0"), self.t), "REQUESTED")
+        self.assertEqual(self.events("AMEND_CONFIRMED"), [])
+        self.assertEqual(len(self.events("AMEND_REJECTED")), 1)
+        self.assertEqual(self.replacement().state, OrderState.REJECTED)
+        self.oms.check_order_deadlines(self.t + 1 * MS)                                       # the query: the venue no longer has the old order
+        self.assertEqual(len(self.events("VENUE_ORDER_QUERY")), 1)
+        live = [x for x in self.plan.children if x.order_role == "PRIMARY" and x.state in (OrderState.ACKNOWLEDGED, OrderState.PARTIAL, OrderState.AMEND_PENDING, OrderState.SENT)]
+        self.assertEqual(live, [])                                                            # nothing live in the OMS that the venue does not have
+        self.assertEqual(self.bybit.open, {})
+        self.assertEqual(len(self.bybit.submits), 1)
+
+    def test_a_replaced_report_alone_does_not_confirm_the_amend(self):
+        """2i item 1a: REPLACED says the venue processed the request; the new price counts from the report that the replacement is live (ACKNOWLEDGED, PARTIAL or FILLED)."""
+        self.build("accept_only")
+        self.oms.request_amend(self.maker.order_id, Decimal("60070.0"), self.t)
+        new = self.replacement()
+        self.oms.ingest_order_update(stream_update(self.plan, new, 1, ExecutionEventType.REPLACED, "0", self.t + 5 * MS, price="60070"))
+        self.assertEqual(self.events("AMEND_CONFIRMED"), [])
+        self.assertEqual(self.maker.state, OrderState.AMEND_PENDING)
+        self.oms.ingest_order_update(stream_update(self.plan, new, 2, ExecutionEventType.ACKNOWLEDGED, "0", self.t + 6 * MS, price="60070"))
+        self.assertEqual(len(self.events("AMEND_CONFIRMED")), 1)
+        self.assertEqual((self.maker.state, new.state), (OrderState.CANCELLED, OrderState.ACKNOWLEDGED))
+
+    def test_the_replace_carries_the_venues_book_like_any_order(self):
+        """2i item 1b: the REPLACE is routed with the venue's book (the same book a maker submit is routed with), so the venue can judge it at arrival."""
+        self.build("confirm")
+        seen = []
+        real = self.bybit.handle
+        self.bybit.handle = lambda req, book: (seen.append((req.action, book)), real(req, book))[1]
+        self.oms.request_amend(self.maker.order_id, Decimal("60070.0"), self.t)
+        (action, book), = seen
+        self.assertEqual(action, OrderAction.REPLACE)
+        self.assertIs(book, self.oms._books[("BYBIT", INSTR_FT)])
+
+    def test_every_amend_timeout_ends_in_a_venue_query_after_the_reconnect_and_before_any_new_decision(self):
+        """2i item 2 (owner 17 Nov): a blackholed amend (the request held by the router, the gateway down). The query of the old order may wait for the reconnect, but it is made, and no new decision
+        (amend, withdrawal) is taken on that quote before it has answered. Until 17 Nov the disconnect variant of case 2i ended with no query at all."""
+        self.build("silent")
+        held = {"pending": True, "down": True}
+        router = self.oms.router
+        real_pending = router.has_pending_order
+        router.has_pending_order = lambda order_id: held["pending"] and order_id != self.maker.order_id or real_pending(order_id)
+        self.bybit.query_unanswered = lambda now_ns: held["down"]
+        self.oms.request_amend(self.maker.order_id, Decimal("60070.0"), self.t)
+        new = self.replacement()
+        held["pending"] = False                                                               # the deadline machinery sees the replacement as not in flight long enough to time it out
+        self.oms.check_order_deadlines(self.t + 60 * 1_000_000_000)
+        self.assertEqual(len(self.events("AMEND_TIMEOUT")), 1)
+        held["pending"] = True                                                                # ... then the router holds the blackholed request until the reconnect
+        queries = lambda: [e for e in self.events("VENUE_ORDER_QUERY") if e.get("purpose") == "amend_timeout"]
+        for k in range(3):
+            self.oms.check_order_deadlines(self.t + (61 + k) * 1_000_000_000)
+        self.assertEqual(queries(), [])                                                       # waits while the request is in flight
+        self.assertFalse(self.oms.withdraw_quote(self.maker.order_id, self.t + 62 * 1_000_000_000, "edge_below_threshold", -1.0))      # no new decision before the query
+        self.assertEqual(self.bybit.cancels, [])
+        held["pending"] = False                                                               # the reconnect: nothing in flight, the gateway still refuses queries
+        self.oms.check_order_deadlines(self.t + 70 * 1_000_000_000)
+        self.assertEqual([e["answered"] for e in queries()], [False])                         # asked, unanswered, asked again later; never given up, never sent again
+        self.assertFalse(self.oms.withdraw_quote(self.maker.order_id, self.t + 70 * 1_000_000_000, "edge_below_threshold", -1.0))
+        held["down"] = False
+        self.bybit.status[self.maker.order_id] = (ExecutionEventType.ACKNOWLEDGED, "0", "60060")
+        self.oms.check_order_deadlines(self.t + 80 * 1_000_000_000)
+        self.assertEqual([e["answered"] for e in queries()], [False, True])
+        self.assertEqual(self.maker.state, OrderState.ACKNOWLEDGED)                           # the venue's answer: the old order rests at the old price
+        self.assertFalse(self.oms.amend_query_owed(self.maker.order_id))
+        self.assertTrue(self.oms.withdraw_quote(self.maker.order_id, self.t + 81 * 1_000_000_000, "edge_below_threshold", -1.0))      # decisions resume after the answer
+        self.assertEqual(len(self.bybit.submits), 1)
+        self.assertEqual(len(self.bybit.replaces), 1)
+        self.assertEqual(self.oms.realism_counters["decisions_held_amend_query_owed"], 2)
+
+    def test_a_lost_amend_followed_by_a_cancel_is_a_timeout_not_a_reject(self):
+        """2i item 3 (owner 17 Nov): the venue never received the amend; a cancel sent for the replacement is refused because the venue does not know it, and a query says the same. That is a lost
+        amend (AMEND_TIMEOUT, lost), followed by the query of the old order, never AMEND_REJECTED."""
+        self.build("silent")
+        self.oms.request_amend(self.maker.order_id, Decimal("60070.0"), self.t)
+        new = self.replacement()
+        self.oms.ingest_order_update(CanonicalOrderUpdate(update_id="q-new", source=OrderUpdateSource.REST_QUERY, parent_order_id=self.plan.parent_id, order_id=new.order_id, venue="BYBIT",
+                                                          instrument_id=new.instrument_id, state=ExecutionEventType.REJECTED, event_ts_ns=self.t + MS, observed_ts_ns=self.t + MS,
+                                                          cumulative_filled_quantity=Decimal("0"), average_price=Decimal("0"), reason="venue has no record of order"))
+        self.assertEqual(self.events("AMEND_REJECTED"), [])
+        (timeout,) = self.events("AMEND_TIMEOUT")
+        self.assertTrue(timeout["lost"])
+        self.bybit.status[self.maker.order_id] = (ExecutionEventType.ACKNOWLEDGED, "0", "60060")
+        self.oms.check_order_deadlines(self.t + 2 * MS)
+        self.assertEqual([e.get("purpose") for e in self.events("VENUE_ORDER_QUERY")], ["amend_timeout"])
+        self.assertEqual(self.maker.state, OrderState.ACKNOWLEDGED)
 
     def test_an_amend_reject_is_followed_by_a_query_not_a_second_order(self):
         self.build("reject")
@@ -494,12 +589,16 @@ class QuoteBookStrategy:
 
     def on_quote_fill(self, quote_id, qty, price, fee, liquidity, ts):
         self.log.append(("fill", quote_id, qty, price, liquidity))
+        self.fees = getattr(self, "fees", []) + [fee]
 
     def on_quote_closed(self, quote_id, reason, ts):
         self.log.append(("closed", quote_id, reason))
 
     def on_quote_amend_refused(self, quote_id, reason, ts):
         self.log.append(("amend_refused", quote_id, reason))
+
+    def on_quote_amended(self, quote_id, price, ts):
+        self.log.append(("amended", quote_id, price))
 
 
 class SessionQuoteBookTests(unittest.TestCase):
@@ -631,6 +730,107 @@ class SessionQuoteBookTests(unittest.TestCase):
         doc = reconcile_session(self.session, fee_bps=fee_bps)
         self.assertEqual((doc["ok"], doc["problems"].get("fee", [])), (True, []), doc["problems"])
         self.assertAlmostEqual(doc["fees_journal"], doc["fees_engine"], places=9)
+
+    def test_an_exit_refused_by_risk_ends_rejected_and_locks_nothing(self):
+        """2i item 4 (owner 17 Nov; MM C2): an exit the risk gates refuse ends with its UNWIND child REJECTED (not CREATED, which counts as live), and nothing of it is counted as an open risk order
+        (on spot it locked the base for the rest of the day: every later ask was refused)."""
+        from crypto_stat_arb.strategy import ExitInventory, PlaceQuote
+        self.build(cap="0.60")
+        self.act([PlaceQuote("q1", self.B, "buy", Decimal("99.5"), Decimal("0.5"))])
+        plan = self.plan_of("q1")
+        self.update(plan, plan.children[0], 1, ExecutionEventType.FILLED, "0.5")
+        self.act([ExitInventory("x1", self.B, "sell", Decimal("1.2"), Decimal("99.0"))])        # more than the inventory: the inventory cap refuses it
+        exit_plan = self.plan_of("x1")
+        self.assertEqual(exit_plan.state, PlanState.CLOSED)
+        self.assertEqual([(o.order_role, o.state) for o in exit_plan.children], [("UNWIND", OrderState.REJECTED)])
+        self.assertIn("inventory_cap", exit_plan.children[0].reject_reason)
+        self.assertEqual(self.session.oms.open_risk_orders(), {})
+        self.assertEqual(self.session.oms.locked_balances(), {})
+        self.assertEqual(len([e for e in self.session.ledger.events if e["event_type"] == "ORDER_NOT_SENT_REJECTED"]), 1)
+
+    def test_a_live_exit_does_not_lock_its_own_child_on_top_of_its_reservation(self):
+        """2i item 4 (owner 17 Nov; MM C3): an exit is covered by its own package reservation; its UNWIND child in flight is not ALSO an open risk order (that counted the same base twice)."""
+        from crypto_stat_arb.strategy import ExitInventory, PlaceQuote
+        self.build(cap="0.60")
+        self.act([PlaceQuote("q1", self.B, "buy", Decimal("99.5"), Decimal("0.5"))])
+        plan = self.plan_of("q1")
+        self.update(plan, plan.children[0], 1, ExecutionEventType.FILLED, "0.5")
+        real = self.bybit.handle
+        self.bybit.handle = lambda req, book: () if (req.action == OrderAction.SUBMIT and req.time_in_force.value == "IOC") else real(req, book)       # the exit is sent, not answered yet
+        self.act([ExitInventory("x1", self.B, "sell", Decimal("0.5"), Decimal("99.0"))])
+        child = self.plan_of("x1").children[0]
+        self.assertIn(child.state, (OrderState.SENT, OrderState.CREATED))
+        self.assertEqual(self.session.oms.open_risk_orders(), {})
+        self.assertTrue(any(r.active for r in self.session.oms.risk.reservations.values() if r.opportunity_id == "x1"))      # it is held by its own reservation
+
+    def test_a_quote_fill_reports_the_fee_of_that_fill_not_the_orders_running_fee(self):
+        """2i item 5 (owner 17 Nov; MM C4): on_quote_fill passes the fill's own fee (fee_delta). The second fill of an order reported the order's cumulative fee (54 of 314 MM fills)."""
+        from crypto_stat_arb.strategy import PlaceQuote
+        self.build()
+        self.act([PlaceQuote("q1", self.B, "buy", Decimal("99.5"), Decimal("0.5"))])
+        plan = self.plan_of("q1")
+        self.update(plan, plan.children[0], 1, ExecutionEventType.PARTIAL, "0.2")
+        self.update(plan, plan.children[0], 2, ExecutionEventType.FILLED, "0.5")
+        fills = self.fills()
+        self.assertEqual(self.strategy.fees, [Decimal(str(f["fee_delta"])) for f in fills])
+        self.assertEqual(sum(self.strategy.fees), plan.children[0].fee)
+        self.assertNotEqual(self.strategy.fees[1], plan.children[0].fee)
+
+    def test_a_confirmed_amend_is_reported_once_with_the_new_price_and_a_refused_one_never(self):
+        """2i item 7 (owner 17 Nov; MM C5): `on_quote_amended(quote_id, price, ts)` when the venue confirms the amend (the replacement live at the new price), once; not on the request, not on a reject."""
+        from crypto_stat_arb.strategy import AmendQuote, PlaceQuote
+        self.build()
+        self.act([PlaceQuote("q1", self.B, "buy", Decimal("99.5"), Decimal("0.5"))])
+        self.act([AmendQuote("q1", Decimal("99.6"))])
+        self.assertEqual([x for x in self.strategy.log if x[0] == "amended"], [("amended", "q1", Decimal("99.6"))])
+        self.bybit.mode = "reject"
+        self.act([AmendQuote("q1", Decimal("99.7"))])
+        self.tick()
+        self.assertEqual([x for x in self.strategy.log if x[0] == "amended"], [("amended", "q1", Decimal("99.6"))])
+
+    def test_a_single_venue_session_quotes_with_no_second_venue(self):
+        """2i item 7 (owner 17 Nov; MM C7): `strategy.single_venue: true` declares a one-venue session (the MM had to carry a dormant Binance venue). It needs exactly one venue, quotes on it, and
+        refuses to build the default cross-venue strategies; without the flag two venues are still required."""
+        import copy
+        import json
+        from crypto_stat_arb.config import config_from_raw
+        from crypto_stat_arb.ems.config import ExecutionConfig
+        from crypto_stat_arb.session import ExecutionMode, TradingSession
+        from crypto_stat_arb.strategy import PlaceQuote
+        import test_session_breaker as sb
+        raw = json.loads((Path(__file__).resolve().parents[1] / "config/perp_research.json").read_text())
+        one = copy.deepcopy(raw)
+        one["strategy"]["venues"], one["strategy"]["single_venue"] = ["BYBIT"], True
+        one["fees"] = [f for f in one["fees"] if f.get("venue") != "BINANCE"]
+        one["instruments"] = [i for i in one["instruments"] if i.get("venue") != "BINANCE"]
+        for key in ("initial_capital_by_venue", "venue_gross_limits", "margin_accounts"):
+            one["risk"][key].pop("BINANCE", None)
+        one["risk"]["margin"]["venues"].pop("BINANCE", None)
+        one["oms"]["residual"]["hedge_venue_priority"] = ["BYBIT"]
+        cfg, _ = config_from_raw(one)
+        self.assertEqual(cfg.venues, ("BYBIT",))
+        strategy = QuoteBookStrategy()
+        venue = AmendVenue("BYBIT")
+        session = TradingSession(cfg, execution_mode=ExecutionMode.INTERNAL_SIMULATION, adapters={"BYBIT": venue}, strategies=[strategy], intent_journal=True, layer_risk_mode="enforce",
+                                 execution_config=ExecutionConfig(pairing="none", quote={"inventory_cap_base": "0.6"}))
+        t = 10 * 1_000_000_000
+        for k in range(4):
+            t += 1_000_000_000
+            if k == 1:
+                strategy.script.append([PlaceQuote("q1", "BYBIT", "buy", Decimal("99.5"), Decimal("0.5"))])
+            session.on_event(sb.snapshot("BYBIT", t, seq=k + 1), gate_allowed=True)
+        self.assertEqual(strategy.log[0], ("ack", "q1", True, ""))
+        self.assertEqual(len(venue.submits), 1)
+        with self.assertRaisesRegex(ValueError, "no default strategy"):
+            TradingSession(cfg, execution_mode=ExecutionMode.INTERNAL_SIMULATION, adapters={"BYBIT": AmendVenue("BYBIT")})
+        two = copy.deepcopy(one)
+        two["strategy"]["venues"] = ["BYBIT", "BINANCE"]
+        with self.assertRaisesRegex(ValueError, "exactly one venue"):
+            config_from_raw(two)
+        plain = copy.deepcopy(one)
+        del plain["strategy"]["single_venue"]
+        with self.assertRaisesRegex(ValueError, "at least two distinct venues"):
+            config_from_raw(plain)
 
     def test_a_new_quote_under_a_stop_is_blocked_with_a_reason(self):
         from crypto_stat_arb.strategy import PlaceQuote

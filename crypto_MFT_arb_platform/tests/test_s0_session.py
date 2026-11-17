@@ -118,6 +118,68 @@ class Controller(unittest.TestCase):
 
 
 @unittest.skipUnless(SLICES.is_dir(), "March slices not available (the profile needs a data root)")
+@unittest.skipUnless(SLICES.is_dir(), "March slices not available (the profile needs a data root)")
+class AmendAtTheVenue(unittest.TestCase):
+    """2i item 1 (owner 17 Nov), on the session with the simulated venue: after a CONFIRMED amend the quote is live at the new price AT THE VENUE and in the OMS. Until 17 Nov the REPLACE travelled with no book,
+    the venue cancelled the old order and rejected the replacement ("no valid book at arrival"), and the OMS still recorded AMEND_CONFIRMED: every confirmed amend ended the quote."""
+
+    def test_a_confirmed_amend_leaves_the_quote_live_at_the_new_price_at_the_venue(self):
+        rep = replay(moved_stream(1.6, bin_bid=100.288, bin_ask=100.298))
+        confirmed_seen = []
+        real = rep.session.oms._amend_confirmed
+
+        def spy(plan, old, new, ts_ns):
+            real(plan, old, new, ts_ns)
+            adapter = rep.session.router.adapters[new.venue]
+            venue_prices = sorted(o.price for o in adapter.executor.live_orders(adapter.venue))
+            confirmed_seen.append((new.state.value, str(new.limit_price), venue_prices, old.state.value))
+        rep.session.oms._amend_confirmed = spy
+        rep.run()
+        self.assertGreaterEqual(len(confirmed_seen), 1)
+        state, price, venue_prices, old_state = confirmed_seen[0]
+        self.assertEqual(state, "ACKNOWLEDGED")                                                    # live in the OMS
+        self.assertEqual(old_state, "CANCELLED")
+        self.assertEqual(venue_prices, [float(price)])                                             # and live at the venue, at the new price, and only there
+        rejected = [e for e in events(rep, "ORDER_LIFECYCLE") if e.get("order_id") == events(rep, "AMEND_REQUESTED")[0]["replacement_order_id"] and "REJECT" in str(e.get("lifecycle_event", "")) + str(e.get("state", ""))]
+        self.assertEqual(rejected, [])
+
+    def test_the_venue_amends_in_place_and_a_rejected_amend_leaves_the_old_order_resting(self):
+        """2i item 1b: Bybit amends IN PLACE: either the order now rests at the new price (queue place lost) or the amend is rejected and the order rests unchanged. Never a cancel followed by a failed new order."""
+        from decimal import Decimal
+        from crypto_stat_arb.execution import CanonicalOrderRequest, ExecutionEventType, OrderAction, OrderType, TimeInForce
+        from crypto_stat_arb.models import Side
+        rep = replay(moved_stream(1.6, bin_bid=100.288, bin_ask=100.298))
+        rep.run()
+        adapter = rep.session.router.adapters["BYBIT"]
+        book = rep.session.books[("BYBIT", rep.instrument_id)]
+        ts = rep.last_ns + 1
+        make = lambda action, oid, price, target=None: CanonicalOrderRequest.create(action=action, order_id=oid, target_order_id=target, parent_opportunity_id="op", parent_order_id="p", instrument_id=rep.instrument_id,
+                                                                                     venue="BYBIT", side=Side.BUY, price=Decimal(price), quantity=Decimal("0.5"), order_type=OrderType.LIMIT, time_in_force=TimeInForce.GTC,
+                                                                                     post_only=True, created_ts_ns=ts, idempotency_key=oid)
+        bid = book.best_bid
+        (ack,) = adapter.handle_at(make(OrderAction.SUBMIT, "t-old", str(bid - Decimal("0.01"))), book, ts)          # levels the book holds (an unseen level needs the unknown-queue fit file)
+        self.assertEqual(ack.event_type, ExecutionEventType.ACKNOWLEDGED)
+        before = sorted(o.price for o in adapter.executor.live_orders("BYBIT"))
+        # no book at arrival: the amend is rejected and the old order still rests at its old price
+        out = adapter.handle_at(make(OrderAction.REPLACE, "t-new1", str(bid), "t-old"), None, ts + 1)
+        self.assertEqual([c.event_type for c in out], [ExecutionEventType.REJECTED])
+        self.assertEqual(sorted(o.price for o in adapter.executor.live_orders("BYBIT")), before)
+        # an amend to a price that would cross: rejected, the old order rests
+        out = adapter.handle_at(make(OrderAction.REPLACE, "t-new2", str(book.best_ask + Decimal("0.01")), "t-old"), book, ts + 2)
+        self.assertEqual([c.event_type for c in out], [ExecutionEventType.REJECTED])
+        self.assertEqual(sorted(o.price for o in adapter.executor.live_orders("BYBIT")), before)
+        # a valid amend: REPLACED and the replacement live at the new price, the old price gone
+        new_price = bid
+        out = adapter.handle_at(make(OrderAction.REPLACE, "t-new3", str(new_price), "t-old"), book, ts + 3)
+        self.assertEqual([c.event_type for c in out], [ExecutionEventType.REPLACED, ExecutionEventType.ACKNOWLEDGED])
+        after = sorted(o.price for o in adapter.executor.live_orders("BYBIT"))
+        self.assertIn(float(new_price), after)
+        self.assertNotIn(float(bid - Decimal("0.01")), after)
+        self.assertEqual(len(after), len(before))
+        (cancel,) = adapter.handle_at(make(OrderAction.CANCEL, "t-cx", str(new_price), "t-new3"), book, ts + 4)
+        self.assertEqual(cancel.event_type, ExecutionEventType.CANCELLED)                         # the venue knows the order under its new id
+
+
 class FaultsAndLimits(unittest.TestCase):
     """EMS note section 5 b, c, j on the controller: an amend the venue rejects or never answers, and an amend with no room in the rate-limit window."""
 
@@ -150,6 +212,19 @@ class FaultsAndLimits(unittest.TestCase):
         self.assertEqual(c.get("amend_requests", 0), 1, c)                                           # the quote is AMEND_PENDING: nothing else is sent for it while the outcome is unknown
         self.assertEqual(Controller.two_live(rep), 0)
         self.assertEqual(len([e for e in events(rep, "AMEND_CONFIRMED")]), 0)
+
+    def test_c2_a_lost_amend_then_a_cancel_is_reported_as_a_lost_timeout_and_ends_in_a_query(self):
+        """2i item 3 (owner 17 Nov), on the simulated venue: the amend is lost, the quote's replacement is later cancelled (the lineage is complete after a fill). Until 17 Nov the venue remembered the
+        refused cancel of an order it never had as that order's state, a query then read REJECTED, and the ledger said AMEND_REJECTED."""
+        self.with_amend_fault("timeout")
+        rep = replay(moved_stream(1.6, bin_bid=100.288, bin_ask=100.298)); rep.run()
+        self.assertEqual(events(rep, "AMEND_REJECTED"), [])
+        lost = [e for e in events(rep, "AMEND_TIMEOUT") if e.get("lost")]
+        self.assertEqual(len(lost), 1)
+        owed = [e for e in events(rep, "VENUE_ORDER_QUERY") if e.get("purpose") == "amend_timeout"]
+        self.assertEqual(len(owed), 1)
+        self.assertGreater(owed[0]["ts_ns"], lost[0]["ts_ns"])
+        self.assertEqual(Controller.two_live(rep), 0)
 
     def test_j_an_amend_with_no_room_in_the_window_is_skipped_never_queued_and_cancels_are_not_refused(self):
         rep = replay(moved_stream(1.6, bin_bid=100.288, bin_ask=100.298))

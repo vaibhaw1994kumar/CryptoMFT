@@ -1,0 +1,9 @@
+{
+ "baseline": 93,
+ "now": 94,
+ "new_failures": [
+  "FAILED tests/test_queue_v2_ledger.py::DepletionLedgerSwitch::test_the_switch_is_off_by_default_and_the_settings_hash_of_every_earlier_profile_is_unchanged"
+ ],
+ "no_longer_failing": [],
+ "UNCHANGED": false
+}

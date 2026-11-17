@@ -421,3 +421,47 @@ class ReconciliationTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class IncrementalFillAudit(unittest.TestCase):
+    """2i item 6 (owner 17 Nov): `Ledger.audit_order_fills` reads only the events recorded since its last call. At every step its issues equal the full rescan's, in the same order, including an
+    orphan event whose order appears later, duplicate fills, a fill with no id, a duplicated ledger event id and a fill accounting mismatch."""
+
+    def test_the_incremental_audit_equals_the_full_rescan_at_every_step(self):
+        from types import SimpleNamespace
+        ledger = Ledger()
+        plans: dict = {}
+
+        def plan(pid, *order_ids):
+            plans[pid] = SimpleNamespace(children=[SimpleNamespace(order_id=o, filled_quantity=Decimal("0")) for o in order_ids])
+            return plans[pid]
+
+        def fill(order_id, qty, fill_id):
+            ledger.record("FILL", 1, parent_id="p", order_id=order_id, fill_quantity=Decimal(qty), **({"fill_id": fill_id} if fill_id else {}))
+            for p in plans.values():
+                for c in p.children:
+                    if c.order_id == order_id:
+                        c.filled_quantity += Decimal(qty)
+
+        def check():
+            self.assertEqual(ledger.audit_order_fills(plans), ledger.audit_order_fills_full(plans))
+            return ledger.audit_order_fills(plans)
+
+        p1 = plan("p1", "a", "b")
+        fill("a", "0.5", "f1")
+        self.assertEqual(check(), [])
+        ledger.record("ORDER_LIFECYCLE", 2, parent_id="p9", order_id="late", lifecycle_event="SUBMIT")     # its order does not exist yet: an orphan
+        self.assertEqual([i["code"] for i in check()], ["ORPHAN_LEDGER_EVENT"])
+        fill("b", "0.2", "f1")                                                                          # the same fill id again
+        fill("b", "0.1", None)                                                                          # a fill with no id
+        self.assertEqual([i["code"] for i in check()], ["ORPHAN_LEDGER_EVENT", "DUPLICATE_FILL", "UNEXPLAINED_FILL"])
+        plan("p9", "late")                                                                              # the order appears: no longer an orphan
+        self.assertEqual([i["code"] for i in check()], ["DUPLICATE_FILL", "UNEXPLAINED_FILL"])
+        p1.children[0].filled_quantity = Decimal("0.7")                                                 # the order says more than the ledger booked
+        ledger.events.append(dict(ledger.events[0]))                                                    # a duplicated ledger event id (and a duplicate fill id with it)
+        issues = check()
+        self.assertEqual([i["code"] for i in issues], ["DUPLICATE_LEDGER_EVENT", "DUPLICATE_FILL", "UNEXPLAINED_FILL", "DUPLICATE_FILL", "FILL_ACCOUNTING_MISMATCH"])
+        for _ in range(3):
+            fill("a", "0.1", f"g{_}")
+            check()
+        self.assertEqual(ledger._audit["pos"], len(ledger.events))                                     # each call read only what was new

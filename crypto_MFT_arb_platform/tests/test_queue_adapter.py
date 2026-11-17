@@ -186,6 +186,26 @@ class RpiPrintTests(unittest.TestCase):
         (pair,) = a.on_trade(sell_print("100.00", "60", 6 * S, "9"))                               # an ordinary print: 50 clear the queue, 10 fill us
         self.assertEqual(pair[1].last_fill_quantity, Decimal("10"))
 
+    def test_the_switch_is_in_the_settings_hash_only_when_on_and_the_excluded_volume_is_counted(self):
+        """2i item 8 (owner 17 Nov): core 1509601 put exclude_rpi_trades into every maker settings hash, so every earlier profile's hash changed. Off, it is left out (like depletion_ledger and
+        participation_cap): v1_9's hash is again d8a79567..., the value of a v1_9 run made before that commit (13 Nov 15:11). The volume of the excluded prints is counted beside their number."""
+        from new_backtest.profiles import apply_profile, load_profile
+        from new_backtest.session_replay import SessionReplay, dated_ticks
+        profile = load_profile("perp_perp_maker_taker_v1_9")
+        cfg = apply_profile(profile, dataset="mar2024", data_root="", pair="SOLUSDT", start_date="2026-10-29", end_date="2026-10-29", output_dir="/tmp/x_rpi_hash")
+        cfg.arb.max_position_base = 1.0
+        rep = SessionReplay(cfg, profile, ticks=dated_ticks("2026-10-29"), recorded=True, profile_safety=True)
+        (executor,) = {id(a.executor): a.executor for a in rep.adapters.values()}.values()
+        self.assertEqual(executor._settings_sha(), "d8a79567d7ff57bd2db3ecca9af575cec99b94a4a0cd5ce75f303f284d476c7f")
+        on = adapter(exclude_rpi_trades=True)
+        self.assertNotEqual(on.executor._settings_sha(), adapter().executor._settings_sha())           # on, it is part of the hash
+        book = core_book(BIDS, ASKS)
+        on.handle(request("m1", Side.BUY, "100.00", "10"), book)
+        on.on_trade(rpi_print("100.00", "500", 3 * S, "1"))
+        on.on_trade(rpi_print("100.00", "25.5", 4 * S, "2"))
+        self.assertEqual((on.executor.diag["rpi_trades_excluded"], on.executor.diag["rpi_volume_excluded"]), (2, 525.5))
+        self.assertNotIn("rpi_volume_excluded", adapter().executor.diag)
+
     def test_an_unflagged_or_false_flag_print_is_never_rpi(self):
         from crypto_stat_arb.simulation.queue_adapter import trade_is_rpi
         self.assertEqual([trade_is_rpi(sell_print("100", "1", S)), trade_is_rpi(rpi_print("100", "1", S))], [False, True])
