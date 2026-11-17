@@ -496,12 +496,13 @@ REAL_ORDER_REQUIRED: tuple[RealOrderRequirement, ...] = (
     RealOrderRequirement('oms.session_limits.margin_warning.free_margin_multiple', (10.0,), 'owner 16 Nov (limit A4): no new quotes in a margin WARNING (not a missing price) or with free margin below 10x the initial margin at the hard cap; resumes after recovery with hysteresis'),
     RealOrderRequirement('oms.session_limits.missing_marks_kill_s', (60.0,), 'owner 16 Nov (limit A5): a margin price pause longer than 60 s trips a latched kill switch'),
     RealOrderRequirement('oms.session_limits.tier_table', ('read_at_start',), "owner 16 Nov (limit A6): each account's own risk-limit / leverage brackets are read at start-up and replace the ASSUMED margin tiers; the session refuses to start if they cannot be read"),
+    RealOrderRequirement('oms.session_limits.feed_arrival_stamp', (True,), 'owner 17 Nov (A9 fix b): each book frame is stamped at ARRIVAL, so a processor that falls behind shows as book age and the staleness gate and a backlog beyond the book age limit resynchronises the connection; with it off the receive time is taken when the frame is processed and a backlog is invisible'),
     RealOrderRequirement('oms.session_limits.verify_account.enabled', (True,), 'owner 16 Nov (limit A8): at paper/live start-up the account must be in one-way mode with the expected margin mode and leverage, and reduce-only orders must be accepted; the session refuses to start otherwise'),
     RealOrderRequirement('hedge_faults.dust_carry', ('next_hedge',), 'owner 16 Nov: a hedge chunk below the hedge venue\'s minimum is carried (one signed balance per venue and instrument, added to the next hedge, sent alone as soon as it reaches the minimum, age alarm after dust_alarm_after_s), never refused and left open. v1_10 and later'),
 )
 
 
-SESSION_LIMIT_DEFAULT_KEYS = ("order_rate", "daily_loss_stop_usdt_per_sol_of_clip", "clock_offset", "margin_warning", "missing_marks_kill_s", "tier_table", "verify_account")
+SESSION_LIMIT_DEFAULT_KEYS = ("order_rate", "daily_loss_stop_usdt_per_sol_of_clip", "clock_offset", "margin_warning", "missing_marks_kill_s", "tier_table", "verify_account", "feed_arrival_stamp")
 
 
 def session_limits_from_profile(profile: dict, clip_base: float | None = None) -> dict | None:
@@ -543,6 +544,8 @@ def session_limits_from_profile(profile: dict, clip_base: float | None = None) -
         if block["tier_table"] != "read_at_start":
             raise ValueError("oms.session_limits.tier_table must be 'read_at_start'")
         out["tier_table"] = "read_at_start"
+    if block.get("feed_arrival_stamp") is not None:
+        out["feed_arrival_stamp"] = bool(block["feed_arrival_stamp"])
     va = block.get("verify_account")
     if va is not None:
         out["verify_account"] = {"enabled": bool(va.get("enabled", True)), "margin_mode": str(va.get("margin_mode", "cross")).lower(), "leverage": int(va["leverage"]) if va.get("leverage") is not None else None}

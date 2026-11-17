@@ -7,7 +7,7 @@ from collections import deque
 from collections.abc import Awaitable, Callable
 from contextlib import AbstractAsyncContextManager, suppress
 from functools import wraps
-from dataclasses import asdict, dataclass, replace
+from dataclasses import asdict, dataclass, fields, is_dataclass, replace
 from datetime import datetime, timezone
 from hashlib import sha256
 import json
@@ -114,6 +114,19 @@ class WireFrame:
     record_hash: str
 
 
+class _ArrivalBox:
+    """One book connection's arrival queue (A9 fix b): frames stamped when the reader task took them from the connection, in arrival order."""
+
+    __slots__ = ("queue", "event", "error", "task", "last_arrival_mono_ns")
+
+    def __init__(self) -> None:
+        self.queue: deque = deque()
+        self.event = asyncio.Event()
+        self.error: BaseException | None = None
+        self.task: asyncio.Task | None = None
+        self.last_arrival_mono_ns: int | None = None
+
+
 @dataclass(slots=True)
 class VenueLiveStats:
     book_syncs: int = 0                  # times the book became VALID
@@ -194,6 +207,16 @@ class LiveFeedSettings:
     udp_depth: int = 20
     udp_max_datagram_bytes: int = 60_000
     monitor_interval_seconds: float = 1.0
+    # Owner 17 Nov (A9 fix a): the recorder flushes (and fsyncs when durable) at a bounded interval instead of per record: after `recorder_flush_writes` write calls (two per recorded frame) or
+    # `recorder_flush_interval_seconds` since the last flush, at the next write; a quiet feed is flushed by the monitor tick at the latest (monitor_interval_seconds later); always at part rotation and at
+    # shutdown. A hard crash can lose at most that window of the newest records. recorder_flush_writes 1 with interval 0 restores the old per-record flush. What is written is byte-identical either way.
+    recorder_flush_writes: int = 200
+    recorder_flush_interval_seconds: float = 0.25
+    # Owner 17 Nov (A9 fix b): stamp each BOOK frame at ARRIVAL, before it waits for processing. Off (the default, the old behaviour): the receive time is taken when the frame is processed, so a backlog in front of the
+    # processor is invisible to book age and the staleness gate. On: a reader task per book connection drains the connection as fast as frames arrive and stamps wall and monotonic time on each; the frame's
+    # receive_ts_ns, the book's last receive time and the stream-liveness evidence are the ARRIVAL stamps, so a processor that falls behind shows as book age and the gate marks the book STALE. The processing time is
+    # kept as well (arrival_stats: backlog frames and arrival-to-processing time). Book frames only (trade and derivative streams keep their processing stamps).
+    arrival_stamp: bool = False
     # Periodic REST cross-check of each VALID book (None: off). A best bid/ask
     # disagreement forces a resync; deeper-level differences are reported.
     rest_reconcile_seconds: float | None = None
@@ -254,6 +277,8 @@ class LiveFeedSettings:
             raise ValueError("trade_stale_seconds must be positive")
         if self.monitor_interval_seconds <= 0:
             raise ValueError("monitor_interval_seconds must be positive")
+        if self.recorder_flush_writes < 1 or self.recorder_flush_interval_seconds < 0:
+            raise ValueError("recorder_flush_writes must be at least 1 and recorder_flush_interval_seconds not negative")
         if self.udp_enabled:
             UdpPublisherSettings(
                 group=self.udp_group,
@@ -263,6 +288,17 @@ class LiveFeedSettings:
                 depth=self.udp_depth,
                 max_datagram_bytes=self.udp_max_datagram_bytes,
             ).validate()
+
+
+def _event_fields(event: Any) -> dict[str, Any]:
+    """The event's fields as one flat dict, NOT deep-copied: nested dataclasses (the book levels) are turned into dicts by `_event_default` while json.dumps writes them, so the text equals json.dumps(asdict(event))."""
+    return {f.name: getattr(event, f.name) for f in fields(event)}
+
+
+def _event_default(value: Any) -> Any:
+    if is_dataclass(value) and not isinstance(value, type):
+        return asdict(value)
+    return json_default(value)
 
 
 class RotatingLiveRecorder:
@@ -277,6 +313,8 @@ class RotatingLiveRecorder:
         rotate_bytes: int,
         durable: bool,
         clock_ns: Callable[[], int] = time.time_ns,
+        flush_every: int = 1,
+        flush_interval_ns: int = 0,
     ) -> None:
         self.output_dir = output_dir
         self.session_id = session_id
@@ -318,6 +356,17 @@ class RotatingLiveRecorder:
         self._part_dir: Path | None = None
         self._closed = False
         self.persistence_error = ""
+        # Owner 17 Nov (A9 fix a): buffered writes flushed at a BOUNDED interval instead of per record. With flush_every 1 and flush_interval_ns 0 (the old behaviour, still the default of this class) every write is
+        # flushed (and fsynced when durable) at once. Otherwise a flush happens when `flush_every` write calls have gathered, or `flush_interval_ns` has passed since the last flush at the next write, or the service's
+        # monitor tick finds the data older than that (`flush_if_due`), and always when a part is closed and at shutdown. What is written is unchanged: only WHEN it reaches the disk. A hard crash can lose at most that window.
+        self.flush_every = max(1, int(flush_every))
+        self.flush_interval_ns = max(0, int(flush_interval_ns))
+        self._deferred = self.flush_every > 1 or self.flush_interval_ns > 0
+        self._dirty: dict[int, Any] = {}
+        self._unflushed = 0
+        self._last_flush_mono_ns = time.monotonic_ns()
+        self.flush_count = 0
+        self._part_bytes = 0                                 # bytes written to wire + canonical + trades of the open part (the raw file is counted by its writer): the rotation test needs no stat per frame
 
     @staticmethod
     def _canonical_json(value: Any) -> str:
@@ -334,9 +383,39 @@ class RotatingLiveRecorder:
         return digest.hexdigest()
 
     def _flush(self, handle: Any) -> None:
+        if not self._deferred:
+            handle.flush()
+            if self.durable:
+                os.fsync(handle.fileno())
+            return
+        self._dirty[id(handle)] = handle
+        self._unflushed += 1
+        if self._unflushed >= self.flush_every or time.monotonic_ns() - self._last_flush_mono_ns >= self.flush_interval_ns:
+            self.flush_now()
+
+    def _flush_immediate(self, handle: Any) -> None:
         handle.flush()
         if self.durable:
             os.fsync(handle.fileno())
+
+    def flush_now(self) -> None:
+        """Flush every handle with unflushed data (fsync when durable), including the raw writer's."""
+        for handle in self._dirty.values():
+            handle.flush()
+            if self.durable:
+                os.fsync(handle.fileno())
+        self._dirty.clear()
+        if self._raw_writer is not None:
+            self._raw_writer.flush()
+        self._unflushed = 0
+        self._last_flush_mono_ns = time.monotonic_ns()
+        self.flush_count += 1
+
+    @_persisting
+    def flush_if_due(self) -> None:
+        """The monitor tick's call: data that sat longer than the interval with no write after it (a quiet feed) is flushed now."""
+        if self._deferred and not self._closed and (self._unflushed or self._raw_writer is not None) and time.monotonic_ns() - self._last_flush_mono_ns >= self.flush_interval_ns:
+            self.flush_now()
 
     def _open_part(self, now_ns: int) -> None:
         self.part_number += 1
@@ -345,6 +424,9 @@ class RotatingLiveRecorder:
         self._raw_writer = RawCaptureWriter(
             self.output_dir, relative_session, durable=self.durable
         )
+        if self._deferred:
+            self._raw_writer.autoflush = False
+        self._part_bytes = 0
         self._part_dir = self.session_dir / part_name
         self._wire_handle = (self._part_dir / "wire.jsonl").open("x", encoding="utf-8")
         self._canonical_handle = (self._part_dir / "canonical.jsonl").open(
@@ -367,12 +449,7 @@ class RotatingLiveRecorder:
         if self._raw_writer is None:
             return False
         elapsed = now_ns - self.part_started_ns >= self.rotate_ns
-        size = (
-            self._raw_writer.raw_path.stat().st_size
-            + (self._part_dir / "wire.jsonl").stat().st_size
-            + (self._part_dir / "canonical.jsonl").stat().st_size
-            + (self._part_dir / "trades.jsonl").stat().st_size
-        )
+        size = self._raw_writer.bytes_written + self._part_bytes          # the bytes of raw + wire + canonical + trades written so far (the lines are ASCII), counted as they are written: the same number the four file sizes gave
         return elapsed or size >= self.rotate_bytes
 
     def _ensure_part(self, now_ns: int) -> None:
@@ -426,7 +503,9 @@ class RotatingLiveRecorder:
         }
         record_hash = sha256(self._canonical_json(unsigned).encode()).hexdigest()
         wire = WireFrame(record_hash=record_hash, **unsigned)
-        self._wire_handle.write(self._canonical_json(asdict(wire)) + "\n")
+        line = self._canonical_json({**unsigned, "record_hash": record_hash}) + "\n"           # the record's fields are exactly unsigned + record_hash: the same line as asdict(wire), without the copy
+        self._wire_handle.write(line)
+        self._part_bytes += len(line)
         self._flush(self._wire_handle)
         self._wire_previous_hash = record_hash
         self.wire_count += 1
@@ -491,9 +570,9 @@ class RotatingLiveRecorder:
     def record_event(
         self, wire: WireFrame, raw: RawFrame, event: MarketEvent, arrival_ordinal: int = 0
     ) -> None:
-        self._canonical_handle.write(
-            json.dumps(asdict(event), default=json_default, sort_keys=True) + "\n"
-        )
+        line = json.dumps(_event_fields(event), default=_event_default, sort_keys=True) + "\n"       # the same text as json.dumps(asdict(event), default=json_default, sort_keys=True), without asdict's deep copy
+        self._canonical_handle.write(line)
+        self._part_bytes += len(line)
         self._trace_handle.write(self._canonical_json({
             "wire_ref": wire.wire_ref,
             "raw_ref": raw.raw_ref,
@@ -518,7 +597,9 @@ class RotatingLiveRecorder:
 
     @_persisting
     def record_trade(self, wire: WireFrame, raw: RawFrame, tick: TradeTick) -> None:
-        self._trade_handle.write(self._canonical_json(tick.to_dict()) + "\n")
+        line = self._canonical_json(tick.to_dict()) + "\n"
+        self._trade_handle.write(line)
+        self._part_bytes += len(line)
         self._trace_handle.write(self._canonical_json({
             "wire_ref": wire.wire_ref,
             "raw_ref": raw.raw_ref,
@@ -601,6 +682,8 @@ class RotatingLiveRecorder:
     def _close_part(self) -> None:
         if self._raw_writer is None or self._part_dir is None:
             return
+        if self._deferred:
+            self.flush_now()
         for handle in (
             self._wire_handle,
             self._canonical_handle,
@@ -608,10 +691,10 @@ class RotatingLiveRecorder:
             self._trace_handle,
             self._quarantine_handle,
         ):
-            self._flush(handle)
+            self._flush_immediate(handle)
             handle.close()
         if self._derivative_handle is not None:
-            self._flush(self._derivative_handle)
+            self._flush_immediate(self._derivative_handle)
             self._derivative_handle.close()
         raw_manifest = self._raw_writer.close()
         paths = {
@@ -796,6 +879,9 @@ class LiveOrderBookService:
         self._last_book_mono_ns: dict[str, int | None] = {}
         # Last frame of any kind on each venue's BOOK connection (monotonic). Together with the last applied update it is the book stream's liveness; trade frames never touch it.
         self._last_book_frame_mono_ns: dict[str, int | None] = {}
+        self._arrival: dict[str, _ArrivalBox] = {}           # A9 fix b: the arrival queue per book connection (only with settings.arrival_stamp)
+        self._arrival_in_flight: tuple[int, int] | None = None       # (wall, monotonic) arrival stamps of the frame being processed
+        self.arrival_stats: dict[str, dict[str, int]] = {}
         # Venue-to-host delay (backlog) and host-clock offset, for alerts and the summary.
         # Decisions are blocked by the trading session's own monitor (same policy).
         self.time_monitor = TimeIntegrityMonitor(self.config.time_policy, tuple(self.settings.venues))
@@ -840,6 +926,8 @@ class LiveOrderBookService:
             rotate_bytes=self.settings.rotate_bytes,
             durable=self.settings.durable,
             clock_ns=clock_ns,
+            flush_every=self.settings.recorder_flush_writes,
+            flush_interval_ns=int(self.settings.recorder_flush_interval_seconds * 1_000_000_000),
         )
         self.structured_logs = StructuredLogStore(
             self.recorder.session_dir / "structured_logs.jsonl",
@@ -1108,6 +1196,8 @@ class LiveOrderBookService:
         while not self.stop_event.is_set():
             self._write_monitoring(self.clock_ns(), final=False)
             self._check_runtime_watchdog()
+            with suppress(PersistenceFailure):
+                self.recorder.flush_if_due()            # owner 17 Nov (A9 fix a): data older than the flush interval on a quiet feed; a failure here is raised again by the next write
             try:
                 await asyncio.wait_for(
                     self.stop_event.wait(),
@@ -1525,14 +1615,15 @@ class LiveOrderBookService:
                     websocket, snapshot_task, ws_url, snapshot_url
                 )
                 while not self.stop_event.is_set():
-                    frame = await self._recv_fresh(venue, websocket)
-                    state = self._process_websocket_frame(venue, ws_url, frame)
+                    frame, arrival = await self._next_book_frame(venue, websocket)
+                    state = self._process_websocket_frame(venue, ws_url, frame, arrival=arrival)
                     if state in (
                         BookState.GAP_DETECTED, BookState.CHECKSUM_FAILED,
                         BookState.INVALID_DATA,
                     ):
                         raise ResyncRequired(self.books[venue].invalid_reason)
             finally:
+                await self._stop_arrival_reader(venue)
                 if not snapshot_task.done():
                     snapshot_task.cancel()
                     with suppress(asyncio.CancelledError):
@@ -1595,14 +1686,15 @@ class LiveOrderBookService:
             )
             try:
                 while not self.stop_event.is_set():
-                    frame = await self._recv_fresh(venue, websocket)
-                    state = self._process_websocket_frame(venue, url, frame, channel=topic)
+                    frame, arrival = await self._next_book_frame(venue, websocket)
+                    state = self._process_websocket_frame(venue, url, frame, channel=topic, arrival=arrival)
                     if state in (
                             BookState.GAP_DETECTED, BookState.CHECKSUM_FAILED,
                             BookState.INVALID_DATA,
                         ):
                         raise ResyncRequired(self.books[venue].invalid_reason)
             finally:
+                await self._stop_arrival_reader(venue)
                 if heartbeat is not None:
                     heartbeat.cancel()
                     with suppress(asyncio.CancelledError):
@@ -1830,6 +1922,84 @@ class LiveOrderBookService:
         remaining_ns = self.config.max_book_age_ns - (self.monotonic_ns() - last)
         return max(0.001, remaining_ns / 1_000_000_000)
 
+    # ---- A9 fix b: arrival stamping --------------------------------------------------------------------------------------------------------------------------------------------------------------------
+    async def _next_book_frame(self, venue: str, websocket: WebSocketLike) -> tuple[str | bytes, tuple[int, int] | None]:
+        """The next book frame and its ARRIVAL stamps (wall, monotonic), or (frame, None) with arrival_stamp off (then the frame is stamped when processed, as before)."""
+        if not self.settings.arrival_stamp:
+            return await self._recv_fresh(venue, websocket), None
+        box = self._arrival.get(venue)
+        if box is None or box.task is None:
+            box = self._arrival[venue] = _ArrivalBox()
+            self.arrival_stats.setdefault(venue, {"frames": 0, "max_backlog_frames": 0, "max_arrival_to_processing_ns": 0, "backlog_resyncs": 0, "backlog_frames_discarded": 0})
+            box.task = asyncio.create_task(self._arrival_reader(venue, websocket, box))
+        while not box.queue:
+            if box.error is not None:
+                raise box.error
+            box.event.clear()
+            await box.event.wait()
+        frame, wall, mono = box.queue.popleft()
+        stats = self.arrival_stats[venue]
+        waited_ns = self.monotonic_ns() - mono
+        if waited_ns > self.config.max_book_age_ns:
+            # The processor is more than the book age limit behind the connection. Applying a backlog frame by frame would flip the book between STALE and VALID on every frame (and log each flip): the queue is
+            # discarded, the book marked stale and the connection resynchronised from a fresh snapshot, exactly as a silent stream is. Counted (backlog_resyncs, backlog_frames_discarded) and logged as FEED_BACKLOG.
+            discarded = len(box.queue) + 1
+            box.queue.clear()
+            stats["backlog_resyncs"] += 1
+            stats["backlog_frames_discarded"] += discarded
+            book = self.books[venue]
+            self._connector_log(
+                "FEED_BACKLOG", StructuredLogLevel.WARNING, "book frames waited longer than the book age limit for processing: backlog discarded, connection resynchronised", venue=venue,
+                payload={"waited_ms": waited_ns / 1e6, "age_limit_ms": self.config.max_book_age_ns / 1e6, "frames_discarded": discarded},
+            )
+            book.mark_stale_age(waited_ns, self.config.max_book_age_ns)
+            self.stats[venue].stale_disconnects += 1
+            self.book_gate.allow(tuple(self.books.values()), self.clock_ns(), self._book_ages())
+            self._publish_book(book, None)
+            raise ResyncRequired("feed_backlog")
+        stats["frames"] += 1
+        stats["max_backlog_frames"] = max(stats["max_backlog_frames"], len(box.queue) + 1)
+        await asyncio.sleep(0)                                # let the reader take what has arrived meanwhile before this frame is processed: the stamps of the frames behind it are then true arrival times
+        return frame, (wall, mono)
+
+    async def _arrival_reader(self, venue: str, websocket: WebSocketLike, box: _ArrivalBox) -> None:
+        """Takes frames from the connection as they arrive and stamps them. A frame already buffered by the connection is taken without a pause, so one turn drains everything that has arrived; the reader yields to the
+        processor every 64 frames. The stale rule is the book stream's own: no frame within the book age limit since the LAST ARRIVAL (not since the last processed frame)."""
+        taken = 0
+        try:
+            while True:
+                last = box.last_arrival_mono_ns
+                book = self.books[venue]
+                if book.state != BookState.VALID or last is None:
+                    timeout = self.settings.initial_sync_timeout_seconds
+                else:
+                    timeout = max(0.001, (self.config.max_book_age_ns - (self.monotonic_ns() - last)) / 1_000_000_000)
+                armed_state = book.state.value
+                try:
+                    frame = await asyncio.wait_for(websocket.recv(), timeout=timeout)
+                except TimeoutError as exc:
+                    self._mark_stale(venue, armed_s=timeout, armed_state=armed_state)
+                    raise ResyncRequired("market_data_stale") from exc
+                wall, mono = self.clock_ns(), self.monotonic_ns()
+                box.last_arrival_mono_ns = mono
+                box.queue.append((frame, wall, mono))
+                box.event.set()
+                taken += 1
+                if taken % 64 == 0:
+                    await asyncio.sleep(0)
+        except asyncio.CancelledError:
+            raise
+        except BaseException as exc:                          # a stale feed, a closed connection: handed to the processor after the frames already queued
+            box.error = exc
+            box.event.set()
+
+    async def _stop_arrival_reader(self, venue: str) -> None:
+        box = self._arrival.pop(venue, None)
+        if box is not None and box.task is not None:
+            box.task.cancel()
+            with suppress(asyncio.CancelledError, Exception):
+                await box.task
+
     async def _recv_fresh(
         self, venue: str, websocket: WebSocketLike
     ) -> str | bytes:
@@ -2044,9 +2214,34 @@ class LiveOrderBookService:
         original_frame: str | bytes,
         *,
         channel: str | None = None,
+        arrival: tuple[int, int] | None = None,
     ) -> BookState | None:
-        receive_ts_ns = self.clock_ns()
-        self._last_book_frame_mono_ns[venue] = self.monotonic_ns()           # any frame on the book connection proves the stream alive, before it is parsed or judged
+        try:
+            return self._process_websocket_frame_body(venue, url, original_frame, channel=channel, arrival=arrival)
+        finally:
+            self._arrival_in_flight = None                    # the arrival stamps belong to this frame only
+
+    def _process_websocket_frame_body(
+        self,
+        venue: str,
+        url: str,
+        original_frame: str | bytes,
+        *,
+        channel: str | None = None,
+        arrival: tuple[int, int] | None = None,
+    ) -> BookState | None:
+        if arrival is None:
+            receive_ts_ns = self.clock_ns()
+            self._arrival_in_flight = None
+            self._last_book_frame_mono_ns[venue] = self.monotonic_ns()           # any frame on the book connection proves the stream alive, before it is parsed or judged
+        else:
+            # A9 fix b: the ARRIVAL stamps are the frame's receive time and its liveness evidence; the time it was taken up for processing is kept beside them
+            receive_ts_ns = arrival[0]
+            self._arrival_in_flight = arrival
+            self._last_book_frame_mono_ns[venue] = arrival[1]
+            stats = self.arrival_stats.get(venue)
+            if stats is not None:
+                stats["max_arrival_to_processing_ns"] = max(stats["max_arrival_to_processing_ns"], self.monotonic_ns() - arrival[1])
         self.books[venue].note_venue_message(receive_ts_ns)                  # and so is the book's age for the session's eligibility rule, which reads last_receive_ts_ns (D7d finding: without this a quiet book was marked stale by it)
         self.stats[venue].book_stream_frames += 1
         adapter_version = (
@@ -2194,7 +2389,7 @@ class LiveOrderBookService:
             self._clear_reconnect_storm(event.venue)
         accepted = book.last_event_id is not None and book.last_event_id != previous_event_id
         if accepted:
-            self._last_book_mono_ns[event.venue] = self.monotonic_ns()
+            self._last_book_mono_ns[event.venue] = self._arrival_in_flight[1] if self._arrival_in_flight is not None else self.monotonic_ns()      # A9 fix b: with arrival stamping the book is as old as its newest APPLIED frame's arrival
         self._observe_timing(event)
         source_event = (
             event

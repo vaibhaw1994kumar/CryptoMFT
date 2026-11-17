@@ -21,7 +21,7 @@ from __future__ import annotations
 
 import asyncio
 from contextlib import suppress
-from dataclasses import asdict
+from dataclasses import asdict, replace as _dc_replace
 import json
 from pathlib import Path
 import time
@@ -111,6 +111,8 @@ class LivePaperSession:
         # account is not as the profile expects (A8: one-way mode, margin mode, leverage, reduce-only accepted) or its own risk tiers cannot be read (A6: they replace the ASSUMED margin tiers); a real-order
         # session with a clock-offset gate (A3) refuses to start without a clock source. A purely simulated session with no account and no readers has nothing to read and starts as before (the checks are not run, and say so).
         self.session_limits = session_limits
+        if session_limits is not None and session_limits.get("feed_arrival_stamp"):
+            settings = _dc_replace(settings, arrival_stamp=True)          # owner 17 Nov (A9 fix b): book frames stamped at arrival
         self.account_checks: dict[str, Any] = {}
         self.clock_source = clock_source
         if session_limits is not None:
@@ -121,7 +123,6 @@ class LivePaperSession:
             if session_limits.get("tier_table") == "read_at_start" and real:
                 tiers = read_account_tiers(readers or {}, tuple(self.cfg.venues), self.cfg.instrument_id)
                 if self.cfg.margin is not None and self.cfg.margin.configured:
-                    from dataclasses import replace as _dc_replace
                     self.cfg = _dc_replace(self.cfg, margin=apply_account_tiers(self.cfg.margin, tiers, self.cfg.instrument_id))
                 self.account_checks["tier_table"] = {v: {"source": t.source, "tiers": len(t.tiers), "last_max_notional": str(t.tiers[-1].max_notional)} for v, t in tiers.items()}
             if session_limits.get("clock_offset") is not None and real and clock_source is None:

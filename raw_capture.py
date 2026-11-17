@@ -86,6 +86,8 @@ class RawCaptureWriter:
             )
         self._handle = self.raw_path.open("x", encoding="utf-8")
         self._durable = durable
+        self.autoflush = True                    # a caller that flushes at a bounded interval of its own (the live recorder) sets this False and calls flush()
+        self.bytes_written = 0                   # characters written (the lines are ASCII: the file size), so the caller needs no stat per record
         self._previous_hash = GENESIS_HASH
         self._count = 0
         self._first_ref: str | None = None
@@ -160,10 +162,13 @@ class RawCaptureWriter:
         }
         record_hash = _hash(unsigned)
         frame = RawFrame(record_hash=record_hash, **unsigned)
-        self._handle.write(_canonical_json(asdict(frame)) + "\n")
-        self._handle.flush()
-        if self._durable:
-            os.fsync(self._handle.fileno())
+        line = _canonical_json({**unsigned, "record_hash": record_hash}) + "\n"          # the record's fields are exactly unsigned + record_hash: the same line as asdict(frame), without the copy
+        self._handle.write(line)
+        self.bytes_written += len(line)
+        if self.autoflush:
+            self._handle.flush()
+            if self._durable:
+                os.fsync(self._handle.fileno())
         self._previous_hash = record_hash
         self._count = ordinal
         self._first_ref = self._first_ref or raw_ref
@@ -172,6 +177,12 @@ class RawCaptureWriter:
         self._last_receive_ts_ns = int(receive_ts_ns)
         self._sources.add((venue, vendor, channel, host))
         return frame
+
+    def flush(self) -> None:
+        """Flush what is buffered (and fsync in durable mode): the bounded-interval flush of a caller that set autoflush False."""
+        self._handle.flush()
+        if self._durable:
+            os.fsync(self._handle.fileno())
 
     def close(self) -> dict[str, Any]:
         if self._closed:
