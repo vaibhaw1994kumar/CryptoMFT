@@ -499,3 +499,157 @@ class PerpetualSessionTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class _FakePerpVenue:
+    """A stateful fake of the two perpetual testnet APIs (no network): orders keyed by client id, an amend/modify moves the SAME order (same venue order id, new price and total quantity).
+    `refuse_amend` makes the venue refuse an amend; `fill(link, qty)` fills an order (part or all)."""
+
+    def __init__(self, venue: str):
+        self.venue, self.orders, self.calls, self.refuse_amend, self.next_id = venue, {}, [], False, 1000
+
+    def fill(self, link, qty):
+        o = self.orders[link]
+        o["cum"] = min(o["qty"], o["cum"] + Decimal(qty))
+        o["status"] = "FILLED" if o["cum"] >= o["qty"] else "PARTIAL"
+
+    def _bybit_row(self, link):
+        o = self.orders[link]
+        status = {"NEW": "New", "PARTIAL": "PartiallyFilled", "FILLED": "Filled", "CANCELLED": "Cancelled"}[o["status"]]
+        return {"orderId": o["id"], "orderLinkId": link, "price": str(o["price"]), "qty": str(o["qty"]), "cumExecQty": str(o["cum"]), "avgPrice": str(o["price"]) if o["cum"] else "0", "orderStatus": status}
+
+    def _binance_row(self, link):
+        o = self.orders[link]
+        status = {"NEW": "NEW", "PARTIAL": "PARTIALLY_FILLED", "FILLED": "FILLED", "CANCELLED": "CANCELED"}[o["status"]]
+        return {"orderId": o["id"], "clientOrderId": link, "price": str(o["price"]), "origQty": str(o["qty"]), "executedQty": str(o["cum"]), "avgPrice": str(o["price"]) if o["cum"] else "0", "status": status, "updateTime": 1}
+
+    def __call__(self, method, url, headers, body, timeout):
+        parsed = urlparse(url)
+        q = {k: v[0] for k, v in parse_qs(parsed.query).items()}
+        b = json.loads(body) if body else {}
+        self.calls.append((method, parsed.path))
+        if self.venue == "BYBIT":
+            if parsed.path == "/v5/order/create":
+                self.next_id += 1
+                self.orders[b["orderLinkId"]] = {"id": str(self.next_id), "price": Decimal(b["price"]), "qty": Decimal(b["qty"]), "cum": Decimal("0"), "status": "NEW"}
+                return 200, json.dumps({"retCode": 0, "result": {"orderId": str(self.next_id)}})
+            if parsed.path == "/v5/order/amend":
+                o = self.orders.get(b["orderLinkId"])
+                if o is None or o["status"] in ("FILLED", "CANCELLED"):
+                    return 200, json.dumps({"retCode": 110001, "retMsg": "order not exists or too late to replace"})
+                if self.refuse_amend:
+                    return 200, json.dumps({"retCode": 10001, "retMsg": "params error"})
+                o["price"], o["qty"] = Decimal(b["price"]), Decimal(b["qty"])
+                return 200, json.dumps({"retCode": 0, "result": {"orderId": o["id"]}})
+            if parsed.path in ("/v5/order/realtime", "/v5/order/history"):
+                link = q["orderLinkId"]
+                return 200, json.dumps({"retCode": 0, "result": {"list": [self._bybit_row(link)] if link in self.orders else []}})
+            if parsed.path == "/v5/order/cancel":
+                o = self.orders.get(b["orderLinkId"])
+                if o is None or o["status"] in ("FILLED", "CANCELLED"):
+                    return 200, json.dumps({"retCode": 110001, "retMsg": "order not exists"})
+                o["status"] = "CANCELLED"
+                return 200, json.dumps({"retCode": 0, "result": {}})
+            if parsed.path == "/v5/execution/list":
+                return 200, json.dumps({"retCode": 0, "result": {"list": []}})
+        else:
+            if method == "POST":
+                self.next_id += 1
+                self.orders[q["newClientOrderId"]] = {"id": self.next_id, "price": Decimal(q["price"]), "qty": Decimal(q["quantity"]), "cum": Decimal("0"), "status": "NEW"}
+                return 200, json.dumps(self._binance_row(q["newClientOrderId"]))
+            link = q.get("origClientOrderId")
+            if link not in self.orders and parsed.path == "/fapi/v1/order":
+                return 400, json.dumps({"code": -2013, "msg": "Order does not exist."})
+            if method == "PUT":
+                o = self.orders[link]
+                if o["status"] in ("FILLED", "CANCELLED"):
+                    return 400, json.dumps({"code": -2013, "msg": "Order does not exist."})
+                if self.refuse_amend:
+                    return 400, json.dumps({"code": -5027, "msg": "No need to modify the order."})
+                o["price"], o["qty"] = Decimal(q["price"]), Decimal(q["quantity"])
+                return 200, json.dumps(self._binance_row(link))
+            if method == "GET" and parsed.path == "/fapi/v1/order":
+                return 200, json.dumps(self._binance_row(link))
+            if method == "DELETE":
+                o = self.orders[link]
+                if o["status"] in ("FILLED", "CANCELLED"):
+                    return 400, json.dumps({"code": -2011, "msg": "Unknown order sent."})
+                o["status"] = "CANCELLED"
+                return 200, json.dumps(self._binance_row(link))
+            if parsed.path == "/fapi/v1/userTrades":
+                return 200, json.dumps([])
+        raise AssertionError(f"unexpected call {method} {parsed.path}")
+
+
+class PerpetualAmend(unittest.TestCase):
+    """(e), owner 17 Nov: a REPLACE is an amend IN PLACE on the perpetual testnet transports (Bybit amend-order, Binance modify-order), never a second order; until 17 Nov a REPLACE was sent as a
+    SUBMIT. Fake venues only, no network."""
+
+    def transports(self):
+        from crypto_stat_arb.testnet import BinanceFuturesTestnetTransport, BybitV5LinearTestnetTransport
+        out = {}
+        for venue, cls in (("BYBIT", BybitV5LinearTestnetTransport), ("BINANCE", BinanceFuturesTestnetTransport)):
+            fake = _FakePerpVenue(venue)
+            out[venue] = (cls(symbols={PERP: "SOLUSDT"}, http=fake, clock_ms=lambda: 1_700_000_000_000, sleep=lambda s: None, settle_queries=2), fake)
+        return out
+
+    @staticmethod
+    def req(action, order_id, price="100.00", qty="1", target=None):
+        return {"action": action, "order_id": order_id, "instrument_id": PERP, "side": "BUY", "order_type": "LIMIT", "time_in_force": "GTC", "post_only": True,
+                "price": price, "quantity": qty, **({"target_order_id": target} if target else {})}
+
+    def creates(self, fake):
+        return sum(1 for m, p in fake.calls if p == "/v5/order/create" or (m == "POST" and p == "/fapi/v1/order"))
+
+    def test_an_amend_moves_the_same_order_and_the_replacement_id_follows_it(self):
+        for venue, (t, fake) in self.transports().items():
+            t(self.req("SUBMIT", "q1"), SECRET)
+            venue_id = fake.orders["q1"]["id"]
+            events = t(self.req("REPLACE", "q1-r1", price="100.05", target="q1"), SECRET)
+            self.assertEqual([e["event_type"] for e in events], ["REPLACED", "ACKNOWLEDGED"], venue)
+            self.assertEqual(self.creates(fake), 1, venue)                                      # ONE order ever placed
+            self.assertEqual((list(fake.orders), fake.orders["q1"]["id"], fake.orders["q1"]["price"]), (["q1"], venue_id, Decimal("100.05")), venue)
+            fake.fill("q1", "0.4")
+            (state,) = t(self.req("QUERY", "q1-r1"), SECRET)                                    # the replacement id is answered by the venue order
+            self.assertEqual((state["event_type"], state["cumulative_filled_quantity"]), ("PARTIAL", "0.4"), venue)
+            # a second amend of the replacement: still the same venue order
+            t(self.req("REPLACE", "q1-r2", price="100.06", target="q1-r1"), SECRET)
+            self.assertEqual((self.creates(fake), fake.orders["q1"]["price"]), (1, Decimal("100.06")), venue)
+            (state,) = t(self.req("QUERY", "q1-r2"), SECRET)
+            self.assertEqual(state["cumulative_filled_quantity"], "0", venue)                    # the 0.4 filled before this amend belongs to the earlier order of the lineage
+            fake.fill("q1", "0.1")
+            (state,) = t(self.req("QUERY", "q1-r2"), SECRET)
+            self.assertEqual(state["cumulative_filled_quantity"], "0.1", venue)
+            events = t({**self.req("CANCEL", "x1", target="q1-r2")}, SECRET)                   # a cancel of the replacement cancels the venue order
+            self.assertEqual(fake.orders["q1"]["status"], "CANCELLED", venue)
+            self.assertEqual(events[-1]["event_type"], "CANCELLED", venue)
+
+    def test_a_refused_amend_leaves_the_order_unchanged_and_sends_nothing_else(self):
+        for venue, (t, fake) in self.transports().items():
+            t(self.req("SUBMIT", "q1"), SECRET)
+            fake.refuse_amend = True
+            (event,) = t(self.req("REPLACE", "q1-r1", price="100.05", target="q1"), SECRET)
+            self.assertEqual(event["event_type"], "REJECTED", venue)
+            self.assertIn("amend rejected, order unchanged", event["reason"])
+            self.assertEqual((self.creates(fake), fake.orders["q1"]["price"], fake.orders["q1"]["status"]), (1, Decimal("100.00"), "NEW"), venue)
+            (state,) = t(self.req("QUERY", "q1-r1"), SECRET) if venue == "BINANCE" else (None,)
+            if venue == "BINANCE":
+                self.assertIsNone(state["event_type"])                                        # the replacement never existed at the venue
+
+    def test_an_amend_after_the_order_filled_is_refused_as_not_open(self):
+        for venue, (t, fake) in self.transports().items():
+            t(self.req("SUBMIT", "q1"), SECRET)
+            fake.fill("q1", "1")
+            (event,) = t(self.req("REPLACE", "q1-r1", price="100.05", target="q1"), SECRET)
+            self.assertEqual(event["event_type"], "REJECTED", venue)
+            self.assertIn("replace target is not open", event["reason"])
+            self.assertEqual(self.creates(fake), 1, venue)
+
+    def test_a_spot_transport_refuses_an_amend_and_sends_nothing(self):
+        from crypto_stat_arb.testnet import BinanceSpotTestnetTransport, BybitV5TestnetTransport
+        for cls in (BinanceSpotTestnetTransport, BybitV5TestnetTransport):
+            http = FakeHttp([])
+            (event,) = cls(symbols={PERP: "SOLUSDT"}, http=http)(self.req("REPLACE", "q1-r1", target="q1"), SECRET)
+            self.assertEqual(event["event_type"], "REJECTED")
+            self.assertIn("amend not supported", event["reason"])
+            self.assertEqual(http.calls, [])
