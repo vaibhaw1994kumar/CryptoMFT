@@ -1,0 +1,22 @@
+{
+ "raw_different": [
+  "session_intent_journal.jsonl",
+  "session_manifest.json",
+  "session_signals.jsonl"
+ ],
+ "raw_files_compared": 17,
+ "stripped": {
+  "session_signals.jsonl": {
+   "equal_without_estimate": true,
+   "rows_with_estimate_a": 0,
+   "rows_with_estimate_b": 39,
+   "rows": 39
+  },
+  "session_intent_journal.jsonl": {
+   "equal_without_estimate": true,
+   "rows_with_estimate_a": 0,
+   "rows_with_estimate_b": 39,
+   "rows": 164
+  }
+ }
+}

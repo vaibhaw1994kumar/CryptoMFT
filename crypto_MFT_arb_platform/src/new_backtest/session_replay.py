@@ -879,7 +879,7 @@ class SessionReplay:
         cash = {v: str(c) for v, c in s.ledger.cash_deltas.items()}
         equity = sum((s.ledger.cash_deltas.get(v, Decimal(0)) for v in mids), Decimal(0)) + sum((q * mids[v] for (v, i), q in s.ledger.positions.items() if v in mids), Decimal(0))
         signals = [{"opportunity_id": k, "ts": sig.ts, "buy_venue": sig.buy_venue, "sell_venue": sig.sell_venue, "qty": sig.qty, "buy_price": sig.buy_price, "sell_price": sig.sell_price,
-                    "net_edge_bps": sig.net_edge_bps} for k, sig in self.shim.signals.items()]
+                    "net_edge_bps": sig.net_edge_bps, **({"estimate": sig.estimate} if sig.estimate is not None else {})} for k, sig in self.shim.signals.items()]      # W7 7.D: the key only when the profile asks
         return {
             "label": "EXPLORATORY: session runtime, not a result to quote", "runtime": "session", "profile": self.profile.get("name"), "pair": self.config.pair,
             "days": [self.config.start_date, self.config.end_date], "size_base": float(self.config.arb.max_position_base), "fee_presets": self.profile.get("fee_presets"),

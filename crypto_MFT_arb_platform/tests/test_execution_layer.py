@@ -599,3 +599,17 @@ class TacticLiquidityAwareTests(unittest.TestCase):
         for bad in (dict(liquidity_aware=1), dict(liquidity_aware=True, depth_margin=0.0), dict(liquidity_aware=True, max_wait_s=-1.0), dict(liquidity_aware=True, taker_fee_bps=float("nan"))):
             with self.assertRaises(ValueError, msg=str(bad)):
                 choose_tactic(self.state(), TacticChoiceConfig(**bad))
+
+
+class PreTradeEstimateRecordShape(unittest.TestCase):
+    """W7 7.D: the intent record gains `estimate` only when one is given; without it the record has no such key at all (so no earlier journal byte changes)."""
+
+    def test_record_key_only_when_set(self):
+        layer = ExecutionLayer(ExecutionConfig(), instrument="SOL-USDT-PERP")
+        plain, = layer.open_primary_group([dict(side="buy", qty=1.0, venues=("BYBIT",), worst_price=100.0)], now=1.0, signal_id=1)
+        est = {"net_edge_bps": 1.5, "opportunity_id": "o1"}
+        with_est, = layer.open_primary_group([dict(side="buy", qty=1.0, venues=("BYBIT",), worst_price=100.0, estimate=est)], now=2.0, signal_id=2)
+        self.assertNotIn("estimate", plain.as_record())
+        self.assertEqual(with_est.as_record()["estimate"], est)
+        recs = [r for r in layer.journal if r["event"] == "intent"]
+        self.assertEqual(["estimate" in r for r in recs], [False, True])

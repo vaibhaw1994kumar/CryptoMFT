@@ -160,6 +160,7 @@ SWITCHES: tuple[Switch, ...] = (
     Switch("maker.depletion_ledger", "LEGACY_COMPAT", note="False in v1 / v1.1 (a print netted against an earlier depth decrease drains nothing more: book-first leaves the queue ahead further back with size behind us, and trade_after_front uses the whole print); v1.2 sets True: the decrease records the head movement it applied, the print moves the queue only by the rest, and netted pairs with no other proof are counted"),
     Switch("maker.unknown_queue_dist", "CALIBRATED", note="floor in v1 (hand-set 25); v1.1: fitted on strictly earlier days, floor 0, flagged fallback 25 where the fit has no data (unknown_queue_fallback)"),
     Switch("dislocation", "LEGACY_COMPAT", note="absent in every profile up to v1_12; v1_13 (W6, owner decision 5 of 16 Nov) carries the block: dislocation episodes between the two venues' mids (rolling baseline, hysteresis), classed DATA / VENUE_EVENT / TRADEABLE / UNCLASSIFIED and recorded; NOTIFY-ONLY: nothing reads an episode, no action is wired; fail_closed is a definition and cannot be enabled; every threshold ASSUMED"),
+    Switch("cost_records", "LEGACY_COMPAT", note="absent in every profile up to v1_13; v1_14 (W7 7.D only, owner 17 Nov) carries `estimate_at_decision: true`: each maker-taker signal row and its primary (maker) intent record gain an `estimate` dict, the pre-trade cost and edge terms the gate used, read from the same variables. It changes no decision; the other W7 keys are not built"),
     Switch("incident_capture", "LEGACY_COMPAT", note="absent in every profile up to v1_11; v1_12 (W2b, owner 17 Nov) carries the block: on a trigger the LIVE recorder cuts the last pre_seconds and the next post_seconds of the recording into its own small recording with a manifest (rule, window, frame counts, hashes, completeness). Read by the live feed service only; a replay never reads it; it changes no decision"),
     Switch("feed_health", "LEGACY_COMPAT", note="absent in every profile up to v1_10; v1_11 (W1, owner 17 Nov) carries the feed-health block: thresholds of the HEALTHY / DEGRADED / UNSAFE state model per (venue, instrument, stream), all ASSUMED; OBSERVATION only: the actions (block_new_quotes_on, withdraw_quotes_on) are none and feed_delayed_ms is null until the owner decides. Read by the session runtime only"),
     Switch("oms.session_limits", "LEGACY_COMPAT", note="absent in every profile up to v1_9; v1_10 (owner 16 Nov, Order 3) carries the approved limits: order_rate (A1), daily_loss_stop_usdt_per_sol_of_clip (A2), clock_offset (A3), margin_warning (A4), missing_marks_kill_s (A5), tier_table (A6), verify_account (A8). Read by the session runtime only; each has a counter and a LIMIT_STATE event. Each is a REAL_ORDER_REQUIRED row"),
@@ -249,7 +250,7 @@ def apply_profile(doc: dict, dataset: str | None = None, **overrides):
         raise ProfileError(f"profile {doc.get('name')}: " + "; ".join(bad))
     body = {k: v for k, v in doc.items() if not k.startswith("_") and k not in ("name", "description", "classification", "decision_status",
                                                                                "product_fee_consistency", "timing", "breaker", "margin",
-                                                                               "fee_presets", "calibration", "execution", "hedge_move_calibration", "adverse_table", "do_not_quote", "dataset_settings", "oms", "feed_health", "incident_capture", "dislocation")}
+                                                                               "fee_presets", "calibration", "execution", "hedge_move_calibration", "adverse_table", "do_not_quote", "dataset_settings", "oms", "feed_health", "incident_capture", "dislocation", "cost_records")}
     ds_applied = None
     ds_cfg = ((doc.get("dataset_settings") or {}).get(dataset) if dataset else None)
     if ds_cfg:
@@ -299,6 +300,12 @@ def apply_profile(doc: dict, dataset: str | None = None, **overrides):
         al = dict(cfg_kw.get("ack_latency") or {})
         cfg_kw["ack_latency"] = AckLatencyConfig(source="empirical", calibration_path=str(path), period=cal.get("period", "all"),
                                                  **{k: v for k, v in al.items() if k not in ("source", "calibration_path", "period")})
+    cr = doc.get("cost_records") or {}
+    unknown_cr = set(cr) - {"estimate_at_decision"}
+    if unknown_cr:
+        raise ProfileError(f"profile {doc.get('name')}: cost_records keys not built (W7: only estimate_at_decision): {sorted(unknown_cr)}")
+    if cr.get("estimate_at_decision"):
+        cfg_kw["arb"] = {**(cfg_kw.get("arb") or {}), "estimate_at_decision": True}     # W7 7.D: carried to the strategy config; the strategy writes the estimate, nothing reads it
     cfg_kw.update(overrides)
     sensitivity = cfg_kw.pop("latency_sensitivity", None)
     check_latency_preset(doc, cfg_kw.get("latency_preset"), timing_preset, sensitivity)

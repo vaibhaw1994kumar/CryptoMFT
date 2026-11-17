@@ -1682,6 +1682,65 @@ if __name__ == "__main__":
 
 
 @unittest.skipUnless(SLICES.is_dir(), "March slices not available (the profile needs a data root)")
+class PreTradeEstimatePerOrder(unittest.TestCase):
+    """W7 7.D (owner 17 Nov, only this item): with cost_records.estimate_at_decision every maker-taker signal row and its primary (maker) intent record carry the estimate the gate used; without it no
+    record has the key; the switch changes no order, fill or position."""
+
+    def _run(self, on: bool):
+        profile = load_profile("perp_perp_maker_taker_v1_14" if on else "perp_perp_maker_taker_v1_13")
+        cfg = apply_profile(profile, dataset="mar2024", data_root=str(SLICES), pair="SOLUSDT", start_date="2024-03-11", end_date="2024-03-11", output_dir="/tmp/x_estimate")
+        cfg.arb.max_position_base = 1.0
+        cfg.arb.participation_max = 0.0
+        return SessionReplay(cfg, profile, stream=stream()).run()
+
+    @classmethod
+    def setUpClass(cls):
+        cls.on, cls.off = cls._run(cls, True), cls._run(cls, False)
+
+    def test_off_no_record_has_the_key(self):
+        self.assertTrue(self.off["signals"])
+        self.assertFalse(any("estimate" in s for s in self.off["signals"]))
+        self.assertFalse(any("estimate" in r for r in self.off["intent_journal"]))
+
+    def test_on_every_signal_and_primary_maker_intent_has_it_and_it_joins_to_the_fills(self):
+        sigs = {s["opportunity_id"]: s for s in self.on["signals"]}
+        self.assertTrue(sigs)
+        self.assertTrue(all("estimate" in s for s in sigs.values()))
+        primaries = [r for r in self.on["intent_journal"] if r["event"] == "intent" and r["role"] == "primary"]
+        self.assertTrue(primaries)
+        for r in primaries:
+            est = r["estimate"]
+            sig = sigs[est["opportunity_id"]]                                      # the join key: the layer's signal_id is its own serial, the opportunity id is inside the estimate
+            self.assertEqual(est["net_edge_bps"], sig["net_edge_bps"])            # taken from the same variable, not recomputed
+            self.assertAlmostEqual(est["conditional_edge_bps"], est["gross_edge_bps"] - est["total_cost_bps"], places=9)      # a recomputation from the stored terms equals the stored total
+            for k in ("impact_bps", "delay_estimate_s", "p_fill", "opportunity_cost_bps"):
+                self.assertIn("missing", est[k])                                   # nothing is a silent null
+        hedges = [r for r in self.on["intent_journal"] if r["event"] == "intent" and r["role"] == "hedge"]
+        self.assertTrue(all("estimate" not in r for r in hedges))                  # the hedge joins through parent_id
+        intent_of_order = {o["order_id"]: o["intent_id"] for o in self.on["orders"]}
+        by_id = {r["intent_id"]: r for r in self.on["intent_journal"] if r["event"] == "intent"}
+        filled = [f for f in self.on["fills"] if f["venue"] == "BYBIT"]
+        self.assertTrue(filled)
+        for f in filled:
+            self.assertIn("estimate", by_id[intent_of_order[f["order_id"]]])       # every maker fill joins to its estimate: fill.order_id -> order.intent_id -> intent record
+
+    def test_the_switch_changes_no_order_fill_or_position(self):
+        strip = lambda rows: [{k: v for k, v in r.items() if k != "estimate"} for r in rows]
+        self.assertEqual(self.on["orders"], self.off["orders"])
+        self.assertEqual(self.on["fills"], self.off["fills"])
+        self.assertEqual(self.on["positions"], self.off["positions"])
+        self.assertEqual(strip(self.on["signals"]), strip(self.off["signals"]))
+        self.assertEqual(strip(self.on["intent_journal"]), strip(self.off["intent_journal"]))
+
+    def test_other_cost_records_keys_are_refused(self):
+        from new_backtest.profiles import ProfileError
+        doc = load_profile("perp_perp_maker_taker_v1_14")
+        doc["cost_records"] = {"estimate_at_decision": True, "shortfall_split": True}
+        with self.assertRaisesRegex(ProfileError, "not built"):
+            apply_profile(doc, dataset="mar2024", data_root=str(SLICES), pair="SOLUSDT", start_date="2024-03-11", end_date="2024-03-11", output_dir="/tmp/x_estimate")
+
+
+@unittest.skipUnless(SLICES.is_dir(), "March slices not available (the profile needs a data root)")
 class DislocationNotifyOnlyInTheReplay(unittest.TestCase):
     """W6: v1_13 (the dislocation block) against v1_12 on the same stream: orders, fills, positions and the intent journal are equal; only v1_13 has the episode list and the manifest key."""
 
