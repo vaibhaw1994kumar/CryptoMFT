@@ -112,6 +112,10 @@ class WireFrame:
     frame_sha256: str
     previous_record_hash: str
     record_hash: str
+    receive_mono_ns: int | None = None       # W1 (0.2b): the monotonic stamp taken at the frame's ARRIVAL; present only with arrival stamping on (the record then carries wire_schema_version 1.1.0)
+
+
+WIRE_SCHEMA_VERSION_MONO = "1.1.0"           # W1: 1.0.0 plus the optional receive_mono_ns field
 
 
 class _ArrivalBox:
@@ -165,6 +169,7 @@ class VenueLiveStats:
     trade_normalization_errors: int = 0
     trade_stale_disconnects: int = 0
     invalid_trades: int = 0
+    exchange_ts_substituted: int = 0      # W1 (0.2b): book frames with no exchange time of their own (the adapter used the receive time): counted, the event is unchanged
     reconnect_storms: int = 0             # episodes of >= reconnect_alarm_count in the window
     reconnect_storm_active: bool = False  # until the book is VALID again
     last_error: str = ""
@@ -217,6 +222,9 @@ class LiveFeedSettings:
     # receive_ts_ns, the book's last receive time and the stream-liveness evidence are the ARRIVAL stamps, so a processor that falls behind shows as book age and the gate marks the book STALE. The processing time is
     # kept as well (arrival_stats: backlog frames and arrival-to-processing time). Book frames only (trade and derivative streams keep their processing stamps).
     arrival_stamp: bool = False
+    # W1 (owner 17 Nov): the recorder writes a `feed_health` block into each part manifest (per venue: frames, canonical events, delay statistics, silences, reconnects, backlog, exchange-time substitutions).
+    # Off (the default): the part manifest is exactly as before.
+    feed_health_block: bool = False
     # Periodic REST cross-check of each VALID book (None: off). A best bid/ask
     # disagreement forces a resync; deeper-level differences are reported.
     rest_reconcile_seconds: float | None = None
@@ -356,6 +364,7 @@ class RotatingLiveRecorder:
         self._part_dir: Path | None = None
         self._closed = False
         self.persistence_error = ""
+        self.health_provider: Callable[[], dict | None] | None = None      # W1: set by the service when settings.feed_health_block is on
         # Owner 17 Nov (A9 fix a): buffered writes flushed at a BOUNDED interval instead of per record. With flush_every 1 and flush_interval_ns 0 (the old behaviour, still the default of this class) every write is
         # flushed (and fsynced when durable) at once. Otherwise a flush happens when `flush_every` write calls have gathered, or `flush_interval_ns` has passed since the last flush at the next write, or the service's
         # monitor tick finds the data older than that (`flush_if_due`), and always when a part is closed and at shutdown. What is written is unchanged: only WHEN it reaches the disk. A hard crash can lose at most that window.
@@ -469,6 +478,7 @@ class RotatingLiveRecorder:
         transport: str,
         receive_ts_ns: int,
         original_frame: str | bytes,
+        receive_mono_ns: int | None = None,
     ) -> WireFrame:
         if self._closed:
             raise RuntimeError("live recorder is closed")
@@ -501,6 +511,9 @@ class RotatingLiveRecorder:
             "frame_sha256": frame_sha256,
             "previous_record_hash": self._wire_previous_hash,
         }
+        if receive_mono_ns is not None:                       # W1: additive, only with arrival stamping on; a record without it is byte-identical to before
+            unsigned["wire_schema_version"] = WIRE_SCHEMA_VERSION_MONO
+            unsigned["receive_mono_ns"] = int(receive_mono_ns)
         record_hash = sha256(self._canonical_json(unsigned).encode()).hexdigest()
         wire = WireFrame(record_hash=record_hash, **unsigned)
         line = self._canonical_json({**unsigned, "record_hash": record_hash}) + "\n"           # the record's fields are exactly unsigned + record_hash: the same line as asdict(wire), without the copy
@@ -584,6 +597,7 @@ class RotatingLiveRecorder:
             "receive_ts_ns": event.receive_ts_ns,
             "arrival_ordinal": arrival_ordinal,
             "disposition": "CANONICAL",
+            **({"receive_mono_ns": wire.receive_mono_ns} if wire.receive_mono_ns is not None else {}),      # W1: the canonical event's monotonic receive stamp, linked through the trace row (the event dataclass is unchanged)
         }) + "\n")
         self._flush(self._canonical_handle)
         self._flush(self._trace_handle)
@@ -730,6 +744,10 @@ class RotatingLiveRecorder:
             "terminal_wire_record_hash": self._wire_previous_hash,
             "stage_counts": {**stage_counts, "consistent": stage_counts_consistent},
         }
+        if self.health_provider is not None:                  # W1: per-part feed health (cumulative since the session start; the previous part's block is the baseline to subtract)
+            block = self.health_provider()
+            if block is not None:
+                part["feed_health"] = block
         if not stage_counts_consistent:
             LOGGER.error("STAGE_COUNT_MISMATCH part %s: %s", self.part_number, stage_counts)
         (self._part_dir / "live_part_manifest.json").write_text(
@@ -929,6 +947,8 @@ class LiveOrderBookService:
             flush_every=self.settings.recorder_flush_writes,
             flush_interval_ns=int(self.settings.recorder_flush_interval_seconds * 1_000_000_000),
         )
+        if self.settings.feed_health_block:
+            self.recorder.health_provider = self.feed_health_snapshot
         self.structured_logs = StructuredLogStore(
             self.recorder.session_dir / "structured_logs.jsonl",
             self.recorder.session_dir / "structured_logs.sqlite",
@@ -1707,7 +1727,12 @@ class LiveOrderBookService:
             await websocket.send(json.dumps({"op": "ping"}))
 
     def _observe_timing(self, event: MarketEvent) -> None:
-        assessment = self.time_monitor.observe(event, now_ns=event.receive_ts_ns)
+        # W1 (audit A1 1.4 f4): this monitor used to be called with now = the event's own receive time, so its feed age was always 0 and STALE_FEED could never fire. With arrival stamping on the
+        # receive time is the ARRIVAL and "now" is the arrival plus the time the frame waited for processing (monotonic), so the age is real. Without arrival stamps the old call is kept (LEGACY: age 0).
+        now_ns = event.receive_ts_ns
+        if self._arrival_in_flight is not None:
+            now_ns = self._arrival_in_flight[0] + max(0, self.monotonic_ns() - self._arrival_in_flight[1])
+        assessment = self.time_monitor.observe(event, now_ns=now_ns)
         delayed = "FEED_DELAYED" in assessment.flags
         if delayed:
             self.stats[event.venue].feed_delayed_events += 1
@@ -1922,6 +1947,24 @@ class LiveOrderBookService:
         remaining_ns = self.config.max_book_age_ns - (self.monotonic_ns() - last)
         return max(0.001, remaining_ns / 1_000_000_000)
 
+    def feed_health_snapshot(self) -> dict[str, Any]:
+        """W1 (audit A1 1.8): the recorder's health block for a part manifest: per venue, what the service counted and timed since the session start (frames, canonical events, the time monitor's
+        latency and delay statistics, silences, reconnects, backlog, exchange-time substitutions) and the book gate. Aggregates only; cumulative, so two consecutive parts are subtracted to get one part."""
+        timing = self.time_monitor.report()
+        venues = {}
+        for venue in self.settings.venues:
+            st = self.stats[venue]
+            venues[venue] = {
+                "book_stream_frames": st.book_stream_frames, "canonical_events": st.canonical_events, "control_frames": st.control_frames, "parse_errors": st.parse_errors,
+                "normalization_errors": st.normalization_errors, "validation_errors": st.validation_errors, "exchange_ts_substituted": st.exchange_ts_substituted,
+                "book_stream_silences": st.book_stream_silences, "stale_disconnects": st.stale_disconnects, "reconnects": st.reconnects, "resyncs": st.resyncs, "feed_delayed_events": st.feed_delayed_events,
+                "trade_ticks": st.trade_ticks, "book_state": self.books[venue].state.value, "book_gaps": self.books[venue].stats.gaps, "book_stale_transitions": self.books[venue].stats.stale_transitions,
+                "timing": (timing.get("venues") or {}).get(venue), "arrival": dict(self.arrival_stats.get(venue, {})) or None,
+            }
+        return {"label": "cumulative since the session start", "arrival_stamp": self.settings.arrival_stamp, "venues": venues,
+                "host_clock": timing.get("host_clock"), "host_offset_correction": {k: v for k, v in (timing.get("host_offset_correction") or {}).items() if k != "aligner"},
+                "strategy_gate": {"suspended": self.book_gate.suspended, "suspend_count": self.book_gate.suspend_count, "resume_count": self.book_gate.resume_count}}
+
     # ---- A9 fix b: arrival stamping --------------------------------------------------------------------------------------------------------------------------------------------------------------------
     async def _next_book_frame(self, venue: str, websocket: WebSocketLike) -> tuple[str | bytes, tuple[int, int] | None]:
         """The next book frame and its ARRIVAL stamps (wall, monotonic), or (frame, None) with arrival_stamp off (then the frame is stamped when processed, as before)."""
@@ -2069,6 +2112,7 @@ class LiveOrderBookService:
             transport=transport,
             receive_ts_ns=receive_ts_ns,
             original_frame=original_frame,
+            **({"receive_mono_ns": self._arrival_in_flight[1]} if self._arrival_in_flight is not None and not trade_stream else {}),
         )
         if trade_stream:
             stats.trade_raw_frames += 1
@@ -2266,6 +2310,8 @@ class LiveOrderBookService:
             return None
         try:
             event = self._normalize(venue, payload, receive_ts_ns, raw.raw_ref)
+            if not any(k in payload for k in (("E", "T") if venue == "BINANCE" else ("ts", "cts"))):
+                self.stats[venue].exchange_ts_substituted += 1      # W1 (0.2b): the venue sent no time of its own: the adapter used the receive time. Counted here; the event itself is unchanged
         except (KeyError, TypeError, ValueError) as exc:
             self.stats[venue].normalization_errors += 1
             self.recorder.record_rejection(
@@ -2293,6 +2339,8 @@ class LiveOrderBookService:
             return None
         wire, raw, payload = captured
         try:
+            if not any(k in payload for k in ("E", "T")):
+                self.stats[venue].exchange_ts_substituted += 1      # W1 (0.2b): a REST depth snapshot carries no exchange time: the adapter uses the receive time (counted; the event is unchanged)
             event = normalize_binance_depth(
                 payload,
                 receive_ts_ns,

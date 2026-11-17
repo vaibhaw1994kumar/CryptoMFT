@@ -552,6 +552,62 @@ def session_limits_from_profile(profile: dict, clip_base: float | None = None) -
     return out
 
 
+FEED_HEALTH_KEYS = ("delay_degraded_ms", "delay_unsafe_ms", "silence_degraded_ms", "silence_unsafe_ms", "own_lag_ms", "recover_s", "burst_window_ms", "burst_count", "feed_delayed_ms", "actions", "recorder_health_block")
+FEED_HEALTH_ACTION_LEVELS = ("none", "UNSAFE", "DEGRADED")
+
+
+def feed_health_from_profile(profile: dict) -> dict | None:
+    """W1 (owner 17 Nov): the profile's `feed_health` block, validated and normalised; None when the profile has none (every profile up to v1_10: nothing is built and nothing is written).
+    The state model, the rollups and the report are OBSERVATION. The two actions are switches that are `none` unless the profile says otherwise, and each waits for an owner decision:
+    `block_new_quotes_on` and `withdraw_quotes_on` take none | UNSAFE | DEGRADED (the level from which the action applies). `feed_delayed_ms` turns the existing blocking FEED_DELAYED flag on."""
+    block = profile.get("feed_health")
+    if not block:
+        return None
+    unknown = sorted(set(block) - set(FEED_HEALTH_KEYS))
+    if unknown:
+        raise ValueError(f"feed_health: unknown key(s) {unknown}")
+    need = ("delay_degraded_ms", "delay_unsafe_ms", "silence_degraded_ms", "silence_unsafe_ms", "own_lag_ms", "recover_s")
+    missing = [k for k in need if block.get(k) is None]
+    if missing:
+        raise ValueError(f"feed_health: missing {missing} (every threshold is stated in the profile; none is defaulted)")
+    actions = dict(block.get("actions") or {})
+    bad = sorted(set(actions) - {"block_new_quotes_on", "withdraw_quotes_on"})
+    if bad:
+        raise ValueError(f"feed_health.actions: unknown key(s) {bad}")
+    out_actions = {}
+    for name in ("block_new_quotes_on", "withdraw_quotes_on"):
+        level = str(actions.get(name, "none"))
+        if level not in FEED_HEALTH_ACTION_LEVELS:
+            raise ValueError(f"feed_health.actions.{name} must be one of {FEED_HEALTH_ACTION_LEVELS}, got {level!r}")
+        out_actions[name] = level
+    return {"delay_degraded_ms": float(block["delay_degraded_ms"]), "delay_unsafe_ms": float(block["delay_unsafe_ms"]), "silence_degraded_ms": float(block["silence_degraded_ms"]),
+            "silence_unsafe_ms": float(block["silence_unsafe_ms"]), "own_lag_ms": float(block["own_lag_ms"]), "recover_s": float(block["recover_s"]),
+            "burst_window_ms": float(block.get("burst_window_ms", 100.0)), "burst_count": int(block.get("burst_count", 200)),
+            "feed_delayed_ms": None if block.get("feed_delayed_ms") is None else float(block["feed_delayed_ms"]), "actions": out_actions,
+            "recorder_health_block": bool(block.get("recorder_health_block", True))}
+
+
+def feed_health_config_report(app_config: "AppConfig", profile: dict) -> dict:
+    """W1 (audit A1 1.1): the effective feed-health settings of a profile-derived config in one place, with where each comes from. Report only: read from the resolved config, it decides nothing.
+    A profile on the backtester's own loop (runtime backtester) does not use the core time policy at all; the values are what a session-runtime run of it would get, and the caller says which it is."""
+    tp = app_config.time_policy
+    ms = lambda ns: None if ns is None else ns / 1e6
+    return {
+        "runtime": str(profile.get("runtime", "backtester")),
+        "time_policy": {"correct_host_offset": tp.correct_host_offset, "max_feed_delay_ms (FEED_DELAYED, blocking)": ms(tp.max_feed_delay_ns), "max_feed_age_ms (STALE_FEED, not blocking)": ms(tp.max_feed_age_ns),
+                        "max_cross_venue_skew_ms (report only)": ms(tp.max_cross_venue_skew_ns), "max_host_offset_ms": ms(tp.max_host_offset_ns), "max_host_drift_ppm": tp.max_host_drift_ppm,
+                        "negative_latency_tolerance_ms": ms(tp.negative_latency_tolerance_ns), "host_offset_quantile": tp.host_offset_quantile, "host_offset_window": tp.host_offset_window,
+                        "host_offset_min_samples": tp.host_offset_min_samples, "source": "core defaults chosen in raw_config_from_profile except where the profile's feed_health block sets feed_delayed_ms"},
+        "book_gate_max_book_age_ms": ms(app_config.max_book_age_ns),
+        "dead_feed_s (resubscribe trigger)": (profile.get("timing") or {}).get("dead_feed_s"),
+        "resync_delay_s": profile.get("resync_delay_s"),
+        "trust_local_ts": profile.get("trust_local_ts"),
+        "breaker_heartbeat_timeout_s": (profile.get("breaker") or {}).get("heartbeat_timeout_s"),
+        "feed_health_block": feed_health_from_profile(profile) or "absent (no feed-health state model; nothing is built)",
+        "session_limits_feed_arrival_stamp": ((profile.get("oms") or {}).get("session_limits") or {}).get("feed_arrival_stamp"),
+    }
+
+
 AMEND_GUARD_FLAGS = ("case2i_passed", "testnet_amend_drill_passed")
 
 
@@ -686,7 +742,8 @@ def raw_config_from_profile(
         "origin": f"profile:{profile.get('name', 'profile')}",
         "latency": {"enabled": True, "seed": seed, "preset": str(profile.get("latency_preset", "singapore")), "profiles": {}},
         "backtest": {"drain_horizon_ms": 10_000},
-        "time": {"correct_host_offset": True},          # owner 8 Nov (Q-G4): the time-integrity monitor stays, with host-offset correction
+        "time": {"correct_host_offset": True,           # owner 8 Nov (Q-G4): the time-integrity monitor stays, with host-offset correction
+                 **({"max_feed_delay_ms": float((profile.get("feed_health") or {})["feed_delayed_ms"])} if (profile.get("feed_health") or {}).get("feed_delayed_ms") is not None else {})},      # W1: FEED_DELAYED on only when a profile sets feed_health.feed_delayed_ms (PENDING the owner's 1000 vs 2000 ms decision; null in v1_11)
         "fees": fee_rows,
         "risk": {
             "initial_capital_by_venue": capital, "max_order_notional": "1000000000", "max_gross_notional": "1000000000", "max_residual_base": residual_cap,

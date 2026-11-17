@@ -39,7 +39,7 @@ from .plan_store import ParentPlanStore
 from .risk import RiskEngine
 from .strategy import AmendQuote, CancelQuote, CrossVenueSpreadStrategy, ExitInventory, PlaceQuote
 from .mean_reversion import CrossVenueMeanReversionStrategy, MeanReversionConfig
-from .time_integrity import ClockGate, ClockMeasurement, TimeIntegrityMonitor
+from .time_integrity import ClockGate, ClockMeasurement, FeedHealthMonitor, FeedHealthPolicy, TimeIntegrityMonitor
 from .rate_limits import OrderRateBucket
 
 
@@ -192,6 +192,7 @@ class TradingSession:
         amend_guard: dict | None = None,
         session_limits: dict | None = None,
         clock_measurement: ClockMeasurement | None = None,
+        feed_health: dict | None = None,
     ) -> None:
         execution_mode = ExecutionMode(execution_mode)
         assert_execution_mode(
@@ -419,6 +420,7 @@ class TradingSession:
             venue_control_callback=self.oms.apply_feed_control,
         )
         self.time_monitor = TimeIntegrityMonitor(cfg.time_policy, cfg.venues)
+        self._init_feed_health(feed_health)
         self.stage_timer = StageTimer()
         self.timestamp_sink: Callable[[dict[str, Any]], None] | None = None
         self.events_processed = 0
@@ -494,6 +496,9 @@ class TradingSession:
         if self.breaker is not None and event.venue in self.breaker.connectivity:
             self.breaker.connectivity[event.venue].record_heartbeat(event.receive_ts_ns / 1e9)       # any message from a venue proves its gateway reachable
         assessment = self.time_monitor.observe(event, now_ns=now)
+        if self.feed_health is not None:
+            self._feed_health_observe(event.venue, event.instrument_id, "book" if event.event_type in (EventType.BOOK_SNAPSHOT, EventType.BOOK_DELTA) else event.event_type.value.lower(),
+                                      event.receive_ts_ns, now, assessment.latency_ns - (self.time_monitor.clock_offset_estimate_ns or 0))
         if assessment.blocking:
             self.ledger.record(
                 "TIME_INTEGRITY_BLOCK", event.receive_ts_ns,
@@ -599,6 +604,8 @@ class TradingSession:
             if self.margin_price_paused and not hasattr(strategy, "force_exit"):
                 self.signals_blocked_by_margin_price += 1       # no price for the margin check: no new risk until it is back
                 continue
+            if self.feed_health is not None and not hasattr(strategy, "force_exit") and self._feed_health_blocks(now):
+                continue                                           # W1 action (off unless the profile turns it on): no new quotes while a feed is at or above the configured level
             if self._limits is not None and not hasattr(strategy, "force_exit") and self._new_quote_stop(now) is not None:
                 self.signals_blocked_by_limits += 1             # owner 16 Nov (A3, A4): the clock gate or a margin WARNING: no new quotes; hedges and cancels continue
                 continue
@@ -685,6 +692,8 @@ class TradingSession:
         now = trade.receive_ts_ns if now_ns is None else now_ns
         if self.clock_ns is not None and now_ns is None:
             now = int(self.clock_ns())
+        if self.feed_health is not None:
+            self.feed_health_trade(trade, now)
         self.oms.advance_time(now, self.books)
         produced = self.oms.on_trade(trade.venue, trade, now)
         if produced:
@@ -784,6 +793,8 @@ class TradingSession:
             return "breaker"
         if self.margin_price_paused:
             return "margin_price_missing"
+        if self.feed_health is not None and self._feed_health_blocks(now):
+            return "feed_health"
         return self._new_quote_stop(now)
 
     def _run_quote_strategy(self, strategy: Any, now: int) -> None:
@@ -1306,6 +1317,67 @@ class TradingSession:
             "state_changes": list(self.limit_events),
         }
 
+    # ---- W1 feed health (owner 17 Nov). Observation unless an action switch is on; built only when the profile has a `feed_health` block (v1_11 onward), so every earlier profile is byte-identical.
+    # One FEED_HEALTH_STATE ledger event per transition (venue, stream, previous, state, cause, own_lag); a worsening carries the alert context. Two actions, both `none` unless the profile says
+    # otherwise and both waiting for an owner decision: `block_new_quotes_on` (no new quotes while any feed is at or above the level; hedges, unwinds and cancels are never held) and
+    # `withdraw_quotes_on` (at a transition to that level or worse, every resting maker quote is withdrawn, once per transition).
+    def _init_feed_health(self, cfg: dict | None) -> None:
+        self.feed_health: FeedHealthMonitor | None = None
+        self._feed_health_cfg = cfg
+        self.feed_health_counters: dict[str, int] = {}
+        if cfg is None:
+            return
+        ms = lambda key: int(cfg[key] * 1_000_000)
+        self.feed_health = FeedHealthMonitor(FeedHealthPolicy(ms("delay_degraded_ms"), ms("delay_unsafe_ms"), ms("silence_degraded_ms"), ms("silence_unsafe_ms"), ms("own_lag_ms"), int(cfg["recover_s"] * 1e9),
+                                                              burst_window_ns=ms("burst_window_ms"), burst_count=int(cfg["burst_count"])), self.time_monitor.host_clock)
+
+    def _feed_health_observe(self, venue: str, instrument_id: str, stream: str, receive_ts_ns: int, now: int, corrected_delay_ns: int | None, check_silence: bool = True) -> None:
+        rows = self.feed_health.observe(venue, instrument_id, stream, receive_ts_ns=receive_ts_ns, now_ns=now, corrected_delay_ns=corrected_delay_ns, check_silence=check_silence)
+        if rows:
+            self._feed_health_changed(rows, now)
+
+    def feed_health_trade(self, trade: TradeEvent, now: int) -> None:
+        """The trade stream's delay and rate (its silence is not a fault: nobody may be trading). Called by on_trade and by the simulated venue feeder."""
+        exchange = getattr(trade, "exchange_ts_ns", None)
+        self._feed_health_observe(trade.venue, trade.instrument_id, "trade", trade.receive_ts_ns, now,
+                                  None if not exchange else trade.receive_ts_ns - exchange - (self.time_monitor.clock_offset_estimate_ns or 0), check_silence=False)
+
+    def _feed_health_changed(self, rows: list, now: int) -> None:
+        if not rows:
+            return
+        order = {"HEALTHY": 0, "DEGRADED": 1, "UNSAFE": 2}
+        withdraw_level = self._feed_health_cfg["actions"]["withdraw_quotes_on"]
+        for row in rows:
+            worse = order[row["state"]] > order[row["previous"]]
+            self.feed_health_counters[f"to_{row['state']}"] = self.feed_health_counters.get(f"to_{row['state']}", 0) + 1
+            self.ledger.record("FEED_HEALTH_STATE", now, venue=row["venue"], instrument_id=row["instrument_id"], stream=row["stream"], previous=row["previous"], state=row["state"], cause=row["cause"],
+                               own_lag=row["own_lag"], **(self.alert_context(now) if worse else {}))
+            if worse and withdraw_level != "none" and order[row["state"]] >= order[withdraw_level]:
+                withdrawn = 0
+                for plan in list(self.oms.plans.values()):
+                    for child in plan.children:
+                        if child.post_only and child.order_role == "PRIMARY" and child.state in (OrderState.ACKNOWLEDGED, OrderState.PARTIAL) and child.quantity - child.filled_quantity > 0:
+                            if self.oms.withdraw_quote(child.order_id, now, f"feed_health:{row['state']}:{row['venue']}:{row['stream']}", None):
+                                withdrawn += 1
+                self.quotes_withdrawn += withdrawn
+                self.feed_health_counters["quotes_withdrawn_by_feed_health"] = self.feed_health_counters.get("quotes_withdrawn_by_feed_health", 0) + withdrawn
+                self.feed_health_counters["withdraw_actions"] = self.feed_health_counters.get("withdraw_actions", 0) + 1
+
+    def _feed_health_blocks(self, now: int) -> bool:
+        level = self._feed_health_cfg["actions"]["block_new_quotes_on"]
+        if level == "none":
+            return False
+        worst, _where = self.feed_health.worst()
+        order = {"HEALTHY": 0, "DEGRADED": 1, "UNSAFE": 2}
+        if order[worst] >= order[level]:
+            self.feed_health_counters["signals_blocked_by_feed_health"] = self.feed_health_counters.get("signals_blocked_by_feed_health", 0) + 1
+            return True
+        return False
+
+    def feed_health_report(self, now_ns: int | None = None) -> dict[str, Any]:
+        return {"label": "OBSERVATION unless an action below is not 'none'", "actions": dict(self._feed_health_cfg["actions"]), "feed_delayed_ms": self._feed_health_cfg["feed_delayed_ms"],
+                "counters": dict(sorted(self.feed_health_counters.items())), **self.feed_health.report(now_ns)}
+
     def _count_reprice(self, key: str) -> None:
         self.reprice_counters[key] = self.reprice_counters.get(key, 0) + 1
 
@@ -1461,6 +1533,7 @@ class TradingSession:
                    if any(getattr(getattr(getattr(s, "strategy", None), "config", None), "requote_delay_after_withdraw_s", 0) > 0 for s in self.strategies) else {}),
                 **({"amend_guard": dict(self.amend_guard_state)} if self.amend_guard_state is not None else {}),
                 **({"session_limits": self.limits_report()} if self._limits is not None else {}),
+                **({"feed_health": self.feed_health_report(getattr(self, "last_event_ts_ns", None) or None)} if self.feed_health is not None else {}),
                 **({"hedge_dust_carry": self.oms.dust_report(getattr(self.oms, "_last_execution_ts_ns", None))} if self.oms.dust_on else {}),
                 **({"breaker_flatten": {"counters": dict(self.breaker_flatten_counters), "dust_events": list(self.breaker_dust_events), "dust_now": None if self._breaker_dust is None else {k: str(v) for k, v in self._breaker_dust.items()}}}
                    if (self.breaker_flatten_counters["dust_recorded"] or self.breaker_flatten_counters["unavailable_retries"]) else {}),
@@ -1475,6 +1548,8 @@ class TradingSession:
         self._breaker_step(now_ns)
         if self._limits is not None:
             self._limits_step(now_ns)
+        if self.feed_health is not None:
+            self._feed_health_changed(self.feed_health.tick(now_ns), now_ns)
         if self.flattening:
             self.flatten_strategies(now_ns)
         return steps

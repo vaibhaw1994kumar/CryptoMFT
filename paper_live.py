@@ -113,6 +113,8 @@ class LivePaperSession:
         self.session_limits = session_limits
         if session_limits is not None and session_limits.get("feed_arrival_stamp"):
             settings = _dc_replace(settings, arrival_stamp=True)          # owner 17 Nov (A9 fix b): book frames stamped at arrival
+        if (session_kwargs or {}).get("feed_health") and (session_kwargs or {})["feed_health"].get("recorder_health_block"):
+            settings = _dc_replace(settings, feed_health_block=True)      # W1: the recorder's part manifests carry the feed-health block
         self.account_checks: dict[str, Any] = {}
         self.clock_source = clock_source
         if session_limits is not None:
@@ -281,13 +283,16 @@ class LivePaperSession:
         stamps must be comparable). A venue whose probe fails leaves the gate with no fresh measurement, so it goes 'unknown' by age."""
         self._next_clock_probe_ns = now + int(self.CLOCK_PROBE_SECONDS * 1e9)
         gate = self.session.clock_gate
-        if gate is None:
-            return
         found = [await probe_server_clock(self.service.http_getter, venue, clock_ns=self.clock_ns) for venue in self.cfg.venues]
         if any(m is None for m in found):
             self._write_row({"record_type": "CLOCK_PROBE_FAILED", "ts_ns": now, "venues": [v for v, m in zip(self.cfg.venues, found) if m is None]})
             return
         worst = max(found, key=lambda m: m.uncertainty_ns)
+        # W1 (audit A1 1.6): the same measurement is the host clock monitors' independent reference (session and service), which until now were fed only by their own estimate
+        self.session.time_monitor.record_clock_reference(worst)
+        self.service.time_monitor.record_clock_reference(worst)
+        if gate is None:
+            return
         gate.update(ClockMeasurement(offset_ns=worst.offset_ns, uncertainty_ns=worst.uncertainty_ns, measured_ts_ns=max(m.measured_ts_ns for m in found), source="+".join(m.source for m in found), samples=sum(m.samples for m in found)))
 
     async def run(self) -> dict[str, Any]:
@@ -365,6 +370,15 @@ class LivePaperSession:
             ),
         )
         summary["live_feed"] = service_summary
+        # W1 (audit A1 1.8): in a live session the SERVICE's gate acts (it passes its verdict to the session, whose own gate is never evaluated), so the block above read INITIAL_SYNC with 0 transitions
+        # while quoting had been suspended many times. The acting gate is reported beside it and the session's block is labelled.
+        if isinstance(summary.get("book_integrity_gate"), dict):
+            summary["book_integrity_gate"]["label"] = "the session's own gate: NOT evaluated in a live session (the feed service passes its verdict in); see book_integrity_gate_acting"
+        summary["book_integrity_gate_acting"] = {"source": "live feed service (strategy_gate)", "suspended": self.service.book_gate.suspended, "reason": self.service.book_gate.reason,
+                                                 "suspend_count": self.service.book_gate.suspend_count, "resume_count": self.service.book_gate.resume_count,
+                                                 "cancel_requests": self.service.book_gate.cancel_requests, "cancelled_orders": self.service.book_gate.cancelled_orders}
+        if self.session.feed_health is not None:
+            summary["feed_health"] = self.session.feed_health_report(stopped)
         summary["paper_timestamps"] = "paper_timestamps.jsonl"
         summary["events_dropped_from_memory"] = self.dropped_from_memory
         summary["flatten_started"] = self.flatten_started

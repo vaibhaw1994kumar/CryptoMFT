@@ -602,6 +602,8 @@ class SimulatedVenueFeeder:
             return False
         session.oms.advance_time(now, session.books)
         session.note_venue_message(trade.venue, now)                      # a print proves the feed alive: its books' age runs from it (owner 8 Nov, Q-G1)
+        if getattr(session, "feed_health", None) is not None:             # W1: the trade stream's rate and delay (observation; its silence is not a fault)
+            session.feed_health_trade(trade, now)
         sign = 1 if trade.aggressor_side == "BUY" else -1
         fv = self._feed_name[trade.venue]
         view, state, adapter, ets = self.views[fv], self.states[fv], self.adapters[trade.venue], self.ets_of(trade.exchange_ts_ns)
