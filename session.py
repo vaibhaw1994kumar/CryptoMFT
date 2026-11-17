@@ -518,7 +518,7 @@ class TradingSession:
             if apply_book and event.event_type in (EventType.BOOK_SNAPSHOT, EventType.BOOK_DELTA):
                 self.books[(event.venue, event.instrument_id)].apply(event)
             self._schedule_resync(now)
-            if self.dislocation is not None and event.event_type in (EventType.BOOK_SNAPSHOT, EventType.BOOK_DELTA):
+            if getattr(self, "dislocation", None) is not None and event.event_type in (EventType.BOOK_SNAPSHOT, EventType.BOOK_DELTA):
                 self._dislocation_after_book(event, assessment.flags)          # W6: a blocked event still moved the book
             return None
         if event.event_type not in (EventType.BOOK_SNAPSHOT, EventType.BOOK_DELTA):
@@ -532,7 +532,7 @@ class TradingSession:
         if apply_book:
             self.books[(event.venue, event.instrument_id)].apply(event)
         self._schedule_resync(now)                      # also when the caller applied the book itself (apply_book=False)
-        if self.dislocation is not None:
+        if getattr(self, "dislocation", None) is not None:
             self._dislocation_after_book(event, assessment.flags)              # W6: notify-only, reads the books and health, decides nothing
         if self.feed_gap_hook is not None:
             gaps = self.books[(event.venue, event.instrument_id)].stats.gaps
@@ -1884,7 +1884,7 @@ class TradingSession:
             hook = getattr(strategy, "on_derivative", None)
             if hook is not None:
                 hook(ticker)
-        if self.dislocation is not None:
+        if getattr(self, "dislocation", None) is not None:
             self.dislocation.on_derivative(ticker)                              # W6: the venue's mark, the only venue-side signal (VENUE_EVENT needs one)
         if ticker.mark_price is not None:
             self.exchange_marks[(ticker.venue, ticker.instrument_id)] = (ticker.receive_ts_ns, Decimal(ticker.mark_price))      # the margin check prefers a fresh exchange mark to a book mid (see _margin_marks)
