@@ -396,6 +396,8 @@ class TradingSession:
         settings = cfg.strategies or {}
         if strategies is None:
             strategies = []
+            if len(set(cfg.venues)) < 2:                     # 2i item 7: a one-venue session (strategy.single_venue) runs only the strategies it is given; the default cross-venue strategies need two venues
+                raise ValueError("a single-venue session has no default strategy: pass the strategies (a quote-book strategy) explicitly")
             if settings.get("cross_venue_arb", {}).get("enabled", True):
                 strategies.append(CrossVenueSpreadStrategy(
                     cfg.strategy_id, cfg.instrument_id, cfg.venues, cfg.quantity,
@@ -430,6 +432,7 @@ class TradingSession:
         self.opportunities_by_strategy: dict[str, int] = {}
         self._tracked_plans: dict[str, Any] = {}
         self._quote_book: dict[str, dict[str, Any]] = {}        # CR-MQ part 3: quote id -> {strategy, parent_id, kind, venue, side, qty, acked, closed, cancel_requested}; empty unless a strategy has `quote_book = True`
+        self._quote_open: dict[str, dict[str, Any]] = {}        # 2i item 6: the subset of _quote_book not closed yet, in the same order
         self._quote_by_parent: dict[str, str] = {}
         self._quote_pos = 0                                       # cursor into the ledger events for the fill callbacks
         self.quote_book_counters: dict[str, int] = {}
@@ -819,6 +822,7 @@ class TradingSession:
             rec = {"strategy": strategy, "parent_id": None, "kind": "exit" if isinstance(action, ExitInventory) else "quote", "venue": action.venue, "side": action.side.lower(),
                    "qty": action.qty, "acked": False, "closed": False, "cancel_requested": False}
             self._quote_book[qid] = rec
+            self._quote_open[qid] = rec                            # 2i item 6: the pump reads the quotes still open only (insertion order, as the book)
             is_quote = isinstance(action, PlaceQuote)
             reason = None
             if is_quote and blocked is not None:
@@ -904,6 +908,12 @@ class TradingSession:
         while self._quote_pos < len(events):
             e = events[self._quote_pos]
             self._quote_pos += 1
+            if e["event_type"] == "AMEND_CONFIRMED":                 # 2i item 7 (owner 17 Nov; MM C5): the venue confirmed the amend: the quote rests at the new price (a strategy without the method is not called)
+                qid = self._quote_by_parent.get(e.get("parent_id"))
+                rec = self._quote_book.get(qid) if qid is not None else None
+                if rec is not None:
+                    self._quote_cb(rec, "on_quote_amended", qid, Decimal(str(e["new_price"])), int(e["ts_ns"]))
+                continue
             if e["event_type"] != "FILL":
                 continue
             qid = self._quote_by_parent.get(e.get("parent_id"))
@@ -914,9 +924,12 @@ class TradingSession:
                 rec["acked"] = True
                 self._quote_cb(rec, "on_quote_ack", qid, True, "", int(e["ts_ns"]))
             liquidity = str((e.get("order") or {}).get("liquidity", "")).upper()
-            self._quote_cb(rec, "on_quote_fill", qid, Decimal(str(e["fill_quantity"])), Decimal(str(e["fill_price"])), Decimal(str(e["fee"])), liquidity, int(e["ts_ns"]))
-        for qid, rec in list(self._quote_book.items()):
-            if rec["closed"] or rec["parent_id"] is None:
+            self._quote_cb(rec, "on_quote_fill", qid, Decimal(str(e["fill_quantity"])), Decimal(str(e["fill_price"])), Decimal(str(e.get("fee_delta", e["fee"]))), liquidity, int(e["ts_ns"]))      # 2i item 5: THIS fill's fee (fee_delta), not the order's running total
+        for qid, rec in list(self._quote_open.items()):          # 2i item 6 (owner 17 Nov): open quotes only; until 17 Nov every quote ever placed was scanned at every event
+            if rec["closed"]:
+                del self._quote_open[qid]
+                continue
+            if rec["parent_id"] is None:
                 continue
             plan = self.oms.plans.get(rec["parent_id"])
             if plan is None:
@@ -931,6 +944,7 @@ class TradingSession:
                     self._quote_cb(rec, "on_quote_ack", qid, False, why.removeprefix("rejected:"), now)
             if plan.state == PlanState.CLOSED:
                 rec["closed"] = True
+                del self._quote_open[qid]
                 self._quote_cb(rec, "on_quote_closed", qid, self._quote_closed_reason(rec, plan), now)
 
     def _notify_closed_plans(self) -> None:

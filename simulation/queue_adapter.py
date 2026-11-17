@@ -402,9 +402,10 @@ class QueueAwareVenueAdapter(DeterministicVenueAdapter):
         chosen = self.truth.at_arrival(self.feed_venue, now, view)
         return book if chosen is view else core_book_from_float(self.venue, book.instrument_id, chosen, self._arrival_ns)
 
-    def _place(self, request: CanonicalOrderRequest, book: CoreBook | None) -> tuple[ExecutionCallback, ...]:
+    def _place_check(self, request: CanonicalOrderRequest, book: CoreBook | None) -> ExecutionCallback | None:
+        """The venue's acceptance checks of a resting post-only order at arrival: a tradable book, and no cross of the book the matching engine held. The reject, or None when it would rest."""
         if book is None or not book.is_tradable:
-            return (self._callback(request, ExecutionEventType.REJECTED, reason="no valid book at arrival"),)
+            return self._callback(request, ExecutionEventType.REJECTED, reason="no valid book at arrival")
         side = "buy" if request.side == CoreSide.BUY else "sell"
         best_bid, best_ask = float(book.best_bid), float(book.best_ask)
         if self.truth is not None and self._arrival_ns is not None:
@@ -415,7 +416,15 @@ class QueueAwareVenueAdapter(DeterministicVenueAdapter):
             else:                                                                      # the backtester waits for a later event here; this path checks the view now (counted: BUILD item if it ever happens)
                 self.truth.stats["postonly_view_fallback_truth_incomplete"] += 1
         if would_cross(side, float(request.price), best_bid, best_ask):
-            return (self._callback(request, ExecutionEventType.REJECTED, reason="postonly_would_take_liquidity"),)
+            return self._callback(request, ExecutionEventType.REJECTED, reason="postonly_would_take_liquidity")
+        return None
+
+    def _place(self, request: CanonicalOrderRequest, book: CoreBook | None, *, checked: bool = False) -> tuple[ExecutionCallback, ...]:
+        if not checked:
+            refused = self._place_check(request, book)
+            if refused is not None:
+                return (refused,)
+        side = "buy" if request.side == CoreSide.BUY else "sell"
         now = self._at(request)
         mirror = self._view(book, now)
         order = self.executor.place(
@@ -446,16 +455,24 @@ class QueueAwareVenueAdapter(DeterministicVenueAdapter):
         ),)
 
     def _replace_own(self, request: CanonicalOrderRequest, book: CoreBook | None) -> tuple[ExecutionCallback, ...]:
+        """2i item 1b (owner 17 Nov): Bybit amends IN PLACE. Every check is made BEFORE the resting order is touched: the order is open, something is left to offer, the book at arrival is valid and the new price
+        would not cross it. A failed check rejects the AMEND and the order rests unchanged, at its old price and queue place. Only then is the order moved: it rests at the new price with the queue place LOST
+        (any price amend; conservative: a real venue may keep it for a size-down only), reported as REPLACED followed by the order live (ACKNOWLEDGED). Until 17 Nov the old order was cancelled first and a
+        refused replacement then left nothing resting. ASSUMED: an amend of a PostOnly order to a crossing price is rejected and the order kept (not cancelled); the venue documentation has not been checked."""
         target = request.target_order_id or ""
-        old = self.executor.cancel(self._maker_id[target], self._at(request))
+        maker_id = self._maker_id.get(target)
+        old = self.executor.orders.get(maker_id) if maker_id is not None else None
         if old is None:
             return (self._callback(request, ExecutionEventType.REJECTED, reason="replace target is not open"),)
-        replaced = self._callback(request, ExecutionEventType.REPLACED)
         left = request.quantity - self._decimal(old.filled_qty)         # the REPLACE carries the quote's total (owner 12 Nov): what the old order filled before the venue processed the amend is not offered again (lineage)
         if left <= 0:
             return (self._callback(request, ExecutionEventType.REJECTED, reason="replace target is already filled"),)
-        placed = self._place(dataclasses.replace(request, quantity=left), book) if left != request.quantity else self._place(request, book)
-        return (replaced, *placed)                                      # ANY price amend loses the queue place here, like a cancel and a new order (CONSERVATIVE: a real venue may keep it for a size-down only; labelled in the ledger event AMEND_CONFIRMED)
+        moved = dataclasses.replace(request, quantity=left) if left != request.quantity else request
+        refused = self._place_check(moved, book)
+        if refused is not None:
+            return (dataclasses.replace(refused, reason=f"amend rejected, order unchanged: {refused.reason}"),)
+        self.executor.cancel(maker_id, self._at(request))
+        return (self._callback(request, ExecutionEventType.REPLACED), *self._place(moved, book, checked=True))
 
     # ---- market data ----------------------------------------------------------------------------------------------------------
 

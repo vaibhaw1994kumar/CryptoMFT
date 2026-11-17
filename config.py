@@ -794,8 +794,13 @@ def _transfer_section(raw: dict) -> dict[str, Any]:
 
 
 def _validate_strategy_venues(raw: dict) -> None:
-    """The cross-venue strategy reads ``venues[0]`` and ``venues[1]``: require two distinct venues."""
+    """The cross-venue strategy reads ``venues[0]`` and ``venues[1]``: require two distinct venues. 2i item 7 (owner 17 Nov): `strategy.single_venue: true` declares a one-venue session (a market-making
+    quote book on one venue, which until now had to carry a dormant second venue); it then needs EXACTLY one venue, and a cross-venue strategy cannot run in it."""
     venues = list(raw["strategy"]["venues"])
+    if raw["strategy"].get("single_venue"):
+        if len(set(venues)) != 1:
+            raise ValueError(f"strategy.single_venue needs exactly one venue, got {venues}")
+        return
     if len(set(venues)) < 2:
         raise ValueError(
             f"strategy.venues must list at least two distinct venues for the "

@@ -64,7 +64,7 @@ ORDER_STATE_BY_EVENT = {
     ExecutionEventType.FILLED: OrderState.FILLED,
     ExecutionEventType.REJECTED: OrderState.REJECTED,
     ExecutionEventType.CANCELLED: OrderState.CANCELLED,
-    ExecutionEventType.REPLACED: OrderState.ACKNOWLEDGED,
+    ExecutionEventType.REPLACED: OrderState.SENT,           # 2i item 1a (owner 17 Nov): the venue processed the amend; the replacement counts as live only on the report that it is (ACKNOWLEDGED, PARTIAL, FILLED)
     ExecutionEventType.TIMED_OUT: OrderState.TIMED_OUT,
     ExecutionEventType.SENT: OrderState.SENT,
     ExecutionEventType.CANCEL_REQUESTED: OrderState.CANCEL_PENDING,
@@ -297,6 +297,10 @@ class OMS:
         self.order_timeout_policy = order_timeout_policy or OrderTimeoutPolicy()
         # order_id -> [next_check_ts_ns, queries_sent, parent_id]
         self._report_deadlines: dict[str, list] = {}
+        # 2i item 2 (owner 17 Nov): an amend whose outcome is unknown (timed out, or lost) OWES a venue query about the quote's old order: [due_ns, parent_id, replacement_id, why]. It is made once nothing
+        # the router holds for either order is still in flight (a blackholed request waits for the reconnect), retried while the venue does not answer, and no new decision (amend, withdrawal) is
+        # taken on that quote until it has answered.
+        self._amend_query_owed: dict[str, list] = {}
         self._requery_orders: set[str] = set()
         self._reject_after_fill_alarmed: set[str] = set()
         # UNWIND_EXHAUSTED_ALARM: parent_id -> alarm payload. Persistent: blocks new risk until reset_unwind_exhausted_alarm().
@@ -596,6 +600,14 @@ class OMS:
     def _close_without_exposure(
         self, plan: ParentPlan, ts_ns: int, outcome: PlanState, reason: str
     ) -> ParentPlan:
+        if plan.parent_id in self._quote_plans:
+            # 2i item 4 (owner 17 Nov; MM C2): a quote or exit refused before anything was sent ends with its child REJECTED, not CREATED: a CREATED child counts as live, and an exit's UNWIND child
+            # locked base for the rest of the session (from 04:35 UTC every ask of the MM day was refused). Quote-book plans only: an arb plan's children are unchanged (v1_9 identity).
+            for order in plan.children:
+                if order.state == OrderState.CREATED:
+                    order.state = OrderState.REJECTED
+                    order.reject_reason = reason
+                    self.ledger.record("ORDER_NOT_SENT_REJECTED", ts_ns, parent_id=plan.parent_id, order_id=order.order_id, venue=order.venue, order_role=order.order_role, reason=reason)
         self._transition(plan, outcome, ts_ns, reason)
         plan.terminal_outcome = outcome.value
         return self._release_and_close(plan, ts_ns)
@@ -916,6 +928,8 @@ class OMS:
         """
         out: dict[tuple[str, str], tuple[Decimal, Decimal]] = {}
         for plan in self.plans.values():
+            if plan.parent_id in self._quote_plans:
+                continue            # 2i item 4 (owner 17 Nov; MM C3): a quote-book exit's UNWIND child is covered by its OWN package reservation (reserve(..., side)); counting it here too locked its base twice
             for order in plan.children:
                 if order.order_role == "PRIMARY" or order.state not in LIVE_ORDER_STATES:
                     continue
@@ -2332,7 +2346,7 @@ class OMS:
     def check_order_deadlines(self, now_ns: int) -> int:
         """Query venues for orders past their report deadline; never resend."""
         policy = self.order_timeout_policy
-        handled = 0
+        handled = self._check_amend_queries(now_ns) if self._amend_query_owed else 0
         for order_id, entry in sorted(
             self._report_deadlines.items(), key=lambda item: (item[1][0], item[0])
         ):
@@ -2416,6 +2430,7 @@ class OMS:
             candidates.append(router_due)
         candidates.extend(self._hedge_timer_candidates())
         candidates.extend(self._lifetime_deadlines.values())
+        candidates.extend(entry[0] for entry in self._amend_query_owed.values())
         return min(candidates) if candidates else None
 
     def _expire_due_orders(self, now_ns: int) -> None:
@@ -2898,6 +2913,9 @@ class OMS:
                 continue
             if order.state not in LIVE_ORDER_STATES or order.state == OrderState.CANCEL_PENDING or self.router.has_pending_order(order_id):
                 return False
+            if self.amend_query_owed(order_id):                       # 2i item 2: the venue query after an amend timeout comes before any new decision on the quote (the caller tries again later)
+                self.realism_counters["decisions_held_amend_query_owed"] = self.realism_counters.get("decisions_held_amend_query_owed", 0) + 1
+                return False
             if order.state == OrderState.AMEND_PENDING or self._lineage_of.get(order_id):
                 self.ledger.record("QUOTE_WITHDRAWN", now_ns, parent_id=plan.parent_id, order_id=order_id, venue=order.venue, reason=reason, net_edge_bps=net_bps)
                 return self.urgent_cancel(order_id, now_ns, reason)
@@ -2929,6 +2947,9 @@ class OMS:
             return "REFUSED:not_a_maker_quote"
         if order.state not in (OrderState.ACKNOWLEDGED, OrderState.PARTIAL):
             return f"REFUSED:state_{order.state.value.lower()}"            # no second amend while one is pending, none during a cancel, none before the venue acknowledged the order
+        if self.amend_query_owed(order_id):
+            self.realism_counters["decisions_held_amend_query_owed"] = self.realism_counters.get("decisions_held_amend_query_owed", 0) + 1
+            return "REFUSED:amend_query_owed"                               # 2i item 2: the venue query after an amend timeout comes before any new decision on the quote
         if self.router.has_pending_order(order_id) or new_price == order.limit_price:
             return "REFUSED:in_flight_or_same_price"
         if self.risk.kill_switch:
@@ -2967,7 +2988,7 @@ class OMS:
             instrument_id=order.instrument_id, venue=order.venue, side=order.side, price=new_price, quantity=order.quantity, order_type=OrderType.LIMIT, time_in_force=TimeInForce.GTC,    # the REPLACE carries the quote's TOTAL
             post_only=order.post_only, reduce_only=order.reduce_only, created_ts_ns=now_ns, idempotency_key=stable_id("amend", order_id, seq),      # quantity (Bybit amend semantics): the venue's new order has total less what the old one filled by then
         )
-        callbacks = self.route_order(request)
+        callbacks = self.route_order(request, self._books.get((order.venue, order.instrument_id)))       # 2i item 1b: the venue's book travels with the REPLACE, as with any maker order (until 17 Nov: none, and the venue refused the replacement)
         self._record_order_action(plan, new, request, "REPLACE", "DISPATCHED", now_ns, target_order_id=order_id)
         self._watch_order(new, now_ns)                                       # no answer in time: the venue is queried (about the replacement, and the old order on the amend timeout), never a second order sent
         for callback in callbacks:
@@ -3031,16 +3052,80 @@ class OMS:
             if update.state == ExecutionEventType.AMEND_ACCEPTED:
                 self.ledger.record("AMEND_ACCEPTED_NOT_CONFIRMED", ts_ns, parent_id=plan.parent_id, order_id=old.order_id, replacement_order_id=order.order_id, effective_price=str(old.limit_price),
                                    requested_price=str(order.limit_price))
-            elif update.state in (ExecutionEventType.REPLACED, ExecutionEventType.ACKNOWLEDGED, ExecutionEventType.PARTIAL, ExecutionEventType.FILLED):
+            elif update.state in (ExecutionEventType.ACKNOWLEDGED, ExecutionEventType.PARTIAL, ExecutionEventType.FILLED):
+                # 2i item 1a (owner 17 Nov): the amend is CONFIRMED only by the venue's report that the replacement is live at the new price. REPLACED alone is not enough (the old simulated venue
+                # reported REPLACED and then rejected the replacement, and every such "confirmed" amend ended the quote)
                 if old.amend_to_price is not None or old.state not in TERMINAL_ORDER_STATES - {OrderState.TIMED_OUT}:
                     self._amend_confirmed(plan, old, order, ts_ns)
+            elif update.state == ExecutionEventType.REPLACED:
+                self.realism_counters["amend_replaced_reports"] = self.realism_counters.get("amend_replaced_reports", 0) + 1
+            elif update.state == ExecutionEventType.REJECTED and old.amend_to_price is not None and self._venue_never_had(update):
+                # 2i item 3 (owner 17 Nov): the venue has never had the replacement (the amend request was lost): that is a TIMEOUT (lost), not a venue reject of the amend
+                self.ledger.record("AMEND_TIMEOUT", ts_ns, parent_id=plan.parent_id, order_id=old.order_id, replacement_order_id=order.order_id, lost=True, evidence=update.reason)
+                self.realism_counters["amend_lost"] = self.realism_counters.get("amend_lost", 0) + 1
+                old.amend_to_price = None
+                self._owe_amend_query(plan, old, order, ts_ns, "amend lost")
             elif update.state == ExecutionEventType.REJECTED and old.amend_to_price is not None:
                 self._amend_failed(plan, old, order, ts_ns, update.reason or "amend rejected")
             elif update.state == ExecutionEventType.TIMED_OUT and old.amend_to_price is not None:
                 self.ledger.record("AMEND_TIMEOUT", ts_ns, parent_id=plan.parent_id, order_id=old.order_id, replacement_order_id=order.order_id)
-                self._watch_order(old, ts_ns, immediate=True, count_unknown=False)       # ask the venue about the old order too: nothing is sent, the amend may still succeed late
+                self._owe_amend_query(plan, old, order, ts_ns, "amend unconfirmed")      # 2i item 2: every amend timeout ends in a venue query about the old order (nothing is sent; the amend may still succeed late)
         if self._lineage_of.get(order.order_id) is not None and update.cumulative_filled_quantity > 0:
             self._lineage_guard(plan, order, ts_ns)
+
+    VENUE_NEVER_HAD = ("venue has no record of order", "order unknown to venue", "cancel target is not open")
+
+    def _venue_never_had(self, update: CanonicalOrderUpdate) -> bool:
+        """A reject of an amend's replacement that only says the venue does not know the order (a query answer, or the reject of a cancel sent for it): the amend request never reached the venue."""
+        return any(text in (update.reason or "") for text in self.VENUE_NEVER_HAD)
+
+    def _owe_amend_query(self, plan: ParentPlan, old: ChildOrder, new: ChildOrder, ts_ns: int, why: str) -> None:
+        if old.order_id not in self._amend_query_owed:
+            self._amend_query_owed[old.order_id] = [ts_ns, plan.parent_id, new.order_id, why]
+            self.realism_counters["amend_queries_owed"] = self.realism_counters.get("amend_queries_owed", 0) + 1
+
+    def amend_query_owed(self, order_id: str) -> bool:
+        """True while the quote this order belongs to (any order of its amend lineage) owes the venue query after an amend timeout: no new decision may be taken on it."""
+        if not self._amend_query_owed:
+            return False
+        root = self._lineage_of.get(order_id, order_id)
+        return any(self._lineage_of.get(old_id, old_id) == root for old_id in self._amend_query_owed)
+
+    def _check_amend_queries(self, now_ns: int) -> int:
+        """2i item 2: make the owed queries. One waits while the router still holds a request of either order (a blackholed request is released at the reconnect, and its held reports come first) and is
+        retried while the venue does not answer (the gateway is down); it is made whatever the local state of the order is by then. The answer is applied like any venue query."""
+        handled = 0
+        interval = self.order_timeout_policy.query_interval_ns
+        for old_id, entry in sorted(self._amend_query_owed.items(), key=lambda item: (item[1][0], item[0])):
+            if entry[0] > now_ns:
+                continue
+            plan = self.plans.get(entry[1])
+            old = next((x for x in plan.children if x.order_id == old_id), None) if plan is not None else None
+            if old is None:
+                self._amend_query_owed.pop(old_id, None)
+                continue
+            if self.router.has_pending_order(old_id) or self.router.has_pending_order(entry[2]):
+                entry[0] = now_ns + interval
+                self.realism_counters["amend_query_waits_in_flight"] = self.realism_counters.get("amend_query_waits_in_flight", 0) + 1
+                continue
+            handled += 1
+            self.realism_counters["venue_queries"] += 1
+            query_ts = self._next_execution_ts(now_ns)
+            status = self.router.query_order(old.venue, old_id, query_ts)
+            self.ledger.record("VENUE_ORDER_QUERY", query_ts, parent_id=plan.parent_id, order_id=old_id, venue=old.venue, purpose="amend_timeout", why=entry[3], replacement_order_id=entry[2],
+                               local_state=old.state.value, answered=status is not None,
+                               venue_state=((status.state.value if status.state else "UNKNOWN_TO_VENUE") if status is not None else None))
+            if status is None:
+                entry[0] = query_ts + interval                       # the gateway is down: asked again, never given up and never sent again
+                self.realism_counters["amend_query_unanswered"] = self.realism_counters.get("amend_query_unanswered", 0) + 1
+                continue
+            self._amend_query_owed.pop(old_id, None)
+            self._requery_orders.discard(old_id)
+            if old.state not in TERMINAL_ORDER_STATES or status.state is not None:
+                self._apply_venue_status(plan, old, status, query_ts)
+            if plan.state != PlanState.CLOSED:
+                self._finalize_plan(plan, self._next_execution_ts(query_ts), self._books)
+        return handled
 
     def _amend_confirmed(self, plan: ParentPlan, old: ChildOrder, new: ChildOrder, ts_ns: int) -> None:
         new_price = old.amend_to_price if old.amend_to_price is not None else new.limit_price

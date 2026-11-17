@@ -90,6 +90,7 @@ class VenueCapitalState:
 class Ledger:
     def __init__(self) -> None:
         self.event_sink = None
+        self._audit: dict | None = None          # 2i item 6: the incremental state of audit_order_fills
         self.events: list[dict] = []
         self.positions: dict[tuple[str, str], Decimal] = {}
         self.cash_deltas: dict[str, Decimal] = {}
@@ -663,61 +664,60 @@ class Ledger:
         }
 
     def audit_order_fills(self, plans: dict[str, ParentPlan]) -> list[dict[str, object]]:
-        """Return correlation, duplication and accounting defects without mutation."""
-        issues: list[dict[str, object]] = []
+        """Return correlation, duplication and accounting defects without mutation.
+
+        2i item 6 (owner 17 Nov): INCREMENTAL. The OMS calls this at every plan close, and it used to rescan every ledger event (and every economic event) each time, so a long session slowed down
+        with its own length. The events seen so far are now remembered (their ids, fill ids and per-order fill totals, the fill issues they raised, and the events that were orphans when last
+        checked); each call reads only the events recorded since the last one. The issues returned are the same, in the same order, as the full scan's: duplicate event ids (sorted), then per
+        event in ledger order (orphan, then fill issues), then fill accounting per order. Orphan status is re-checked on every call (an order or an out-of-plan booking may appear later)."""
+        cache = self._audit
+        events = self.events
+        if cache is None or cache["pos"] > len(events):
+            cache = self._audit = {"pos": 0, "econ_pos": 0, "id_counts": Counter(), "dups": set(), "fill_ids": set(), "fill_totals": {}, "fill_issues": [], "orphans": {}, "out_of_plan": set()}
+        econ = self.economics.events
+        for e in econ[cache["econ_pos"]:]:
+            if e.event_type in (EconomicEventType.BORROW_FORCED_CLOSE, EconomicEventType.LIQUIDATION):
+                cache["out_of_plan"].add(e.order_id)
+        cache["econ_pos"] = len(econ)
         orders = {
             order.order_id: order
             for plan in plans.values() for order in plan.children
         }
-        event_ids = [str(event["ledger_event_id"]) for event in self.events]
-        duplicate_event_ids = sorted(
-            event_id for event_id, count in Counter(event_ids).items() if count > 1
-        )
-        for event_id in duplicate_event_ids:
-            issues.append({
-                "code": "DUPLICATE_LEDGER_EVENT", "severity": "ERROR",
-                "ledger_event_id": event_id,
-            })
-        fill_ids: set[str] = set()
-        fill_totals: dict[str, Decimal] = {}
-        # Fills that belong to no plan by design (venue buy-ins, simulated
-        # liquidations): known when the economic ledger booked them as such.
-        out_of_plan = {
-            e.order_id for e in self.economics.events
-            if e.event_type in (EconomicEventType.BORROW_FORCED_CLOSE, EconomicEventType.LIQUIDATION)
-        }
-        for event in self.events:
+        out_of_plan = cache["out_of_plan"]
+
+        def orphan(event: dict) -> bool:
             order_id = str(event.get("order_id") or "")
-            if event["event_type"] in {
-                "ORDER_LIFECYCLE", "FILL", "FEE_ADJUSTMENT",
-                "FILL_NOTIONAL_ADJUSTMENT",
-            }:
-                if order_id in out_of_plan and str(event.get("parent_id", "")) in OUT_OF_PLAN_PARENTS:
-                    pass                       # still checked for duplicates below
-                elif not order_id or order_id not in orders:
-                    issues.append({
-                        "code": "ORPHAN_LEDGER_EVENT", "severity": "ERROR",
-                        "ledger_event_id": event["ledger_event_id"],
-                        "order_id": order_id,
-                    })
+            if order_id in out_of_plan and str(event.get("parent_id", "")) in OUT_OF_PLAN_PARENTS:
+                return False
+            return not order_id or order_id not in orders
+
+        for index in range(cache["pos"], len(events)):
+            event = events[index]
+            event_id = str(event["ledger_event_id"])
+            cache["id_counts"][event_id] += 1
+            if cache["id_counts"][event_id] > 1:
+                cache["dups"].add(event_id)
+            if event["event_type"] in {"ORDER_LIFECYCLE", "FILL", "FEE_ADJUSTMENT", "FILL_NOTIONAL_ADJUSTMENT"} and orphan(event):
+                cache["orphans"][index] = event
             if event["event_type"] != "FILL":
                 continue
+            order_id = str(event.get("order_id") or "")
             fill_id = str(event.get("fill_id") or "")
             if not fill_id:
-                issues.append({
-                    "code": "UNEXPLAINED_FILL", "severity": "ERROR",
-                    "ledger_event_id": event["ledger_event_id"],
-                    "order_id": order_id,
-                })
-            elif fill_id in fill_ids:
-                issues.append({
-                    "code": "DUPLICATE_FILL", "severity": "ERROR",
-                    "fill_id": fill_id, "order_id": order_id,
-                })
-            fill_ids.add(fill_id)
-            fill_totals[order_id] = fill_totals.get(order_id, Decimal("0")) + Decimal(
-                str(event.get("fill_quantity", "0"))
-            )
+                cache["fill_issues"].append((index, {"code": "UNEXPLAINED_FILL", "severity": "ERROR", "ledger_event_id": event["ledger_event_id"], "order_id": order_id}))
+            elif fill_id in cache["fill_ids"]:
+                cache["fill_issues"].append((index, {"code": "DUPLICATE_FILL", "severity": "ERROR", "fill_id": fill_id, "order_id": order_id}))
+            cache["fill_ids"].add(fill_id)
+            cache["fill_totals"][order_id] = cache["fill_totals"].get(order_id, Decimal("0")) + Decimal(str(event.get("fill_quantity", "0")))
+        cache["pos"] = len(events)
+        for index in [k for k, event in cache["orphans"].items() if not orphan(event)]:
+            del cache["orphans"][index]                     # its order exists now (or it is an out-of-plan booking): no longer an orphan
+        issues: list[dict[str, object]] = [{"code": "DUPLICATE_LEDGER_EVENT", "severity": "ERROR", "ledger_event_id": event_id} for event_id in sorted(cache["dups"])]
+        per_event = [(index, 0, {"code": "ORPHAN_LEDGER_EVENT", "severity": "ERROR", "ledger_event_id": event["ledger_event_id"], "order_id": str(event.get("order_id") or "")})
+                     for index, event in cache["orphans"].items()]
+        per_event += [(index, 1, dict(issue)) for index, issue in cache["fill_issues"]]
+        issues += [issue for _, _, issue in sorted(per_event, key=lambda row: (row[0], row[1]))]
+        fill_totals = cache["fill_totals"]
         for order_id, order in orders.items():
             accounted = fill_totals.get(order_id, Decimal("0"))
             if accounted != order.filled_quantity:
@@ -728,6 +728,14 @@ class Ledger:
                     "order_quantity": str(order.filled_quantity),
                 })
         return issues
+
+    def audit_order_fills_full(self, plans: dict[str, ParentPlan]) -> list[dict[str, object]]:
+        """The full rescan (the rule before 17 Nov), kept as the reference the incremental audit is tested against."""
+        saved, self._audit = self._audit, None
+        try:
+            return self.audit_order_fills(plans)
+        finally:
+            self._audit = saved
 
     def record_plan(self, plan: ParentPlan, ts_ns: int) -> None:
         self.record("PLAN_CLOSED", ts_ns, plan=asdict(plan))

@@ -587,6 +587,9 @@ class DeterministicVenueAdapter:
     ) -> tuple[ExecutionCallback, ...]:
         if request.action == OrderAction.CANCEL:
             callbacks = self._cancel(request)
+            target = request.target_order_id or request.order_id
+            if callbacks and callbacks[0].event_type == ExecutionEventType.REJECTED and target not in self.order_status:
+                return callbacks          # 2i item 3 (owner 17 Nov): a rejected cancel of an order this venue never had is not that order's state: a later query says "unknown to venue", not REJECTED
         elif request.action == OrderAction.REPLACE:
             target = request.target_order_id or ""
             if target not in self.open_orders:
@@ -595,11 +598,16 @@ class DeterministicVenueAdapter:
                     reason="replace target is not open",
                 ),)
             else:
-                del self.open_orders[target]
-                self.terminal_orders.add(target)
-                self._fills.pop(target, None)
-                replaced = self._callback(request, ExecutionEventType.REPLACED)
-                callbacks = (replaced, *self._submit(request, book))
+                # 2i item 1b (owner 17 Nov): an amend IN PLACE. The new order is judged first; a refused one leaves the old order open and unchanged (until 17 Nov the old order was
+                # deleted first, so a refused replacement left nothing resting while REPLACED had been reported).
+                placed = self._submit(request, book)
+                if placed and placed[0].event_type == ExecutionEventType.REJECTED:
+                    callbacks = tuple(replace(c, reason=f"amend rejected, order unchanged: {c.reason}") for c in placed)
+                else:
+                    del self.open_orders[target]
+                    self.terminal_orders.add(target)
+                    self._fills.pop(target, None)
+                    callbacks = (self._callback(request, ExecutionEventType.REPLACED), *placed)
         else:
             callbacks = self._submit(request, book)
         self._remember(callbacks)

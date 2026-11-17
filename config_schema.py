@@ -49,7 +49,7 @@ _MARGIN_TIER = {"max_notional": ANY, "maintenance_rate": ANY, "initial_rate": AN
                 "maintenance_deduction": ANY, "initial_deduction": ANY}
 
 SCHEMA: dict[str, Any] = {
-    "strategy": {"strategy_id": ANY, "instrument_id": ANY, "venues": ANY, "quantity": ANY,
+    "strategy": {"strategy_id": ANY, "instrument_id": ANY, "venues": ANY, "single_venue": ANY, "quantity": ANY,
                  "entry_bps": ANY, "min_net_edge_bps": ANY, "max_book_age_ms": ANY},
     "execution_mode": ANY,
     "origin": ANY,                       # set by raw_config_from_profile ('profile:<name>', the route with the safe-config checks); a plain config file has none

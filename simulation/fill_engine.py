@@ -580,6 +580,8 @@ class MakerExecutor:
                 settings.pop("depletion_ledger", None)         # listed only when on: the settings hash of every earlier profile is unchanged
             if not settings.get("participation_cap"):
                 settings.pop("participation_cap", None)
+            if not settings.get("exclude_rpi_trades"):
+                settings.pop("exclude_rpi_trades", None)        # 2i item 8 (owner 17 Nov): listed only when on (core 1509601 added it to every hash): earlier profiles' hashes match again
             self._settings_hash = hashlib.sha256(json.dumps(settings, sort_keys=True, default=str).encode()).hexdigest()
         return self._settings_hash
 
@@ -1031,6 +1033,7 @@ class MakerExecutor:
         self.diag["trade_volume_observed"] += volume
         if rpi and cfg.exclude_rpi_trades:
             self.diag["rpi_trades_excluded"] = self.diag.get("rpi_trades_excluded", 0) + 1       # key present only when the switch is on and a print was excluded
+            self.diag["rpi_volume_excluded"] = self.diag.get("rpi_volume_excluded", 0.0) + volume  # 2i item 8: and the volume, beside the count (the MM's dropped-RPI check reads it)
             return []
         gross_volume = volume
         confirm_ids: set[int] = set()
