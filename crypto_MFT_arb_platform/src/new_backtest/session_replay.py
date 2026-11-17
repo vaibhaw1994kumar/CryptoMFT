@@ -975,12 +975,15 @@ def s0_audit(ledger_events: list[dict], plans: dict, reprice_counters: dict | No
     maker_filled = sum((c.filled_quantity for plan in plans.values() for c in plan.children if c.order_role == "PRIMARY" and c.post_only), Decimal("0"))
     hedge_filled = sum((c.filled_quantity for plan in plans.values() for c in plan.children if c.order_role == "HEDGE"), Decimal("0"))
     primary_ids = {c.order_id: plan.parent_id for plan in plans.values() for c in plan.children if c.order_role == "PRIMARY" and c.post_only}
+    replaced_by = {c.order_id: c.replaces_order_id for plan in plans.values() for c in plan.children if getattr(c, "replaces_order_id", None)}
     points = []
     for e in life:
         oid = e.get("order_id")
         if oid not in primary_ids:
             continue
         le = e.get("lifecycle_event")
+        if le == "REPLACED" and replaced_by.get(oid) in primary_ids:
+            points.append((e["ts_ns"], 0, replaced_by[oid]))           # 2i item 1b (owner 17 Nov): an amend IN PLACE: when the venue reports REPLACED the old order IS the replacement: it ends here
         if le in ("ACKNOWLEDGED", "REPLACED"):
             points.append((e["ts_ns"], 1, oid))
         elif le in ("CANCELLED", "FILLED", "REJECTED", "TIMED_OUT", "EXPIRED"):
@@ -997,7 +1000,12 @@ def s0_audit(ledger_events: list[dict], plans: dict, reprice_counters: dict | No
             "late_fills_reducing_replacement": sum(1 for r in requested if any(f["order_id"] == r["order_id"] and f["ts_ns"] > r["ts_ns"] for f in fills)),
             "duplicate_fills_booked_twice": dup, "lineage_overfill": overfill, "lineage_overfill_alarms": kinds["AMEND_LINEAGE_OVERFILL"],
             "maker_filled": str(maker_filled), "hedge_filled": str(hedge_filled), "hedged_equals_filled": maker_filled == hedge_filled,
-            "two_live_orders": max(0, worst - 1), "controller_counters": dict(reprice_counters or {})}
+            "two_live_orders": max(0, worst - 1), "controller_counters": dict(reprice_counters or {}),
+            # item 10 (owner 17 Nov), after the 2i fixes: why amends were rejected, how many timeouts were LOST requests, and the owed venue queries that followed (aggregates only)
+            "amend_reject_reasons": dict(Counter(str(e.get("reason", ""))[:80] for e in ev if e["event_type"] == "AMEND_REJECTED")),
+            "amend_timeouts_lost": sum(1 for e in ev if e["event_type"] == "AMEND_TIMEOUT" and e.get("lost")),
+            "amend_owed_queries": sum(1 for e in ev if e["event_type"] == "VENUE_ORDER_QUERY" and e.get("purpose") == "amend_timeout"),
+            "amend_owed_queries_answered": sum(1 for e in ev if e["event_type"] == "VENUE_ORDER_QUERY" and e.get("purpose") == "amend_timeout" and e.get("answered"))}
 
 
 def participation_audit(fills: list[dict], traded: dict[tuple[str, str], float], *, tolerance: float = 1e-9) -> dict:

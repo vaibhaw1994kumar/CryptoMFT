@@ -25,6 +25,8 @@ SESSION = Path("/Users/vaibhav/Documents/Newproject/data/live_sessions/solusdt/2
 DAY0 = 1793232000                      # 2026-10-29 00:00:00 UTC
 BND = "/Users/vaibhav/Documents/Newproject/crypto_MFT_arb_platform/config/regime_boundaries_day1_2026-10-29_insample.json"
 A, B = ("11:00", "13:00"), ("19:00", "21:00")      # the windows that hold the capture natural maker fills (11:15 and 12:30 UTC; 19:59 UTC)
+DENSE2_ARB = {"min_net_edge_bps": -2.0, "participation_max": 0.0, "quote_withdraw_hysteresis_bps": 2.5, "close_pairs": "reduce_only_quote"}      # item 10: the 2i dense entry, AND the pair-close switch (Order 3 B) ON: an open pair keeps a closing quote resting, so quotes rest all day and the injected move meets them (without it the 5 SOL inventory fills in minutes and nothing rests to amend). Labelled arb_overrides
+DENSE2_SET = {}                                                                                            # placement improve was tried: the arb prices its quote by the edge rule, placement does not move it (probes 2i_v110_dense2_probe, _probe4, _probe6, _probe8: 1, 1, 0, 1 amends in 10 min)
 
 # case -> settings. profile v1_9 (size_aware) unless the case needs another; every case uses 1 SOL unless it says size.
 DENSE = {"min_net_edge_bps": -2.0, "participation_max": 0.0}          # labelled: the dense entry of the 2i cases, so that the capture has quotes for a limit to act on
@@ -72,6 +74,21 @@ CASES = {
     "2i_v110_dup_filled": dict(profile="perp_perp_maker_taker_v1_10", window=A, inject_move=dict(venue="BINANCE", bps=2.0, every_s=20.0, offset_s=5.0, dur_s=8.0), duplicate_filled=True, hedge_min_notional=5.0, arb_overrides={"min_net_edge_bps": -2.0, "participation_max": 0.0, "quote_withdraw_hysteresis_bps": 2.5}),
     # DENSE variant: the capture window has 2 signals at the profile's entry edge, too few for an injected move to meet a resting quote. The entry threshold is lowered and the participation limit lifted FOR THE CASE (labelled in the result: arb_overrides), so more quotes rest.
     "2i_v110_dense": dict(profile="perp_perp_maker_taker_v1_10", window=A, inject_move=dict(venue="BINANCE", bps=2.0, every_s=20.0, offset_s=5.0, dur_s=8.0), hedge_min_notional=5.0, arb_overrides={"min_net_edge_bps": -2.0, "participation_max": 0.0, "quote_withdraw_hysteresis_bps": 2.5}),
+    # Item 10 (owner 17 Nov, after the 2i core fixes): DENSER. The quote rests one tick INSIDE the touch (placement improve, a case setting), so the injected 2 bps hedge move meets resting quotes that
+    # have no slack and the controller amends many times; reject / timeout / disconnect / duplicate Filled act on those real amends. The disconnect windows cover amends by construction (amends are frequent).
+    "2i_v110_dense2_probe": dict(profile="perp_perp_maker_taker_v1_10", window=("11:00", "11:10"), inject_move=dict(venue="BINANCE", bps=2.0, every_s=20.0, offset_s=5.0, dur_s=8.0), hedge_min_notional=5.0, arb_overrides=DENSE2_ARB, profile_set=DENSE2_SET),
+    "2i_v110_dense2_probe4": dict(profile="perp_perp_maker_taker_v1_10", window=("11:00", "11:10"), inject_move=dict(venue="BINANCE", bps=4.0, every_s=10.0, offset_s=5.0, dur_s=5.0), hedge_min_notional=5.0,
+                                  arb_overrides={**DENSE2_ARB, "quote_withdraw_hysteresis_bps": 6.0}, profile_set={"execution.primary.reprice.band_down_bps": 0.5}),
+    "2i_v110_dense2_probe6": dict(profile="perp_perp_maker_taker_v1_10", window=("11:00", "11:10"), inject_move=dict(venue="BINANCE", bps=4.0, every_s=10.0, offset_s=5.0, dur_s=5.0), hedge_min_notional=5.0,
+                                  arb_overrides={"min_net_edge_bps": -8.0, "participation_max": 0.0, "quote_withdraw_hysteresis_bps": 8.0}, profile_set={"execution.primary.reprice.band_down_bps": 0.5}),
+    "2i_v110_dense2_probe8": dict(profile="perp_perp_maker_taker_v1_10", window=("11:00", "11:10"), inject_move=dict(venue="BINANCE", bps=8.0, every_s=10.0, offset_s=5.0, dur_s=5.0), hedge_min_notional=5.0,
+                                  arb_overrides={"min_net_edge_bps": -2.0, "participation_max": 0.0, "quote_withdraw_hysteresis_bps": 12.0}),
+    "2i_v110_dense2_probe_cp": dict(profile="perp_perp_maker_taker_v1_10", window=("11:00", "11:10"), inject_move=dict(venue="BINANCE", bps=2.0, every_s=20.0, offset_s=5.0, dur_s=8.0), hedge_min_notional=5.0, arb_overrides=DENSE2_ARB, profile_set=DENSE2_SET),
+    "2i_v110_dense2": dict(profile="perp_perp_maker_taker_v1_10", window=A, inject_move=dict(venue="BINANCE", bps=2.0, every_s=20.0, offset_s=5.0, dur_s=8.0), hedge_min_notional=5.0, arb_overrides=DENSE2_ARB, profile_set=DENSE2_SET),
+    "2i_v110_dense2_reject": dict(profile="perp_perp_maker_taker_v1_10", window=A, inject_move=dict(venue="BINANCE", bps=2.0, every_s=20.0, offset_s=5.0, dur_s=8.0), amend_reject_every=1, hedge_min_notional=5.0, arb_overrides=DENSE2_ARB, profile_set=DENSE2_SET),
+    "2i_v110_dense2_timeout": dict(profile="perp_perp_maker_taker_v1_10", window=A, inject_move=dict(venue="BINANCE", bps=2.0, every_s=20.0, offset_s=5.0, dur_s=8.0), amend_timeout_every=1, hedge_min_notional=5.0, arb_overrides=DENSE2_ARB, profile_set=DENSE2_SET),
+    "2i_v110_dense2_disconnect": dict(profile="perp_perp_maker_taker_v1_10", window=A, inject_move=dict(venue="BINANCE", bps=2.0, every_s=20.0, offset_s=5.0, dur_s=8.0), maker_outage=[("09:56:30", "09:56:31")], disconnect_at_amend_s=30.0, hedge_min_notional=5.0, arb_overrides=DENSE2_ARB, profile_set=DENSE2_SET),      # the static outage (1 s in the warm-up, quoting off) only switches the maker-outage model on; each amend opens its own 30 s outage
+    "2i_v110_dense2_dup_filled": dict(profile="perp_perp_maker_taker_v1_10", window=A, inject_move=dict(venue="BINANCE", bps=2.0, every_s=20.0, offset_s=5.0, dur_s=8.0), duplicate_filled=True, hedge_min_notional=5.0, arb_overrides=DENSE2_ARB, profile_set=DENSE2_SET),
     "2i_v110_timeout_short": dict(profile="perp_perp_maker_taker_v1_10", window=("11:00", "11:03"), inject_move=dict(venue="BINANCE", bps=2.0, every_s=20.0, offset_s=5.0, dur_s=8.0), amend_timeout_every=1, hedge_min_notional=5.0, arb_overrides={"min_net_edge_bps": -2.0, "participation_max": 0.0, "quote_withdraw_hysteresis_bps": 2.5}),
     "2i_v110_short": dict(profile="perp_perp_maker_taker_v1_10", window=("11:00", "11:04"), inject_move=dict(venue="BINANCE", bps=2.0, every_s=20.0, offset_s=5.0, dur_s=8.0), hedge_min_notional=5.0),
     "2a_v110": dict(profile="perp_perp_maker_taker_v1_10", window=A),
@@ -103,6 +120,11 @@ CASES = {
     "4b_hedge_feed_lost_observe_v111": dict(profile="perp_perp_maker_taker_v1_11", window=A, hedge_min_notional=5.0, arb_overrides=DENSE, gap=("11:01:33", "11:02:13"), gap_venue="BINANCE"),
     "4c_feed_delay_v111": dict(profile="perp_perp_maker_taker_v1_11", window=A, hedge_min_notional=5.0, arb_overrides=DENSE, inject_delay=dict(venue="BINANCE", start="11:01:00", end="11:02:00", delay_s=1.5),
                                profile_set={"feed_health.feed_delayed_ms": 1000.0}),
+    # Queue item (d), owner decisions of 16 Nov applied to v1_11 (17 Nov): the same three cases with the PROFILE'S OWN values (no profile_set): FEED_DELAYED 1000 ms, block on DEGRADED,
+    # withdraw on the hedge feed DEGRADED, UNSAFE cancels and pauses, OWN_LAG blocks. The 4a / 4b / 4c rows above are the W1 records (observation build, actions set per case).
+    "4x_feed_health_v111_decided": dict(profile="perp_perp_maker_taker_v1_11", window=A, hedge_min_notional=5.0, arb_overrides=DENSE),
+    "4a_hedge_feed_lost_v111_decided": dict(profile="perp_perp_maker_taker_v1_11", window=A, hedge_min_notional=5.0, arb_overrides=DENSE, gap=("11:01:33", "11:02:13"), gap_venue="BINANCE"),
+    "4c_feed_delay_v111_decided": dict(profile="perp_perp_maker_taker_v1_11", window=A, hedge_min_notional=5.0, arb_overrides=DENSE, inject_delay=dict(venue="BINANCE", start="11:01:00", end="11:02:00", delay_s=1.5)),
     "3x_baseline_v110": dict(profile="perp_perp_maker_taker_v1_10", window=A, hedge_min_notional=5.0, arb_overrides=DENSE),
 }
 
@@ -223,6 +245,18 @@ if st.get("amend_reject_every") or st.get("amend_timeout_every"):          # the
             return ()
         return _real_replace(self, request, book)
     QueueAwareVenueAdapter._replace_own = _faulty_replace
+
+if st.get("disconnect_at_amend_s"):           # item 10 (owner 17 Nov): the maker venue's gateway goes down AS each amend arrives (for this many seconds): the request is lost into the disconnect, every time
+    from crypto_stat_arb.simulation.queue_adapter import QueueAwareVenueAdapter
+    _real_replace2 = QueueAwareVenueAdapter._replace_own
+    disconnects_at_amend = [0]
+
+    def _disconnect_on_amend(self, request, book):
+        now_s = self._at(request)
+        self._windows[f"amend-disconnect-{request.order_id}"] = Outage(self.venue, now_s, now_s + float(st["disconnect_at_amend_s"]))
+        disconnects_at_amend[0] += 1
+        return ()
+    QueueAwareVenueAdapter._replace_own = _disconnect_on_amend
 
 if st.get("duplicate_filled"):                # every venue "Filled" / "Partial" report is delivered twice, the second under a new update id
     from crypto_stat_arb.execution import ExecutionEventType
