@@ -1147,6 +1147,8 @@ class TradingSession:
         self._loss_day: int | None = None
         self._loss_due_ns = 0
         self._loss_min_pnl: Decimal | None = None
+        self._loss_min_at: dict[str, Any] | None = None       # when the low point was, the two mids and the positions then (aggregates)
+        self._equity_mids: dict[str, Decimal] = {}
         self._price_pause_since: int | None = None
         self._margin_warn_active = False
         self._margin_warn_ok_since: int | None = None
@@ -1211,6 +1213,7 @@ class TradingSession:
                 mids[venue] = (book.best_bid + book.best_ask) / Decimal("2")
         if len(mids) < len(self.cfg.venues):
             return None
+        self._equity_mids = mids                              # the mids this figure was taken at (the loss stop's low point reports them)
         return (sum((self.ledger.cash_deltas.get(v, Decimal("0")) for v in mids), Decimal("0"))
                 + sum((q * mids[v] for (v, _i), q in self.ledger.positions.items() if v in mids), Decimal("0")))
 
@@ -1243,6 +1246,7 @@ class TradingSession:
                 pnl = equity - self._loss_baseline
                 if self._loss_min_pnl is None or pnl < self._loss_min_pnl:
                     self._loss_min_pnl = pnl
+                    self._loss_min_at = {"ts_ns": now, "mids": {v: str(m) for v, m in sorted(self._equity_mids.items())}, "positions": {f"{v}": str(q) for (v, _i), q in sorted(self.ledger.positions.items())}}
                 if pnl <= Decimal(str(loss["limit_usdt"])) and "daily_loss_stop" not in self._limit_kills:
                     self._limit_trip("daily_loss_stop", now, "daily loss stop", pnl_usdt=str(pnl), limit_usdt=loss["limit_usdt"])
         kill_s = L.get("missing_marks_kill_s")
@@ -1295,7 +1299,7 @@ class TradingSession:
             "counters": dict(sorted(self.limit_counters.items())),
             "stop_quoting_reasons": dict(sorted(self.limit_blocks.items())),
             "signals_blocked_by_limits": self.signals_blocked_by_limits,
-            "daily_loss": {"limit_usdt": (L.get("daily_loss_stop") or {}).get("limit_usdt"), "min_pnl_usdt": None if self._loss_min_pnl is None else str(self._loss_min_pnl)},
+            "daily_loss": {"limit_usdt": (L.get("daily_loss_stop") or {}).get("limit_usdt"), "min_pnl_usdt": None if self._loss_min_pnl is None else str(self._loss_min_pnl), "min_pnl_at": self._loss_min_at},
             "kills": {k: dict(v) for k, v in self._limit_kills.items()},
             "clock_gate": None if self.clock_gate is None else {"replay": self.clock_gate.replay, "measurement": None if self.clock_gate.measurement is None else {
                 "offset_ms": self.clock_gate.measurement.offset_ns / 1e6, "uncertainty_ms": self.clock_gate.measurement.uncertainty_ns / 1e6, "source": self.clock_gate.measurement.source}},
