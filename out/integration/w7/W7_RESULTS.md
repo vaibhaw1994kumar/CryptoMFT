@@ -14,3 +14,7 @@ Design: `out/integration/designs/W7_W5_W10_design.md` section 7.D, only that ite
 ## Gates (29 Oct 2026 day, 1 SOL)
 - G3 v1_9 identity with the W7 code: 14 of 14 equal (`g3.json`).
 - G4 v1_14 against v1_13 (`g4_v114_vs_v113.json`): different only `session_signals.jsonl`, `session_intent_journal.jsonl` (by the new key: equal once it is removed; 39 of 39 signals and 39 primary intents carry it) and `session_manifest.json` (profile name and hash).
+
+## Full suite after W6 and W7 (once, against the 93 baseline)
+- First run: 94, one new failure: `test_funding_term.py::Routing::test_the_trading_session_routes_derivative_ticks_to_a_strategy_with_the_hook_only`. The cause was a W6 slip: `TradingSession.on_derivative` read `self.dislocation` directly, and the test calls it on a SimpleNamespace. Fixed in core c0d6885 (getattr, no behaviour change in a session).
+- Rerun: UNCHANGED at 93 (3,941 passed, 92 failed + 1 error, 4 skipped, 11 xfailed). `compare_baselines_w6w7_rerun.txt`.

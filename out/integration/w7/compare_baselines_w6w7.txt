@@ -1,0 +1,9 @@
+{
+ "baseline": 93,
+ "now": 94,
+ "new_failures": [
+  "FAILED tests/test_funding_term.py::Routing::test_the_trading_session_routes_derivative_ticks_to_a_strategy_with_the_hook_only"
+ ],
+ "no_longer_failing": [],
+ "UNCHANGED": false
+}
