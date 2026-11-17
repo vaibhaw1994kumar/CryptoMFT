@@ -1,0 +1,78 @@
+{
+ "a": "/Users/vaibhav/Documents/Newproject/out/integration/w2b/v111_1sol",
+ "b": "/Users/vaibhav/Documents/Newproject/out/integration/w2b/v112_1sol",
+ "equal": false,
+ "files_compared": 14,
+ "different": [
+  "session_manifest.json"
+ ],
+ "skipped": [
+  "session_run_record.json"
+ ],
+ "files": {
+  "maker_observations.jsonl": {
+   "status": "EQUAL",
+   "bytes": 40322
+  },
+  "session_decision_events.jsonl": {
+   "status": "EQUAL",
+   "bytes": 10888
+  },
+  "session_fills.jsonl": {
+   "status": "EQUAL",
+   "bytes": 85636
+  },
+  "session_intent_fills.jsonl": {
+   "status": "EQUAL",
+   "bytes": 7077
+  },
+  "session_intent_journal.jsonl": {
+   "status": "EQUAL",
+   "bytes": 26635
+  },
+  "session_limits_and_stops.json": {
+   "status": "EQUAL",
+   "bytes": 10926
+  },
+  "session_manifest.json": {
+   "status": "DIFFERENT",
+   "first_difference": {
+    "at": "profile",
+    "a": "'perp_perp_maker_taker_v1_11'",
+    "b": "'perp_perp_maker_taker_v1_12'"
+   },
+   "excluded": [
+    "run",
+    "manifest.release_identity"
+   ]
+  },
+  "session_markouts_decomposed.jsonl": {
+   "status": "EQUAL",
+   "bytes": 26387
+  },
+  "session_orders.jsonl": {
+   "status": "EQUAL",
+   "bytes": 12072
+  },
+  "session_pair_economics.json": {
+   "status": "EQUAL",
+   "bytes": 2177
+  },
+  "session_pair_economics.jsonl": {
+   "status": "EQUAL",
+   "bytes": 9619
+  },
+  "session_participation_audit.json": {
+   "status": "EQUAL",
+   "bytes": 971
+  },
+  "session_safety_events.jsonl": {
+   "status": "EQUAL",
+   "bytes": 720688
+  },
+  "session_signals.jsonl": {
+   "status": "EQUAL",
+   "bytes": 4444
+  }
+ }
+}

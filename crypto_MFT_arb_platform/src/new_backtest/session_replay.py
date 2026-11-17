@@ -1472,7 +1472,9 @@ def live_paper_setup(profile_name: str) -> dict:
     guard = amend_guard_from_profile(profile)
     if guard is not None:
         session_kwargs["amend_guard"] = guard             # owner 16 Nov: read by TradingSession only when it sends real orders
-    return {"session_kwargs": session_kwargs, "queue_simulation": asdict(cfg.maker), "strategy_builder": build}
+    from crypto_stat_arb.config import incident_capture_from_profile
+    return {"session_kwargs": session_kwargs, "queue_simulation": asdict(cfg.maker), "strategy_builder": build,
+            "incident_capture": incident_capture_from_profile(profile)}      # W2b: None for every profile without the block (nothing is built)
 
 
 def _open_jsonl(path: Path):

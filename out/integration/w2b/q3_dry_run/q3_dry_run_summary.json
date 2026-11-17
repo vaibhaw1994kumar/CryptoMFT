@@ -1,0 +1,167 @@
+{
+ "label": "EXPLORATORY: Q3 dry run of the incident tooling on the 8 Nov paper recording (read-only on it)",
+ "source": "/Users/vaibhav/Documents/Newproject/out/integration/paper_live/run2/d7d-run2",
+ "profile": "perp_perp_maker_taker_v1_10",
+ "windows": [
+  {
+   "window": "stall_1594ms",
+   "detail": "all-channel delivery stall, 1,594 ms",
+   "completeness": "COMPLETE",
+   "incomplete_reasons": [],
+   "pre_s": 90.0,
+   "post_s": 90.0,
+   "frame_counts": {
+    "wire": 19812,
+    "raw": 19812,
+    "canonical": 8872,
+    "trades": 10186,
+    "derivatives": 1800,
+    "trace": 21604
+   },
+   "seeds": {
+    "BINANCE": "SEEDED_AT_WINDOW_START",
+    "BYBIT": "SEEDED_AT_WINDOW_START"
+   },
+   "audit_ok": true,
+   "audit_checks": {
+    "manifest": true,
+    "files": true,
+    "wire": true,
+    "trace": true,
+    "books": true,
+    "source_books": true
+   },
+   "book_events_compared_with_the_recording": 8872,
+   "book_states_in_the_window": {
+    "BYBIT": {
+     "VALID": 7250
+    },
+    "BINANCE": {
+     "VALID": 1614,
+     "GAP_DETECTED": 8
+    }
+   },
+   "replay": {
+    "events": {
+     "book": 8874,
+     "trade": 10186
+    },
+    "signals": 0,
+    "orders": 0,
+    "fills": 0,
+    "ledger_events": 414,
+    "data_span_s": 179.986079,
+    "speed_x": 69.70608988460695,
+    "input_files": 4
+   },
+   "wall_s": 12.6
+  },
+  {
+   "window": "stall_1941ms",
+   "detail": "all-channel delivery stall, 1,941 ms",
+   "completeness": "COMPLETE",
+   "incomplete_reasons": [],
+   "pre_s": 90.0,
+   "post_s": 90.0,
+   "frame_counts": {
+    "wire": 19587,
+    "raw": 19587,
+    "canonical": 8186,
+    "trades": 10584,
+    "derivatives": 1774,
+    "trace": 21272
+   },
+   "seeds": {
+    "BINANCE": "SEEDED_AT_WINDOW_START",
+    "BYBIT": "SEEDED_AT_WINDOW_START"
+   },
+   "audit_ok": true,
+   "audit_checks": {
+    "manifest": true,
+    "files": true,
+    "wire": true,
+    "trace": true,
+    "books": true,
+    "source_books": true
+   },
+   "book_events_compared_with_the_recording": 8186,
+   "book_states_in_the_window": {
+    "BYBIT": {
+     "VALID": 6624
+    },
+    "BINANCE": {
+     "GAP_DETECTED": 16,
+     "VALID": 1546
+    }
+   },
+   "replay": {
+    "events": {
+     "book": 8188,
+     "trade": 10584
+    },
+    "signals": 0,
+    "orders": 0,
+    "fills": 0,
+    "ledger_events": 43,
+    "data_span_s": 179.973141,
+    "speed_x": 74.64982207281851,
+    "input_files": 4
+   },
+   "wall_s": 13.3
+  },
+  {
+   "window": "stall_1302ms",
+   "detail": "all-channel delivery stall, 1,302 ms; 36 s before the recording ends",
+   "completeness": "INCOMPLETE",
+   "incomplete_reasons": [
+    "POST_WINDOW_SHORT:the recording ends before the window end"
+   ],
+   "pre_s": 90.0,
+   "post_s": 90.0,
+   "frame_counts": {
+    "wire": 12177,
+    "raw": 12177,
+    "canonical": 5979,
+    "trades": 5333,
+    "derivatives": 1261,
+    "trace": 13073
+   },
+   "seeds": {
+    "BINANCE": "SEEDED_AT_WINDOW_START",
+    "BYBIT": "SEEDED_AT_WINDOW_START"
+   },
+   "audit_ok": true,
+   "audit_checks": {
+    "manifest": true,
+    "files": true,
+    "wire": true,
+    "trace": true,
+    "books": true,
+    "source_books": true
+   },
+   "book_events_compared_with_the_recording": 5979,
+   "book_states_in_the_window": {
+    "BYBIT": {
+     "VALID": 4770
+    },
+    "BINANCE": {
+     "VALID": 1209
+    }
+   },
+   "replay": {
+    "events": {
+     "book": 5981,
+     "trade": 5333
+    },
+    "signals": 0,
+    "orders": 0,
+    "fills": 0,
+    "ledger_events": 9,
+    "data_span_s": 126.014958,
+    "speed_x": 70.60211137186899,
+    "input_files": 4
+   },
+   "wall_s": 20.7
+  }
+ ]
+}

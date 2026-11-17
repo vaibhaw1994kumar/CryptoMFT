@@ -484,3 +484,44 @@ A LIVE paper session is not deterministic and is not meant to be: it runs on the
 **The 860 against 837 ledger rows of the 8 Nov paper run (d7d-run2), explained.** The replay of 9 Nov was not stored, so the recording was replayed again (read-only) and its feed-control rows matched to the live ledger by venue, state and time. Of the 23 extra live rows, 17 are `FEED_CONTROL_STATE_TRANSITION`: 1 is a start-up row (the live session records Bybit as syncing before its first snapshot; a replay starts at the first frame); 16 are the two rows of 8 short stale episodes (22 ms to 1.9 s) that the live staleness timer saw between two frames and that ended at the next frame, where a replay, which evaluates the gate only at recorded events, sees a fresh book. The other 9 stale episodes are on both sides at shifted times (the live timer fires up to 3.8 s before the replay notices at its next event). 9 are `FEED_CONTROL_VENUE_CANCEL`, one per extra transition into the restricted state (8 episodes and the start-up row). 1 is `RMS_RECONCILIATION`, the last ledger row, written at finalize. The remaining difference is 4 rows the REPLAY had and the live run did not (1 kill-switch transition, 1 margin alert, 2 margin state transitions): every live kill-switch and margin-alert row, and 18 of the 19 live margin transitions, sit inside a stale interval or within 6 s after one, so they follow the stale intervals, which differ as above; these 4 could not be matched row by row because today's code no longer writes the 9 Nov replay (817 rows now: the mark rules changed on 11 and 16 Nov). No fill, order, position or cash figure is part of the difference.
 
 **Paper parity on v1_10 (offline, 17 Nov).** Both wirings (the replay's session and an offline `LivePaperSession`, each built from the one builder) on 60 minutes of the 8 Nov recording, marks included: 757 ledger rows on each side, the same rows, positions, cash, plans and strategy counters. It rests on one signal and one quote that was withdrawn unfilled, so it is wiring parity, not statistical parity. One condition: the paper side's clock gate (limit A3) was given an INJECTED measurement. Without it the paper session logs one `LIMIT_STATE` and never quotes, because an offline run has no server-time probe and the gate treats an unknown clock as a stop (a replay is "not evaluable" and is never stopped). That is the gate doing its job, and it is also what a live v1_10 paper session from this Mac would do today: the probe's uncertainty is about 85 to 95 ms against the 5 ms limit (open owner decision). A LIVE paper run of v1_10 was not made (network use needs the owner's go-ahead).
+
+## Incident capture (W2b, owner 17 Nov 2026)
+
+Profile `perp_perp_maker_taker_v1_12` = v1_11 + the `incident_capture` block. It is read by the live feed service only (paper and live); a replay has no recorder and never reads it, so every replay output of v1_12 equals v1_11's. Without the block nothing is built and no directory is made. It records; it changes no decision, no order and no file of the session recording. No new source file: the capture is in `live_feed.py` next to the recorder, the diagnostics in `session_audit.py`.
+
+**What an incident is.** A short window of the live recording, kept as a small recording of its own: `<session>/incidents/<id>/part-000001/` in the recorder's own layout (wire, raw, canonical, trades, derivatives, trace, quarantine: the same rows as the session's files), the paper journals of the same window under `paper/`, and `incident_manifest.json`. `iter_recorded_events` and the session replay open it with no change.
+
+**Ring.** Every `mark_seconds` (5 s) the service takes a mark: the size of every recorder file and a copy of each venue's book. Nothing is buffered per frame: the rows are already on disk. A mark costs about 0.12 ms on this Mac with the real Binance book (about 3,300 levels).
+
+**Window.** From the newest mark at least `pre_seconds` (90 s) before the trigger to `post_seconds` (5 s) after it; because the start is aligned to a mark it can be up to one mark longer than asked. The byte ranges between the two marks are copied in a worker thread, so the event loop does not wait for the copy.
+
+**Seed books.** A window starts in mid-stream, so each venue's book at the first mark is written as the first row of `canonical.jsonl` and `trace.jsonl`: a BOOK_SNAPSHOT with `quality_flags: [SEEDED_AT_WINDOW_START]`. It is a COPY of the real book at that mark, never built. For Binance USD-M (deltas chain by `pu`) the seed's sequence is written as the next delta's first id minus one when that delta follows the seed (`pu` equals the book's sequence); the true sequence stays in `native.book_sequence`. A venue whose book was not usable at the mark gets no seed and the manifest says `NO_VALID_BOOK_AT_WINDOW_START`. A seed is constructed state: a window is never used for a profit figure.
+
+**Trigger table** (`live_feed.INCIDENT_RULES`; each rule can be switched off in the block):
+
+| Rule | Raised by |
+|---|---|
+| `feed_unsafe` | ledger `FEED_HEALTH_STATE` with state UNSAFE; the service's book-stream silence |
+| `book_invalid` | a book entering GAP_DETECTED, INVALID_DATA, PRICE_ANOMALY or CHECKSUM_FAILED |
+| `breaker_trip` | ledger `BREAKER_TRIP` |
+| `kill_switch` | ledger `KILL_SWITCH_STATE_TRANSITION` to ACTIVE |
+| `hedge_unfilled` | ledger `HEDGE_ALARM`, `UNWIND_EXHAUSTED_ALARM`, `HEDGE_LOT_RESIDUAL_ALARM` |
+| `ghost_hedge` | ledger `HEDGE_LATE_FILL`, `LATE_REPORT_FOR_CLOSED_PLAN` |
+| `unknown_order_state` | ledger `NEW_RISK_HELD_HEDGE_UNKNOWN`, `HEDGE_CHAINS_ESCALATED`, `AMEND_TIMEOUT` |
+| `reconciliation_mismatch` | ledger `RECONCILIATION_DISAGREEMENT` |
+| `limit_stop` | ledger `LIMIT_STATE` going ACTIVE |
+| `manual` | a file named `TRIGGER` in `<session>/incidents/` (renamed when taken, not deleted) |
+| `markout_worse_than` | NOT BUILT (needs the markout trigger, W7) |
+| `venue_dislocation` | NOT BUILT (needs the dislocation episode record, W6) |
+
+A trigger inside an open window joins that incident. A trigger within `cooldown_seconds` (30 s) of the last capture, beyond `max_captures` (50 per session) or for a rule that is switched off is counted and not captured.
+
+**Never silent.** The manifest's `completeness` is COMPLETE or INCOMPLETE with the reason: `PRE_WINDOW_SHORT` (the session is younger than the window asked for), `POST_WINDOW_SHORT` (the session ended inside the post window), `MARK_GAP` (a gap between two marks inside the window: a stalled loop or an overload; the rows are still whole), `DISK_PRESSURE` (free space below `min_free_bytes`, 1 GiB: the window is not copied and the manifest is the record), `WRITE_ERROR`, `RECORDER_ERROR`, `SOURCE_MISSING`. The session summary carries every count (`incident_capture`).
+
+**Manifest.** Rule, every trigger with its time and source, instrument, venues, the window (start, trigger, end, seconds before and after, what was asked), frame counts per stream, each file's sha256 and, separately, the sha256 of the copied rows alone (so the copy can be checked against the session's own files), the seeds, the source ranges, and a note that the window's wire file is a cut of the session's hash chain.
+
+**The same cut offline** (`cut_recording_window`, command `incident-cut`): from a recording that already exists, plain or gzip parts, read-only on it. The seed is then the book rebuilt by applying the recording's own events up to the window start, and says so.
+
+**Diagnostics on a window** (`session_audit.audit_incident`, command `incident-audit`): manifest, file hashes and row counts, every wire record's own hash, trace references, the books applied from the seed; with the source recording, the window's book state and sequence are compared with it event for event. A replay never writes into an incident (the replay interlock).
+
+Not done in this step: a stored LIVE capture of each trigger type (no live session was run: it needs the network; the triggers are exercised by tests and the cut by the 8 Nov recording); the two triggers named above; a comparison report of decisions, orders, fills and ledger between a live incident and its replay (the window replay starts flat, so only the books are comparable today).

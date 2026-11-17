@@ -68,6 +68,46 @@ class PaperOnTheQueueSimulator(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(ack.event_type, ExecutionEventType.ACKNOWLEDGED)
             self.assertEqual(len(adapters[venue].executor.live_orders(venue)), 1)
 
+    async def test_a_ledger_event_cuts_an_incident_with_the_recording_and_the_journals(self):
+        """W2b (owner 17 Nov): in a paper session a ledger event of the trigger table cuts a window of the live recording into <session>/incidents/<id>/, with the paper journals of the same window, and the
+        session summary reports it. With no incident block nothing is built and no directory is made."""
+        from crypto_stat_arb.live_feed import SEED_LABEL
+        policy = {"enabled": True, "pre_seconds": 0.02, "post_seconds": 0.005, "mark_seconds": 0.002, "cooldown_seconds": 0.0, "min_free_bytes": 0}
+        with tempfile.TemporaryDirectory() as directory:
+            paper = await self._session(Path(directory), queue_simulation={}, incident_capture=policy)
+            incidents = paper.service.incidents
+            self.assertIsNotNone(incidents)
+            seen = {"n": 0}
+            inner = paper.service.event_listener
+
+            def listener(event, book, state, accepted):
+                inner(event, book, state, accepted)
+                seen["n"] += 1
+                if seen["n"] == 60:
+                    paper.session.ledger.record("BREAKER_TRIP", event.receive_ts_ns, cause="test")       # the ledger sink raises the rule
+            paper.service.event_listener = listener
+            await asyncio.wait_for(paper.run(), timeout=10)
+            report = incidents.report()
+            self.assertEqual((report["counts"]["captures"], report["triggers_by_rule"]), (1, {"breaker_trip": 1}))
+            capture = report["captures"][0]
+            out = Path(capture["directory"])
+            self.assertEqual(out.parent, paper.service.recorder.session_dir / "incidents")
+            manifest = json.loads((out / "incident_manifest.json").read_text())
+            self.assertEqual((manifest["rule"], manifest["triggers"][0]["source"]), ("breaker_trip", "ledger"))
+            self.assertGreaterEqual(manifest["window"]["pre_seconds"], 0.02)
+            self.assertGreater(manifest["frame_counts"]["canonical"], 0)
+            self.assertTrue(any(s["status"] == SEED_LABEL for s in manifest["seeds"].values()))
+            ledger_rows = [json.loads(line) for line in (out / "paper" / "ledger_stream.jsonl").read_text().splitlines()]
+            self.assertIn("BREAKER_TRIP", [row["event_type"] for row in ledger_rows])                    # the journal rows of the window are cut with it
+            self.assertTrue((out / "paper" / "paper_timestamps.jsonl").exists())
+            from new_backtest.session_replay import iter_recorded_events
+            self.assertGreater(len(list(iter_recorded_events(out))), manifest["frame_counts"]["canonical"])        # the window opens in the replay's reader (the seeds are extra rows)
+        with tempfile.TemporaryDirectory() as directory:
+            paper = await self._session(Path(directory), queue_simulation={})
+            self.assertIsNone(paper.service.incidents)
+            await asyncio.wait_for(paper.run(), timeout=10)
+            self.assertFalse((paper.service.recorder.session_dir / "incidents").exists())
+
     async def test_it_is_refused_with_other_adapters_or_outside_paper_mode(self):
         with tempfile.TemporaryDirectory() as directory:
             with self.assertRaisesRegex(ValueError, "INTERNAL_PAPER only"):
@@ -282,6 +322,34 @@ class LivePaperRunsTheProfileStrategy(unittest.TestCase):
             self.assertEqual(paper_kw["layer_risk_mode"], "enforce" if late else "count", name)
             self.assertEqual(paper_kw["breaker_config"] is not None, late, name)
             self.assertTrue(paper_kw["intent_journal"])
+
+    def test_the_setup_carries_the_profiles_limits_and_incident_block_to_the_paper_session(self):
+        """W2b: the session limits reach the paper session's own start-up steps through the setup (v1_10: book frames stamped at arrival), and the incident block is in the setup from v1_12 on."""
+        from new_backtest.session_replay import live_paper_setup
+        self.assertIsNone(live_paper_setup("perp_perp_maker_taker_v1_5")["incident_capture"])
+        self.assertIsNone(live_paper_setup("perp_perp_maker_taker_v1_11")["incident_capture"])
+        self.assertEqual(live_paper_setup("perp_perp_maker_taker_v1_12")["incident_capture"]["pre_seconds"], 90.0)
+        with tempfile.TemporaryDirectory() as tmp:
+            for name, stamped in (("perp_perp_maker_taker_v1_5", False), ("perp_perp_maker_taker_v1_10", True)):
+                base = Path(tmp) / name
+                base.mkdir()
+                setup = live_paper_setup(name)
+                paper = LivePaperSession(self.build_config(base, name), base / "out", "limits", LiveFeedSettings(udp_enabled=False, binance_market="linear", bybit_market="linear", durable=False),
+                                         queue_simulation=setup["queue_simulation"], session_kwargs=setup["session_kwargs"], strategy_builder=setup["strategy_builder"], tick_seconds=3600)
+                try:
+                    self.assertEqual(paper.service.settings.arrival_stamp, stamped, name)
+                    self.assertEqual(paper.session_limits is not None, stamped, name)
+                finally:
+                    self.close(paper)
+
+    def build_config(self, tmp: Path, name: str) -> Path:
+        from new_backtest.profiles import apply_profile, load_profile
+        from new_backtest.session_replay import SessionReplay
+        profile = load_profile(name)
+        rep = SessionReplay(apply_profile(profile, pair="SOLUSDT", start_date="2024-03-11", end_date="2024-03-11", data_root="", output_dir=""), profile)
+        cfg_file = tmp / "cfg.json"
+        cfg_file.write_text(json.dumps(rep.raw_config))
+        return cfg_file
 
     def test_a_killed_session_leaves_every_ledger_and_intent_record_on_disk(self):
         """W2a (owner 17 Nov; audit A2 2.1): the journals are appended and flushed per record. A process killed without finalize (simulated: the files are read while the session is still open and
