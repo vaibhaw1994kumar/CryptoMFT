@@ -170,6 +170,30 @@ class VenueTestnetTransport:
         self.settle_interval_seconds = settle_interval_seconds
         self.sleep = sleep
         self.requests_sent = 0
+        # (e), owner 17 Nov: an amend moves the SAME venue order (Bybit amend-order, Binance modify-order). The OMS knows the moved order under the REPLACE's own id; the venue knows it under the
+        # original client id. replacement id -> {"root": the venue's client id, "base": the quantity the venue order had filled when the amend took effect, "since_ms": when}: a query or cancel of the
+        # replacement goes to the root, and its fills are reported net of `base` (those belong to the old order in the OMS lineage; reporting them again would count them twice).
+        self._aliases: dict[str, dict[str, Any]] = {}
+        self._fill_since_ms: int | None = None
+
+    def _root(self, order_id: str) -> tuple[str, Decimal, int | None]:
+        alias = self._aliases.get(order_id)
+        return (order_id, Decimal("0"), None) if alias is None else (alias["root"], alias["base"], alias["since_ms"])
+
+    def _net_of(self, events: tuple[dict[str, Any], ...], base: Decimal) -> tuple[dict[str, Any], ...]:
+        if not base:
+            return events
+        out = []
+        for event in events:
+            if "cumulative_filled_quantity" in event:
+                net = max(Decimal("0"), Decimal(str(event["cumulative_filled_quantity"])) - base)
+                event = {**event, "cumulative_filled_quantity": decimal_text(net), "last_fill_quantity": decimal_text(net)}
+            out.append(event)
+        return tuple(out)
+
+    def amend(self, request, symbol, key, secret):
+        """No amend on this transport (spot): refused, never sent as a second order. The OMS records AMEND_REJECTED and keeps the old order."""
+        return ({"event_type": "REJECTED", "reason": f"amend not supported by {type(self).__name__}: refused, nothing sent"},)
 
     def __call__(
         self, request: dict[str, Any], secret: memoryview
@@ -188,12 +212,21 @@ class VenueTestnetTransport:
             return (self.account_risk_tiers(request, symbol, key, secret_bytes),)
         if action == "VERIFY_ACCOUNT":
             return self.verify_account(request, symbol, key, secret_bytes)
-        if action in {"SUBMIT", "REPLACE"}:
+        if action == "REPLACE":                     # (e): an amend in place, NEVER a second order (until 17 Nov a REPLACE was sent as a SUBMIT)
+            return self.amend(request, symbol, key, secret_bytes)
+        if action == "SUBMIT":
             return self.submit(request, symbol, key, secret_bytes)
-        if action == "CANCEL":
-            return self.cancel(request, symbol, key, secret_bytes)
-        if action == "QUERY":
-            return self.query(request, symbol, key, secret_bytes)
+        if action in ("CANCEL", "QUERY"):
+            field = "target_order_id" if action == "CANCEL" and request.get("target_order_id") else "order_id"
+            root, base, since_ms = self._root(str(request[field]))
+            if root != request[field]:
+                request = {**request, field: root, **({"order_id": root} if field == "target_order_id" else {})}
+            self._fill_since_ms = since_ms
+            try:
+                events = self.cancel(request, symbol, key, secret_bytes) if action == "CANCEL" else self.query(request, symbol, key, secret_bytes)
+            finally:
+                self._fill_since_ms = None
+            return self._net_of(events, base)
         raise ValueError(f"unsupported testnet action {action}")
 
     def submit(self, request, symbol, key, secret):  # pragma: no cover - abstract
@@ -487,6 +520,43 @@ class BybitV5TestnetTransport(VenueTestnetTransport):
         """Category-specific order fields (none for spot)."""
         return {}
 
+    def _row(self, order_link_id: str, symbol: str, key: str, secret: bytes) -> dict[str, Any] | None:
+        payload = self._signed("GET", "/v5/order/realtime", key, secret, params={"category": self.category, "symbol": symbol, "orderLinkId": order_link_id})
+        rows = payload.get("result", {}).get("list", []) if payload.get("retCode") == 0 else []
+        return rows[0] if rows else None
+
+    def amend(self, request, symbol, key, secret):
+        """(e), owner 17 Nov: Bybit amend-order (POST /v5/order/amend) moves the SAME order: `qty` is the order's new TOTAL quantity (the REPLACE carries the quote's total) and `price` the new price; the
+        venue keeps the order id and gives up its queue place. Linear perpetuals only (spot refuses, see the base class). The amend counts only when the venue shows the order at the new price:
+        then REPLACED and the order live (ACKNOWLEDGED) are reported for the replacement id, which from then on is an alias of the venue order. A refused amend is REJECTED and the order is unchanged.
+        An amend the venue accepted but does not show yet gives AMEND_ACCEPTED only (the OMS waits and queries; nothing is assumed)."""
+        if self.category != "linear":
+            return super().amend(request, symbol, key, secret)
+        root, _base, _since = self._root(str(request["target_order_id"]))
+        new_price = Decimal(str(request["price"]))
+        payload = self._signed("POST", "/v5/order/amend", key, secret, body={
+            "category": self.category, "symbol": symbol, "orderLinkId": root,
+            "qty": decimal_text(request["quantity"]), "price": decimal_text(new_price),
+        })
+        code = payload.get("retCode")
+        if code in (110001, 110008, 110010):            # order does not exist / already filled or cancelled
+            return ({"event_type": "REJECTED", "reason": f"replace target is not open (bybit {code}: {payload.get('retMsg')})"},)
+        if code != 0:
+            return ({"event_type": "REJECTED", "reason": f"amend rejected, order unchanged: bybit {code}: {payload.get('retMsg')}"},)
+        for attempt in range(self.settle_queries):
+            row = self._row(root, symbol, key, secret)
+            if row is not None and Decimal(str(row.get("price") or "0")) == new_price:
+                executed = Decimal(str(row.get("cumExecQty") or "0"))
+                self._aliases[str(request["order_id"])] = {"root": root, "base": executed, "since_ms": self.clock_ms()}
+                status = self.STATUS.get(str(row.get("orderStatus", "")), "")
+                live = {"event_type": "ACKNOWLEDGED", "venue_order_id": str(row.get("orderId", "")), "native_status": str(row.get("orderStatus", ""))}
+                if status in ("NEW", "PARTIAL"):
+                    return ({"event_type": "REPLACED"}, live)
+                return ({"event_type": "REPLACED"},)    # it filled or ended right after the amend: the next query reports it
+            if attempt + 1 < self.settle_queries:
+                self.sleep(self.settle_interval_seconds)
+        return ({"event_type": "AMEND_ACCEPTED"},)
+
     def query(self, request, symbol, key, secret):
         state = self._state(request["order_id"], symbol, key, secret)
         if state is None:
@@ -545,6 +615,8 @@ class BinanceFuturesTestnetTransport(BinanceSpotTestnetTransport):
                                     {"symbol": symbol, "orderId": order_id}, key, secret)
         if status != 200 or not isinstance(rows, list):
             return {}
+        if self._fill_since_ms is not None:              # (e): an amended order's own fills only (the earlier ones belong to the old order of the lineage)
+            rows = [row for row in rows if int(row.get("time") or 0) >= self._fill_since_ms]
         return {
             "liquidity": _liquidity([bool(row.get("maker")) for row in rows]),
             "venue_commission": [
@@ -584,6 +656,28 @@ class BinanceFuturesTestnetTransport(BinanceSpotTestnetTransport):
             return ({"event_type": "REJECTED",
                      "reason": f"binance {payload.get('code')}: {payload.get('msg')}"},)
         return self._with_fills(payload, symbol, key, secret, submit=True)
+
+    def amend(self, request, symbol, key, secret):
+        """(e), owner 17 Nov: Binance USD-M modify-order (PUT /fapi/v1/order) moves the SAME order (LIMIT orders; the venue re-queues it): symbol, side, the order's new TOTAL quantity and price,
+        addressed by the original client id. Counted only when the venue's answer shows the new price: then REPLACED and the order live; the replacement id becomes an alias of the venue order.
+        A refused modify is REJECTED and the order is unchanged. UNVERIFIED until the drill: whether a GTX (post-only) order can be modified."""
+        root, _base, _since = self._root(str(request["target_order_id"]))
+        new_price = Decimal(str(request["price"]))
+        status, payload = self._signed("PUT", self.ORDER_PATH, {
+            "symbol": symbol, "origClientOrderId": root, "side": request["side"],
+            "quantity": decimal_text(request["quantity"]), "price": decimal_text(new_price),
+        }, key, secret)
+        if status == 400 and payload.get("code") in (-2011, -2013):
+            return ({"event_type": "REJECTED", "reason": f"replace target is not open (binance {payload.get('code')}: {payload.get('msg')})"},)
+        if status != 200:
+            return ({"event_type": "REJECTED", "reason": f"amend rejected, order unchanged: binance {payload.get('code')}: {payload.get('msg')}"},)
+        if Decimal(str(payload.get("price") or "0")) != new_price:
+            return ({"event_type": "AMEND_ACCEPTED"},)
+        executed = Decimal(str(payload.get("executedQty") or "0"))
+        self._aliases[str(request["order_id"])] = {"root": root, "base": executed, "since_ms": self.clock_ms()}
+        kind = self.STATUS.get(str(payload.get("status", "")), "")
+        live = {"event_type": "ACKNOWLEDGED", "venue_order_id": str(payload.get("orderId", "")), "native_status": str(payload.get("status", ""))}
+        return ({"event_type": "REPLACED"}, live) if kind in ("NEW", "PARTIAL") else ({"event_type": "REPLACED"},)
 
     def query(self, request, symbol, key, secret):
         status, payload = self._signed("GET", self.ORDER_PATH, {
@@ -769,6 +863,8 @@ class BybitV5LinearTestnetTransport(BybitV5TestnetTransport):
             "category": self.category, "orderLinkId": order_link_id,
         })
         rows = payload.get("result", {}).get("list", []) if payload.get("retCode") == 0 else []
+        if self._fill_since_ms is not None:              # (e): an amended order's own fills only
+            rows = [r for r in rows if int(r.get("execTime") or 0) >= self._fill_since_ms]
         if not rows:
             return events
         liquidity = _liquidity([str(r.get("isMaker")).lower() == "true" for r in rows])
