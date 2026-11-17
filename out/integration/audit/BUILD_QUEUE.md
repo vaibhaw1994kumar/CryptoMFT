@@ -51,3 +51,29 @@ B and C of Order 3 have no W row. B = pair-close switch (separate from v1_10). C
 Remaining W1 work after A3 and the A9 fixes: state model, rollups, baselines, health block in manifests, `elif` and STALE_FEED fixes, `paper_summary` gate block, 0.3b, W13-B1, historical acceptance, and the open decisions (FEED_DELAYED threshold, cancel / withdraw on DEGRADED). Re-scope W1 against what the build session actually commits for A3 and the arrival stamp before starting it.
 
 Status 17 Nov: Order 1 (dust carry) and Order 2 (v1_10) are committed; Order 3 A1-A8 is committed (core bd8c8eb, outer a28210d); A9 ran and FAILED, fixes in progress in the build session; B and C wait behind them.
+
+## SETTLED (owner, 16-17 Nov 2026; taken from the owner's paste of 17 Nov)
+This section supersedes the "Still open" list above and the W1 "OPEN" questions where they conflict. Details of the DEGRADED/UNSAFE actions are "as specified in the owner's 16 Nov answers"; that specification is not reproduced in this file.
+- New `feed_health.py` approved (answers the "new module or extend" question).
+- FEED_DELAYED threshold: 1000 ms in v1_11.
+- DEGRADED / UNSAFE actions: as specified by the owner (16 Nov).
+- Markout: decomposed, measured after the fill, + = favourable. FAST_MM's pre-fill signal stays separate.
+- "Four parts" = pre-trade delay, fees, impact, opportunity; mapped to the six-term split.
+- March holdout is SPENT; the next recorder days are reserved as the unread holdout.
+- `book_risk`: observation only, never in the hedge dispatch.
+- `config.yaml` to `discarded/` (after the secrets check). `config.testnet.example.yaml` fixed to the schema.
+
+## REVISED ORDER (owner, 17 Nov 2026) - replaces the "all 12 steps" order
+(a) 2i core fixes 1-9 (amend confirmation, amend timeout query, lost amend then cancel, MM exits, fee_delta, incremental cost growth, MM interface, settings-hash fix, MARGIN_STATE_TRANSITION explanation), then 2i item 10 (dense arb case on v1_10);
+(b) finish the rehearsal rerun;
+(c) one session builder for paper and replay, a profile -> real-order session command, journals written as each record is made;
+(d) W1 feed health and clock -> v1_11, with the clock-source decision (rework onto `feed_health.py`);
+(e) Bybit tier endpoint, then the testnet drill on v1_10 (testnet only);
+(f) gates, manifest hashes, settings-hash fix, core speed-up, housekeeping;
+(g) incident capture (W2b).
+Then, only after (g): W6 notify-only; W7/W10 limited to "persist the pre-trade estimate per order".
+
+## PARKED until the owner reopens them
+W8 routing selector; W9 Almgren-Chriss; the Cont-Kukanov split; W5 VPIN / conditions; W3 / W4 book-shape and resilience models (`book_risk` observation stays); further execution-cost studies; a faster recorder for 10,000 events/s (A9 stays "sustains about 3,000-3,500/s per venue, target not met"). The four design briefs in `out/integration/designs/` stay on disk; W3_W4, W8_W9_W12 and most of W7_W5_W10 are parked.
+
+One core-editing session at a time; each step reports the suite and identity gates.

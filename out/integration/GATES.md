@@ -8,7 +8,7 @@ Every statement below is marked by its source. "Observed" means I ran a read-onl
 
 | Gate | What it checks | Evidence that counts | How it runs | Source |
 |---|---|---|---|---|
-| G0 pins | the pinned hashes in section 3 (14 input files, profile hashes v1_3 .. v1_11, freeze files) against disk and git HEAD; the golden hashes are recorded here and checked only with `--golden-root` (none are checked by default; section 4) | the printed PASS / FAIL list of the command below, exit code 0, and the SUMMARY line, including the count "goldens X/Y checked" | `python3.12 crypto_MFT_arb_platform/scripts/compare_baselines.py hashes` (from `Newproject/`; light, reads files, writes nothing). Its own test: `... compare_baselines.py hashes-selftest` | defined by this file under decision 2; the script is the `hashes` subcommand proposed in DELIVERABLE_C section 1 |
+| G0 pins | the pinned hashes in section 3 (14 input files, profile hashes v1_3 .. v1_12, freeze files) against disk and git HEAD; the golden hashes are recorded here and checked only with `--golden-root` (none are checked by default; section 4) | the printed PASS / FAIL list of the command below, exit code 0, and the SUMMARY line, including the count "goldens X/Y checked" | `python3.12 crypto_MFT_arb_platform/scripts/compare_baselines.py hashes` (from `Newproject/`; light, reads files, writes nothing). Its own test: `... compare_baselines.py hashes-selftest` | defined by this file under decision 2; the script is the `hashes` subcommand proposed in DELIVERABLE_C section 1 |
 | G1 suite | the full test suite fails only on the tests listed in `out/integration/baselines/failing_tests_phase0.txt` | real counts (passed / failed / errors) and the output of `compare_baselines.py tests LOG` with `UNCHANGED: true`; new tests must pass; new tests never go on the list | from `crypto_MFT_arb_platform/`: `PYTHONPATH=src python3.12 -m pytest -rfE tests > LOG`, then `python3.12 scripts/compare_baselines.py tests LOG`. The list has 93 names: 92 FAILED + 1 collection ERROR, all under `tests/platform_kit` | DELIVERABLE_C section 1; A6 0.4 (`compare_baselines.py` `tests`). Last recorded result: 3,749 passed, 92 failed, 1 collection error (`out/integration/cost/LARGE_GAPS_RESULTS.md`, per A6). Not re-run by me |
 | G2 pins | the G0 pin block still holds on the tree being accepted: the 14 pinned input files unchanged, every pinned or frozen profile YAML unchanged, no frozen profile edited in place | G0's output at the commit being accepted; a version that is frozen later is added to the pin block in the same commit as its freeze file | same command as G0 (G0 is the mechanism, G2 is the requirement at each phase) | DELIVERABLE_C section 1 (G2) |
 | G3 identity | frozen v1_9, 1 SOL, 29 Oct 2026 capture, `--gross 5.0` (the identityB/C/F/L/M recipe in `out/integration/cost/LARGE_GAPS_RULES.md`): the 13 non-manifest output files byte-identical; the manifest compared excluding `release_identity.*` and `run` | the replay's output files and a per-file equality list. The reference aggregate sha256 prefix is 9d5fa86f71393161 (A2 0.2c, copied here as a prefix only; the full value and the file list are NOT in this file: UNVERIFIED by me) | heavy replay, one heavy job at a time, run by the build session; no script of this file runs it | DELIVERABLE_C section 1 (G3); the 29 Oct capture carries the waiver label REJECTED / CRITICAL (BUILD_QUEUE data rules) |
@@ -33,9 +33,10 @@ Computed by me on 17 Nov 2026 from the working copy `crypto_MFT_arb_platform/pro
 | v1_9 | FROZEN (owner, 16 Nov) | f798ac62497da2f26b93c845b383ea5f47dd6d7409e6122c3f733d7b857be8cb | equals `profile_sha256` in `perp_perp_maker_taker_v1_9.freeze.json` (committed in 27a838e); checked by the script |
 | v1_9s | PINNED | 3d037d2be19a2ffbf8cc3586bbcbbc7ee6ed20e5f17553b936b3aba2d1cf1d0a | listed as a reference profile in `v1_9.freeze.json`; checked by the script |
 | v1_10 | NOT FROZEN | e0fb1910fd3c890469f8d1a7da45ca4f07d415dcd36b6795fbe00774ca436a18 observed 17 Nov, NEVER pinned | still changing (BUILD_QUEUE; last commit f45fedf turned arrival stamps on). Shown as INFO. Joins the PINNED group only at its freeze |
-| v1_11 | NOT FROZEN | 4eb991d158da8a90f29b8db768673382c87e1b24d160db4766d08611be6c88e4 observed 17 Nov (equal to the value in the request of the integration session; committed in outer cc68e0a), NEVER pinned | v1_10 + feed health (W1); it will change as W2 onward add keys. Shown as INFO. Joins the PINNED group only at its freeze |
+| v1_11 | NOT FROZEN | 5413d192313c0c7791dc867003609056fae9380f7d2152225d6b2b7d09e53889 observed 17 Nov (was 4eb991d1... when first recorded; the build session applied the owner decisions of 16 Nov, outer 45d9c7e / d6c17fa), NEVER pinned | v1_10 + feed health (W1); changes as later items add keys. Shown as INFO. Joins the PINNED group only at its freeze |
+| v1_12 | NOT FROZEN | 067bcd7878d6e2cad380618b09ed018f15d1d926cbecdd5d3c6f0757f04fe220 observed 17 Nov, NEVER pinned | new since W2b (af7b980, per the build session): v1_11 + incident_capture. Shown as INFO |
 
-Not in the "v1_3 .. v1_11" group, covered elsewhere: legacy_v0, v1, v1_1, v1_2 and `v1_2.freeze.json` are in the 14 inputs (section 4); the two spot profiles (spot_perp_basis_v1, spot_spot_maker_taker_v1) are in no pin group (A6 listed their prefixes 1de39a19 and 45a4d11b; not pinned here, owner to say if they should be).
+Not in the "v1_3 .. v1_12" group, covered elsewhere: legacy_v0, v1, v1_1, v1_2 and `v1_2.freeze.json` are in the 14 inputs (section 4); the two spot profiles (spot_perp_basis_v1, spot_spot_maker_taker_v1) are in no pin group (A6 listed their prefixes 1de39a19 and 45a4d11b; not pinned here, owner to say if they should be).
 
 ## 4. Adopted from the MM session (copied, not recomputed)
 
@@ -91,7 +92,7 @@ inputs | PINNED | 5fb59b9081c04f26c2cce978f81413d15882675099aadd20eca0770938e6f9
 inputs | PINNED | 698431278b62b67c89b43fa49c888721624aba00b3cad6565bda9426b892c210 | out/queue_v2/manifest.json
 inputs | PINNED | f1b6eee8f872939ef1471da046ed1271baab2fd3b5e2cfbae586a345b31c1172 | out/queue_v2/manifest_mar2024.json
 
-# group 2: profile hashes v1_3 .. v1_11 (computed from the working copy on 17 Nov 2026 and checked against git HEAD; no MM source)
+# group 2: profile hashes v1_3 .. v1_12 (computed from the working copy on 17 Nov 2026 and checked against git HEAD; no MM source)
 profiles | PINNED | f6a4137c8e252411e079fd23f265cdca6d2900f65f3eb7870c8ba42b673d876f | crypto_MFT_arb_platform/profiles/perp_perp_maker_taker_v1_3.yaml
 profiles | PINNED | 0142fbaf61db51839c400a22a15441914e7393301acb14650604ca310504a0fd | crypto_MFT_arb_platform/profiles/perp_perp_maker_taker_v1_4.yaml
 profiles | PINNED | 9235acad441e2e45ca6c94709038db4d80d056bd53daa972c3bd221c5729fbd1 | crypto_MFT_arb_platform/profiles/perp_perp_maker_taker_v1_5.yaml
@@ -101,7 +102,8 @@ profiles | PINNED | e52b22aa0bb088484838d2ea4e31c61e9c71330d5bec6383d78e035dcd1e
 profiles | FROZEN | f798ac62497da2f26b93c845b383ea5f47dd6d7409e6122c3f733d7b857be8cb | crypto_MFT_arb_platform/profiles/perp_perp_maker_taker_v1_9.yaml
 profiles | PINNED | 3d037d2be19a2ffbf8cc3586bbcbbc7ee6ed20e5f17553b936b3aba2d1cf1d0a | crypto_MFT_arb_platform/profiles/perp_perp_maker_taker_v1_9s.yaml
 profiles | NOT_FROZEN | e0fb1910fd3c890469f8d1a7da45ca4f07d415dcd36b6795fbe00774ca436a18 | crypto_MFT_arb_platform/profiles/perp_perp_maker_taker_v1_10.yaml
-profiles | NOT_FROZEN | 4eb991d158da8a90f29b8db768673382c87e1b24d160db4766d08611be6c88e4 | crypto_MFT_arb_platform/profiles/perp_perp_maker_taker_v1_11.yaml
+profiles | NOT_FROZEN | 5413d192313c0c7791dc867003609056fae9380f7d2152225d6b2b7d09e53889 | crypto_MFT_arb_platform/profiles/perp_perp_maker_taker_v1_11.yaml
+profiles | NOT_FROZEN | 067bcd7878d6e2cad380618b09ed018f15d1d926cbecdd5d3c6f0757f04fe220 | crypto_MFT_arb_platform/profiles/perp_perp_maker_taker_v1_12.yaml
 
 # group 3: freeze files (v1_2 freeze file is in group 1)
 freeze | PINNED | c452f37087a72f1a8e04e9c00a87cdd9f0e3b33473e973a2fc1ff6301e9b4624 | crypto_MFT_arb_platform/profiles/perp_perp_maker_taker_v1_9.freeze.json
