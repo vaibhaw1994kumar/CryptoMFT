@@ -401,6 +401,79 @@ class LivePaperRunsTheProfileStrategy(unittest.TestCase):
             finally:
                 self.close(paper)
 
+    def real_order_session(self, tmp: Path, **kw):
+        """(c), owner 17 Nov: a VENUE_TESTNET session with FAKE venue adapters (no network, nothing leaves the process) running the profile's strategy, its views fed from the live feed."""
+        from crypto_stat_arb.config import load_config
+        from crypto_stat_arb.fees import Liquidity
+        from crypto_stat_arb.session import ExecutionMode
+        from new_backtest.session_replay import live_paper_setup
+        from test_oms_amend import AmendVenue
+        (tmp / "base").mkdir(parents=True)
+        base, _ = self.build(tmp / "base")
+        self.close(base)
+        cfg_file = tmp / "base" / "cfg.json"
+        cfg, _ = load_config(cfg_file)
+
+        class FakeVenue(AmendVenue):                      # rests orders and answers as a venue would; reports the profile's own fee rates so the start-up fee check passes
+            def account_fee_rates(self, instrument_id):
+                rate = lambda liq: cfg.instruments.fee_schedule.raw_rate_bps(self.venue, instrument_id, liq, None) / 10_000
+                return rate(Liquidity.MAKER), rate(Liquidity.TAKER)
+        setup = live_paper_setup(self.PROFILE)
+        adapters = {v: FakeVenue(v) for v in cfg.venues}
+        paper = LivePaperSession(cfg_file, tmp / "real", "real-order", LiveFeedSettings(udp_enabled=False, binance_market="linear", bybit_market="linear", durable=False),
+                                 execution_mode=ExecutionMode.VENUE_TESTNET, adapters=adapters, session_kwargs=setup["session_kwargs"], strategy_builder=setup["strategy_builder"], tick_seconds=3600,
+                                 **{"real_order_problems": setup["real_order_problems"], **kw})
+        return paper, adapters, setup
+
+    def feed(self, paper, n=3):
+        from crypto_stat_arb.models import MarketEvent
+        clock = 1_700_000_000_000_000_000
+        for k in range(n):
+            for venue, bid, ask in (("BYBIT", "100.000", "100.010"), ("BINANCE", "100.002", "100.012")):
+                ev = MarketEvent.from_dict({"event_type": "BOOK_SNAPSHOT", "venue": venue, "instrument_id": paper.cfg.instrument_id, "exchange_ts_ns": clock + k, "source_ts_ns": clock + k,
+                                            "receive_ts_ns": clock + k * 1_000_000 + 1_000_000, "sequence": k + 1, "bids": [{"price": bid, "quantity": str(5 + k)}], "asks": [{"price": ask, "quantity": "5"}]})
+                book = paper.service.books[venue]
+                book.apply(ev)
+                paper._on_event(ev, book, book.state, True)
+
+    def test_a_real_order_session_is_refused_unless_enabled_and_the_profile_qualifies(self):
+        """(c): real orders stay OFF. Without the flag the session is refused; with it, a profile that misses a real-order requirement is refused (v1_5 here); the CLI still refuses venue_testnet."""
+        with tempfile.TemporaryDirectory() as tmp:
+            with self.assertRaisesRegex(ValueError, "not enabled"):
+                self.real_order_session(Path(tmp) / "a")
+            with self.assertRaisesRegex(ValueError, "real-order requirements"):
+                self.real_order_session(Path(tmp) / "b", real_order_strategy=True)
+        import argparse
+        import asyncio as _asyncio
+        from crypto_stat_arb.cli import _run_live_paper
+        with self.assertRaisesRegex(SystemExit, "VENUE_TESTNET needs a CredentialBroker"):
+            _asyncio.run(_run_live_paper(argparse.Namespace(queue_sim=False, maker_dry_run=False, execution_mode="venue_testnet")))
+
+    def test_a_real_order_session_takes_its_views_from_the_live_feed_with_the_same_builder_and_no_simulated_venue(self):
+        """(c), owner 17 Nov: with venue adapters the profile's strategy reads views fed from the LIVE feed through the same view builder the simulated venue uses; the queue simulator's books
+        and executor do not exist in it, and the same events give the same views and venue-state readings as in simulated paper."""
+        with tempfile.TemporaryDirectory() as tmp:
+            real, adapters, _ = self.real_order_session(Path(tmp) / "r", real_order_strategy=True, real_order_problems=[])
+            (Path(tmp) / "s").mkdir()
+            sim, _ = self.build(Path(tmp) / "s")
+            try:
+                self.assertTrue(real.real_order_views)
+                self.assertEqual(real.feeder.adapters, {})                              # no simulated venue: a fill can only come from the venue's own report
+                self.assertFalse(hasattr(real, "queue_executor"))
+                self.assertEqual([type(x).__name__ for x in real.session.strategies], ["ArbSessionStrategy"])
+                self.assertIs(real.session.router.adapters["BYBIT"], adapters["BYBIT"])     # orders go to the venue adapters
+                self.feed(real)
+                self.feed(sim)
+                for venue in real.cfg.venues:
+                    rv, sv = real._views[venue], sim._views[venue]
+                    self.assertTrue(rv.ready)
+                    self.assertEqual((rv.best_bid, rv.best_ask, rv.best_bid_size, rv.best_ask_size), (sv.best_bid, sv.best_ask, sv.best_bid_size, sv.best_ask_size), venue)
+                    self.assertEqual(real._states[venue].regime().bucket, sim._states[venue].regime().bucket, venue)
+                self.assertEqual([x for v in adapters.values() for x in v.submits if x.time_in_force.value != "GTC"], [])      # nothing but what the strategy decided was sent
+            finally:
+                for p in (real, sim):
+                    self.close(p)
+
     def test_a_strategy_builder_without_the_queue_simulator_is_refused(self):
         with tempfile.TemporaryDirectory() as tmp:
             from new_backtest.profiles import apply_profile, load_profile

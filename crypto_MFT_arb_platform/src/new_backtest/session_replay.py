@@ -1482,6 +1482,7 @@ def live_paper_setup(profile_name: str) -> dict:
         session_kwargs["amend_guard"] = guard             # owner 16 Nov: read by TradingSession only when it sends real orders
     from crypto_stat_arb.config import incident_capture_from_profile
     return {"session_kwargs": session_kwargs, "queue_simulation": asdict(cfg.maker), "strategy_builder": build,
+            "real_order_problems": check_real_order_profile(profile),           # (c): empty when the profile meets every real-order requirement (v1_10 and later); a real-order session refuses otherwise
             "incident_capture": incident_capture_from_profile(profile)}      # W2b: None for every profile without the block (nothing is built)
 
 

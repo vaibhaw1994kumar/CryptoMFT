@@ -1,0 +1,71 @@
+{
+ "a": "/Users/vaibhav/Documents/Newproject/out/integration/w1d/identity_1sol_v19",
+ "b": "/Users/vaibhav/Documents/Newproject/out/integration/c_real_order/identity_1sol_v19",
+ "equal": true,
+ "files_compared": 14,
+ "different": [],
+ "skipped": [
+  "session_run_record.json"
+ ],
+ "files": {
+  "maker_observations.jsonl": {
+   "status": "EQUAL",
+   "bytes": 19023
+  },
+  "session_decision_events.jsonl": {
+   "status": "EQUAL",
+   "bytes": 3996
+  },
+  "session_fills.jsonl": {
+   "status": "EQUAL",
+   "bytes": 48925
+  },
+  "session_intent_fills.jsonl": {
+   "status": "EQUAL",
+   "bytes": 4339
+  },
+  "session_intent_journal.jsonl": {
+   "status": "EQUAL",
+   "bytes": 10590
+  },
+  "session_limits_and_stops.json": {
+   "status": "EQUAL",
+   "bytes": 6181
+  },
+  "session_manifest.json": {
+   "status": "EQUAL_EXCEPT_EXCLUDED",
+   "excluded": [
+    "run",
+    "manifest.release_identity"
+   ]
+  },
+  "session_markouts_decomposed.jsonl": {
+   "status": "EQUAL",
+   "bytes": 16491
+  },
+  "session_orders.jsonl": {
+   "status": "EQUAL",
+   "bytes": 4669
+  },
+  "session_pair_economics.json": {
+   "status": "EQUAL",
+   "bytes": 2183
+  },
+  "session_pair_economics.jsonl": {
+   "status": "EQUAL",
+   "bytes": 5995
+  },
+  "session_participation_audit.json": {
+   "status": "EQUAL",
+   "bytes": 958
+  },
+  "session_safety_events.jsonl": {
+   "status": "EQUAL",
+   "bytes": 20645
+  },
+  "session_signals.jsonl": {
+   "status": "EQUAL",
+   "bytes": 1116
+  }
+ }
+}
