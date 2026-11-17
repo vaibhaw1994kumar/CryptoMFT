@@ -393,6 +393,11 @@ def scan_venue_day_checks(data_root: Path | str, venue: str, pair: str, day: str
     msg_key = None
     msg_n = 0
     seq_seen = False
+    # W1 (0.3b): a venue feed restart shows as the update id going back to 1 (Bybit `u == 1` after a larger id: the venue's own "new snapshot, start again" signal). Each one is a recorded event of the
+    # file with the time of the next full snapshot (the resync), so an exclusion window comes from the data and not from a hard-coded time. Counted, never repaired.
+    prev_u = None
+    resets: list[dict[str, Any]] = []
+    reset_open: dict[str, Any] | None = None
 
     def close_message() -> None:
         nonlocal crossed_msgs, multi_msgs, msgs, msg_key, msg_n
@@ -412,6 +417,22 @@ def scan_venue_day_checks(data_root: Path | str, venue: str, pair: str, day: str
                 back_l += 1
             prev_l = ev.local_ts
         t = ev.local_ts if ev.local_ts > 0 else ev.exchange_ts
+        if ev.kind in (BOOK, DELTA):
+            u = ev.payload.get("u") if hasattr(ev.payload, "get") else None
+            if isinstance(u, (int, float)) and not isinstance(u, bool):
+                if int(u) == 1 and prev_u is not None and prev_u > 1:
+                    reset_open = {"ts": t, "exchange_ts": ev.exchange_ts, "previous_update_id": int(prev_u), "resync_ts": t if ev.kind == BOOK else None}
+                    if len(resets) < 200:
+                        resets.append(reset_open)
+                    if ev.kind == BOOK:
+                        reset_open = None
+                elif reset_open is not None and ev.kind == BOOK:
+                    reset_open["resync_ts"] = t
+                    reset_open = None
+                prev_u = int(u)
+            elif reset_open is not None and ev.kind == BOOK:
+                reset_open["resync_ts"] = t
+                reset_open = None
         if ev.kind == DELTA:
             ev_n["delta"] += 1
             key = (ev.exchange_ts, ev.local_ts if ev.local_ts > 0 else ev.exchange_ts)
@@ -473,6 +494,7 @@ def scan_venue_day_checks(data_root: Path | str, venue: str, pair: str, day: str
     return {
         "venue": venue, "day": day, "events": ev_n, "loader_duplicates_dropped": loader_stats.get("duplicates_dropped", 0),
         "sequence_fields_present": seq_seen,
+        **({"sequence_resets": [dict(r, seconds_to_resync=None if r["resync_ts"] is None else round(r["resync_ts"] - r["ts"], 6)) for r in resets]} if resets else {}),       # W1 (0.3b): update id back to 1 = a venue feed restart; the exclusion window is [ts, resync_ts]. The key is absent when there is none (every existing scan result is unchanged)
         "timestamps_backwards_exchange": back_x, "timestamps_backwards_receive": back_l, "invalid_trades": int(invalid_trades),
         "stale_gaps": {f"gt_{g:g}s": {"count": c, "seconds_in_gaps": round(sec, 3)} for g, (c, sec) in gaps.items()},
         "observation": {

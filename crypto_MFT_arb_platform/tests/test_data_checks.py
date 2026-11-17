@@ -68,6 +68,24 @@ class Scan(unittest.TestCase):
         self.assertEqual(r["arrival_checks"]["trade_side"]["violations"], 1)
         self.assertEqual(r["arrival_checks"]["trade_side"]["status"], "MEASURED")
 
+    def test_an_update_id_back_to_one_is_a_recorded_feed_restart_with_its_resync_time(self):
+        """W1 (0.3b): the venue's update id going back to 1 after a larger one is a feed restart (the 2026-04-23 06:09 UTC case). It is a recorded event of the file with the time of the next full
+        snapshot, so the exclusion window comes from the data. SYNTHETIC rows."""
+        write(self.root, "bybit", "book_snapshots", [dict(snap(T0), u=500), dict(snap(T0 + 12), u=3)])
+        write(self.root, "bybit", "book_events", [dict(delta(T0 + 1, "bid", 99.0, 4.0), u=501), dict(delta(T0 + 2, "bid", 99.0, 5.0), u=502),
+                                                  dict(delta(T0 + 10, "bid", 99.0, 1.0), u=1),                    # the restart: the id starts again
+                                                  dict(delta(T0 + 11, "bid", 99.0, 2.0), u=2), dict(delta(T0 + 13, "bid", 99.0, 3.0), u=4)])
+        (reset,) = self.scan()["sequence_resets"]
+        self.assertEqual(reset["previous_update_id"], 502)
+        self.assertAlmostEqual(reset["ts"], T0 + 10 + 0.002)
+        self.assertAlmostEqual(reset["resync_ts"], T0 + 12 + 0.002)
+        self.assertAlmostEqual(reset["seconds_to_resync"], 2.0)
+
+    def test_a_file_with_no_restart_or_no_update_ids_has_no_such_key(self):
+        write(self.root, "bybit", "book_snapshots", [snap(T0)])
+        write(self.root, "bybit", "book_events", [delta(T0 + 1, "bid", 99.0, 4.0)])
+        self.assertNotIn("sequence_resets", self.scan())
+
     def test_stale_gaps_are_counted_at_5_and_30_seconds_with_the_seconds_lost(self):
         write(self.root, "bybit", "book_snapshots", [snap(T0)])
         write(self.root, "bybit", "book_events", [delta(T0 + 6, "bid", 99.0, 4.0), delta(T0 + 40, "bid", 99.0, 5.0), delta(T0 + 40.2, "bid", 99.0, 6.0)])

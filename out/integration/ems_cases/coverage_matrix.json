@@ -456,6 +456,38 @@
   "evidence": "runs/scn_3x_baseline_v110/session_ems_path_coverage.json"
  },
  {
+  "case": "J2/J3 checks, 4a_hedge_feed_lost_actions_v111",
+  "covering_layer": "execution layer, router",
+  "count": 23,
+  "result": "PASS",
+  "detail": "off_tick=0, tactic_violations=0",
+  "evidence": "runs/scn_4a_hedge_feed_lost_actions_v111/session_ems_path_coverage.json"
+ },
+ {
+  "case": "J2/J3 checks, 4b_hedge_feed_lost_observe_v111",
+  "covering_layer": "execution layer, router",
+  "count": 19,
+  "result": "PASS",
+  "detail": "off_tick=0, tactic_violations=0",
+  "evidence": "runs/scn_4b_hedge_feed_lost_observe_v111/session_ems_path_coverage.json"
+ },
+ {
+  "case": "J2/J3 checks, 4c_feed_delay_v111",
+  "covering_layer": "execution layer, router",
+  "count": 14,
+  "result": "PASS",
+  "detail": "off_tick=0, tactic_violations=0",
+  "evidence": "runs/scn_4c_feed_delay_v111/session_ems_path_coverage.json"
+ },
+ {
+  "case": "J2/J3 checks, 4x_feed_health_v111",
+  "covering_layer": "execution layer, router",
+  "count": 27,
+  "result": "PASS",
+  "detail": "off_tick=0, tactic_violations=0",
+  "evidence": "runs/scn_4x_feed_health_v111/session_ems_path_coverage.json"
+ },
+ {
   "case": "J2/J3 checks, H1a",
   "covering_layer": "execution layer, router",
   "count": 13,
@@ -650,9 +682,9 @@
  {
   "case": "2h New-level vs queued fills: every maker fill carries queue_class",
   "covering_layer": "simulator observation rows",
-  "count": 358,
+  "count": 402,
   "result": "PASS",
-  "detail": "maker fills with the field 358 in 46 runs (scn_2a_quote_withdraw, scn_2a_v110, scn_2b_v110, scn_2c_partial_then_fill, scn_2c_thin_top, scn_2c_zero_exhausted, scn_2c_zero_exhausted_layeronly, scn_2c_zero_then_fill, scn_2c_zero_then_fill_layeronly, scn_2d_ghost3, scn_2d_ghost30, scn_2e_feed_gap, scn_2f_rate_limit, scn_2f_v110, scn_2i_control_v19, scn_2i_s0, scn_2i_v110_dense, scn_2i_v110_disconnect, scn_2i_v110_dup_filled, scn_2i_v110_reject, scn_2i_v110_short, scn_2i_v110_timeout, scn_2j_duplicate_filled, scn_2k_breaker_pause, scn_2k_breaker_trip, scn_2l_maker_outage, scn_2m_p99, scn_2m_p999, scn_2m_p999_v110, scn_2m_processing, scn_2m_processing_v110, scn_2n_size1, scn_2n_size1_v110, scn_2n_size25, scn_2n_size25_v110, scn_2n_size5, scn_2n_size5_v110, scn_3a_order_rate_v110, scn_3b_loss_stop_v110, scn_3c_clock_none_v110, scn_3c_clock_ok_v110, scn_3e_missing_marks_v110, scn_3g_close_pairs_on_v110, scn_3x_baseline_v110, scn_H1a, scn_H1b): {'queued': 358}. The class is read from the placement of the same order (new_level: no displayed size at our price when we placed, queued: behind displayed size, unknown: queue not known); it sits on the maker_fill rows of maker_observations.jsonl, an observation-only file, so no existing output changed. Agreement with real fills is a Track C result and is NOT claimed",
+  "detail": "maker fills with the field 402 in 50 runs (scn_2a_quote_withdraw, scn_2a_v110, scn_2b_v110, scn_2c_partial_then_fill, scn_2c_thin_top, scn_2c_zero_exhausted, scn_2c_zero_exhausted_layeronly, scn_2c_zero_then_fill, scn_2c_zero_then_fill_layeronly, scn_2d_ghost3, scn_2d_ghost30, scn_2e_feed_gap, scn_2f_rate_limit, scn_2f_v110, scn_2i_control_v19, scn_2i_s0, scn_2i_v110_dense, scn_2i_v110_disconnect, scn_2i_v110_dup_filled, scn_2i_v110_reject, scn_2i_v110_short, scn_2i_v110_timeout, scn_2j_duplicate_filled, scn_2k_breaker_pause, scn_2k_breaker_trip, scn_2l_maker_outage, scn_2m_p99, scn_2m_p999, scn_2m_p999_v110, scn_2m_processing, scn_2m_processing_v110, scn_2n_size1, scn_2n_size1_v110, scn_2n_size25, scn_2n_size25_v110, scn_2n_size5, scn_2n_size5_v110, scn_3a_order_rate_v110, scn_3b_loss_stop_v110, scn_3c_clock_none_v110, scn_3c_clock_ok_v110, scn_3e_missing_marks_v110, scn_3g_close_pairs_on_v110, scn_3x_baseline_v110, scn_4a_hedge_feed_lost_actions_v111, scn_4b_hedge_feed_lost_observe_v111, scn_4c_feed_delay_v111, scn_4x_feed_health_v111, scn_H1a, scn_H1b): {'queued': 402}. The class is read from the placement of the same order (new_level: no displayed size at our price when we placed, queued: behind displayed size, unknown: queue not known); it sits on the maker_fill rows of maker_observations.jsonl, an observation-only file, so no existing output changed. Agreement with real fills is a Track C result and is NOT claimed",
   "evidence": "runs/scn_*/maker_observations.jsonl"
  },
  {
@@ -780,7 +812,7 @@
   "covering_layer": "session, OMS kill switch (keep_risk_reducing)",
   "count": 1,
   "result": "PASS",
-  "detail": "the price pause began at 11:20:05, the kill switch tripped once after 60.05 s (limit 60 s); no hedge was in flight and the day's later signals were already over, so the stop on new quotes is shown by the unit test, not by this run; after the injected reconnect the Binance feed stayed in a price pause for more than an hour: an artefact of the injected snapshot, not a market fact",
+  "detail": "the price pause began at 11:20:05, the kill switch tripped once after 60.05 s (limit 60 s); no hedge was in flight and the day's later signals were already over, so the stop on new quotes is shown by the unit test, not by this run; the price pause ended at the injected reconnect (11:22:30). (The first version of this case left the Binance book invalid for over an hour after the gap: an artefact of the injection, fixed 17 Nov by bridging the reconnect snapshot to the venue's delta chain)",
   "evidence": "runs/scn_3e_missing_marks_v110/session_limits.json"
  },
  {
@@ -790,6 +822,38 @@
   "result": "PASS",
   "detail": "closing quotes placed 28, closing fills 5 (4.9 SOL sold against longs on the maker venue); the maker venue position stayed between 0 and 4.9 (never below flat: never beyond flat, never opens a short); CLOSE_PAIR_BEYOND_FLAT 0; hedge buys on the other venue 4.9 against closing fills 4.9 (reduce-only), hedge sells 9.58 for maker buys 9.58775: hedged equals filled up to the dust carried (0.0078 SOL, HEDGE_DUST_CARRIED 3); signals 57 against 13 with the switch off (3x), maker fills 29 against 13",
   "evidence": "runs/scn_3g_close_pairs_on_v110/session_limits.json"
+ },
+ {
+  "case": "4x W1 feed health on v1_11, observation only (dense window)",
+  "covering_layer": "time_integrity.FeedHealthMonitor, session",
+  "count": 165,
+  "result": "PASS",
+  "detail": "signals, orders and fills equal the v1_10 baseline 3x (13, 27, 26): True; 165 state transitions recorded, one FEED_HEALTH_STATE event each ({'to_DEGRADED': 80, 'to_HEALTHY': 81, 'to_UNSAFE': 4}); BINANCE book: episodes {'DEGRADED': 11, 'UNSAFE': 1}, seconds DEGRADED 36.1 UNSAFE 3.4; BINANCE trade: episodes {'DEGRADED': 10, 'UNSAFE': 1}, seconds DEGRADED 27.5 UNSAFE 3.1; BYBIT book: episodes {'DEGRADED': 52, 'UNSAFE': 1}, seconds DEGRADED 113.2 UNSAFE 2.3; BYBIT trade: episodes {'DEGRADED': 7, 'UNSAFE': 1}, seconds DEGRADED 15.4 UNSAFE 3.2. Thresholds ASSUMED; the capture's recorder quality is REJECTED: mechanics only",
+  "evidence": "runs/scn_4x_feed_health_v111/session_feed_health.json"
+ },
+ {
+  "case": "4a W1: hedge feed (Binance) lost 40 s with a maker quote resting; actions ON for the case (withdraw and block at DEGRADED; both none in v1_11)",
+  "covering_layer": "session feed health, OMS withdraw_quote",
+  "count": 1,
+  "result": "PASS",
+  "detail": "quotes resting when the feed was lost 1; Binance book states in the window [('HEALTHY', 'DEGRADED'), ('DEGRADED', 'UNSAFE'), ('UNSAFE', 'HEALTHY')] (one event each); withdrawn by feed health 1; the quote stayed live [-0.04] s after the DEGRADED point; evaluations blocked by feed health 4687; no quote was live after the transition",
+  "evidence": "runs/scn_4a_hedge_feed_lost_actions_v111/session_feed_health.json"
+ },
+ {
+  "case": "4b W1: the same loss, observation only (v1_11 as it is): what happens today",
+  "covering_layer": "session feed health, OMS withdraw_quote",
+  "count": 1,
+  "result": "PASS",
+  "detail": "quotes resting when the feed was lost 1; Binance book states in the window [('HEALTHY', 'DEGRADED'), ('DEGRADED', 'UNSAFE'), ('UNSAFE', 'HEALTHY')] (one event each); withdrawn by feed health 0; the quote stayed live [9.49] s after the DEGRADED point; evaluations blocked by feed health 0; WITHOUT the action the resting maker quote stayed live with the hedge feed dead (audit A1 1.4 gap 5, now on record); it ended by another rule, not by feed health",
+  "evidence": "runs/scn_4b_hedge_feed_lost_observe_v111/session_feed_health.json"
+ },
+ {
+  "case": "4c W1 (W13-B1): INJECTED feed delay, Binance stamps 1.5 s late for 60 s, FEED_DELAYED on at 1000 ms FOR THE CASE (the threshold is PENDING the owner)",
+  "covering_layer": "time_integrity, session time gate",
+  "count": 2817,
+  "result": "PASS",
+  "detail": "events delayed by the injection 3046; TIME_INTEGRITY_BLOCK 2817 (decisions blocked on those events and on the peer venue's); feed-health delay transitions on Binance 18 ([('DEGRADED', 'UNSAFE'), ('HEALTHY', 'DEGRADED'), ('UNSAFE', 'DEGRADED')]); maker quotes sent inside the delayed minute 0 (rule: 0)",
+  "evidence": "runs/scn_4c_feed_delay_v111/session_limits.json"
  },
  {
   "case": "3f A6 tier table and A8 account check at start-up (recorded messages)",

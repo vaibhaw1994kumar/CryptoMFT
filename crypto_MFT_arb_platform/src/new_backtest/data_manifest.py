@@ -39,7 +39,8 @@ def gate(path: str, venues: tuple[str, ...], pair: str, start_day: str, end_day:
             empty = [c for c, x in e["channels"].items() if x["rows"] == 0]
             rows.append({"venue": v, "day": day, "status": e["status"], "placeholder_snapshots": bool(e["channels"].get("book_snapshots", {}).get("placeholder")),
                          "truncated_channels": trunc, "empty_channels": empty,
-                         "rows": {c: x["rows"] for c, x in e["channels"].items()}})
+                         "rows": {c: x["rows"] for c, x in e["channels"].items()},
+                         **({"sequence_resets": e["sequence_resets"]} if e.get("sequence_resets") else {})})       # W1 (0.3b): feed restarts recorded in the manifest (quality_preflight.scan_venue_day_checks): listed, never blocking
             if trunc:
                 blocked.append((v, day, "truncated gzip in " + ",".join(trunc)))
     flags = []                                    # rebuild acceptance (step 2): a day under 99 % touch match is flagged in every result that uses it
@@ -60,6 +61,8 @@ def gate(path: str, venues: tuple[str, ...], pair: str, start_day: str, end_day:
            "placeholder_snapshot_days": [f"{r['venue']}/{r['day']}" for r in rows if r.get("placeholder_snapshots")],
            "snapshots_ignored_for": list(skipped_snapshot_venues),
            "rebuild_acceptance_flags": flags,
+           **({"sequence_reset_windows": [{"venue": r["venue"], "day": r["day"], "from_ts": x["ts"], "to_ts": x.get("resync_ts")} for r in rows for x in r.get("sequence_resets", [])]}
+              if any(r.get("sequence_resets") for r in rows) else {}),       # W1 (0.3b): the exclusion windows a run should use, from the data (absent when the manifest records none: every existing result is unchanged)
            "provenance_unrecorded_venue_days": unrec,           # capture region / client version not recorded in the files: listed, never blocking
            "provenance_note": "capture_region and client_version are declared per dataset and mostly UNKNOWN (see the manifest)"}
     hard = [(v, d, why) for v, d, why in blocked if why.startswith("book_events are a copy")]

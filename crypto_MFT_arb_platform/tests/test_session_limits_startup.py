@@ -268,5 +268,66 @@ class StartUp(unittest.TestCase):
         self.assertEqual(paper.account_checks, {})
 
 
+class W1PaperSide(unittest.IsolatedAsyncioTestCase):
+    """W1 (owner 17 Nov), the paper session: the gate block of paper_summary names the gate that acted, and the server-time probe is the host clock monitors' independent reference."""
+    CONFIG = Path(__file__).resolve().parents[1] / "config" / "research.json"
+
+    def paper(self, directory, **kw):
+        import json
+        from crypto_stat_arb.live_feed import LiveFeedSettings
+        from crypto_stat_arb.paper_live import LivePaperSession
+        from test_live_feed import FakeConnector, FakeWebSocket, StepClock
+        binance = FakeWebSocket([json.dumps({"e": "depthUpdate", "E": 1000, "T": 1000, "s": "BTCUSDT", "U": 101, "u": 101, "b": [["59999.90", "2"]], "a": []})])
+        bybit = FakeWebSocket([json.dumps({"topic": "orderbook.50.BTCUSDT", "type": "snapshot", "ts": 1000, "data": {"s": "BTCUSDT", "u": 10, "b": [["60060.00", "1"]], "a": [["60060.10", "1"]]}}),
+                               json.dumps({"topic": "orderbook.50.BTCUSDT", "type": "delta", "ts": 1001, "data": {"s": "BTCUSDT", "u": 11, "b": [["60060.00", "2"]], "a": []}})])
+        clock = StepClock()
+
+        async def http_getter(url, timeout):
+            await asyncio.sleep(0.05)
+            return json.dumps({"lastUpdateId": 100, "bids": [["59999.90", "1"]], "asks": [["60000.00", "1"]]}), clock()
+        return LivePaperSession(self.CONFIG, Path(directory) / "live", "w1-paper",
+                                LiveFeedSettings(max_events=4, reconnect_min_seconds=0.001, reconnect_max_seconds=0.002, durable=False, udp_enabled=False, trade_streams_enabled=False),
+                                websocket_connector=FakeConnector({"BINANCE": [binance], "BYBIT": [bybit]}), http_getter=http_getter, clock_ns=clock, tick_seconds=10, **kw), clock
+
+    async def test_the_summary_names_the_gate_that_acted_and_labels_the_sessions_own_block(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as d:
+            paper, _clock = self.paper(d)
+            summary = await asyncio.wait_for(paper.run(), timeout=5)
+        acting = summary["book_integrity_gate_acting"]
+        self.assertEqual(acting["source"], "live feed service (strategy_gate)")
+        self.assertEqual(acting["suspend_count"], summary["live_feed"]["service"]["strategy_gate"]["suspend_count"] if "service" in summary["live_feed"] else acting["suspend_count"])
+        self.assertIn("NOT evaluated in a live session", summary["book_integrity_gate"]["label"])
+        self.assertNotIn("feed_health", summary)                                             # no feed-health block was configured
+
+    async def test_the_server_time_probe_is_the_host_clocks_reference_and_a_failed_probe_is_recorded(self):
+        import json
+        import tempfile
+        with tempfile.TemporaryDirectory() as d:
+            paper, clock = self.paper(d)
+            rows = []
+            paper._write_row = rows.append
+
+            async def time_getter(url, timeout):
+                now_ms = clock() // 1_000_000
+                return (json.dumps({"serverTime": now_ms}) if "binance" in url else json.dumps({"retCode": 0, "result": {"timeNano": str(now_ms * 1_000_000)}, "time": now_ms})), clock()
+            paper.service.http_getter = time_getter
+            await paper._probe_clock(clock())
+            for monitor in (paper.session.time_monitor, paper.service.time_monitor):
+                self.assertTrue(monitor.host_clock_external)
+                self.assertTrue(monitor.host_clock.source.startswith("server_time:"))
+                self.assertEqual(monitor.host_clock.state, "SYNCED")
+                self.assertIn("reference_cross_check", monitor.report()["host_offset_correction"])
+            before = paper.session.time_monitor.host_clock.samples
+
+            async def dead(url, timeout):
+                raise ConnectionError("down")
+            paper.service.http_getter = dead
+            await paper._probe_clock(clock())
+            self.assertEqual(paper.session.time_monitor.host_clock.samples, before)          # no measurement: nothing is fed
+            self.assertEqual([r["record_type"] for r in rows], ["CLOCK_PROBE_FAILED"])
+            paper._timestamps.close()
+
+
 if __name__ == "__main__":
     unittest.main()

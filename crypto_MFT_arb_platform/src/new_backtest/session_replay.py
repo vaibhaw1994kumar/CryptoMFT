@@ -27,7 +27,7 @@ from decimal import Decimal
 from pathlib import Path
 from typing import Any, Iterable
 
-from crypto_stat_arb.config import check_real_order_profile, config_from_raw, hedge_dust_fields, raw_config_from_profile, session_limits_from_profile
+from crypto_stat_arb.config import check_real_order_profile, config_from_raw, feed_health_config_report, feed_health_from_profile, hedge_dust_fields, raw_config_from_profile, session_limits_from_profile
 from crypto_stat_arb.derivatives import DerivativeTicker
 from crypto_stat_arb.metrics import regime_sample
 from crypto_stat_arb.ems.layer import hedge_policy_fields
@@ -255,8 +255,11 @@ class SessionReplay:
             layer_risk_mode=layer_risk_mode,   # E0 step (c): count (default) = the layer's base-ceiling gate only counts; enforce = it refuses before the OMS reserves anything
             intent_journal=True,               # E0 step (a) (owner 10 Nov): the orders are journaled as layer intents next to the OMS plan; observation only
             markout_horizons_s=tuple(config.markout_horizons_s),          # owner 9 Nov: forward markouts per fill, by venue and role, as the backtester reports them (the core's MarkoutTracker)
+            feed_health=feed_health_from_profile(profile),             # W1 (owner 17 Nov): None (nothing built) for every profile without the block
             session_limits=session_limits_from_profile(profile, float(config.arb.max_position_base)),      # owner 16 Nov (Order 3): oms.session_limits, None (nothing built) for every profile without the block
         )
+        if self.session.feed_health is not None:                            # W1: the effective feed-health settings of the run, in the manifest only when the profile has the block
+            self.config_notes["feed_health"] = feed_health_config_report(self.app_config, profile)
         if self.session._limits is not None:                                # owner 16 Nov (Order 3): recorded in the manifest only when the profile has the block
             self.config_notes["session_limits"] = {"config": self.session._limits, "tier_table": "replays keep the ASSUMED margin tiers (the account-read tiers are a real-order start-up step), labelled",
                                                    "clock_offset": "not evaluable in a replay without a measured clock: counted, never blocking", "verify_account": "a start-up step for paper and live; not run in a replay"}
@@ -1199,6 +1202,9 @@ def live_paper_setup(profile_name: str) -> dict:
     limits = session_limits_from_profile(profile, float(cfg.arb.max_position_base))
     if limits is not None:
         session_kwargs["session_limits"] = limits         # owner 16 Nov (Order 3): the profile's oms.session_limits, the clip scaling the loss stop; absent in every earlier profile
+    fh = feed_health_from_profile(profile)
+    if fh is not None:
+        session_kwargs["feed_health"] = fh                # W1: the same block the replay passes
     return {"session_kwargs": session_kwargs, "queue_simulation": asdict(cfg.maker), "strategy_builder": build}
 
 
@@ -1263,3 +1269,25 @@ def load_keepalive_notes(session_dir) -> list[tuple[int, str]]:
             elif w["venue"] == "BINANCE" and "depth" in ch and '"e":"depthUpdate"' not in fd and '"lastUpdateId"' not in fd:
                 notes.append((w["receive_ts_ns"], "BINANCE"))
     return sorted(notes)
+
+
+def feed_health_config_table(profile_names: Iterable[str]) -> dict:
+    """W1 (audit A1 1.1): the effective feed-health settings of each named profile, resolved through the same loaders a run uses (no data is read; the run-specific fields are placeholders).
+    Report only. A profile whose runtime is `backtester` runs on the backtester's own loop, where the core time policy is NOT used: its row says so."""
+    from .profiles import apply_profile, load_profile
+    out = {}
+    for name in profile_names:
+        profile = load_profile(name)
+        cfg = apply_profile(profile, dataset="mar2024", data_root="", pair="SOLUSDT", start_date="2024-03-11", end_date="2024-03-11", output_dir="/tmp/_feed_health_table")
+        venues = tuple(cfg.venues)
+        try:
+            raw, _notes = raw_config_from_profile(profile, pair=cfg.pair, venues=venues, ticks=dated_ticks(cfg.start_date), quantity_steps={v: quantity_steps()[v] for v in venues},
+                                                  size_base=float(cfg.arb.max_position_base), seed=cfg.seed)
+            app, _ = config_from_raw(raw)
+            row = feed_health_config_report(app, profile)
+            if row["runtime"] != "session":
+                row["note"] = "runtime backtester: the core time policy is not used by this profile's own runs; the values are what a session-runtime run would get"
+        except Exception as exc:                 # a profile the core loader refuses (a legacy or spot profile): reported, not guessed
+            row = {"runtime": str(profile.get("runtime", "backtester")), "not_resolvable_through_the_core_loader": f"{type(exc).__name__}: {exc}"[:200]}
+        out[name] = row
+    return out

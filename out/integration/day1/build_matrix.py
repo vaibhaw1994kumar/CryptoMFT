@@ -499,7 +499,7 @@ if r and lim:
     kill = lim["kills"].get("missing_marks")
     _o3("3e_missing_marks_v110", "3e A5 missing marks (INJECTED: the Binance feed lost for 150 s, 11:20:00 to 11:22:30)", "session, OMS kill switch (keep_risk_reducing)", lim["counters"].get("missing_marks_trips", 0),
         kill is not None and kill["paused_s"] > 60.0 and lim["counters"].get("missing_marks_trips", 0) == 1,
-        f"the price pause began at 11:20:05, the kill switch tripped once after {kill['paused_s']:.2f} s (limit 60 s); no hedge was in flight and the day's later signals were already over, so the stop on new quotes is shown by the unit test, not by this run; after the injected reconnect the Binance feed stayed in a price pause for more than an hour: an artefact of the injected snapshot, not a market fact" if kill else "no trip")
+        f"the price pause began at 11:20:05, the kill switch tripped once after {kill['paused_s']:.2f} s (limit 60 s); no hedge was in flight and the day's later signals were already over, so the stop on new quotes is shown by the unit test, not by this run; the price pause ended at the injected reconnect (11:22:30). (The first version of this case left the Binance book invalid for over an hour after the gap: an artefact of the injection, fixed 17 Nov by bridging the reconnect snapshot to the venue's delta chain)" if kill else "no trip")
 r, lim = load("3g_close_pairs_on_v110"), None
 if r and base3:
     c = r["manifest"]["ledger_event_counts"]
@@ -521,6 +521,49 @@ if r and base3:
     _o3("3g_close_pairs_on_v110", "3g B pair close ON (arb.close_pairs reduce_only_quote, NOT in v1_10; the dense window of 3x with the switch on)", "strategy, OMS (reduce-only quote and hedge), session", closes,
         not bad and gap < 0.05 and r["cov"]["checks"]["pass"],
         f"closing quotes placed {quotes}, closing fills {closes} ({close_qty:g} SOL sold against longs on the maker venue); the maker venue position stayed between {lo:g} and {hi:g} (never below flat: never beyond flat, never opens a short); CLOSE_PAIR_BEYOND_FLAT {c.get('CLOSE_PAIR_BEYOND_FLAT', 0)}; hedge buys on the other venue {bin_buy:g} against closing fills {close_qty:g} (reduce-only), hedge sells {bin_sell:g} for maker buys {maker_buy:g}: hedged equals filled up to the dust carried ({gap:.4f} SOL, HEDGE_DUST_CARRIED {c.get('HEDGE_DUST_CARRIED', 0)}); signals {len(r['signals'])} against {len(base3['signals'])} with the switch off (3x), maker fills {len(fills_by)} against {sum(1 for f in base3['fills'] if f['venue'] == 'BYBIT')}")
+# ---- W1 feed health on v1_11 (owner 17 Nov). 4x observation only; 4a / 4b the hedge feed lost with a quote resting (actions on for the case / off); 4c an injected feed delay with FEED_DELAYED on for the case.
+def _fh(case):
+    f = RUNS / f"scn_{case}" / "session_feed_health.json"
+    return json.loads(f.read_text()) if f.exists() else None
+
+
+def _quotes(r):
+    j = {x["intent_id"]: x for x in rows(r["dir"] / "session_intent_journal.jsonl") if x.get("event") == "intent" and x.get("role") == "primary"}
+    return [(j[o["intent_id"]]["created_ts"], o["terminal_ts_ns"] / 1e9, o) for o in r["orders"] if o.get("intent_id") in j and o.get("terminal_ts_ns")]
+
+
+r, fh = load("4x_feed_health_v111"), _fh("4x_feed_health_v111")
+if r and fh and base3:
+    same = (len(r["signals"]), len(r["orders"]), len(r["fills"])) == (len(base3["signals"]), len(base3["orders"]), len(base3["fills"]))
+    add("4x W1 feed health on v1_11, observation only (dense window)", "time_integrity.FeedHealthMonitor, session", fh["transitions"], same and fh["actions"] == {"block_new_quotes_on": "none", "withdraw_quotes_on": "none"},
+        f"signals, orders and fills equal the v1_10 baseline 3x ({len(r['signals'])}, {len(r['orders'])}, {len(r['fills'])}): {same}; {fh['transitions']} state transitions recorded, one FEED_HEALTH_STATE event each ({fh['counters']}); "
+        + "; ".join(f"{k.split('|')[0]} {k.split('|')[2]}: episodes {v['episodes']}, seconds DEGRADED {v['seconds_in_state']['DEGRADED']:.1f} UNSAFE {v['seconds_in_state']['UNSAFE']:.1f}" for k, v in fh["feeds"].items())
+        + ". Thresholds ASSUMED; the capture's recorder quality is REJECTED: mechanics only", "runs/scn_4x_feed_health_v111/session_feed_health.json")
+G0, G1 = 1793271600 + 93.0, 1793271600 + 133.0                # the injected loss, 11:01:33 to 11:02:13 UTC
+for case, title in (("4a_hedge_feed_lost_actions_v111", "4a W1: hedge feed (Binance) lost 40 s with a maker quote resting; actions ON for the case (withdraw and block at DEGRADED; both none in v1_11)"),
+                    ("4b_hedge_feed_lost_observe_v111", "4b W1: the same loss, observation only (v1_11 as it is): what happens today")):
+    r, fh = load(case), _fh(case)
+    if r and fh:
+        resting = [(c, e, o) for c, e, o in _quotes(r) if c < G0 < e or G0 <= c < G0 + 1]
+        ev = [e for e in rows(r["dir"] / "session_safety_events.jsonl") if e["event_type"] == "FEED_HEALTH_STATE" and e.get("venue") == "BINANCE" and e.get("stream") == "book" and G0 <= e["ts_ns"] / 1e9 <= G1 + 5]
+        seq = [(e["previous"], e["state"]) for e in ev]
+        live_after = [round(e - (G0 + 0.5), 2) for c, e, o in resting]            # seconds the quote stayed live after the feed was DEGRADED (0.5 s of silence)
+        by_feed = [o.get("cancel_reason") for c, e, o in resting if str(o.get("cancel_reason") or "").startswith("quote_withdrawn:feed_health")]
+        acting = case.startswith("4a")
+        ok = seq == [("HEALTHY", "DEGRADED"), ("DEGRADED", "UNSAFE"), ("UNSAFE", "HEALTHY")] and bool(resting) and ((len(by_feed) == 1 and max(live_after) < 1.0) if acting else (not by_feed))
+        _o3(case, title, "session feed health, OMS withdraw_quote", len(resting), ok,
+            f"quotes resting when the feed was lost {len(resting)}; Binance book states in the window {seq} (one event each); withdrawn by feed health {len(by_feed)}; the quote stayed live {live_after} s after the DEGRADED point; "
+            f"evaluations blocked by feed health {fh['counters'].get('signals_blocked_by_feed_health', 0)}; "
+            + ("no quote was live after the transition" if acting else "WITHOUT the action the resting maker quote stayed live with the hedge feed dead (audit A1 1.4 gap 5, now on record); it ended by another rule, not by feed health"),
+            f"runs/scn_{case}/session_feed_health.json")
+r, fh = load("4c_feed_delay_v111"), _fh("4c_feed_delay_v111")
+if r and fh:
+    blocks = r["manifest"]["ledger_event_counts"].get("TIME_INTEGRITY_BLOCK", 0)
+    ev = [e for e in rows(r["dir"] / "session_safety_events.jsonl") if e["event_type"] == "FEED_HEALTH_STATE" and e.get("venue") == "BINANCE" and e.get("cause") == "delay"]
+    sent_in = [c for c, e, o in _quotes(r) if 1793271600 + 61.0 <= c < 1793271600 + 120.0]
+    _o3("4c_feed_delay_v111", "4c W1 (W13-B1): INJECTED feed delay, Binance stamps 1.5 s late for 60 s, FEED_DELAYED on at 1000 ms FOR THE CASE (the threshold is PENDING the owner)", "time_integrity, session time gate", blocks,
+        blocks > 0 and bool(ev) and not sent_in,
+        f"events delayed by the injection {fh['injected_delay_events']}; TIME_INTEGRITY_BLOCK {blocks} (decisions blocked on those events and on the peer venue's); feed-health delay transitions on Binance {len(ev)} ({sorted({(e['previous'], e['state']) for e in ev})}); maker quotes sent inside the delayed minute {len(sent_in)} (rule: 0)")
 add("3f A6 tier table and A8 account check at start-up (recorded messages)", "testnet transports, sdk, paper_live start-up", 21, True,
     "21 tests in tests/test_session_limits_startup.py: the Binance leverageBracket and Bybit risk-limit reads become ordered tiers (initial rate 1/leverage, deductions, order of brackets), an error or an unexpected shape raises, the read asks for the READ permission only, a spot transport says it has none; the start-up refuses when any venue's tiers cannot be read and replaces the ASSUMED tiers (source ACCOUNT_READ) when they can; verify_account refuses hedge mode, another margin mode or leverage, a missing leverage row, collects every problem, and labels reduce-only acceptance DERIVED_FROM_ONE_WAY_MODE and UNVERIFIED. HAND-WRITTEN messages in the documented shapes: the endpoint shapes are UNVERIFIED against the live endpoints, and the replays have no account (a replay keeps the ASSUMED tiers, labelled)", "tests/test_session_limits_startup.py")
 

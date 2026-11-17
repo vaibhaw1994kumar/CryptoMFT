@@ -201,4 +201,4 @@
 {"cumulative_filled_quantity": "0.5", "event": "ORDER_LIFECYCLE", "order_id": "eee9acc3-4e19-5451-a91e-edc13ca001c3", "reason": "", "source": "ADAPTER_CALLBACK", "stage": "fill_notified", "ts": 1793271782.5223818, "venue": "BINANCE"}
 {"confirmed_residual_base": "0E-12", "event": "MARGIN_PRICE_PAUSE", "execution_blocked_reason": "margin_price_missing", "pending_hedge_qty": "0", "stage": "alert", "ts": 1793272805.9580173}
 {"confirmed_residual_base": "0E-12", "event": "KILL_SWITCH_STATE_TRANSITION", "execution_blocked_reason": "breaker:PAUSED", "pending_hedge_qty": "0", "reason": "missing marks", "source": "LIMIT_MISSING_MARKS", "stage": "alert", "ts": 1793272866.007626}
-{"confirmed_residual_base": "0E-12", "event": "MARGIN_PRICE_PAUSE", "execution_blocked_reason": "margin_price_missing", "pending_hedge_qty": "0", "stage": "alert", "ts": 1793272955.1584423}
+{"confirmed_residual_base": "0E-12", "event": "MARGIN_PRICE_PAUSE", "execution_blocked_reason": "margin_price_missing", "pending_hedge_qty": "0", "stage": "alert", "ts": 1793277308.1884742}

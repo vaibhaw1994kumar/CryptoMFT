@@ -1,0 +1,507 @@
+{
+ "events": 156219,
+ "time_integrity_blocked_events": 659,
+ "own_lag_visible": false,
+ "feed_health": {
+  "policy": {
+   "delay_degraded_ns": 500000000,
+   "delay_unsafe_ns": 2000000000,
+   "silence_degraded_ns": 500000000,
+   "silence_unsafe_ns": 5000000000,
+   "own_lag_ns": 100000000,
+   "recover_ns": 2000000000,
+   "burst_window_ns": 100000000,
+   "burst_count": 200
+  },
+  "feeds": {
+   "BINANCE|SOL-USDT-PERP|book": {
+    "events": 31047,
+    "rate_per_s": 9.458,
+    "delay_ms": {
+     "mean": 46.892,
+     "p50": 37.809,
+     "p99": 312.612,
+     "max": 1760.947,
+     "window": 20000
+    },
+    "max_gap_ms": 6493.885,
+    "bursts": 0,
+    "own_lag_max_ms": 0.0,
+    "own_lag_events": 0,
+    "state": "HEALTHY",
+    "cause": "",
+    "episodes": {
+     "DEGRADED": 22,
+     "UNSAFE": 3
+    },
+    "seconds_in_state": {
+     "HEALTHY": 3202.052054,
+     "DEGRADED": 70.591892,
+     "UNSAFE": 10.027408
+    }
+   },
+   "BYBIT|SOL-USDT-PERP|book": {
+    "events": 125172,
+    "rate_per_s": 38.131,
+    "delay_ms": {
+     "mean": 15.967,
+     "p50": 9.368,
+     "p99": 253.446,
+     "max": 2503.545,
+     "window": 20000
+    },
+    "max_gap_ms": 3890.139,
+    "bursts": 0,
+    "own_lag_max_ms": 0.0,
+    "own_lag_events": 0,
+    "state": "HEALTHY",
+    "cause": "",
+    "episodes": {
+     "DEGRADED": 20,
+     "UNSAFE": 2
+    },
+    "seconds_in_state": {
+     "HEALTHY": 3223.809174,
+     "DEGRADED": 54.409904,
+     "UNSAFE": 4.495039
+    }
+   }
+  },
+  "transitions": 91,
+  "own_lag_episodes": 0,
+  "host_clock_state": "SYNCED"
+ },
+ "clock_offset_estimate_ns": 0,
+ "host_clock": {
+  "max_offset_ns": 100000000,
+  "max_drift_ppm": 500.0,
+  "source": "EXCHANGE_TIMESTAMP_LOW_QUANTILE",
+  "state": "SYNCED",
+  "samples": 1555,
+  "latest_offset_ns": 0,
+  "latest_drift_ppm": 0.0,
+  "last_observed_ts_ns": 1794179424471216000,
+  "max_abs_offset_ns": 75921000,
+  "max_abs_drift_ppm": 1068.1750753176727
+ },
+ "label": "D7d run2 live paper session, 8 Nov 2026 (recorded canonical events; now = receive time: own lag not visible)",
+ "source_file": "canonical_events.jsonl.gz",
+ "thresholds": "perp_perp_maker_taker_v1_11 feed_health block (ASSUMED values)",
+ "wall_s": 4.8,
+ "transitions_by_feed_and_state": {
+  "BYBIT|book|HEALTHY->DEGRADED|delay": 17,
+  "BINANCE|book|HEALTHY->DEGRADED|silence": 14,
+  "BYBIT|book|DEGRADED->HEALTHY|recovered": 19,
+  "BINANCE|book|DEGRADED->HEALTHY|recovered": 20,
+  "BINANCE|book|HEALTHY->DEGRADED|delay": 8,
+  "BYBIT|book|DEGRADED->UNSAFE|delay": 1,
+  "BYBIT|book|UNSAFE->HEALTHY|recovered": 2,
+  "BINANCE|book|DEGRADED->UNSAFE|silence": 3,
+  "BINANCE|book|UNSAFE->HEALTHY|recovered": 2,
+  "BINANCE|book|UNSAFE->DEGRADED|silence": 1,
+  "BYBIT|book|HEALTHY->UNSAFE|delay": 1,
+  "BYBIT|book|HEALTHY->DEGRADED|silence": 3
+ },
+ "first_transitions": [
+  {
+   "venue": "BYBIT",
+   "instrument_id": "SOL-USDT-PERP",
+   "stream": "book",
+   "previous": "HEALTHY",
+   "state": "DEGRADED",
+   "cause": "delay",
+   "ts_ns": 1794176723745678000,
+   "own_lag": false
+  },
+  {
+   "venue": "BINANCE",
+   "instrument_id": "SOL-USDT-PERP",
+   "stream": "book",
+   "previous": "HEALTHY",
+   "state": "DEGRADED",
+   "cause": "silence",
+   "ts_ns": 1794176724019436000,
+   "own_lag": false
+  },
+  {
+   "venue": "BYBIT",
+   "instrument_id": "SOL-USDT-PERP",
+   "stream": "book",
+   "previous": "DEGRADED",
+   "state": "HEALTHY",
+   "cause": "recovered",
+   "ts_ns": 1794176725810451000,
+   "own_lag": false
+  },
+  {
+   "venue": "BINANCE",
+   "instrument_id": "SOL-USDT-PERP",
+   "stream": "book",
+   "previous": "DEGRADED",
+   "state": "HEALTHY",
+   "cause": "recovered",
+   "ts_ns": 1794176726099345000,
+   "own_lag": false
+  },
+  {
+   "venue": "BYBIT",
+   "instrument_id": "SOL-USDT-PERP",
+   "stream": "book",
+   "previous": "HEALTHY",
+   "state": "DEGRADED",
+   "cause": "delay",
+   "ts_ns": 1794177325406045000,
+   "own_lag": false
+  },
+  {
+   "venue": "BINANCE",
+   "instrument_id": "SOL-USDT-PERP",
+   "stream": "book",
+   "previous": "HEALTHY",
+   "state": "DEGRADED",
+   "cause": "silence",
+   "ts_ns": 1794177325406045000,
+   "own_lag": false
+  },
+  {
+   "venue": "BYBIT",
+   "instrument_id": "SOL-USDT-PERP",
+   "stream": "book",
+   "previous": "DEGRADED",
+   "state": "HEALTHY",
+   "cause": "recovered",
+   "ts_ns": 1794177327447588000,
+   "own_lag": false
+  },
+  {
+   "venue": "BINANCE",
+   "instrument_id": "SOL-USDT-PERP",
+   "stream": "book",
+   "previous": "DEGRADED",
+   "state": "HEALTHY",
+   "cause": "recovered",
+   "ts_ns": 1794177327461119000,
+   "own_lag": false
+  },
+  {
+   "venue": "BINANCE",
+   "instrument_id": "SOL-USDT-PERP",
+   "stream": "book",
+   "previous": "HEALTHY",
+   "state": "DEGRADED",
+   "cause": "delay",
+   "ts_ns": 1794177377202029000,
+   "own_lag": false
+  },
+  {
+   "venue": "BYBIT",
+   "instrument_id": "SOL-USDT-PERP",
+   "stream": "book",
+   "previous": "HEALTHY",
+   "state": "DEGRADED",
+   "cause": "delay",
+   "ts_ns": 1794177377487123000,
+   "own_lag": false
+  },
+  {
+   "venue": "BINANCE",
+   "instrument_id": "SOL-USDT-PERP",
+   "stream": "book",
+   "previous": "DEGRADED",
+   "state": "HEALTHY",
+   "cause": "recovered",
+   "ts_ns": 1794177380004961000,
+   "own_lag": false
+  },
+  {
+   "venue": "BYBIT",
+   "instrument_id": "SOL-USDT-PERP",
+   "stream": "book",
+   "previous": "DEGRADED",
+   "state": "HEALTHY",
+   "cause": "recovered",
+   "ts_ns": 1794177380050822000,
+   "own_lag": false
+  },
+  {
+   "venue": "BYBIT",
+   "instrument_id": "SOL-USDT-PERP",
+   "stream": "book",
+   "previous": "HEALTHY",
+   "state": "DEGRADED",
+   "cause": "delay",
+   "ts_ns": 1794177508750766000,
+   "own_lag": false
+  },
+  {
+   "venue": "BINANCE",
+   "instrument_id": "SOL-USDT-PERP",
+   "stream": "book",
+   "previous": "HEALTHY",
+   "state": "DEGRADED",
+   "cause": "silence",
+   "ts_ns": 1794177508750766000,
+   "own_lag": false
+  },
+  {
+   "venue": "BYBIT",
+   "instrument_id": "SOL-USDT-PERP",
+   "stream": "book",
+   "previous": "DEGRADED",
+   "state": "UNSAFE",
+   "cause": "delay",
+   "ts_ns": 1794177510344320000,
+   "own_lag": false
+  },
+  {
+   "venue": "BYBIT",
+   "instrument_id": "SOL-USDT-PERP",
+   "stream": "book",
+   "previous": "UNSAFE",
+   "state": "HEALTHY",
+   "cause": "recovered",
+   "ts_ns": 1794177512794956000,
+   "own_lag": false
+  },
+  {
+   "venue": "BINANCE",
+   "instrument_id": "SOL-USDT-PERP",
+   "stream": "book",
+   "previous": "DEGRADED",
+   "state": "UNSAFE",
+   "cause": "silence",
+   "ts_ns": 1794177513005141000,
+   "own_lag": false
+  },
+  {
+   "venue": "BINANCE",
+   "instrument_id": "SOL-USDT-PERP",
+   "stream": "book",
+   "previous": "UNSAFE",
+   "state": "HEALTHY",
+   "cause": "recovered",
+   "ts_ns": 1794177516508276000,
+   "own_lag": false
+  },
+  {
+   "venue": "BYBIT",
+   "instrument_id": "SOL-USDT-PERP",
+   "stream": "book",
+   "previous": "HEALTHY",
+   "state": "DEGRADED",
+   "cause": "delay",
+   "ts_ns": 1794177538146805000,
+   "own_lag": false
+  },
+  {
+   "venue": "BINANCE",
+   "instrument_id": "SOL-USDT-PERP",
+   "stream": "book",
+   "previous": "HEALTHY",
+   "state": "DEGRADED",
+   "cause": "silence",
+   "ts_ns": 1794177538146805000,
+   "own_lag": false
+  },
+  {
+   "venue": "BYBIT",
+   "instrument_id": "SOL-USDT-PERP",
+   "stream": "book",
+   "previous": "DEGRADED",
+   "state": "HEALTHY",
+   "cause": "recovered",
+   "ts_ns": 1794177540159884000,
+   "own_lag": false
+  },
+  {
+   "venue": "BINANCE",
+   "instrument_id": "SOL-USDT-PERP",
+   "stream": "book",
+   "previous": "DEGRADED",
+   "state": "HEALTHY",
+   "cause": "recovered",
+   "ts_ns": 1794177543821451000,
+   "own_lag": false
+  },
+  {
+   "venue": "BINANCE",
+   "instrument_id": "SOL-USDT-PERP",
+   "stream": "book",
+   "previous": "HEALTHY",
+   "state": "DEGRADED",
+   "cause": "delay",
+   "ts_ns": 1794177622324416000,
+   "own_lag": false
+  },
+  {
+   "venue": "BYBIT",
+   "instrument_id": "SOL-USDT-PERP",
+   "stream": "book",
+   "previous": "HEALTHY",
+   "state": "DEGRADED",
+   "cause": "delay",
+   "ts_ns": 1794177623017116000,
+   "own_lag": false
+  },
+  {
+   "venue": "BYBIT",
+   "instrument_id": "SOL-USDT-PERP",
+   "stream": "book",
+   "previous": "DEGRADED",
+   "state": "HEALTHY",
+   "cause": "recovered",
+   "ts_ns": 1794177625230959000,
+   "own_lag": false
+  },
+  {
+   "venue": "BINANCE",
+   "instrument_id": "SOL-USDT-PERP",
+   "stream": "book",
+   "previous": "DEGRADED",
+   "state": "UNSAFE",
+   "cause": "silence",
+   "ts_ns": 1794177627392878000,
+   "own_lag": false
+  },
+  {
+   "venue": "BINANCE",
+   "instrument_id": "SOL-USDT-PERP",
+   "stream": "book",
+   "previous": "UNSAFE",
+   "state": "DEGRADED",
+   "cause": "silence",
+   "ts_ns": 1794177630698040000,
+   "own_lag": false
+  },
+  {
+   "venue": "BYBIT",
+   "instrument_id": "SOL-USDT-PERP",
+   "stream": "book",
+   "previous": "HEALTHY",
+   "state": "UNSAFE",
+   "cause": "delay",
+   "ts_ns": 1794177632639535000,
+   "own_lag": false
+  },
+  {
+   "venue": "BINANCE",
+   "instrument_id": "SOL-USDT-PERP",
+   "stream": "book",
+   "previous": "DEGRADED",
+   "state": "UNSAFE",
+   "cause": "silence",
+   "ts_ns": 1794177633144515000,
+   "own_lag": false
+  },
+  {
+   "venue": "BYBIT",
+   "instrument_id": "SOL-USDT-PERP",
+   "stream": "book",
+   "previous": "UNSAFE",
+   "state": "HEALTHY",
+   "cause": "recovered",
+   "ts_ns": 1794177634683938000,
+   "own_lag": false
+  },
+  {
+   "venue": "BINANCE",
+   "instrument_id": "SOL-USDT-PERP",
+   "stream": "book",
+   "previous": "UNSAFE",
+   "state": "HEALTHY",
+   "cause": "recovered",
+   "ts_ns": 1794177636363626000,
+   "own_lag": false
+  },
+  {
+   "venue": "BINANCE",
+   "instrument_id": "SOL-USDT-PERP",
+   "stream": "book",
+   "previous": "HEALTHY",
+   "state": "DEGRADED",
+   "cause": "silence",
+   "ts_ns": 1794177641873805000,
+   "own_lag": false
+  },
+  {
+   "venue": "BINANCE",
+   "instrument_id": "SOL-USDT-PERP",
+   "stream": "book",
+   "previous": "DEGRADED",
+   "state": "HEALTHY",
+   "cause": "recovered",
+   "ts_ns": 1794177645931377000,
+   "own_lag": false
+  },
+  {
+   "venue": "BINANCE",
+   "instrument_id": "SOL-USDT-PERP",
+   "stream": "book",
+   "previous": "HEALTHY",
+   "state": "DEGRADED",
+   "cause": "delay",
+   "ts_ns": 1794177861177533000,
+   "own_lag": false
+  },
+  {
+   "venue": "BYBIT",
+   "instrument_id": "SOL-USDT-PERP",
+   "stream": "book",
+   "previous": "HEALTHY",
+   "state": "DEGRADED",
+   "cause": "silence",
+   "ts_ns": 1794177861177533000,
+   "own_lag": false
+  },
+  {
+   "venue": "BINANCE",
+   "instrument_id": "SOL-USDT-PERP",
+   "stream": "book",
+   "previous": "DEGRADED",
+   "state": "HEALTHY",
+   "cause": "recovered",
+   "ts_ns": 1794177863260457000,
+   "own_lag": false
+  },
+  {
+   "venue": "BYBIT",
+   "instrument_id": "SOL-USDT-PERP",
+   "stream": "book",
+   "previous": "DEGRADED",
+   "state": "HEALTHY",
+   "cause": "recovered",
+   "ts_ns": 1794177865729784000,
+   "own_lag": false
+  },
+  {
+   "venue": "BYBIT",
+   "instrument_id": "SOL-USDT-PERP",
+   "stream": "book",
+   "previous": "HEALTHY",
+   "state": "DEGRADED",
+   "cause": "delay",
+   "ts_ns": 1794177882077994000,
+   "own_lag": false
+  },
+  {
+   "venue": "BINANCE",
+   "instrument_id": "SOL-USDT-PERP",
+   "stream": "book",
+   "previous": "HEALTHY",
+   "state": "DEGRADED",
+   "cause": "silence",
+   "ts_ns": 1794177882077994000,
+   "own_lag": false
+  },
+  {
+   "venue": "BINANCE",
+   "instrument_id": "SOL-USDT-PERP",
+   "stream": "book",
+   "previous": "DEGRADED",
+   "state": "HEALTHY",
+   "cause": "recovered",
+   "ts_ns": 1794177885547469000,
+   "own_lag": false
+  }
+ ]
+}

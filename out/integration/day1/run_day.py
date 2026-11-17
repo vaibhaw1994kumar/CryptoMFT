@@ -73,7 +73,7 @@ cfg.maker.participation_cap = cap or bool(cfg.maker.participation_cap)          
 if proc_strategy or proc_risk:
     import dataclasses
     cfg.timing = dataclasses.replace(cfg.timing, processing_ms={k: v for k, v in (("strategy", proc_strategy), ("risk", proc_risk)) if v})
-replay = SessionReplay(cfg, profile, ticks=dated_ticks("2026-10-29"), recorded=True, decompose_markouts=True, mark_from_mid=True, lifecycle_report=boundaries is not None, regime_boundaries=boundaries, profile_safety=(name in ("perp_perp_maker_taker_v1_9", "perp_perp_maker_taker_v1_10")), hedge_min_notional=hedge_min_notional)      # owner 13 Nov: v1_9 runs with the profile's own safety values (layer gate enforce, the breaker block)
+replay = SessionReplay(cfg, profile, ticks=dated_ticks("2026-10-29"), recorded=True, decompose_markouts=True, mark_from_mid=True, lifecycle_report=boundaries is not None, regime_boundaries=boundaries, profile_safety=(name in ("perp_perp_maker_taker_v1_9", "perp_perp_maker_taker_v1_10", "perp_perp_maker_taker_v1_11")), hedge_min_notional=hedge_min_notional)      # owner 13 Nov: v1_9 runs with the profile's own safety values (layer gate enforce, the breaker block)
 if samples:
     replay.strategy.participation_sample_cap = 400_000
 events = iter_recorded_events(SESSION)
@@ -104,14 +104,14 @@ if getattr(replay, "impact", None) is not None:                     # step C: wh
 import collections
 sess = replay.session
 led = sess.ledger.events
-safety = [e for e in led if e["event_type"].startswith(("BREAKER_", "LIMIT_STATE", "KILL_SWITCH", "UNWIND_", "HEDGE_ALARM", "HEDGE_DUST", "HEDGE_CHAIN", "HEDGE_STATE", "MARGIN_", "NEW_RISK_HELD", "RECONCILIATION", "QUOTE_SKIPPED", "QUOTE_WITHDRAWN", "RESIDUAL_", "LAYER_RISK", "RISK_FLATTEN", "ORDER_LIFETIME", "TIME_INTEGRITY", "ORDER_TIMED_OUT", "ORDER_REJECT_CLASSIFIED"))]
+safety = [e for e in led if e["event_type"].startswith(("BREAKER_", "LIMIT_STATE", "FEED_HEALTH", "KILL_SWITCH", "UNWIND_", "HEDGE_ALARM", "HEDGE_DUST", "HEDGE_CHAIN", "HEDGE_STATE", "MARGIN_", "NEW_RISK_HELD", "RECONCILIATION", "QUOTE_SKIPPED", "QUOTE_WITHDRAWN", "RESIDUAL_", "LAYER_RISK", "RISK_FLATTEN", "ORDER_LIFETIME", "TIME_INTEGRITY", "ORDER_TIMED_OUT", "ORDER_REJECT_CLASSIFIED"))]
 (out / "session_safety_events.jsonl").write_text("".join(json.dumps({k: (str(v) if not isinstance(v, (int, float, bool, type(None), list, dict)) else v) for k, v in e.items()}, sort_keys=True, default=str) + "\n" for e in safety))
 lim = getattr(sess.router, "scoped_limits", None)
 rejects = getattr(replay.strategy, "rejects", None)
 doc = {"label": "EXPLORATORY: every counter of the run; counts are complete (nothing truncated)",
        "ledger_event_type_counts": dict(sorted(collections.Counter(e["event_type"] for e in led).items())),
        "stop_quoting": {"signals_blocked_by_breaker": sess.signals_blocked_by_breaker, "breaker": sess.breaker_report().get("breaker"), "breaker_alarms": list(sess.breaker_alarms), "hedge_dust_carry": sess.breaker_report().get("hedge_dust_carry"),
-                        "session_limits": sess.breaker_report().get("session_limits"), "no_requote": sess.breaker_report().get("no_requote"), "amend_guard": sess.breaker_report().get("amend_guard"), "reprice_counters": dict(sess.reprice_counters), "amend_refusals": {k: v for k, v in sess.oms.realism_counters.items() if "amend" in k},
+                        **({"feed_health": {k: v for k, v in sess.breaker_report()["feed_health"].items() if k != "transition_rows"}} if sess.breaker_report().get("feed_health") is not None else {}), "session_limits": sess.breaker_report().get("session_limits"), "no_requote": sess.breaker_report().get("no_requote"), "amend_guard": sess.breaker_report().get("amend_guard"), "reprice_counters": dict(sess.reprice_counters), "amend_refusals": {k: v for k, v in sess.oms.realism_counters.items() if "amend" in k},
                         "margin_price_paused_at_end": sess.margin_price_paused, "signals_blocked_by_margin_price": sess.signals_blocked_by_margin_price,
                         "quotes_skipped_rate_limit": sess.quotes_skipped_rate_limit, "quotes_withdrawn": sess.quotes_withdrawn, "risk_gate_refusals_by_reason": dict(sess.gate_counts),
                         "kill_switch": bool(sess.oms.risk.kill_switch), "kill_switch_reason": getattr(sess.oms.risk, "kill_switch_reason", ""),

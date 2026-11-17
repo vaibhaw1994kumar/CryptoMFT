@@ -1,0 +1,203 @@
+{
+ "label": "W1 (audit A1 1.1): effective feed-health settings per profile, resolved through the loaders (new_backtest.session_replay.feed_health_config_table). Report only.",
+ "profiles": {
+  "perp_perp_maker_taker_v1_2": {
+   "runtime": "backtester",
+   "time_policy": {
+    "correct_host_offset": true,
+    "max_feed_delay_ms (FEED_DELAYED, blocking)": null,
+    "max_feed_age_ms (STALE_FEED, not blocking)": 500.0,
+    "max_cross_venue_skew_ms (report only)": 500.0,
+    "max_host_offset_ms": 100.0,
+    "max_host_drift_ppm": 500.0,
+    "negative_latency_tolerance_ms": 0.0,
+    "host_offset_quantile": 0.01,
+    "host_offset_window": 2000,
+    "host_offset_min_samples": 20,
+    "source": "core defaults chosen in raw_config_from_profile except where the profile's feed_health block sets feed_delayed_ms"
+   },
+   "book_gate_max_book_age_ms": 500.0,
+   "dead_feed_s (resubscribe trigger)": 5.0,
+   "resync_delay_s": null,
+   "trust_local_ts": {
+    "bybit": false,
+    "binance": false
+   },
+   "breaker_heartbeat_timeout_s": 10.0,
+   "feed_health_block": "absent (no feed-health state model; nothing is built)",
+   "session_limits_feed_arrival_stamp": null,
+   "note": "runtime backtester: the core time policy is not used by this profile's own runs; the values are what a session-runtime run would get"
+  },
+  "perp_perp_maker_taker_v1_5": {
+   "runtime": "session",
+   "time_policy": {
+    "correct_host_offset": true,
+    "max_feed_delay_ms (FEED_DELAYED, blocking)": null,
+    "max_feed_age_ms (STALE_FEED, not blocking)": 500.0,
+    "max_cross_venue_skew_ms (report only)": 500.0,
+    "max_host_offset_ms": 100.0,
+    "max_host_drift_ppm": 500.0,
+    "negative_latency_tolerance_ms": 0.0,
+    "host_offset_quantile": 0.01,
+    "host_offset_window": 2000,
+    "host_offset_min_samples": 20,
+    "source": "core defaults chosen in raw_config_from_profile except where the profile's feed_health block sets feed_delayed_ms"
+   },
+   "book_gate_max_book_age_ms": 500.0,
+   "dead_feed_s (resubscribe trigger)": 5.0,
+   "resync_delay_s": 5.0,
+   "trust_local_ts": {
+    "bybit": false,
+    "binance": false
+   },
+   "breaker_heartbeat_timeout_s": 10.0,
+   "feed_health_block": "absent (no feed-health state model; nothing is built)",
+   "session_limits_feed_arrival_stamp": null
+  },
+  "perp_perp_maker_taker_v1_8": {
+   "runtime": "session",
+   "time_policy": {
+    "correct_host_offset": true,
+    "max_feed_delay_ms (FEED_DELAYED, blocking)": null,
+    "max_feed_age_ms (STALE_FEED, not blocking)": 500.0,
+    "max_cross_venue_skew_ms (report only)": 500.0,
+    "max_host_offset_ms": 100.0,
+    "max_host_drift_ppm": 500.0,
+    "negative_latency_tolerance_ms": 0.0,
+    "host_offset_quantile": 0.01,
+    "host_offset_window": 2000,
+    "host_offset_min_samples": 20,
+    "source": "core defaults chosen in raw_config_from_profile except where the profile's feed_health block sets feed_delayed_ms"
+   },
+   "book_gate_max_book_age_ms": 500.0,
+   "dead_feed_s (resubscribe trigger)": 5.0,
+   "resync_delay_s": 5.0,
+   "trust_local_ts": {
+    "bybit": false,
+    "binance": false
+   },
+   "breaker_heartbeat_timeout_s": 10.0,
+   "feed_health_block": "absent (no feed-health state model; nothing is built)",
+   "session_limits_feed_arrival_stamp": null
+  },
+  "perp_perp_maker_taker_v1_9": {
+   "runtime": "session",
+   "time_policy": {
+    "correct_host_offset": true,
+    "max_feed_delay_ms (FEED_DELAYED, blocking)": null,
+    "max_feed_age_ms (STALE_FEED, not blocking)": 500.0,
+    "max_cross_venue_skew_ms (report only)": 500.0,
+    "max_host_offset_ms": 100.0,
+    "max_host_drift_ppm": 500.0,
+    "negative_latency_tolerance_ms": 0.0,
+    "host_offset_quantile": 0.01,
+    "host_offset_window": 2000,
+    "host_offset_min_samples": 20,
+    "source": "core defaults chosen in raw_config_from_profile except where the profile's feed_health block sets feed_delayed_ms"
+   },
+   "book_gate_max_book_age_ms": 500.0,
+   "dead_feed_s (resubscribe trigger)": 5.0,
+   "resync_delay_s": 5.0,
+   "trust_local_ts": {
+    "bybit": false,
+    "binance": false
+   },
+   "breaker_heartbeat_timeout_s": 10.0,
+   "feed_health_block": "absent (no feed-health state model; nothing is built)",
+   "session_limits_feed_arrival_stamp": null
+  },
+  "perp_perp_maker_taker_v1_9s": {
+   "runtime": "session",
+   "time_policy": {
+    "correct_host_offset": true,
+    "max_feed_delay_ms (FEED_DELAYED, blocking)": null,
+    "max_feed_age_ms (STALE_FEED, not blocking)": 500.0,
+    "max_cross_venue_skew_ms (report only)": 500.0,
+    "max_host_offset_ms": 100.0,
+    "max_host_drift_ppm": 500.0,
+    "negative_latency_tolerance_ms": 0.0,
+    "host_offset_quantile": 0.01,
+    "host_offset_window": 2000,
+    "host_offset_min_samples": 20,
+    "source": "core defaults chosen in raw_config_from_profile except where the profile's feed_health block sets feed_delayed_ms"
+   },
+   "book_gate_max_book_age_ms": 500.0,
+   "dead_feed_s (resubscribe trigger)": 5.0,
+   "resync_delay_s": 5.0,
+   "trust_local_ts": {
+    "bybit": false,
+    "binance": false
+   },
+   "breaker_heartbeat_timeout_s": 10.0,
+   "feed_health_block": "absent (no feed-health state model; nothing is built)",
+   "session_limits_feed_arrival_stamp": null
+  },
+  "perp_perp_maker_taker_v1_10": {
+   "runtime": "session",
+   "time_policy": {
+    "correct_host_offset": true,
+    "max_feed_delay_ms (FEED_DELAYED, blocking)": null,
+    "max_feed_age_ms (STALE_FEED, not blocking)": 500.0,
+    "max_cross_venue_skew_ms (report only)": 500.0,
+    "max_host_offset_ms": 100.0,
+    "max_host_drift_ppm": 500.0,
+    "negative_latency_tolerance_ms": 0.0,
+    "host_offset_quantile": 0.01,
+    "host_offset_window": 2000,
+    "host_offset_min_samples": 20,
+    "source": "core defaults chosen in raw_config_from_profile except where the profile's feed_health block sets feed_delayed_ms"
+   },
+   "book_gate_max_book_age_ms": 500.0,
+   "dead_feed_s (resubscribe trigger)": 5.0,
+   "resync_delay_s": 5.0,
+   "trust_local_ts": {
+    "bybit": false,
+    "binance": false
+   },
+   "breaker_heartbeat_timeout_s": 10.0,
+   "feed_health_block": "absent (no feed-health state model; nothing is built)",
+   "session_limits_feed_arrival_stamp": true
+  },
+  "perp_perp_maker_taker_v1_11": {
+   "runtime": "session",
+   "time_policy": {
+    "correct_host_offset": true,
+    "max_feed_delay_ms (FEED_DELAYED, blocking)": null,
+    "max_feed_age_ms (STALE_FEED, not blocking)": 500.0,
+    "max_cross_venue_skew_ms (report only)": 500.0,
+    "max_host_offset_ms": 100.0,
+    "max_host_drift_ppm": 500.0,
+    "negative_latency_tolerance_ms": 0.0,
+    "host_offset_quantile": 0.01,
+    "host_offset_window": 2000,
+    "host_offset_min_samples": 20,
+    "source": "core defaults chosen in raw_config_from_profile except where the profile's feed_health block sets feed_delayed_ms"
+   },
+   "book_gate_max_book_age_ms": 500.0,
+   "dead_feed_s (resubscribe trigger)": 5.0,
+   "resync_delay_s": 5.0,
+   "trust_local_ts": {
+    "bybit": false,
+    "binance": false
+   },
+   "breaker_heartbeat_timeout_s": 10.0,
+   "feed_health_block": {
+    "delay_degraded_ms": 500.0,
+    "delay_unsafe_ms": 2000.0,
+    "silence_degraded_ms": 500.0,
+    "silence_unsafe_ms": 5000.0,
+    "own_lag_ms": 100.0,
+    "recover_s": 2.0,
+    "burst_window_ms": 100.0,
+    "burst_count": 200,
+    "feed_delayed_ms": null,
+    "actions": {
+     "block_new_quotes_on": "none",
+     "withdraw_quotes_on": "none"
+    },
+    "recorder_health_block": true
+   },
+   "session_limits_feed_arrival_stamp": true
+  }
+ }
+}

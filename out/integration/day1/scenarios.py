@@ -94,6 +94,15 @@ CASES = {
     "3e_missing_marks_v110": dict(profile="perp_perp_maker_taker_v1_10", window=A, hedge_min_notional=5.0, arb_overrides=DENSE, gap=("11:20:00", "11:22:30"), gap_venue="BINANCE"),
     # ORDER 3 B: the pair-close switch ON (arb.close_pairs reduce_only_quote, NOT in v1_10), on the dense window of the baseline (3x): the same run with the switch on. Labelled: the dense entry is a case override.
     "3g_close_pairs_on_v110": dict(profile="perp_perp_maker_taker_v1_10", window=A, hedge_min_notional=5.0, arb_overrides={**DENSE, "close_pairs": "reduce_only_quote"}),
+    # W1 feed health on v1_11 (owner 17 Nov). 4x: v1_11 as it is (observation only) on the dense window. 4a: the hedge feed (Binance) LOST for 40 s from 11:01:33 (INJECTED; a maker quote placed at 11:01:32.24 is resting then) with the two actions ON for the case (labelled
+    # profile_set: both are none in v1_11 and wait for the owner). 4b: the same loss, observation only: what happens today without an action. 4c (W13-B1): an INJECTED feed delay: Binance exchange stamps moved
+    # 1.5 s into the past for 60 s with feed_delayed_ms 1000 set FOR THE CASE (PENDING the owner's 1000 vs 2000): the time gate blocks decisions and the state model logs it.
+    "4x_feed_health_v111": dict(profile="perp_perp_maker_taker_v1_11", window=A, hedge_min_notional=5.0, arb_overrides=DENSE),
+    "4a_hedge_feed_lost_actions_v111": dict(profile="perp_perp_maker_taker_v1_11", window=A, hedge_min_notional=5.0, arb_overrides=DENSE, gap=("11:01:33", "11:02:13"), gap_venue="BINANCE",
+                                            profile_set={"feed_health.actions.withdraw_quotes_on": "DEGRADED", "feed_health.actions.block_new_quotes_on": "DEGRADED"}),
+    "4b_hedge_feed_lost_observe_v111": dict(profile="perp_perp_maker_taker_v1_11", window=A, hedge_min_notional=5.0, arb_overrides=DENSE, gap=("11:01:33", "11:02:13"), gap_venue="BINANCE"),
+    "4c_feed_delay_v111": dict(profile="perp_perp_maker_taker_v1_11", window=A, hedge_min_notional=5.0, arb_overrides=DENSE, inject_delay=dict(venue="BINANCE", start="11:01:00", end="11:02:00", delay_s=1.5),
+                               profile_set={"feed_health.feed_delayed_ms": 1000.0}),
     "3x_baseline_v110": dict(profile="perp_perp_maker_taker_v1_10", window=A, hedge_min_notional=5.0, arb_overrides=DENSE),
 }
 
@@ -149,7 +158,7 @@ if st.get("latency_q"):
                                             fill_report=spec(fill, vt.fill_report), cancel=spec(at(grids["cancel_rest_rtt_ms"]) / 2, vt.cancel), cancel_report=spec(at(grids["cancel_rest_rtt_ms"]) / 2, vt.cancel_report))
     cfg.timing = dataclasses.replace(cfg.timing, venues=venues)
 kw = {}
-if st["profile"] in ("perp_perp_maker_taker_v1_9", "perp_perp_maker_taker_v1_9s", "perp_perp_maker_taker_v1_10"):
+if st["profile"] in ("perp_perp_maker_taker_v1_9", "perp_perp_maker_taker_v1_9s", "perp_perp_maker_taker_v1_10", "perp_perp_maker_taker_v1_11"):
     if st.get("hedge_min_notional") is not None:
         kw["hedge_min_notional"] = st["hedge_min_notional"]       # owner 16 Nov: the hedge venue's real minimum for this run (the replay default is 1 USDT)
     if layer_only:
@@ -173,7 +182,7 @@ if st.get("clock_inject"):                         # Order 3 (A3): an INJECTED c
     from crypto_stat_arb.time_integrity import ClockMeasurement
     replay.session.clock_gate.update(ClockMeasurement(offset_ns=int(st["clock_inject"]["offset_ms"] * 1e6), uncertainty_ns=int(st["clock_inject"]["uncertainty_ms"] * 1e6), measured_ts_ns=int(hms(st["window"][1] + ":00") * 1e9), source="INJECTED"))
 
-if st.get("profile") in ("perp_perp_maker_taker_v1_9", "perp_perp_maker_taker_v1_9s", "perp_perp_maker_taker_v1_10"):
+if st.get("profile") in ("perp_perp_maker_taker_v1_9", "perp_perp_maker_taker_v1_9s", "perp_perp_maker_taker_v1_10", "perp_perp_maker_taker_v1_11"):
     assert replay.session.oms.maker_ack_deadline, "v1_9 carries oms.maker_ack_deadline (owner 13 Nov)"      # from the profile now, not set here
 if st.get("thin_view_top"):                   # the bot sees the same thin touch (the market's touch IS thin): the size_aware cap is taken from this view, every deeper level is the real one
     import copy
@@ -250,6 +259,7 @@ if st.get("debug_requote"):                    # diagnosis only (owner 14 Nov): 
 t0, t1 = hms(st["window"][0] + ":00"), hms(st["window"][1] + ":00")
 gap = None if not st.get("gap") else (hms(st["gap"][0]), hms(st["gap"][1]))
 market_rows = []
+delay_injected = [0]
 inj_events = []                                   # the injected shifts (aggregates are written to session_injection.json)
 
 
@@ -259,6 +269,7 @@ replay.strategy.config.min_net_edge_bps = 1e9      # warm-up: the books are fed 
 
 def events():
     armed, reset_done, n, reconnected, shadow = False, False, 0, False, {}
+    gap_shadow = {}
     inj = st.get("inject_move")                                  # INJECTED hedge-venue move (owner 16 Nov, case 2i on v1_10): see CASES
     inj_on = {"shift": None}
     import copy as _copy
@@ -308,7 +319,31 @@ def events():
         if not armed and ts >= t0:
             replay.strategy.config.min_net_edge_bps = ARMED_EDGE
             armed = True
-        if gap is not None:
+        dl = st.get("inject_delay")                                   # W1 (W13-B1): INJECTED feed delay: the venue's exchange stamps are moved into the past inside the window, so receive minus exchange grows by delay_s
+        if dl is not None and ev.venue == dl["venue"] and hms(dl["start"]) <= ts < hms(dl["end"]):
+            import dataclasses as _dc2
+            ev = _dc2.replace(ev, exchange_ts_ns=ev.exchange_ts_ns - int(dl["delay_s"] * 1e9))
+            delay_injected[0] += 1
+        if gap is not None and st.get("gap_venue") is not None:
+            # ONE venue's feed lost (Order 3 case 3e, W1 cases 4a / 4b). The venue's true stream keeps feeding a copy of the session's own book (its delta rules, its sequence), so that the reconnect can
+            # be a snapshot placed right before a delta of the venue and carrying that delta's start id minus 1 (the delta bridges it): the book is VALID again at once. (17 Nov: the first version rebuilt the
+            # snapshot from a fresh book and the venue stayed invalid for over an hour after the gap, an artefact that case 3e reported.)
+            gv = st["gap_venue"]
+            if "book" not in gap_shadow:
+                import copy as _copy2
+                gap_shadow["book"] = _copy2.deepcopy(replay.session.books[(gv, replay.instrument_id)])
+            if ev.venue == gv:
+                gb = gap_shadow["book"]
+                if isinstance(ev, MarketEvent):
+                    ok = gb.state.value in ("VALID", "STALE") and bool(gb.bids) and bool(gb.asks)
+                    if not reconnected and ts >= gap[1] and ev.event_type.value == "BOOK_DELTA" and ok:
+                        reconnected = True
+                        yield MarketEvent.from_dict({"event_type": "BOOK_SNAPSHOT", "venue": gv, "instrument_id": gb.instrument_id, "exchange_ts_ns": ev.exchange_ts_ns, "receive_ts_ns": ev.receive_ts_ns,
+                                                     "sequence": ev.sequence_start - 1, "bids": [[str(p), str(q)] for p, q in sorted(gb.bids.items(), reverse=True)], "asks": [[str(p), str(q)] for p, q in sorted(gb.asks.items())]})
+                    gb.apply(ev)
+                if ts >= gap[0] and not reconnected:
+                    continue                   # the venue's feed is lost from the gap's start until its reconnect snapshot
+        elif gap is not None:
             if isinstance(ev, MarketEvent) and (st.get("gap_venue") is None or ev.venue == st["gap_venue"]):
                 shadow.setdefault(ev.venue, OrderBook(ev.venue, ev.instrument_id)).apply(ev)         # the books as the exchange has them, outage or not
             if gap[0] <= ts < gap[1] and (st.get("gap_venue") is None or ev.venue == st["gap_venue"]):
@@ -326,13 +361,16 @@ result = replay.run_recorded(events())
 result["run"] = {"case": case, "settings": {k: v for k, v in st.items()}, "window_utc": st["window"], "wall_s": round(time.time() - t, 1), "labels": ["EXPLORATORY: mechanics only, no profit claim", "2-hour window of the 2026-10-29 capture; the books are warmed from the capture start (09:56 UTC) with quoting off until the window opens: counts of events and the regime samples include the warm-up",
                  "mark = mid, no funding", "regime boundaries IN-SAMPLE (the capture's own terciles)"]}
 write_result(result, out)
-safety = [e for e in replay.session.ledger.events if e["event_type"].startswith(("BREAKER_", "LIMIT_STATE", "KILL_SWITCH", "UNWIND_", "HEDGE_ALARM", "MARGIN_PRICE", "NEW_RISK_HELD", "RECONCILIATION", "QUOTE_SKIPPED"))]
+safety = [e for e in replay.session.ledger.events if e["event_type"].startswith(("BREAKER_", "LIMIT_STATE", "FEED_HEALTH", "TIME_INTEGRITY", "KILL_SWITCH", "UNWIND_", "HEDGE_ALARM", "MARGIN_PRICE", "NEW_RISK_HELD", "RECONCILIATION", "QUOTE_SKIPPED"))]
 if safety:                                   # the safety events of the run in full (payloads included), next to the standard outputs
     (out / "session_safety_events.jsonl").write_text("".join(json.dumps({k: (str(v) if not isinstance(v, (int, float, bool, type(None), list, dict)) else v) for k, v in e.items()}, sort_keys=True, default=str) + "\n" for e in safety))
 else:
     (out / "session_safety_events.jsonl").unlink(missing_ok=True)      # a rerun with no safety events must not leave the previous run's file behind
 if st.get("inject_move"):
     (out / "session_injection.json").write_text(json.dumps({"label": "INJECTED: a scripted shift of the hedge venue's book on the real capture (not a market event)", "setting": st["inject_move"], "shifts_applied": len(inj_events), "events": inj_events}, indent=1))
+if replay.session.feed_health is not None:         # W1: the feed-health verdict of the run (aggregates; the transition rows carry venue, stream, state, cause and time only)
+    (out / "session_feed_health.json").write_text(json.dumps({"label": "EXPLORATORY: feed health on the 29 Oct capture; 4a-4c INJECT their condition", "injected_delay_events": delay_injected[0],
+                                                              **replay.session.feed_health_report(getattr(replay, "last_ns", None))}, indent=1, default=str))
 if replay.session._limits is not None:             # Order 3: every limit, whether it bound, and why quoting stopped (aggregates only)
     (out / "session_limits.json").write_text(json.dumps({"label": "EXPLORATORY: session limits of Order 3 on the 29 Oct capture; the condition is INJECTED in the 3x cases", **replay.session.limits_report()}, indent=1, default=str))
 from new_backtest.session_replay import s0_audit
