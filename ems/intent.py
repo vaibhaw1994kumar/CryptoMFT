@@ -81,6 +81,7 @@ class ExecutionIntent:
     meta: dict = field(default_factory=dict)              # tactic bookkeeping (break-even price, attempts budget); not part of the journal record
     filled_qty: float = 0.0
     dust_included: float = 0.0            # owner 16 Nov (hedge dust carry): the carried dust this hedge takes in (absolute base); in the journal record only when non-zero
+    estimate: dict | None = None          # W7 7.D: the pre-trade estimate of the signal (primary maker intent only); in the record only when set
 
     def move(self, to: IntentState) -> None:
         """The only way a state changes. An illegal transition is a bug in the caller, never silently absorbed."""
@@ -109,4 +110,6 @@ class ExecutionIntent:
                 "parent_filled_qty": self.parent_filled_qty, "signal_id": self.signal_id, "created_ts": self.created_ts}
         if self.dust_included:
             rec["dust_included"] = self.dust_included
+        if self.estimate is not None:
+            rec["estimate"] = self.estimate               # W7 7.D: only when the profile asks for it (cost_records.estimate_at_decision); no key at all otherwise
         return rec

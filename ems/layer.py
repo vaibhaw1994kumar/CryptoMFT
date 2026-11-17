@@ -227,14 +227,14 @@ class ExecutionLayer:
     # ── intents ──────────────────────────────────────────────────────────────
     def _create(self, *, role: str, side: str, qty: float, venues: tuple[str, ...], worst_price: float | None, now: float,
                 signal_id: int, parent: ExecutionIntent | None, parent_filled_qty: float, urgency: str, deadline_ts: float | None,
-                reason: str, tactic_hint: str, dust_included: float = 0.0) -> ExecutionIntent:
+                reason: str, tactic_hint: str, dust_included: float = 0.0, estimate: dict | None = None) -> ExecutionIntent:
         kind = _KIND[role]
         self._serial[(signal_id, kind)] += 1
         iid = f"sig{signal_id}-{kind}{self._serial[(signal_id, kind)]}"
         it = ExecutionIntent(intent_id=iid, role=role, instrument=self.instrument, side=side, qty=qty, venues=tuple(venues),
                              worst_price=worst_price, urgency=urgency, deadline_ts=deadline_ts, tactic_hint=tactic_hint, reason=reason,
                              parent_id=parent.intent_id if parent is not None else "", parent_filled_qty=parent_filled_qty,
-                             signal_id=signal_id, created_ts=now, dust_included=dust_included)
+                             signal_id=signal_id, created_ts=now, dust_included=dust_included, estimate=estimate)
         self.intents[iid] = it
         self._by_signal.setdefault(signal_id, []).append(iid)
         if self.journal.room():
@@ -283,7 +283,7 @@ class ExecutionLayer:
         for sp in specs:
             it = self._create(role=Role.PRIMARY, side=sp["side"], qty=sp["qty"], venues=sp["venues"], worst_price=sp["worst_price"],
                               now=now, signal_id=signal_id, parent=None, parent_filled_qty=0.0, urgency=sp.get("urgency", "normal"),
-                              deadline_ts=sp.get("deadline_ts"), reason=sp.get("reason", ""), tactic_hint=sp.get("tactic_hint", ""))
+                              deadline_ts=sp.get("deadline_ts"), reason=sp.get("reason", ""), tactic_hint=sp.get("tactic_hint", ""), estimate=sp.get("estimate"))
             self.reservations.reserve(it.intent_id, sp["venues"][0], sp["side"], sp["qty"])
             out.append(it)
         self.counts["reservations_made"] += len(out)
@@ -537,6 +537,7 @@ class IntentObserver:
 
     def __init__(self, layer: "ExecutionLayer") -> None:
         self.layer = layer
+        self.estimate_fn = None                            # W7 7.D: plan -> the signal's pre-trade estimate (set by the strategy shim when the profile asks); None: no intent record gains the key
         self.errors: list[dict] = []
         self.error_counts: Counter = Counter()
         self.counts: Counter = Counter()
@@ -612,6 +613,11 @@ class IntentObserver:
         sid = self._signal.setdefault(plan.parent_id, len(self._signal) + 1)
         specs = [dict(side=c.side.value.lower(), qty=float(c.quantity), venues=(c.venue,), worst_price=self._px(c.limit_price),
                       reason="maker leg" if c.post_only else "taker leg") for c in plan.children]
+        est = self.estimate_fn(plan) if self.estimate_fn is not None else None
+        if est is not None:
+            for c, sp in zip(plan.children, specs):
+                if c.post_only:
+                    sp["estimate"] = est                   # the maker leg's intent carries it; the hedge intent joins through parent_id
         try:
             intents = self.layer.open_primary_group(specs, now=now, signal_id=sid, gated=plan.parent_id in self._admitted)
         except RiskRefused as exc:                         # only when the layer's state moved between admit and here (cannot happen inside one OMS call): the OMS rolls the plan back

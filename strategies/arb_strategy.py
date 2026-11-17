@@ -158,6 +158,9 @@ class ArbConfig:
     # open size (less what a closing quote already rests for), priced by the same edge formula in the reducing direction (fees, S1 table, VWAP hedge, funding). The hedge that follows a fill closes the other leg and is
     # reduce-only. It never opens risk and never takes a position through flat. Maker-taker mode only. A separate switch, NOT in v1_10.
     close_pairs: str = "off"
+    # W7 7.D (owner 17 Nov, profile block `cost_records.estimate_at_decision`): False (every profile up to v1_13) | True: each maker-taker signal carries `estimate`, the pre-trade cost and edge terms
+    # the gate used, taken from the same variables (never recomputed). It changes no decision; only the signal row and the primary intent record gain the key.
+    estimate_at_decision: bool = False
 
     # ── Strategy profile (docs/strategy_contract.md) ─────────────────────────
     # "legacy_v0" (default): the edge expressions and gate used by every result before 2026-11-01, kept bit-identical.
@@ -293,6 +296,7 @@ class ArbSignal:
     conditional_edge_bps: float | None = None
     edge_ref: str = "buy_ask"
     close_pair: bool = False             # Order 3 B: this signal CLOSES an open pair (a reducing quote; its hedge is reduce-only)
+    estimate: dict | None = None         # W7 7.D: the pre-trade estimate (ArbConfig.estimate_at_decision only; None otherwise and the key is never written)
 
     # MAKER_TAKER: the passive leg is legs[0]; the hedge is a taker on the other venue, on the opposite side. For a passive
     # bid (the only direction before maker_passive_side) these equal buy_venue / sell_venue / "sell".
@@ -1012,6 +1016,7 @@ class CrossVenueArbStrategy:
         gross_bps, _ = edge_mod.legacy_maker_bid_edge_bps(hedge_px, max_bid, fee_bps)
         net_bps = gross_bps - fee_bps - cfg.safety_buffer_bps
         naive_bps = cond_bps = None
+        est_inputs = None
         edge_ref = "maker_price"
         if cfg.profile != "legacy_v0":
             # perp_perp_maker_taker_v1: the gate uses the conditional expected edge; the naive one is logged beside it.
@@ -1028,6 +1033,7 @@ class CrossVenueArbStrategy:
                 funding_holding_bps=funding_bps, p_fail=cfg.p_fail, loss_fail_bps=cfg.loss_fail_bps)
             naive_bps, cond_bps, edge_ref = er.naive_bps, er.net_bps - cfg.safety_buffer_bps, er.ref_name
             net_bps = cond_bps
+            est_inputs = (er, edge_book, edge_qty)
         self.best_edge_seen_bps = max(self.best_edge_seen_bps, net_bps)
         if net_bps < cfg.min_net_edge_bps:
             if joins_touch:
@@ -1107,6 +1113,7 @@ class CrossVenueArbStrategy:
             depth_limited=qty >= hedge_depth - 1e-12,
             inventory_limited=qty >= inv_cap - 1e-12,
             naive_edge_bps=naive_bps, conditional_edge_bps=cond_bps, edge_ref=edge_ref, close_pair=close_cap is not None,
+            estimate=self._decision_estimate("bid", est_inputs, maker_book, hedge_px, max_bid, gross_bps, net_bps, vwap_entry) if cfg.estimate_at_decision else None,
             legs=[
                 # Passive leg only. The hedge is fired on fill, not now — firing
                 # it up front would be a naked short against a maybe-fill.
@@ -1169,6 +1176,7 @@ class CrossVenueArbStrategy:
         gross_bps, _ = edge_mod.legacy_maker_ask_edge_bps(min_ask, hedge_px, fee_bps)
         net_bps = gross_bps - fee_bps - cfg.safety_buffer_bps
         naive_bps = cond_bps = None
+        est_inputs = None
         edge_ref = "hedge_price"
         if cfg.profile != "legacy_v0":
             edge_book, edge_qty = taker_book, self._max_clip(min_ask)
@@ -1184,6 +1192,7 @@ class CrossVenueArbStrategy:
                 funding_holding_bps=funding_bps, p_fail=cfg.p_fail, loss_fail_bps=cfg.loss_fail_bps)
             naive_bps, cond_bps, edge_ref = er.naive_bps, er.net_bps - cfg.safety_buffer_bps, er.ref_name
             net_bps = cond_bps
+            est_inputs = (er, edge_book, edge_qty)
         self.best_edge_seen_bps = max(self.best_edge_seen_bps, net_bps)
         if net_bps < cfg.min_net_edge_bps:
             if joins_touch:
@@ -1250,11 +1259,41 @@ class CrossVenueArbStrategy:
             depth_limited=qty >= hedge_depth - 1e-12,
             inventory_limited=qty >= inv_cap - 1e-12,
             naive_edge_bps=naive_bps, conditional_edge_bps=cond_bps, edge_ref=edge_ref, close_pair=close_cap is not None,
+            estimate=self._decision_estimate("ask", est_inputs, maker_book, hedge_px, min_ask, gross_bps, net_bps, vwap_entry) if cfg.estimate_at_decision else None,
             legs=[
                 # Passive leg only; the buy hedge is fired on fill (see _evaluate_maker_taker).
                 ArbLeg(maker_venue, "sell", qty, min_ask, False, min_ask, maker_fees.maker_bps),
             ],
         )
+
+    def _decision_estimate(self, side: str, est_inputs, maker_book, hedge_touch: float, quote_px: float, gross_bps: float, net_bps: float, vwap_entry: bool) -> dict:
+        """W7 7.D: the pre-trade estimate of one maker-taker signal, read from the variables the gate just used (`est_inputs` = the EdgeResult, the hedge book it walked and the size). Every field is a
+        number or {"missing": reason}: nothing is a silent null. bps are against the edge's own reference price (`edge_ref`). Nothing here is read by any decision."""
+        cfg = self.config
+        missing = lambda why: {"missing": why}
+        mid = (maker_book.best_bid + maker_book.best_ask) / 2.0
+        est = {"side": side, "quote_price": quote_px, "hedge_touch": hedge_touch,
+               "half_spread_bps": (maker_book.best_ask - maker_book.best_bid) / 2.0 / mid * 10_000.0 if mid > 0 else missing("maker book has no mid"),
+               "safety_buffer_bps": cfg.safety_buffer_bps, "net_edge_bps": net_bps,
+               "impact_bps": missing("the arb strategy reads no impact curve"), "delay_estimate_s": missing("the arb strategy reads no latency estimate"),
+               "p_fill": missing("no fill-probability model is used by the arb strategy"), "opportunity_cost_bps": missing("no fill-probability model is used by the arb strategy")}
+        if est_inputs is None:                        # legacy_v0: the edge is the legacy expression, no conditional terms exist
+            est.update({"gross_edge_bps": gross_bps, "edge_ref": "legacy", "terms": missing("legacy_v0 edge: no conditional terms")})
+            return est
+        er, edge_book, edge_qty = est_inputs
+        c = er.components or {}
+        terms = {"maker_fee_bps": c.get("maker_fee_bps"), "taker_fee_bps": c.get("taker_fee_bps"), "expected_hedge_slippage_bps": c.get("hedge_slippage_bps"),
+                 "funding_holding_bps": c.get("funding_holding_bps"), "failure_cost_bps": c.get("failure_cost_bps"), "safety_buffer_bps": cfg.safety_buffer_bps}
+        used_px = edge_book.best_bid if side == "bid" else edge_book.best_ask
+        est.update({"gross_edge_bps": er.gross_bps, "naive_edge_bps": er.naive_bps, "conditional_edge_bps": er.net_bps - cfg.safety_buffer_bps, "edge_ref": er.ref_name, "ref_price": er.ref,
+                    "fee_bps": er.fee_bps, "expected_hedge_move_bps": c.get("hedge_move_bps"), "expected_hedge_slippage_bps": c.get("hedge_slippage_bps"),
+                    "hedge_walk_bps": abs(hedge_touch - used_px) / hedge_touch * 10_000.0 if hedge_touch > 0 else missing("no hedge touch"),
+                    "hedge_price_basis": "vwap_for_size" if vwap_entry else "touch", "edge_size_base": edge_qty,
+                    "p_fail": cfg.p_fail, "loss_fail_bps": cfg.loss_fail_bps,
+                    "terms": terms, "total_cost_bps": sum(v for v in terms.values() if v is not None),
+                    "inputs_label": {"p_fail": "ASSUMED placeholder", "loss_fail_bps": "ASSUMED placeholder", "expected_hedge_move_bps": "profile S1 table or run-supplied value",
+                                     "expected_hedge_slippage_bps": "profile value"}})
+        return est
 
     def hedge_leg(self, signal: ArbSignal, filled_qty: float, book: OrderBook) -> ArbLeg | None:
         """Build the aggressive hedge after a passive leg fills: a sell after a passive bid, a buy after a passive ask."""
@@ -1347,6 +1386,16 @@ class ArbSessionStrategy:
         self.close_pair_ids: set[str] = set()                                                 # Order 3 B: the opportunities that CLOSE a pair (the session passes close_pair to the OMS for them)
         self.close_pair_signals = 0
         self.grid_snaps = {"price": 0, "quantity": 0}                                         # how often the instrument grid changed a signal value (0 when the strategy already quotes on the grid)
+        observer = getattr(oms, "observer", None)
+        if strategy.config.estimate_at_decision and observer is not None and hasattr(observer, "estimate_fn"):
+            observer.estimate_fn = self.estimate_for_plan                                       # W7 7.D: the layer writes the signal's estimate on the primary (maker) intent record
+
+    def estimate_for_plan(self, plan) -> dict | None:
+        """W7 7.D: the estimate of the signal behind this plan, with the join keys (the layer's `signal_id` is its own serial, not the strategy's: the opportunity id goes inside)."""
+        sig = self.signals.get(getattr(getattr(plan, "opportunity", None), "opportunity_id", None))
+        if sig is None or sig.estimate is None:
+            return None
+        return {**sig.estimate, "opportunity_id": plan.opportunity.opportunity_id, "strategy_signal_id": sig.signal_id, "decision_ts": sig.ts}
 
     # -- inputs from the core ------------------------------------------------------------------------------------------------
 
