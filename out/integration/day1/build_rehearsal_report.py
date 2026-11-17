@@ -362,4 +362,227 @@ Safety values taken from the profile: {esc(json.dumps({k: v for k, v in gate(A).
     print("written", OUT, len(doc))
 
 
-build()
+
+
+# ====================================================================================================================================================================================================
+# 17 Nov report (owner 16 Nov, Order 3 part C): the rehearsal rerun on the CURRENT code, written as a NEW report beside the 13 Nov one (which is never overwritten). `--mode nov17 --runs DIR [--out FILE]`.
+# DIR holds: v19_ref (v1_9, the 13 Nov settings), v19_min5 (v1_9, hedge minimum 5 USDT), v110_A / v110_B, v110cp_A / v110cp_B (v1_10 + arb.close_pairs), v110g5_A / v110g5_B (v1_10 at 5.0 SOL gross per venue).
+# Every number is read from the runs' files; the typed text is labels and explanations. EXPLORATORY.
+# ====================================================================================================================================================================================================
+def build_nov17():
+    runs_dir = opt("--runs", INT / "rehearsal_20261117")
+    out_file = opt("--out", INT / "e2e_rehearsal_2026-10-29_v2_17nov.html")
+    names = ("v19_ref", "v19_min5", "v110_A", "v110_B", "v110cp_A", "v110cp_B", "v110g5_A", "v110g5_B")
+    R = {n: Run(runs_dir / n) for n in names}
+    old = Run(E2E / "v19_A")                                           # the 13 Nov run A, the reference of what changed
+    cols = [("v19_ref", "v1_9, 13 Nov settings"), ("v19_min5", "v1_9, hedge min 5 USDT"), ("v110_A", "v1_10"), ("v110cp_A", "v1_10 + close_pairs"), ("v110g5_A", "v1_10, 5.0 SOL gross")]
+
+    def pair_identity(a, b):
+        da, db = runs_dir / a, runs_dir / b
+        if not (R[a].exists and R[b].exists):
+            return "<p class='note'>a run of this pair is not available.</p>", False
+        rows, bad = [], []
+        for n in sorted({p.name for p in da.iterdir()} | {p.name for p in db.iterdir()}):
+            pa, pb = da / n, db / n
+            if not (pa.exists() and pb.exists()):
+                rows.append([n, "missing in one run"]); bad.append(n); continue
+            same = pa.read_bytes() == pb.read_bytes()
+            if not same and n == "session_manifest.json":
+                ma, mb = json.loads(pa.read_text()), json.loads(pb.read_text())
+                diffs = []
+
+                def walk(x, y, p=""):
+                    if isinstance(x, dict) and isinstance(y, dict):
+                        for k in sorted(set(x) | set(y)):
+                            walk(x.get(k), y.get(k), p + "/" + k)
+                    elif x != y:
+                        diffs.append(p)
+                walk(ma, mb)
+                same = all(d.endswith("wall_s") or "release_identity" in d for d in diffs)
+                rows.append([n, "identical except wall time and release stamps" if same else f"DIFFERS at {diffs[:4]}"])
+            else:
+                rows.append([n, "identical" if same else "DIFFERENT"])
+            if not same:
+                bad.append(n)
+        return table(["file", "result"], rows), not bad
+
+    def fifo_pairs(r):
+        """Pair-close statistics from the maker-venue fills in time order: a SELL against a long closes (FIFO) the oldest long lots; holding time = close time minus the lot's open time."""
+        lots, closed, hold = [], 0.0, []
+        for f in sorted((x for x in r.fills if x["venue"] == "BYBIT"), key=lambda x: x["ts_ns"]):
+            q = float(f["fill_quantity"]); t = f["ts_ns"] / 1e9
+            if str(f["side"]).upper() == "BUY":
+                lots.append([t, q])
+            else:
+                left = q
+                while left > 1e-12 and lots:
+                    take = min(left, lots[0][1]); hold.append((t - lots[0][0], take)); lots[0][1] -= take; left -= take; closed += take
+                    if lots[0][1] <= 1e-12:
+                        lots.pop(0)
+        w = sum(q for _, q in hold)
+        return closed, (sum(h * q for h, q in hold) / w if w else None), (max((h for h, _ in hold), default=None))
+
+    def limits_of(r):
+        return ((r.limits or {}).get("stop_quoting") or {}).get("session_limits") or {}
+
+    html_parts = ["<h1>End-to-end rehearsal 2026-10-29, rerun on the 17 Nov code</h1>"
+                  "<p class='sub'>A NEW report beside the 13 Nov one (not overwritten). The full SOLUSDT day from the recorder's capture, both venues; v1_9 (the reference), v1_10 (twice), v1_10 + the pair-close switch (twice), v1_10 at 5.0 SOL gross per venue (twice). <b>EXPLORATORY.</b> One day, mark = mid, "
+                  "no funding (derivatives.jsonl is not in: the rerun with recorded marks and funding is still owed). The recorder quality is REJECTED and the host clock UNKNOWN: mechanics only, no profit claim, no calibration. Every fill is simulated.</p>"]
+    sizes = {n: R[n].m.get("size_base") for n in names if R[n].exists}
+    html_parts.append(f"<p class='note'>Run settings: clip 1.0 SOL in all; gross per venue 2.0 SOL (the 13 Nov setting) except the labelled 5.0 SOL run; the hedge venue's minimum notional 1 USDT in v19_ref (the 13 Nov setting) and 5 USDT (the real Binance SOLUSDT rule) in every other run; singapore latency; seeds as the profile keys. Profiles and code: the working tree at the time of the run (the identity stamps are in each manifest). "
+                      f"Wall time per run (s): {esc(json.dumps({n: R[n].run.get('wall_s') for n in names if R[n].exists}))}.</p>")
+    # 1
+    ident = {pair: pair_identity(*pair) for pair in (("v110_A", "v110_B"), ("v110cp_A", "v110cp_B"), ("v110g5_A", "v110g5_B"))}
+    html_parts.append("<h2>1. Byte identity: every v1_10 run twice</h2>" + "".join(f"<h3>{esc(a)} against {esc(b)}: {verdict(ok)}</h3>" + t for (a, b), (t, ok) in ident.items())
+                      + "<p class='note'>Only run.wall_s and the release-identity stamps may differ.</p>")
+    # 2 headline
+    avail = [(k, lab) for k, lab in cols if R[k].exists]
+    H = {k: headline(R[k]) for k, _ in avail}
+    html_parts.append("<h2>2. Headline</h2>" + table([""] + [lab for _, lab in avail], [[H_ROWS[i]] + [H[k][i] for k, _ in avail] for i in range(len(H_ROWS))]))
+    # 3 reconciliation
+    recs = {k: reconcile(R[k]) for k, _ in avail}
+    dust_notes = []
+    for k, lab in avail:
+        dust = ((R[k].limits or {}).get("stop_quoting") or {}).get("hedge_dust_carry")
+        if not dust:
+            continue
+        # With hedge dust carry on (v1_10) a hedge chunk below the venue minimum is carried in the balance and netted in a later hedge, possibly of ANOTHER plan: a plan may then show one such chunk open while the
+        # balance holds it. The 13 Nov rule (a remainder of one lot or more is OPEN) is replaced, for these runs only, by: every open remainder is smaller than the smallest sendable hedge (the run's minimum notional
+        # over the day's highest fill price), and the signed sum of all plans' remainders equals the dust balance at the end.
+        rows, plan_rows = recs[k]
+        min_notional = Decimal(str(R[k].run.get("hedge_min_notional") or 1))
+        top = max((Decimal(str(f["fill_price"])) for f in R[k].fills), default=Decimal("1"))
+        smallest = min_notional / top
+        signed, still_open, carried = Decimal("0"), 0, 0
+        for pr in plan_rows:
+            resid = Decimal(pr[7])
+            signed += resid if pr[1] == "BUY" else -resid
+            if pr[8] == "OPEN":
+                if abs(resid) < smallest:
+                    pr[8] = "carried as dust (netted in a later hedge)"; carried += 1
+                else:
+                    still_open += 1
+        end = Decimal(str(dust.get("balance_end") or "0"))
+        ok = still_open == 0 and abs(signed - end) < Decimal("1e-9")
+        for row in rows:
+            if row[0].startswith("every plan: maker fill"):
+                row[1] = verdict(ok)
+        dust_notes.append(f"{esc(lab)}: {carried} plans show a remainder that was carried as dust (each below the smallest sendable hedge, {smallest:.4f} SOL at {min_notional} USDT); the signed sum of all plans' remainders is {signed} and the dust balance at the end is {end}; HEDGE_DUST_CARRIED {dust.get('carried_events')}, hedges that took dust in {dust.get('hedges_with_dust')}, age alarms {dust.get('alarms')}")
+    rows3 = [[row[0]] + [recs[k][0][i][1] for k, _ in avail] for i, row in enumerate(next(iter(recs.values()))[0])] if recs else []
+    html_parts.append("<h2>3. Reconciliation: every order, fill, hedge, unwind and alarm</h2><p>Each check is computed from the run's own files, independently of the engine's counters, for every variant.</p>" + table(["check"] + [lab for _, lab in avail], rows3)
+                      + "<p class='note'>The per-plan check with hedge dust carry on (the v1_10 runs): a plan may show a remainder below the smallest sendable hedge, because that chunk was carried in the dust balance and netted in a later hedge of another plan. For those runs the check passes when every open remainder is below the smallest sendable hedge AND the signed sum of all plans' remainders equals the dust balance at the end. "
+                      + " | ".join(dust_notes) + "</p>")
+    for k, lab in avail:
+        if k in ("v110_A", "v110cp_A"):
+            html_parts.append(f"<h3>Per plan, {esc(lab)}</h3>" + table(["plan", "maker side", "maker filled", "hedge orders", "hedge filled", "unwind orders", "unwind filled", "residual", "flag"], recs[k][1]))
+    # 4 paths
+    for k, lab in avail:
+        if k in ("v110_A", "v110cp_A", "v110g5_A"):
+            html_parts.append("<h2>4. EMS path counts: " + esc(lab) + "</h2>" + paths_block(R[k], lab) if k == "v110_A" else f"<h2>4b. EMS path counts: {esc(lab)}</h2>" + paths_block(R[k], lab))
+    html_parts.append("<h2>5. Pair economics and the statistics block (v1_10)</h2>" + (stats_block(R["v110_A"]) if R["v110_A"].exists else ""))
+    # 6 positions
+    prow = []
+    for k, lab in avail:
+        nm, vm = positions_timeline(R[k])
+        prow.append([lab, json.dumps(R[k].m.get("positions")), json.dumps((R[k].m.get("residual_at_end") or {})), str(nm), str(vm)])
+    html_parts.append("<h2>6. End-of-day positions and residuals</h2>" + table(["variant", "positions", "residual at end", "max |net|", "max |position| on one venue"], prow))
+    # 7 stop quoting reasons
+    reasons = {}
+    for k, lab in avail:
+        sc = R[k].m.get("strategy_counters", {}); stops = ((R[k].limits or {}).get("stop_quoting") or {}); sl = limits_of(R[k])
+        d = {f"strategy: {a}": b for a, b in (sc.get("rejects") or {}).items() if b}
+        d["breaker blocked signals"] = stops.get("signals_blocked_by_breaker")
+        d["margin price pause: signals blocked"] = stops.get("signals_blocked_by_margin_price")
+        d["limits: signals blocked (clock gate, margin WARNING)"] = sl.get("signals_blocked_by_limits", "not in this profile")
+        for a, b in (sl.get("stop_quoting_reasons") or {}).items():
+            d[f"limit stop: {a}"] = b
+        d["quotes skipped: rate-limit window"] = stops.get("quotes_skipped_rate_limit")
+        d["quotes withdrawn by validity"] = stops.get("quotes_withdrawn")
+        d["kill switch"] = f"{stops.get('kill_switch')} {stops.get('kill_switch_reason') or ''}"
+        reasons[k] = d
+    keys = sorted({kk for d in reasons.values() for kk in d})
+    html_parts.append("<h2>7. Why quoting stopped: every reason that fired, per variant</h2>" + table(["reason (evaluations unless stated)"] + [lab for _, lab in avail], [[kk] + [reasons[k].get(kk, 0) for k, _ in avail] for kk in keys])
+                      + "<p class='note'>The strategy rejects count evaluations (one per book event); \"no_edge\" is the normal reason not to quote, \"inventory\" is the position and net limits leaving no room. With close_pairs on, a book event with an open pair is evaluated twice (the closing direction, then the opening one), so that column's reject counts are about twice as large for the same number of events and are not comparable with the other columns.</p>")
+    # 8 limits
+    lim_rows, lows = [], {}
+    for k, lab in avail:
+        sl, lm = limits_of(R[k]), ((R[k].limits or {}).get("limits_that_bound") or {})
+        c = sl.get("counters") or {}
+        orr = sl.get("order_rate") or {}
+        dl = sl.get("daily_loss") or {}
+        at = dl.get("min_pnl_at") or {}
+        low = (f"{float(dl['min_pnl_usdt']):.4f} against {dl.get('limit_usdt')} at {__import__('time').strftime('%H:%M:%S', __import__('time').gmtime(at['ts_ns'] / 1e9))} UTC, mids {json.dumps(at.get('mids'))}, positions {json.dumps(at.get('positions'))}"
+               if dl.get("min_pnl_usdt") is not None and at else dl.get("min_pnl_usdt"))
+        lows[k] = (float(dl["min_pnl_usdt"]) if dl.get("min_pnl_usdt") is not None else None, dl.get("limit_usdt"))
+        lim_rows.append([lab, f"{json.dumps({v: [b.get('taken'), b.get('skipped')] for v, b in orr.items()})}" if sl else "not in this profile", low if sl else "-", c.get("clock_not_evaluable", "-") if sl else "-",
+                         sl.get("stop_quoting_reasons", {}).get("margin_warning", 0) if sl else "-", (sl.get("kills") or {}) if sl else "-", json.dumps(c) if sl else "-"])
+    html_parts.append("<h2>8. Every limit of Order 3, and whether it bound</h2>" + table(["variant", "A1 order rate: [taken, skipped] per venue", "A2 daily P&L low point (USDT) against its limit, when, and the two mids then", "A3 clock gate: evaluations 'not evaluable' (no measured clock in a replay)", "A4 margin stop: evaluations blocked", "A5/A2 kills", "all limit counters"], lim_rows)
+                      + "<p>Reading, computed from the rows above: " + ("<b>no Order 3 limit bound</b> in any variant" if not any((limits_of(R[k]).get("kills") or (limits_of(R[k]).get("stop_quoting_reasons")) or any(b.get("skipped") for b in (limits_of(R[k]).get("order_rate") or {}).values())) for k, _ in avail) else "<b>a limit bound</b>: see the rows")
+                      + f". The loss stop's low points were {esc(json.dumps({lab: lows[k][0] for k, lab in avail if lows.get(k) and lows[k][0] is not None}))} USDT against a limit of -5 per SOL of clip (the clip is 1 SOL in every run, the 5.0 SOL gross run included). The low point is marked at each venue's own book mid, so it moves with the gap between the two venues' mids on an open hedged pair, not only with trading losses: the row gives the two mids at that moment. The clock gate was not evaluable in a replay (counted, never blocking). "
+                        "A6 (account tiers), A8 (account check) and A3's live source are start-up steps that a replay does not have; A9 is the stress measurement (the 10,000 events/s target still FAILS: about 3,000 to 3,500 events/s per venue on this Mac). "
+                        "Their injected cases are in the coverage matrix (3a to 3e, 3g) and the recorded-message tests (3f).</p>")
+    # 9 withdrawals and reprices
+    wrow = []
+    for k, lab in avail:
+        led = ((R[k].limits or {}).get("ledger_event_type_counts") or {})
+        rc = ((R[k].limits or {}).get("stop_quoting") or {}).get("reprice_counters") or {}
+        ages = []
+        j_ = {x.get("intent_id"): x for x in jl(R[k].d / "session_intent_journal.jsonl") if x.get("event") == "intent" and x.get("role") == "primary"}
+        for o in R[k].orders:
+            if o.get("intent_id") in j_ and o.get("terminal_ts_ns"):
+                ages.append(o["terminal_ts_ns"] / 1e9 - j_[o["intent_id"]]["created_ts"])
+        span_h = 10.85
+        wrow.append([lab, led.get("QUOTE_WITHDRAWN", 0), f"{led.get('QUOTE_WITHDRAWN', 0) / span_h:.2f}", led.get("AMEND_REQUESTED", 0), led.get("AMEND_CONFIRMED", 0), led.get("AMEND_REJECTED", 0), led.get("WORKING_ORDER_CANCEL_BEFORE_CLOSE", 0),
+                     f"{(led.get('QUOTE_WITHDRAWN', 0) + led.get('WORKING_ORDER_CANCEL_BEFORE_CLOSE', 0)) / (span_h * 60):.4f}", f"{sum(ages) / len(ages):.2f} / {max(ages):.2f}" if ages else "-", json.dumps(rc)])
+    html_parts.append("<h2>9. Withdrawals and reprices</h2>" + table(["variant", "quotes withdrawn", "per hour", "amends requested", "confirmed", "rejected", "cancels before close", "withdraw + cancel per minute", "quote age mean / max (s)", "reprice counters"], wrow)
+                      + "<p class='note'>The capture is about 10.85 h. Quote age is the maker order's time from its signal to its end. Case 2i (the amend paths on v1_10) is an open item, see section 13. The ledger's AMEND_CONFIRMED count and the controller's own `amends_confirmed` counter differ in the close_pairs run (the ledger count is the record; the controller's counter is lower): not explained here, an open item.</p>")
+    # 10 pair close
+    prow = []
+    for k, lab in avail:
+        cl, hold_mean, hold_max = fifo_pairs(R[k])
+        led = ((R[k].limits or {}).get("ledger_event_type_counts") or {})
+        pos, lo, hi = 0.0, 0.0, 0.0
+        for f in sorted((x for x in R[k].fills if x["venue"] == "BYBIT"), key=lambda x: x["ts_ns"]):
+            pos += float(f["fill_quantity"]) * (1 if str(f["side"]).upper() == "BUY" else -1)
+            lo, hi = min(lo, pos), max(hi, pos)
+        mk_sell = sum(float(f["fill_quantity"]) for f in R[k].fills if f["venue"] == "BYBIT" and str(f["side"]).upper() == "SELL")
+        hd_buy = sum(float(f["fill_quantity"]) for f in R[k].fills if f["venue"] == "BINANCE" and str(f["side"]).upper() == "BUY")
+        prow.append([lab, led.get("CLOSE_PAIR_QUOTE", 0), round(cl, 4), "-" if hold_mean is None else f"{hold_mean:.1f} / {hold_max:.1f}", f"{lo:.4f} to {hi:.4f}", f"{mk_sell:.2f} / {hd_buy:.2f}", led.get("CLOSE_PAIR_BEYOND_FLAT", 0)])
+    html_parts.append("<h2>10. Pair close (arb.close_pairs, a separate switch, NOT in v1_10)</h2>" + table(["variant", "closing quotes placed", "SOL closed by closing fills", "holding time of the closed lots, mean / max (s, FIFO)", "maker venue position over the day (min to max)", "closing fills / reduce-only hedge buys (SOL)", "beyond-flat alarms"], prow)
+                      + "<p class='note'>Without the switch the strategy has no exit for an open pair: the position only grows until the inventory rule refuses. With it, a sell against the long is quoted for at most the open size and its hedge is reduce-only. The holding time is the time between the buy fills and the sell fills that close them, first in first out. Zero closing fills in a variant means the case is NOT COVERED there, not a pass.</p>")
+    # 11 P&L
+    erow = []
+    for k, lab in avail:
+        pe = (R[k].pairs or {}).get("summary") or {}
+        erow.append([lab, R[k].m.get("equity_at_book_mids"), str(sum((Decimal(str(f.get('fee_delta') or 0)) for f in R[k].fills), Decimal('0'))), f"{(pe.get('pair_net_bps') or {}).get('mean')} (n={(pe.get('pair_net_bps') or {}).get('n')})", json.dumps(R[k].m.get("markout_summary"))[:200]])
+    html_parts.append("<h2>11. Ledger P&amp;L (EXPLORATORY)</h2>" + table(["variant", "equity at book mids (USDT)", "fees paid", "pair net bps mean (n)", "markout summary"], erow)
+                      + "<p class='note'>A mechanics number: 4 to 260 fills on one day, ASSUMED public fee schedule, S1 table out of period, recorder quality REJECTED, mark = mid, no funding. Not a profit estimate.</p>")
+    # 12 changes vs 13 Nov
+    o_h = headline(old) if old.exists else ["not available"] * len(H_ROWS)
+    n_h = H["v19_ref"] if "v19_ref" in H else ["not available"] * len(H_ROWS)
+    ch = [[H_ROWS[i], o_h[i], n_h[i]] for i in (3, 4, 5, 6, 7, 8, 9, 10, 12, 13, 14, 15)]
+    html_parts.append("<h2>12. What changed against the 13 Nov report, and why</h2><p>The v1_9 reference run on today's code at the 13 Nov settings, against the 13 Nov run A (taken from that run's own files):</p>" + table(["", "13 Nov run A (v1_9)", "17 Nov v1_9 reference"], ch)
+                      + "<p>v1_9 is FROZEN and its replay outputs were checked byte for byte against the pre-change reference at 1 SOL (12 of 14 files identical; the manifest and the limits file differ only by notes and counter keys), so any difference in this table is the runner or the code outside the profile's behaviour, not v1_9 itself. "
+                        "What is NEW on the page: v1_10 (quote withdrawal on, S0 repricing on, hedge dust carry on, the 1 s no-requote, the 5 s mark rule, the Order 3 limits) and the pair-close switch. Why the v1_10 numbers differ from v1_9's: withdrawal takes a quote down when its edge is gone (so the stale-quote fills of v1_9 do not happen), "
+                        "the 5 s mark rule pauses new quotes when a mark is older than 5 s by its own timestamp (more pauses at the Binance book resyncs), and the dust carry removes the lot residual of v1_9. Section 9 and 7 give the counts.</p>")
+    # 13 open items
+    html_parts.append("<h2>13. Open items</h2><ul>"
+                      "<li><b>Case 2i on v1_10 is NOT COVERED.</b> The capture gives ONE real amend per run (a quote already 0.9 filled, at 11:01:23), so reject, timeout, disconnect and duplicate Filled each met that single amend. The paths that never met a real amend: a fill during AMEND_PENDING (met only in the timeout variant), cancels during a pending amend, and above all the disconnect variant ended with the amend timed out and NO venue query before the reconnect. "
+                      "<b>What would cover it:</b> (1) repeated injected hedge-venue moves timed to hit a quote that rests deep with slack, so there are many amends and not one (the dense injection of 2 ticks every 20 s met one); (2) an OMS-level test where an amend times out while the router still holds the request, which settles whether the deferred query is by design. (3) the full day with the pair-close switch on produced 23 real amends with no injection (section 9): the same reject, timeout, disconnect and duplicate-Filled variants run on THAT day would meet many amends; it is not v1_10 (the switch is separate), so it is named here as the scenario, not run. Until then `case2i_passed` stays false and every reprice is a cancel plus a fresh quote under real orders.</li>"
+                      "<li><b>The loss stop and the two venues' mids.</b> The day's low point of the A2 figure is at 20:43:16 UTC in every v1_10 run, with the Bybit mid 96.305 and the Binance mid 97.135 (86 bps apart) on a flat-net hedged pair: -1.59 USDT at 2 SOL per venue and -3.78 USDT at 4.7 SOL, against the -5 limit. Whether that moment is a real dislocation or one venue's book being wrong while still VALID was not traced. Either way the stop is marked at each venue's own mid, so a wide gap on a larger hedged position would trip the latched kill switch without any trading loss: the owner may want the mark rule or the limit reviewed before the gross per venue is raised.</li>"
+                      "<li><b>Controller counter:</b> in the close_pairs run the ledger records 23 AMEND_CONFIRMED and the reprice controller's own counter says 8. The ledger is the record; the counter's rule was not checked.</li>"
+                      "<li><b>A9 target not met</b>: the live path keeps up to about 3,000 to 3,500 events/s per venue, not 10,000 (see ORDER3_A9_FIX_RESULTS.md); with arrival stamps on, an overload now shows as book age and resyncs.</li>"
+                      "<li><b>A3 clock source:</b> a REST server-time probe from this Mac has an uncertainty of about 85 to 95 ms against the 5 ms limit, so the gate would hold quoting in every real-order run; the source or the limit is the owner's decision.</li>"
+                      "<li>The rerun with derivatives.jsonl (recorded marks and funding) is still owed; the pair-close switch and the testnet drill (reduce-only acceptance and its exemption from the minimum notional) are unverified on a venue.</li></ul>")
+    html_parts.append("<h2>14. What this rehearsal does not show</h2><ul><li>No funding and no recorded marks (the margin check uses the labelled MARK_FROM_MID fallback).</li><li>One day only: no out-of-sample claim; regimes are the day's own terciles.</li><li>No own orders on the venues: queue position and fills are the simulator's.</li>"
+                      "<li>The account-side limits (A6, A8, A3's source) and the stress proof are not part of a replay.</li></ul>")
+    css = (Path(__file__).read_text().split('css = """')[1].split('"""')[0])
+    doc = f"<!doctype html><html lang='en'><head><meta charset='utf-8'><meta name='viewport' content='width=device-width,initial-scale=1'><title>End-to-end rehearsal 2026-10-29 (17 Nov)</title><style>{css}</style></head><body><main>{''.join(html_parts)}</main></body></html>"
+    out_file.write_text(doc)
+    print("written", out_file, len(doc))
+
+
+if "--mode" in argv and argv[argv.index("--mode") + 1] == "nov17":
+    build_nov17()
+else:
+    build()

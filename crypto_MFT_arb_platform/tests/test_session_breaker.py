@@ -619,6 +619,8 @@ class A2DailyLossStop(unittest.TestCase):
         self.assertEqual([e["state"] for e in trips], ["ACTIVE"])                                   # once per state change
         self.assertEqual(s.limit_counters["daily_loss_stop_trips"], 1)
         self.assertLessEqual(Decimal(s.limits_report()["daily_loss"]["min_pnl_usdt"]), Decimal("-5"))
+        at = s.limits_report()["daily_loss"]["min_pnl_at"]                                          # when the low point was, the two mids and the positions then
+        self.assertEqual((at["ts_ns"], at["mids"], at["positions"]), (4 * S, {A: "99.0", B: "99.0"}, {A: "10"}))
         self.assertTrue(events(s, "KILL_SWITCH_CANCEL_ALL_COMPLETE")[-1]["risk_reducing_orders_kept"])   # hedges in flight finish
 
     def test_a_loss_inside_the_limit_does_not_trip_and_the_limit_scales_with_the_clip(self):

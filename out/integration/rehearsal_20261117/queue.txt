@@ -1,0 +1,8 @@
+v19_ref perp_perp_maker_taker_v1_9 --size 1 --regime-boundaries /Users/vaibhav/Documents/Newproject/crypto_MFT_arb_platform/config/regime_boundaries_day1_2026-10-29_insample.json
+v19_min5 perp_perp_maker_taker_v1_9 --size 1 --hedge-min-notional 5 --regime-boundaries /Users/vaibhav/Documents/Newproject/crypto_MFT_arb_platform/config/regime_boundaries_day1_2026-10-29_insample.json
+v110_A perp_perp_maker_taker_v1_10 --size 1 --hedge-min-notional 5 --regime-boundaries /Users/vaibhav/Documents/Newproject/crypto_MFT_arb_platform/config/regime_boundaries_day1_2026-10-29_insample.json
+v110_B perp_perp_maker_taker_v1_10 --size 1 --hedge-min-notional 5 --regime-boundaries /Users/vaibhav/Documents/Newproject/crypto_MFT_arb_platform/config/regime_boundaries_day1_2026-10-29_insample.json
+v110cp_A perp_perp_maker_taker_v1_10 --size 1 --hedge-min-notional 5 --set arb.close_pairs=reduce_only_quote --regime-boundaries /Users/vaibhav/Documents/Newproject/crypto_MFT_arb_platform/config/regime_boundaries_day1_2026-10-29_insample.json
+v110cp_B perp_perp_maker_taker_v1_10 --size 1 --hedge-min-notional 5 --set arb.close_pairs=reduce_only_quote --regime-boundaries /Users/vaibhav/Documents/Newproject/crypto_MFT_arb_platform/config/regime_boundaries_day1_2026-10-29_insample.json
+v110g5_A perp_perp_maker_taker_v1_10 --size 1 --gross 5 --hedge-min-notional 5 --regime-boundaries /Users/vaibhav/Documents/Newproject/crypto_MFT_arb_platform/config/regime_boundaries_day1_2026-10-29_insample.json
+v110g5_B perp_perp_maker_taker_v1_10 --size 1 --gross 5 --hedge-min-notional 5 --regime-boundaries /Users/vaibhav/Documents/Newproject/crypto_MFT_arb_platform/config/regime_boundaries_day1_2026-10-29_insample.json
