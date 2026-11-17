@@ -1,0 +1,130 @@
+{
+ "rate_per_s_per_venue": 5000.0,
+ "seconds": 5.0,
+ "frames_scheduled_per_venue": 25000,
+ "wall_s": 10.395,
+ "venues": {
+  "BINANCE": {
+   "connections": 2,
+   "frames_handed": 24720,
+   "book_stream_frames": 19720,
+   "canonical_events": 19722,
+   "backlog_frames_discarded": 5000,
+   "dropped_frames": 0,
+   "normalization_errors": 0,
+   "processing_ms": {
+    "n": 19722,
+    "p50": 0.014208,
+    "p99": 0.02425,
+    "max": 3.073167
+   },
+   "end_to_end_lag_ms": {
+    "n": 19721,
+    "p50": 476.130542,
+    "p99": 983.247917,
+    "max": 1001.839542
+   },
+   "arrival_stats": {
+    "frames": 19686,
+    "max_backlog_frames": 4999,
+    "max_arrival_to_processing_ns": 999962917,
+    "backlog_resyncs": 1,
+    "backlog_frames_discarded": 5000
+   },
+   "harness_lag_ms": {
+    "p50": 0.420959,
+    "p99": 16.12425,
+    "max": 44.604959
+   },
+   "book_age_ms": {
+    "n": 451,
+    "p50": 409.274,
+    "p99": 984.839,
+    "max": 997.322
+   },
+   "stale_book_transitions": 2,
+   "stale_samples": 0,
+   "gaps": 0,
+   "out_of_order": 0,
+   "duplicates": 0,
+   "resyncs": 2,
+   "book_state_at_end": "VALID",
+   "reconnects": null
+  },
+  "BYBIT": {
+   "connections": 2,
+   "frames_handed": 24716,
+   "book_stream_frames": 19719,
+   "canonical_events": 19719,
+   "backlog_frames_discarded": 4997,
+   "dropped_frames": 0,
+   "normalization_errors": 0,
+   "processing_ms": {
+    "n": 19719,
+    "p50": 0.013834,
+    "p99": 0.01925,
+    "max": 0.651375
+   },
+   "end_to_end_lag_ms": {
+    "n": 19719,
+    "p50": 490.453042,
+    "p99": 993.892792,
+    "max": 1001.304292
+   },
+   "arrival_stats": {
+    "frames": 19719,
+    "max_backlog_frames": 4999,
+    "max_arrival_to_processing_ns": 999958709,
+    "backlog_resyncs": 1,
+    "backlog_frames_discarded": 4997
+   },
+   "harness_lag_ms": {
+    "p50": 0.418292,
+    "p99": 15.61525,
+    "max": 44.046625
+   },
+   "book_age_ms": {
+    "n": 454,
+    "p50": 416.721,
+    "p99": 992.545,
+    "max": 999.211
+   },
+   "stale_book_transitions": 2,
+   "stale_samples": 0,
+   "gaps": 0,
+   "out_of_order": 0,
+   "duplicates": 0,
+   "resyncs": 1,
+   "book_state_at_end": "VALID",
+   "reconnects": null
+  }
+ },
+ "book_gate_suspended_at_end": false,
+ "session_events_processed": 39441,
+ "cpu": {
+  "user_plus_system_s": 10.049,
+  "share_of_one_core": 0.967,
+  "max_rss_mb": 245.3
+ },
+ "verdict": {
+  "checks": {
+   "stale_book_events_zero": false,
+   "no_dropped_frames": true,
+   "no_gaps_out_of_order_or_errors": true,
+   "no_reconnect_or_backlog_resync": false,
+   "kept_up_with_the_schedule_end_to_end_p99_lag_under_100ms": false,
+   "book_gate_open_at_end": true
+  },
+  "pass": false,
+  "stale_book_events": 4,
+  "dropped_frames": 0,
+  "gaps_out_of_order_duplicates_errors": 0
+ },
+ "arrival_stamp": "on",
+ "label": "EXPLORATORY: this Mac, one process, a synthetic top-of-book stream through the live parse, book and session path on the wall clock",
+ "machine": {
+  "platform": "macOS-15.3.1-arm64-arm-64bit",
+  "python": "3.12.0",
+  "processor": "arm"
+ }
+}

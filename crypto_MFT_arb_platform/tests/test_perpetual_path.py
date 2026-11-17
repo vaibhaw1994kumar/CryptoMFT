@@ -108,6 +108,7 @@ class LiveDerivativeCaptureTests(unittest.TestCase):
                                                           "p": "60001", "i": "60000", "r": "0.0002",
                                                           "T": 28_800_000}), channel="markPrice")
             service._process_derivative_frame("BINANCE", "wss://x", "not json", channel="markPrice")
+            service.recorder.flush_now()               # A9 fix a (17 Nov): the recorder flushes at a bounded interval; this test reads the files while the part is open
             part = service.recorder._part_dir
             rows = [json.loads(line) for line in (part / "derivatives.jsonl").read_text().splitlines()]
             trace = [json.loads(line) for line in (part / "trace.jsonl").read_text().splitlines()]

@@ -69,6 +69,7 @@ class LiveValidationTests(unittest.TestCase):
             self.assertEqual((book.sequence, book.state), (10, BookState.VALID))
             self.assertNotIn(90, [int(p) for p in book.bids])
             self.assertEqual(live.service.stats["BYBIT"].validation_errors, 1)
+            live.service.recorder.flush_now()          # A9 fix a (17 Nov): the recorder flushes at a bounded interval; this test reads the file while the part is open
             quarantine = live.service.recorder._part_dir / "quarantine.jsonl"
             rows = [json.loads(line) for line in quarantine.read_text().splitlines()]
             self.assertEqual([row["stage"] for row in rows], ["VALIDATE"])

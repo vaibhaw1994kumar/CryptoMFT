@@ -252,6 +252,11 @@ class StartUp(unittest.TestCase):
         self.assertIsNotNone(paper.session.clock_gate)
         self.assertFalse(paper.session.clock_gate.replay)                                            # a live session blocks on an unknown clock
 
+    def test_the_feed_arrival_stamp_key_turns_arrival_stamping_on_in_the_live_service(self):
+        paper = self.make({"feed_arrival_stamp": True}, None)
+        self.assertTrue(paper.service.settings.arrival_stamp)
+        self.assertFalse(self.make({}, None).service.settings.arrival_stamp)
+
     def test_a_purely_simulated_session_with_no_account_starts_as_before_and_does_not_run_the_checks(self):
         import tempfile
         from crypto_stat_arb.live_feed import LiveFeedSettings

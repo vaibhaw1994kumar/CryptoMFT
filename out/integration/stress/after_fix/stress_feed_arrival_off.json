@@ -1,0 +1,118 @@
+{
+ "rate_per_s_per_venue": 10000.0,
+ "seconds": 5.0,
+ "frames_scheduled_per_venue": 50000,
+ "wall_s": 24.563,
+ "venues": {
+  "BINANCE": {
+   "connections": 1,
+   "frames_handed": 50000,
+   "book_stream_frames": 50000,
+   "canonical_events": 50001,
+   "backlog_frames_discarded": 0,
+   "dropped_frames": 0,
+   "normalization_errors": 0,
+   "processing_ms": {
+    "n": 50001,
+    "p50": 0.013417,
+    "p99": 0.021084,
+    "max": 5.710708
+   },
+   "end_to_end_lag_ms": {
+    "n": 50000,
+    "p50": 7105.398042,
+    "p99": 7941.673917,
+    "max": 7953.167208
+   },
+   "arrival_stats": {},
+   "harness_lag_ms": {
+    "p50": 7105.284708,
+    "p99": 7941.562167,
+    "max": 7953.029042
+   },
+   "book_age_ms": {
+    "n": 0,
+    "p50": null,
+    "p99": null,
+    "max": null
+   },
+   "stale_book_transitions": 0,
+   "stale_samples": 0,
+   "gaps": 0,
+   "out_of_order": 0,
+   "duplicates": 0,
+   "resyncs": 1,
+   "book_state_at_end": "VALID",
+   "reconnects": null
+  },
+  "BYBIT": {
+   "connections": 1,
+   "frames_handed": 50000,
+   "book_stream_frames": 50000,
+   "canonical_events": 50000,
+   "backlog_frames_discarded": 0,
+   "dropped_frames": 0,
+   "normalization_errors": 0,
+   "processing_ms": {
+    "n": 50000,
+    "p50": 0.012583,
+    "p99": 0.02025,
+    "max": 0.907125
+   },
+   "end_to_end_lag_ms": {
+    "n": 50000,
+    "p50": 647.816708,
+    "p99": 1280.656667,
+    "max": 1290.509917
+   },
+   "arrival_stats": {},
+   "harness_lag_ms": {
+    "p50": 647.686958,
+    "p99": 1280.541042,
+    "max": 1290.402083
+   },
+   "book_age_ms": {
+    "n": 1,
+    "p50": 13.326,
+    "p99": 13.326,
+    "max": 13.326
+   },
+   "stale_book_transitions": 1,
+   "stale_samples": 0,
+   "gaps": 0,
+   "out_of_order": 0,
+   "duplicates": 0,
+   "resyncs": 0,
+   "book_state_at_end": "STALE",
+   "reconnects": null
+  }
+ },
+ "book_gate_suspended_at_end": true,
+ "session_events_processed": 100001,
+ "cpu": {
+  "user_plus_system_s": 24.363,
+  "share_of_one_core": 0.992,
+  "max_rss_mb": 517.9
+ },
+ "verdict": {
+  "checks": {
+   "stale_book_events_zero": false,
+   "no_dropped_frames": true,
+   "no_gaps_out_of_order_or_errors": true,
+   "no_reconnect_or_backlog_resync": true,
+   "kept_up_with_the_schedule_end_to_end_p99_lag_under_100ms": false,
+   "book_gate_open_at_end": false
+  },
+  "pass": false,
+  "stale_book_events": 1,
+  "dropped_frames": 0,
+  "gaps_out_of_order_duplicates_errors": 0
+ },
+ "arrival_stamp": "off",
+ "label": "EXPLORATORY: this Mac, one process, a synthetic top-of-book stream through the live parse, book and session path on the wall clock",
+ "machine": {
+  "platform": "macOS-15.3.1-arm64-arm-64bit",
+  "python": "3.12.0",
+  "processor": "arm"
+ }
+}

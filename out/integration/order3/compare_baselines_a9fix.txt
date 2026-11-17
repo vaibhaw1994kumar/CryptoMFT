@@ -1,0 +1,10 @@
+{
+ "baseline": 93,
+ "now": 95,
+ "new_failures": [
+  "FAILED tests/test_market_data_p2.py::LiveValidationTests::test_invalid_book_event_is_quarantined_and_never_applied",
+  "FAILED tests/test_perpetual_path.py::LiveDerivativeCaptureTests::test_frames_are_captured_merged_recorded_and_traced"
+ ],
+ "no_longer_failing": [],
+ "UNCHANGED": false
+}

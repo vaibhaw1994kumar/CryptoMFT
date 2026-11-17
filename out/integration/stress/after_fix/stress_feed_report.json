@@ -1,0 +1,177 @@
+{
+ "rate_per_s_per_venue": 10000.0,
+ "seconds": 5.0,
+ "frames_scheduled_per_venue": 50000,
+ "wall_s": 10.189,
+ "venues": {
+  "BINANCE": {
+   "connections": 4,
+   "frames_handed": 48266,
+   "book_stream_frames": 18273,
+   "canonical_events": 18277,
+   "backlog_frames_discarded": 29993,
+   "dropped_frames": 0,
+   "normalization_errors": 0,
+   "processing_ms": {
+    "n": 18277,
+    "p50": 0.014167,
+    "p99": 0.023458,
+    "max": 3.391708
+   },
+   "end_to_end_lag_ms": {
+    "n": 18276,
+    "p50": 499.924708,
+    "p99": 988.802792,
+    "max": 1002.032542
+   },
+   "arrival_stats": {
+    "frames": 18222,
+    "max_backlog_frames": 10002,
+    "max_arrival_to_processing_ns": 1000003625,
+    "backlog_resyncs": 3,
+    "backlog_frames_discarded": 29993
+   },
+   "harness_lag_ms": {
+    "p50": 0.435583,
+    "p99": 42.89975,
+    "max": 82.43475
+   },
+   "book_age_ms": {
+    "n": 428,
+    "p50": 465.951,
+    "p99": 991.163,
+    "max": 999.33
+   },
+   "stale_book_transitions": 4,
+   "stale_samples": 0,
+   "gaps": 0,
+   "out_of_order": 0,
+   "duplicates": 0,
+   "resyncs": 4,
+   "book_state_at_end": "VALID",
+   "reconnects": null
+  },
+  "BYBIT": {
+   "connections": 4,
+   "frames_handed": 48270,
+   "book_stream_frames": 18297,
+   "canonical_events": 18297,
+   "backlog_frames_discarded": 29973,
+   "dropped_frames": 0,
+   "normalization_errors": 0,
+   "processing_ms": {
+    "n": 18297,
+    "p50": 0.014042,
+    "p99": 0.022875,
+    "max": 1.491833
+   },
+   "end_to_end_lag_ms": {
+    "n": 18297,
+    "p50": 492.545583,
+    "p99": 985.043708,
+    "max": 1002.081375
+   },
+   "arrival_stats": {
+    "frames": 18297,
+    "max_backlog_frames": 9999,
+    "max_arrival_to_processing_ns": 1001028500,
+    "backlog_resyncs": 3,
+    "backlog_frames_discarded": 29973
+   },
+   "harness_lag_ms": {
+    "p50": 0.431625,
+    "p99": 43.795667,
+    "max": 83.742792
+   },
+   "book_age_ms": {
+    "n": 431,
+    "p50": 455.388,
+    "p99": 985.796,
+    "max": 993.994
+   },
+   "stale_book_transitions": 4,
+   "stale_samples": 0,
+   "gaps": 0,
+   "out_of_order": 0,
+   "duplicates": 0,
+   "resyncs": 3,
+   "book_state_at_end": "VALID",
+   "reconnects": null
+  }
+ },
+ "book_gate_suspended_at_end": false,
+ "session_events_processed": 36574,
+ "cpu": {
+  "user_plus_system_s": 9.671,
+  "share_of_one_core": 0.949,
+  "max_rss_mb": 252.1
+ },
+ "verdict": {
+  "checks": {
+   "stale_book_events_zero": false,
+   "no_dropped_frames": true,
+   "no_gaps_out_of_order_or_errors": true,
+   "no_reconnect_or_backlog_resync": false,
+   "kept_up_with_the_schedule_end_to_end_p99_lag_under_100ms": false,
+   "book_gate_open_at_end": true
+  },
+  "pass": false,
+  "stale_book_events": 8,
+  "dropped_frames": 0,
+  "gaps_out_of_order_duplicates_errors": 0
+ },
+ "arrival_stamp": "on",
+ "label": "EXPLORATORY: this Mac, one process, a synthetic top-of-book stream through the live parse, book and session path on the wall clock",
+ "machine": {
+  "platform": "macOS-15.3.1-arm64-arm-64bit",
+  "python": "3.12.0",
+  "processor": "arm"
+ },
+ "profile_run": {
+  "by_own_time_top18": [
+   "         5308012 function calls (5289989 primitive calls) in 2.482 seconds",
+   "   Ordered by: internal time",
+   "   List reduced from 534 to 18 due to restriction <18>",
+   "   ncalls  tottime  percall  cumtime  percall filename:lineno(function)",
+   "    87366    0.307    0.000    0.392    0.000 /Library/Frameworks/Python.framework/Versions/3.12/lib/python3.12/json/encoder.py:205(iterencode)",
+   "    23612    0.168    0.000    0.169    0.000 /Users/vaibhav/Documents/Newproject/crypto_MFT_arb_platform/src/crypto_stat_arb/time_integrity.py:250(<genexpr>)",
+   "     2990    0.104    0.000    0.104    0.000 {method 'control' of 'select.kqueue' objects}",
+   "    11808    0.060    0.000    0.293    0.000 /Users/vaibhav/Documents/Newproject/crypto_MFT_arb_platform/src/crypto_stat_arb/time_integrity.py:188(observe)",
+   "     2162    0.057    0.000    0.430    0.000 /Users/vaibhav/Documents/Newproject/crypto_MFT_arb_platform/src/crypto_stat_arb/live_feed.py:1965(_arrival_reader)",
+   "254166/254162    0.057    0.000    0.225    0.000 {built-in method builtins.max}",
+   "    87366    0.051    0.000    0.469    0.000 /Library/Frameworks/Python.framework/Versions/3.12/lib/python3.12/json/encoder.py:183(encode)",
+   "    37121    0.047    0.000    0.085    0.000 /Users/vaibhav/Documents/Newproject/crypto_MFT_arb_platform/scripts/stress_feed.py:95(recv)",
+   "    87366    0.045    0.000    0.523    0.000 /Library/Frameworks/Python.framework/Versions/3.12/lib/python3.12/json/__init__.py:183(dumps)",
+   "     5904    0.041    0.000    0.284    0.000 /Users/vaibhav/Documents/Newproject/crypto_MFT_arb_platform/src/crypto_stat_arb/raw_capture.py:100(append)",
+   "     5904    0.038    0.000    0.162    0.000 /Users/vaibhav/Documents/Newproject/crypto_MFT_arb_platform/src/crypto_stat_arb/live_feed.py:462(capture_wire)",
+   "   326228    0.037    0.000    0.037    0.000 {method 'get' of 'dict' objects}",
+   "   435032    0.036    0.000    0.036    0.000 {built-in method builtins.isinstance}",
+   "    37122    0.033    0.000    0.340    0.000 /Library/Frameworks/Python.framework/Versions/3.12/lib/python3.12/asyncio/tasks.py:462(wait_for)",
+   "     5904    0.031    0.000    1.034    0.000 /Users/vaibhav/Documents/Newproject/crypto_MFT_arb_platform/src/crypto_stat_arb/live_feed.py:2365(_apply_and_record)",
+   "    17762    0.031    0.000    0.086    0.000 /Library/Frameworks/Python.framework/Versions/3.12/lib/python3.12/uuid.py:727(uuid5)",
+   "     5904    0.030    0.000    0.071    0.000 /Users/vaibhav/Documents/Newproject/crypto_MFT_arb_platform/src/crypto_stat_arb/models.py:109(from_dict)",
+   "    17762    0.027    0.000    0.035    0.000 /Library/Frameworks/Python.framework/Versions/3.12/lib/python3.12/uuid.py:139(__init__)"
+  ],
+  "by_cumulative_time_core_modules": [
+   "         5308012 function calls (5289989 primitive calls) in 2.482 seconds",
+   "   Ordered by: cumulative time",
+   "   List reduced from 534 to 106 due to restriction <'live_feed|session|orderbook|adapters|paper_live|book_gate|time_integrity|strategy'>",
+   "   List reduced from 106 to 14 due to restriction <14>",
+   "   ncalls  tottime  percall  cumtime  percall filename:lineno(function)",
+   "     5915    0.002    0.000    1.926    0.000 /Users/vaibhav/Documents/Newproject/crypto_MFT_arb_platform/src/crypto_stat_arb/live_feed.py:1310(_venue_forever)",
+   "     5913    0.001    0.000    1.921    0.000 /Users/vaibhav/Documents/Newproject/crypto_MFT_arb_platform/src/crypto_stat_arb/live_feed.py:996(_fail_closed)",
+   "     5902    0.004    0.000    1.725    0.000 /Users/vaibhav/Documents/Newproject/crypto_MFT_arb_platform/src/crypto_stat_arb/live_feed.py:2210(_process_websocket_frame)",
+   "     5902    0.017    0.000    1.720    0.000 /Users/vaibhav/Documents/Newproject/crypto_MFT_arb_platform/src/crypto_stat_arb/live_feed.py:2224(_process_websocket_frame_b",
+   "     2972    0.004    0.000    1.046    0.000 /Users/vaibhav/Documents/Newproject/crypto_MFT_arb_platform/src/crypto_stat_arb/live_feed.py:1668(_run_bybit_connection)",
+   "     5904    0.031    0.000    1.034    0.000 /Users/vaibhav/Documents/Newproject/crypto_MFT_arb_platform/src/crypto_stat_arb/live_feed.py:2365(_apply_and_record)",
+   "     2943    0.004    0.000    0.868    0.000 /Users/vaibhav/Documents/Newproject/crypto_MFT_arb_platform/src/crypto_stat_arb/live_feed.py:1597(_run_binance_connection)",
+   "    17715    0.010    0.000    0.731    0.000 /Users/vaibhav/Documents/Newproject/crypto_MFT_arb_platform/src/crypto_stat_arb/live_feed.py:88(wrapper)",
+   "     5904    0.013    0.000    0.505    0.000 /Users/vaibhav/Documents/Newproject/crypto_MFT_arb_platform/src/crypto_stat_arb/live_feed.py:2052(_capture_and_parse)",
+   "     2162    0.057    0.000    0.430    0.000 /Users/vaibhav/Documents/Newproject/crypto_MFT_arb_platform/src/crypto_stat_arb/live_feed.py:1965(_arrival_reader)",
+   "    11808    0.060    0.000    0.293    0.000 /Users/vaibhav/Documents/Newproject/crypto_MFT_arb_platform/src/crypto_stat_arb/time_integrity.py:188(observe)",
+   "     5904    0.004    0.000    0.288    0.000 /Users/vaibhav/Documents/Newproject/crypto_MFT_arb_platform/src/crypto_stat_arb/live_feed.py:539(append_payload)",
+   "     5904    0.022    0.000    0.271    0.000 /Users/vaibhav/Documents/Newproject/crypto_MFT_arb_platform/src/crypto_stat_arb/live_feed.py:569(record_event)",
+   "     5904    0.005    0.000    0.238    0.000 /Users/vaibhav/Documents/Newproject/crypto_MFT_arb_platform/src/crypto_stat_arb/live_feed.py:1709(_observe_timing)"
+  ]
+ }
+}
