@@ -154,6 +154,10 @@ class ArbConfig:
     # the taker venue. "both": also rest a sell (an improved ask) hedged by BUYING on the taker venue; per evaluation the
     # direction with the higher net edge wins. On a perpetual both directions are equally available.
     maker_passive_side: str = "bid"      # "bid" (legacy: passive buy only) | "ask" (passive sell only) | "both" (better net edge wins)
+    # Owner 16 Nov (Order 3 B): "off" (the default, every profile) | "reduce_only_quote". While a pair is open (a net position on the maker venue, hedged on the other), ALSO quote the opposite maker side for at most the
+    # open size (less what a closing quote already rests for), priced by the same edge formula in the reducing direction (fees, S1 table, VWAP hedge, funding). The hedge that follows a fill closes the other leg and is
+    # reduce-only. It never opens risk and never takes a position through flat. Maker-taker mode only. A separate switch, NOT in v1_10.
+    close_pairs: str = "off"
 
     # ── Strategy profile (docs/strategy_contract.md) ─────────────────────────
     # "legacy_v0" (default): the edge expressions and gate used by every result before 2026-11-01, kept bit-identical.
@@ -288,6 +292,7 @@ class ArbSignal:
     naive_edge_bps: float | None = None
     conditional_edge_bps: float | None = None
     edge_ref: str = "buy_ask"
+    close_pair: bool = False             # Order 3 B: this signal CLOSES an open pair (a reducing quote; its hedge is reduce-only)
 
     # MAKER_TAKER: the passive leg is legs[0]; the hedge is a taker on the other venue, on the opposite side. For a passive
     # bid (the only direction before maker_passive_side) these equal buy_venue / sell_venue / "sell".
@@ -308,6 +313,7 @@ class ArbSignal:
 class PendingExposure:
     """Base quantity (positive magnitudes) per venue that would still be bought / sold if every order that is not in the
     InventoryBook yet executed in full: resting maker remainders, maker legs in flight and hedges in flight."""
+    closing: dict[str, float] = field(default_factory=dict)       # Order 3 B: remaining size of resting REDUCING quotes per maker venue (not counted in buys / sells)
     buys: dict[str, float] = field(default_factory=dict)
     sells: dict[str, float] = field(default_factory=dict)
 
@@ -359,6 +365,12 @@ class CrossVenueArbStrategy:
         self.pair = pair
         self.venues = venues
         self.config = config or ArbConfig()
+        if self.config.close_pairs not in ("off", "reduce_only_quote"):
+            raise ValueError(f"ArbConfig.close_pairs must be 'off' or 'reduce_only_quote', got {self.config.close_pairs!r}")
+        if self.config.close_pairs != "off" and self.config.mode != MAKER_TAKER:
+            raise ValueError("ArbConfig.close_pairs needs the maker-taker mode")
+        if self.config.close_pairs != "off" and not self.config.count_pending_exposure:
+            raise ValueError("ArbConfig.close_pairs needs count_pending_exposure (a resting closing quote is read from the pending exposure: without it every evaluation would quote the open size again)")
         if self.config.maker_passive_side not in ("bid", "ask", "both"):
             raise ValueError(f"ArbConfig.maker_passive_side must be 'bid', 'ask' or 'both', got {self.config.maker_passive_side!r}")
         if self.config.join_touch_on_tick_rounding and not self.config.round_quotes_to_tick:
@@ -641,12 +653,12 @@ class CrossVenueArbStrategy:
         self.rejects["participation_size_capped"] = self.rejects.get("participation_size_capped", 0) + 1
         return limit, True
 
-    def _entry_quote_qty(self, side: str, price: float, taker_book, hedge_px: float, maker_venue: str, taker_venue: str, inventory, pending) -> float:
+    def _entry_quote_qty(self, side: str, price: float, taker_book, hedge_px: float, maker_venue: str, taker_venue: str, inventory, pending, close_cap: float | None = None) -> float:
         """The size a signal at `price` will have: min(tradeable hedge depth, inventory room, max clip), the formula the signal itself uses below. 0 when a limit leaves nothing (the signal then fails its own later
         checks, so the edge is measured at the clip size just as before)."""
         clip = self._max_clip(price)
         depth = self._tradeable_depth(taker_book, side, hedge_px)
-        room = self._inventory_room(maker_venue, taker_venue, inventory, pending) if side == "bid" else self._inventory_room(taker_venue, maker_venue, inventory, pending)
+        room = close_cap if close_cap is not None else (self._inventory_room(maker_venue, taker_venue, inventory, pending) if side == "bid" else self._inventory_room(taker_venue, maker_venue, inventory, pending))
         return clip if (depth <= 0 or room <= 0) else min(depth, room, clip)
 
     def _quote_to_tick(self, venue: str, price: float, side: str) -> float:
@@ -767,6 +779,13 @@ class CrossVenueArbStrategy:
         if window == "not_evaluable":
             self.rejects["funding_window_not_evaluable"] = self.rejects.get("funding_window_not_evaluable", 0) + 1      # labelled, nothing blocked
 
+        if cfg.mode == MAKER_TAKER and cfg.close_pairs == "reduce_only_quote":
+            close = self._close_pair_signal(books, states, inventory, now, pending)
+            if close is not None:
+                self.signals += 1
+                self._last_signal_ts = now
+                return close
+
         # A7: enforce maker_max_live_orders before even computing the signal.
         if cfg.mode == MAKER_TAKER and live_maker_orders >= cfg.maker_max_live_orders:
             self.rejects["maker_limit"] += 1
@@ -793,6 +812,30 @@ class CrossVenueArbStrategy:
         if best is not None:
             self.signals += 1
             self._last_signal_ts = now
+        return best
+
+    def _close_pair_signal(self, books: dict, states: dict, inventory: InventoryBook, now: float, pending: "PendingExposure | None") -> ArbSignal | None:
+        """Order 3 B: for each maker venue holding a net position, a REDUCING quote (a sell against a long, a buy against a short) for at most the open size less what a closing quote already rests for,
+        by the same edge formula and gates as an opening quote (the signal is the ordinary maker-taker one with the size capped at the open size). None when nothing is open or nothing clears. It counts
+        its rejects like any evaluation."""
+        cfg = self.config
+        tradeable = [v for v in self.venue_names if self._venue_tradeable(v, books[v], states[v], now)]
+        if len(tradeable) < 2:
+            return None
+        best: ArbSignal | None = None
+        for maker in tradeable:
+            if not self._maker_allowed(maker):
+                continue
+            position = inventory.base.get(maker, 0.0)
+            already = (pending.closing.get(maker, 0.0) if pending is not None else 0.0)
+            open_size = abs(position) - already
+            if open_size <= 1e-9:
+                continue
+            taker = next(v for v in tradeable if v != maker)
+            sig = (self._evaluate_maker_taker_ask(maker, taker, books, states, inventory, now, pending, close_cap=open_size) if position > 0
+                   else self._evaluate_maker_taker(maker, taker, books, states, inventory, now, pending, close_cap=open_size))
+            if sig is not None and (best is None or sig.net_edge_bps > best.net_edge_bps):
+                best = sig
         return best
 
     def _evaluate_direction(
@@ -922,8 +965,9 @@ class CrossVenueArbStrategy:
         inventory: InventoryBook,
         now: float,
         pending: "PendingExposure | None" = None,
+        close_cap: float | None = None,
     ) -> ArbSignal | None:
-        """Rest a passive bid on maker_venue, hedge by selling on taker_venue."""
+        """Rest a passive bid on maker_venue, hedge by selling on taker_venue. `close_cap` (Order 3 B only): the open size this bid may CLOSE (a short on the maker venue): it sizes the quote instead of the inventory room."""
         cfg = self.config
         if not self._maker_allowed(maker_venue):
             return None
@@ -938,7 +982,7 @@ class CrossVenueArbStrategy:
         vwap_entry = cfg.profile != "legacy_v0" and cfg.entry_hedge_price == "vwap"      # owner 13 Nov: the hedge is priced at the VWAP for the quote's size (quote price and edge), not at the touch
         price_px = hedge_px
         if vwap_entry:
-            est_view = self._hedge_vwap_view(taker_book, "bid", self._entry_quote_qty("bid", hedge_px, taker_book, hedge_px, maker_venue, taker_venue, inventory, pending))
+            est_view = self._hedge_vwap_view(taker_book, "bid", self._entry_quote_qty("bid", hedge_px, taker_book, hedge_px, maker_venue, taker_venue, inventory, pending, close_cap))
             if est_view is None:
                 self.rejects["no_depth"] += 1
                 return None
@@ -973,7 +1017,7 @@ class CrossVenueArbStrategy:
             # perp_perp_maker_taker_v1: the gate uses the conditional expected edge; the naive one is logged beside it.
             edge_book, edge_qty = taker_book, self._max_clip(max_bid)
             if vwap_entry:
-                edge_qty = self._entry_quote_qty("bid", max_bid, taker_book, hedge_px, maker_venue, taker_venue, inventory, pending)       # the size the signal will have, walked once: the same walk quote_validity uses
+                edge_qty = self._entry_quote_qty("bid", max_bid, taker_book, hedge_px, maker_venue, taker_venue, inventory, pending, close_cap)       # the size the signal will have, walked once: the same walk quote_validity uses
                 edge_book = self._hedge_vwap_view(taker_book, "bid", edge_qty)
                 if edge_book is None:
                     self.rejects["no_depth"] += 1
@@ -1001,7 +1045,7 @@ class CrossVenueArbStrategy:
             self.rejects["no_depth"] += 1
             return None
 
-        inv_cap = self._inventory_room(maker_venue, taker_venue, inventory, pending)
+        inv_cap = close_cap if close_cap is not None else self._inventory_room(maker_venue, taker_venue, inventory, pending)
         if inv_cap <= 0:
             self.rejects["inventory"] += 1
             return None
@@ -1062,7 +1106,7 @@ class CrossVenueArbStrategy:
             mode=MAKER_TAKER, buy_price=max_bid, sell_price=hedge_px,
             depth_limited=qty >= hedge_depth - 1e-12,
             inventory_limited=qty >= inv_cap - 1e-12,
-            naive_edge_bps=naive_bps, conditional_edge_bps=cond_bps, edge_ref=edge_ref,
+            naive_edge_bps=naive_bps, conditional_edge_bps=cond_bps, edge_ref=edge_ref, close_pair=close_cap is not None,
             legs=[
                 # Passive leg only. The hedge is fired on fill, not now — firing
                 # it up front would be a naked short against a maybe-fill.
@@ -1079,8 +1123,9 @@ class CrossVenueArbStrategy:
         inventory: InventoryBook,
         now: float,
         pending: "PendingExposure | None" = None,
+        close_cap: float | None = None,
     ) -> ArbSignal | None:
-        """Rest a passive ask on maker_venue, hedge by buying on taker_venue (mirror of _evaluate_maker_taker)."""
+        """Rest a passive ask on maker_venue, hedge by buying on taker_venue (mirror of _evaluate_maker_taker). `close_cap` (Order 3 B only): the open size this ask may CLOSE (a long on the maker venue)."""
         cfg = self.config
         if not self._maker_allowed(maker_venue):
             return None
@@ -1095,7 +1140,7 @@ class CrossVenueArbStrategy:
         vwap_entry = cfg.profile != "legacy_v0" and cfg.entry_hedge_price == "vwap"      # owner 13 Nov: see the bid path
         price_px = hedge_px
         if vwap_entry:
-            est_view = self._hedge_vwap_view(taker_book, "ask", self._entry_quote_qty("ask", hedge_px, taker_book, hedge_px, maker_venue, taker_venue, inventory, pending))
+            est_view = self._hedge_vwap_view(taker_book, "ask", self._entry_quote_qty("ask", hedge_px, taker_book, hedge_px, maker_venue, taker_venue, inventory, pending, close_cap))
             if est_view is None:
                 self.rejects["no_depth"] += 1
                 return None
@@ -1128,7 +1173,7 @@ class CrossVenueArbStrategy:
         if cfg.profile != "legacy_v0":
             edge_book, edge_qty = taker_book, self._max_clip(min_ask)
             if vwap_entry:
-                edge_qty = self._entry_quote_qty("ask", min_ask, taker_book, hedge_px, maker_venue, taker_venue, inventory, pending)
+                edge_qty = self._entry_quote_qty("ask", min_ask, taker_book, hedge_px, maker_venue, taker_venue, inventory, pending, close_cap)
                 edge_book = self._hedge_vwap_view(taker_book, "ask", edge_qty)
                 if edge_book is None:
                     self.rejects["no_depth"] += 1
@@ -1156,7 +1201,7 @@ class CrossVenueArbStrategy:
             self.rejects["no_depth"] += 1
             return None
 
-        inv_cap = self._inventory_room(taker_venue, maker_venue, inventory, pending)   # we buy on the taker venue, sell on the maker venue
+        inv_cap = close_cap if close_cap is not None else self._inventory_room(taker_venue, maker_venue, inventory, pending)   # we buy on the taker venue, sell on the maker venue
         if inv_cap <= 0:
             self.rejects["inventory"] += 1
             return None
@@ -1204,7 +1249,7 @@ class CrossVenueArbStrategy:
             mode=MAKER_TAKER, buy_price=hedge_px, sell_price=min_ask,
             depth_limited=qty >= hedge_depth - 1e-12,
             inventory_limited=qty >= inv_cap - 1e-12,
-            naive_edge_bps=naive_bps, conditional_edge_bps=cond_bps, edge_ref=edge_ref,
+            naive_edge_bps=naive_bps, conditional_edge_bps=cond_bps, edge_ref=edge_ref, close_pair=close_cap is not None,
             legs=[
                 # Passive leg only; the buy hedge is fired on fill (see _evaluate_maker_taker).
                 ArbLeg(maker_venue, "sell", qty, min_ask, False, min_ask, maker_fees.maker_bps),
@@ -1299,6 +1344,8 @@ class ArbSessionStrategy:
         self._no_requote_until_ns: dict[tuple[str, str], int] = {}                            # owner 16 Nov: (maker feed venue, side) -> no new quote before this time (arb.requote_delay_after_withdraw_s)
         self.requote_blocked_after_withdraw = 0
         self.withdrawn_by_validity = 0
+        self.close_pair_ids: set[str] = set()                                                 # Order 3 B: the opportunities that CLOSE a pair (the session passes close_pair to the OMS for them)
+        self.close_pair_signals = 0
         self.grid_snaps = {"price": 0, "quantity": 0}                                         # how often the instrument grid changed a signal value (0 when the strategy already quotes on the grid)
 
     # -- inputs from the core ------------------------------------------------------------------------------------------------
@@ -1319,6 +1366,11 @@ class ArbSessionStrategy:
                     continue
                 remaining = float(child.quantity - child.filled_quantity)
                 if remaining <= 0:
+                    continue
+                if child.reduce_only and child.post_only and child.order_role == "PRIMARY":
+                    # Order 3 B: a resting CLOSING quote reduces the position it was sized from: it is not new risk, not one of the live opening quotes, and is remembered so the next evaluation does not quote the open size again
+                    feed = self._feed_name[child.venue]
+                    pending.closing[feed] = pending.closing.get(feed, 0.0) + remaining
                     continue
                 pending.add(self._feed_name[child.venue], child.side.value.lower(), remaining)
                 makers += int(child.post_only)
@@ -1436,6 +1488,9 @@ class ArbSessionStrategy:
                 self.requote_blocked_after_withdraw += 1
                 return None
         opportunity = self.to_opportunity(signal, now_ns, books, fingerprint)
+        if signal.close_pair:
+            self.close_pair_ids.add(opportunity.opportunity_id)
+            self.close_pair_signals += 1
         self.signals[opportunity.opportunity_id] = signal
         self.last_signal = signal
         return opportunity

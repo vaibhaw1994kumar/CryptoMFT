@@ -334,6 +334,7 @@ class OMS:
         self._flatten_shadow: set[str] = set()                              # owner 13 Nov: breaker flatten plans whose inherited exposure is already carried by other plans: only their OWN fills count toward the residual
         self._unwind_dust: dict[str, dict[str, Any]] = {}                   # owner 13 Nov: plans whose unwind remainder is below every venue's minimum: DUST, recorded once, never retried
         self._unwind_skip: dict[tuple[str, str], dict[str, Any]] = {}      # (plan, venue) -> the unavailable-venue state: reason, next retry time, delay (1 s doubling to 30 s)
+        self._close_pair_plans: set[str] = set()                           # Order 3 B: plans whose maker quote CLOSES an open pair (reduce-only quote, reduce-only hedge); empty = off, byte-identical
         self._quote_plans: set[str] = set()                                # CR-MQ part 2 (owner 13 Nov): plans that are a market-making quote (one post-only child, no hedge); marked at creation, rebuilt from the plan store
         self._hedge_specs: dict[str, dict[str, Any]] = {}                  # FILL_TRIGGERED: the declared hedge leg of a plan (no ChildOrder until a maker fill)
         self.hedge_chains: dict[str, dict[str, HedgeLifecycle]] = {}       # parent_id -> chain_id -> chain
@@ -3173,6 +3174,7 @@ class OMS:
         *,
         quote_side: Side | None = None,
         exit_cap: Decimal | None = None,
+        close_pair: bool = False,
     ) -> ParentPlan:
         """Admit and dispatch one arb package. `quote_side` (owner 13 Nov, CR-MQ part 2; only through `execute_quote`) makes it a market-making QUOTE: one post-only GTC child on that side, no hedge spec, no
         eligibility alignment (there is one venue), one-leg risk reservation. None (every arb package) is the unchanged path."""
@@ -3222,17 +3224,27 @@ class OMS:
             plan = ParentPlan(parent_id, opportunity, children)
             self._quote_plans.add(parent_id)
         elif fill_triggered:
+            if close_pair and maker_venue is None:
+                raise ValueError("close_pair needs a maker venue")
             if maker_venue not in (opportunity.buy_venue, opportunity.sell_venue):
                 raise ValueError("FILL_TRIGGERED needs maker_venue to be one of the opportunity's venues")
             maker_child = next(c for c in children if c.venue == maker_venue)
             hedge_proto = next(c for c in children if c is not maker_child)
             maker_child.post_only, maker_child.time_in_force = True, "GTC"       # a resting post-only order: priced as maker, and a quiet GTC order is resting, not unknown
+            if close_pair:                                                       # Order 3 B: a CLOSING quote: reduce-only on the venue, and its hedge will be reduce-only too
+                maker_child.reduce_only = True
+                self._close_pair_plans.add(parent_id)
             plan = ParentPlan(parent_id, opportunity, [maker_child])
         else:
             plan = ParentPlan(parent_id, opportunity, children)
         self.plans[parent_id] = plan
         now = opportunity.observed_ts_ns
         self._transition(plan, PlanState.CREATED, now, event_type="PLAN_CREATED")
+        if parent_id in self._close_pair_plans:
+            maker_child = plan.children[0]
+            self.realism_counters["close_pair_quotes"] = self.realism_counters.get("close_pair_quotes", 0) + 1
+            self.ledger.record("CLOSE_PAIR_QUOTE", now, parent_id=parent_id, order_id=maker_child.order_id, venue=maker_child.venue, side=maker_child.side.value, quantity=str(maker_child.quantity),
+                               limit_price=str(maker_child.limit_price), position_before=str(self.ledger.positions.get((maker_child.venue, maker_child.instrument_id), Decimal("0"))))
         if quote_side is not None:
             self._persist(plan, now, "QUOTE_PLAN", side=quote_side.value)         # the marker survives a restart (_recover_hedge_state rebuilds it)
         held = self._new_risk_hold(plan, opportunity, now) if exit_cap is None else None      # an exit reduces risk: no hold on new risk applies to it
@@ -3720,6 +3732,7 @@ class OMS:
             "venue": proto.venue, "side": proto.side, "instrument_id": proto.instrument_id, "limit_price": proto.limit_price,
             "max_qty": opportunity.quantity, "requested_qty": Decimal("0"), "maker_order_id": maker.order_id, "chain_seq": 0,
             "opportunity_id": opportunity.opportunity_id,
+            **({"close_pair": True} if plan.parent_id in self._close_pair_plans else {}),          # Order 3 B: persisted with the spec, so the hedge stays reduce-only after a restart
         }
         self._persist(plan, ts_ns, "HEDGE_SPEC", **self._hedge_specs[plan.parent_id])
 
@@ -3757,7 +3770,22 @@ class OMS:
                 self._hedge_child_changed(plan, spec, chain, order, ts_ns)
         self._fill_triggered_settle(plan, spec, ts_ns)
 
+    def _close_pair_guard(self, plan: ParentPlan, spec: dict[str, Any], maker: ChildOrder, ts_ns: int) -> None:
+        """Order 3 B: a CLOSING quote's fills may never increase |position| on the maker venue and never take it through flat. The quote is sized at the open size, so this should never fire; if the position moved
+        underneath it (a flatten, another path) and a fill did, it is a persistent alarm on record, once per plan, and counted (a venue clips a reduce-only order; this platform's simulated venue does not)."""
+        if not spec.get("close_pair") or spec.get("close_pair_alarmed"):
+            return
+        after = self.ledger.positions.get((maker.venue, maker.instrument_id), Decimal("0"))
+        filled = self._lineage_filled(plan, maker)
+        before = after + filled if maker.side == Side.SELL else after - filled
+        if abs(after) > abs(before) or (before != 0 and after != 0 and (before > 0) != (after > 0)):
+            spec["close_pair_alarmed"] = True
+            self.realism_counters["close_pair_beyond_flat"] = self.realism_counters.get("close_pair_beyond_flat", 0) + 1
+            self.ledger.record("CLOSE_PAIR_BEYOND_FLAT", ts_ns, parent_id=plan.parent_id, venue=maker.venue, position_before=str(before), position_after=str(after), filled=str(filled), alarm=True, persistent=True)
+
     def _hedge_for_maker_fill(self, plan: ParentPlan, spec: dict[str, Any], maker: ChildOrder, ts_ns: int) -> None:
+        if spec.get("close_pair"):
+            self._close_pair_guard(plan, spec, maker, ts_ns)
         if self.dust_on:
             self._hedge_for_maker_fill_dust(plan, spec, maker, ts_ns)
             return
@@ -4099,7 +4127,7 @@ class OMS:
                                reason="touch_past_planned_limit")
         child = ChildOrder(
             order_id=stable_id("child", plan.parent_id, "HEDGE", chain.chain_id, attempt), parent_id=plan.parent_id, opportunity_id=spec["opportunity_id"],
-            venue=spec["venue"], instrument_id=spec["instrument_id"], side=spec["side"], quantity=qty, limit_price=cap, order_role="HEDGE")
+            venue=spec["venue"], instrument_id=spec["instrument_id"], side=spec["side"], quantity=qty, limit_price=cap, order_role="HEDGE", reduce_only=bool(spec.get("close_pair")))
         try:
             self.instruments.validate_order(child, ts_ns)
         except ValueError as exc:

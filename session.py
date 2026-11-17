@@ -728,7 +728,10 @@ class TradingSession:
             return None
         if maker_venue is not None and not self._order_rate_ok(maker_venue, now, "quote"):
             return None                                  # owner 16 Nov (A1): the per-venue order rate is used up: this quote is SKIPPED (counted, never queued); hedges, unwinds, flattens and cancels never pass this test
-        plan = self.oms.execute(opportunity, self.books, dispatch_ts_ns=dispatch_ts, maker_venue=maker_venue)
+        close_ids = getattr(strategy, "close_pair_ids", None)
+        plan = (self.oms.execute(opportunity, self.books, dispatch_ts_ns=dispatch_ts, maker_venue=maker_venue, close_pair=True)
+                if close_ids and opportunity.opportunity_id in close_ids and maker_venue is not None          # Order 3 B: a closing quote: reduce-only quote and hedge (every other call is the unchanged one)
+                else self.oms.execute(opportunity, self.books, dispatch_ts_ns=dispatch_ts, maker_venue=maker_venue))
         if hasattr(strategy, "on_plan_closed"):
             self._tracked_plans[plan.parent_id] = strategy
         wall_routed = self.wall_ns()
