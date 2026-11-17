@@ -163,3 +163,106 @@ class LiveCrossVenueTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+# ---- W6 (owner decision 5, 16 Nov): dislocation episodes, NOTIFY-ONLY ------------------------------------------------------------------------------------------------------------------------
+from crypto_stat_arb.cross_venue import DislocationMonitor, Episode, FAIL_CLOSED_RULE, assess_episode, dislocation_policy, dislocation_scan, false_alarm_report  # noqa: E402
+
+POLICY = {"enabled": True, "open_bps": 10.0, "close_bps": 8.0, "close_hold_s": 1.0, "baseline_window_s": 20.0, "max_episode_s": 60.0, "pair_max_skew_ms": 500.0, "max_unobservable_s": 5.0,
+          "data_lookback_s": 5.0, "venue_event_min_baseline_n": 3}
+T0 = 1_700_000_000 * SEC
+
+
+def snap(venue, seq, mid, ts, *, depth="50", spread="0.01"):
+    half = Decimal(spread) / 2
+    return MarketEvent.from_dict({"event_type": "BOOK_SNAPSHOT", "venue": venue, "instrument_id": "SOL-USDT-PERP", "exchange_ts_ns": ts, "source_ts_ns": ts, "receive_ts_ns": ts, "sequence": seq,
+                                  "bids": [{"price": str(Decimal(mid) - half), "quantity": depth}], "asks": [{"price": str(Decimal(mid) + half), "quantity": depth}]})
+
+
+def stream(gap_bps_at, seconds=60, step_ms=100, depth="50"):
+    """Two venues every `step_ms`; BYBIT at 100 plus `gap_bps_at(t)` bps (t in seconds from the start), BINANCE at 100."""
+    ev, seq = [], 0
+    for k in range(int(seconds * 1000 / step_ms)):
+        t = k * step_ms / 1000
+        ts = T0 + int(t * SEC)
+        seq += 1
+        ev.append(snap("BINANCE", seq, "100.00", ts, depth=depth))
+        ev.append(snap("BYBIT", seq, f"{100 * (1 + gap_bps_at(t) / 10000):.4f}", ts + 1_000_000, depth=depth))
+    return ev
+
+
+class DislocationEpisodes(unittest.TestCase):
+    def policy(self, **over):
+        return dislocation_policy({**POLICY, **over}, size_base=1.0)
+
+    def test_off_and_refusals(self):
+        self.assertIsNone(dislocation_policy(None))
+        self.assertIsNone(dislocation_policy({"enabled": False, "open_bps": 5}))
+        with self.assertRaisesRegex(ValueError, "defined, not built"):
+            dislocation_policy({**POLICY, "fail_closed": {"enabled": True}})
+        with self.assertRaisesRegex(ValueError, "not built"):
+            dislocation_policy({**POLICY, "reference": {"enabled": True}})
+        with self.assertRaises(ValueError):
+            dislocation_policy({**POLICY, "surprise": 1})
+        with self.assertRaises(ValueError):
+            dislocation_policy({**POLICY, "open_bps": 5.0, "close_bps": 8.0})
+
+    def test_an_episode_opens_against_the_baseline_and_closes_with_hysteresis(self):
+        gap = lambda t: 20.0 if 30 <= t < 35 else 2.0                          # a persistent 2 bp basis (the baseline) and a 5 s jump of 18 bp above it
+        out = dislocation_scan(stream(gap), self.policy())
+        (ep,) = out["records"]
+        self.assertEqual(ep["end_reason"], "RECOVERED")
+        self.assertAlmostEqual(ep["baseline_bps"], -2.0, delta=0.2)           # gap = first venue (sorted, BINANCE) minus second: the 2 bp basis is the baseline, not an episode
+        self.assertAlmostEqual(ep["duration_s"], 6.0, delta=0.3)              # 5 s plus the 1 s close hold
+        self.assertGreater(abs(ep["deviation_extreme_bps"]), 17.0)
+        self.assertEqual(ep["rich_venue"], "BYBIT")                            # BYBIT is the one priced above the baseline
+        self.assertEqual(ep["decision"], "NOTIFY_ONLY")
+        self.assertEqual(ep["class"], "UNCLASSIFIED")                          # the scan had no feed-health monitor: never TRADEABLE without one
+        self.assertIn("NO_FEED_HEALTH_MONITOR", ep["reason_codes"])
+
+    def test_a_thin_book_has_no_executable_price_at_size_and_a_deep_one_has_a_net_edge(self):
+        gap = lambda t: 40.0 if 30 <= t < 33 else 0.0
+        deep = dislocation_scan(stream(gap, depth="50"), self.policy())["records"][0]["executable"]
+        self.assertIsNotNone(deep["net_edge_bps_at_open"])
+        thin = dislocation_scan(stream(gap, depth="0.5"), self.policy())["records"][0]["executable"]
+        self.assertIsNone(thin["net_edge_bps_at_open"])
+        self.assertEqual(thin["BYBIT"]["reason"], "INSUFFICIENT_DEPTH")
+
+    def test_a_venue_that_stops_keeps_the_episode_open_then_closes_it_unobservable_as_data(self):
+        events = [e for e in stream(lambda t: 20.0 if t >= 30 else 0.0) if not (e.venue == "BYBIT" and e.receive_ts_ns > T0 + 32 * SEC)]
+        (ep,) = dislocation_scan(events, self.policy())["records"]
+        self.assertEqual(ep["end_reason"], "UNOBSERVABLE")
+        self.assertEqual(ep["class"], "DATA")
+        self.assertEqual(ep["would_be_action"], FAIL_CLOSED_RULE["DATA"])
+
+    def test_classes_by_evidence(self):
+        ep = lambda dur=5.0, net=3.0, end="RECOVERED": Episode(1, ("A", "B"), 0, 0.0, 20.0, 20.0, 20.0, end_ns=int(dur * SEC), end_reason=end, executable={"net_edge_bps_at_open": net})
+        healthy = {"feed_health_monitor": True, "books_valid_at_open": True}
+        self.assertEqual(assess_episode(ep(), healthy, durations_non_data=[], min_baseline_n=3)["class"], "TRADEABLE")
+        self.assertEqual(assess_episode(ep(net=-1.0), healthy, durations_non_data=[], min_baseline_n=3)["class"], "UNCLASSIFIED")
+        self.assertEqual(assess_episode(ep(net=None), healthy, durations_non_data=[], min_baseline_n=3)["reason_codes"], ["NO_EXECUTABLE_PRICE_AT_SIZE"])
+        long = ep(dur=100.0)
+        self.assertEqual(assess_episode(long, healthy, durations_non_data=[1.0, 2.0, 3.0], min_baseline_n=3)["reason_codes"], ["PERSISTENT_BEYOND_P99", "NO_VENUE_SIGNAL"])      # never VENUE_EVENT by persistence alone
+        self.assertEqual(assess_episode(long, {**healthy, "venue_signal": {"mark_gap_bps": 15.0}}, durations_non_data=[1.0, 2.0, 3.0], min_baseline_n=3)["class"], "VENUE_EVENT")
+        self.assertEqual(assess_episode(ep(), {"books_valid_at_open": True}, durations_non_data=[], min_baseline_n=3)["class"], "UNCLASSIFIED")     # no feed-health monitor
+
+    def test_no_data_episode_is_ever_tradeable_for_any_combination_of_data_triggers(self):
+        import itertools
+        triggers = ("feed_not_healthy", "clock_not_synced", "book_not_valid", "sequence_gaps", "own_lag", "feed_delayed")
+        for bits in itertools.product((False, True), repeat=len(triggers)):
+            if not any(bits):
+                continue
+            evidence = {"feed_health_monitor": True, "books_valid_at_open": True, **dict(zip(triggers, bits))}
+            got = assess_episode(Episode(1, ("A", "B"), 0, 0.0, 30.0, 30.0, 30.0, end_ns=SEC, end_reason="RECOVERED", executable={"net_edge_bps_at_open": 50.0}), evidence,
+                                 durations_non_data=[], min_baseline_n=3)
+            self.assertEqual(got["class"], "DATA", bits)
+
+    def test_the_false_alarm_report_counts_what_the_definition_would_block(self):
+        eps = [{"class": "DATA", "start_ns": 10 * SEC, "end_ns": 20 * SEC}, {"class": "TRADEABLE", "start_ns": 30 * SEC, "end_ns": 31 * SEC}]
+        self.assertEqual(false_alarm_report(eps, [15.0, 30.5, 40.0]), {"episodes": 2, "would_block_episodes": 1, "would_block_seconds": 10.0, "signals_inside_would_block_windows": 1})
+
+    def test_the_monitor_imports_no_order_risk_or_execution_module(self):
+        import ast
+        tree = ast.parse((ROOT / "src/crypto_stat_arb/cross_venue.py").read_text())
+        names = {n.module for n in ast.walk(tree) if isinstance(n, ast.ImportFrom) and n.module} | {a.name for n in ast.walk(tree) if isinstance(n, ast.Import) for a in n.names}
+        self.assertFalse({m for m in names if any(part in ("oms", "risk", "ems", "circuit_breaker", "session") for part in m.split("."))}, names)

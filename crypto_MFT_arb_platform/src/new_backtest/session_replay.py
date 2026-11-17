@@ -27,7 +27,7 @@ from decimal import Decimal
 from pathlib import Path
 from typing import Any, Iterable
 
-from crypto_stat_arb.config import check_real_order_profile, config_from_raw, feed_health_config_report, feed_health_from_profile, hedge_dust_fields, raw_config_from_profile, session_limits_from_profile
+from crypto_stat_arb.config import check_real_order_profile, config_from_raw, dislocation_from_profile, feed_health_config_report, feed_health_from_profile, hedge_dust_fields, raw_config_from_profile, session_limits_from_profile
 from crypto_stat_arb.derivatives import DerivativeTicker
 from crypto_stat_arb.metrics import regime_sample
 from crypto_stat_arb.ems.layer import hedge_policy_fields
@@ -125,6 +125,7 @@ def profile_session_rules(config, profile: dict, names: dict, *, hedge_policy, l
         "intent_journal": True,               # E0 step (a) (owner 10 Nov): the orders are journaled as layer intents next to the OMS plan; observation only
         "markout_horizons_s": tuple(config.markout_horizons_s),          # owner 9 Nov: forward markouts per fill, by venue and role (the core's MarkoutTracker)
         "feed_health": feed_health_from_profile(profile),             # W1 (owner 17 Nov): None (nothing built) for every profile without the block
+        "dislocation": dislocation_from_profile(profile, float(config.arb.max_position_base)),      # W6 (owner decision 5): notify-only episodes; None for every profile without the block
         "session_limits": session_limits_from_profile(profile, float(config.arb.max_position_base)),      # owner 16 Nov (Order 3): None for every profile without the block
     }
 
@@ -855,6 +856,8 @@ class SessionReplay:
 
     def result(self) -> dict[str, Any]:
         s = self.session
+        if getattr(s, "dislocation", None) is not None:
+            s.dislocation_report(self.last_ns)            # W6: an episode still open at the end of the data closes END_OF_RUN before the records are read
         orders, fills = [], []
         lifetime_ids = {e["order_id"] for e in s.ledger.events if e["event_type"] == "ORDER_LIFETIME_EXPIRED"}
         withdrawn = {e["order_id"]: e.get("reason") for e in s.ledger.events if e["event_type"] == "QUOTE_WITHDRAWN"}        # owner 12 Nov: the order file shows why a quote was cancelled (only runs with quote_withdraw on have any)
@@ -884,6 +887,7 @@ class SessionReplay:
             "residual_at_end": self._residual_at_end(),
             **({"_lifecycle": self._lifecycle(fills, list(self.decomp.rows) if self.decomp is not None else [])} if self.lifecycle_report else {}),
             **({"_ems_coverage": self._ems_coverage()} if self.lifecycle_report else {}),
+            **({"_dislocation_episodes": [e.record() for e in s.dislocation.episodes]} if getattr(s, "dislocation", None) is not None else {}),
             **({"participation": {"cap_on": bool(self.config.maker.participation_cap), "prints_it_binds_on": self.executor.diag.get("participation_cap_would_bind", 0.0), "excess_fill_qty": self.executor.diag.get("participation_cap_excess_qty", 0.0)}}
                if self.executor.diag.get("participation_cap_would_bind") or self.config.maker.participation_cap else {}),        # E3: only when the cap is on or something would have bound, so every earlier run's manifest is unchanged
             "ledger_event_counts": dict(Counter(e["event_type"] for e in s.ledger.events)),
@@ -908,6 +912,7 @@ class SessionReplay:
                 "price_sanity_core_stats": {f"{v}": {k: getattr(b.stats, k) for k in ("price_jumps", "confirmed_price_moves", "wide_spreads", "crossed_or_locked", "stale_transitions", "invalid_levels", "resyncs", "snapshots", "deltas_applied")}
                                             for (v, _), b in s.books.items()},
                 "time_integrity_blocks": sum(1 for e in s.ledger.events if e["event_type"] == "TIME_INTEGRITY_BLOCK"),
+                **({"dislocation": s.dislocation_report(self.last_ns)} if getattr(s, "dislocation", None) is not None else {}),      # W6: only when the profile has the block (every earlier profile: no key)
                 "model_choices": {"consume_liquidity_on_own_taker_fills": {**{n: a.consume_liquidity for n, a in self.adapters.items()}, "status": "DELIBERATE_MODEL_CHOICE (owner 12 Nov): an own hedge or unwind fill removes the walked quantity from the book it walked; the public view book is not changed by it (every level on both venues, tested)"}},
                 **({"hedge_fault_injection": {"faults": self.config.hedge_faults.as_dict(), "injected_by_venue": {n: dict(a.hedge_faults_injected) for n, a in self.adapters.items()},
                                               "ghost_hedges_held_at_end": {n: len(a._held) for n, a in self.adapters.items()}, "ghost_hedges_delivered": {n: len(a.ghost_delivered) for n, a in self.adapters.items()},
@@ -1288,6 +1293,10 @@ def write_result(result: dict, out_dir: Path) -> None:
         with (out_dir / "session_decision_events.jsonl").open("w") as fh:
             for row in result["_decision_events"]:
                 fh.write(json.dumps({k: (str(v) if isinstance(v, Decimal) else v) for k, v in row.items()}, sort_keys=True, default=str) + "\n")
+    if result.get("manifest", {}).get("dislocation") is not None and result.get("_dislocation_episodes") is not None:       # W6: the notify-only episode records, one per closed episode
+        with (out_dir / "session_dislocation_episodes.jsonl").open("w") as fh:
+            for row in result["_dislocation_episodes"]:
+                fh.write(json.dumps(row, sort_keys=True, default=str) + "\n")
     if result.get("_markout_rows"):
         with (out_dir / "session_markouts_decomposed.jsonl").open("w") as fh:
             for row in result["_markout_rows"]:
@@ -1300,7 +1309,7 @@ def write_result(result: dict, out_dir: Path) -> None:
             for row in pe["rows"]:
                 fh.write(json.dumps(row, default=str) + "\n")
         (out_dir / "session_pair_economics.json").write_text(json.dumps({"label": "EXPLORATORY: linked pair economics per maker fill, session runtime", "summary": pe["summary"], "metadata": pe["metadata"]}, indent=1, default=str))
-    (out_dir / "session_manifest.json").write_text(json.dumps({k: v for k, v in result.items() if k not in ("signals", "orders", "fills", "reject_trace", "intent_journal", "intent_fills", "_markout_rows", "_maker_observations", "_decision_events", "_lifecycle", "_ems_coverage")}, indent=1, default=str))
+    (out_dir / "session_manifest.json").write_text(json.dumps({k: v for k, v in result.items() if k not in ("signals", "orders", "fills", "reject_trace", "intent_journal", "intent_fills", "_markout_rows", "_maker_observations", "_decision_events", "_lifecycle", "_ems_coverage", "_dislocation_episodes")}, indent=1, default=str))
 
 
 # ---- parity (D5): v1_5 on the session against v1_4 on the backtester's loop ----------------------------------------------------------------------------------------------------

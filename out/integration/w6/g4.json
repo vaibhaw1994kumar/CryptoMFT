@@ -1,0 +1,90 @@
+{
+ "a": "/Users/vaibhav/Documents/Newproject/out/integration/w6/v112",
+ "b": "/Users/vaibhav/Documents/Newproject/out/integration/w6/v113",
+ "equal": false,
+ "files_compared": 17,
+ "different": [
+  "session_dislocation_episodes.jsonl",
+  "session_manifest.json"
+ ],
+ "skipped": [
+  "session_run_record.json"
+ ],
+ "files": {
+  "maker_observations.jsonl": {
+   "status": "EQUAL",
+   "bytes": 30433
+  },
+  "session_decision_events.jsonl": {
+   "status": "EQUAL",
+   "bytes": 11445
+  },
+  "session_dislocation_episodes.jsonl": {
+   "status": "ONLY_B"
+  },
+  "session_ems_path_coverage.json": {
+   "status": "EQUAL",
+   "bytes": 2364
+  },
+  "session_fills.jsonl": {
+   "status": "EQUAL",
+   "bytes": 11626
+  },
+  "session_intent_fills.jsonl": {
+   "status": "EQUAL",
+   "bytes": 1073
+  },
+  "session_intent_journal.jsonl": {
+   "status": "EQUAL",
+   "bytes": 32409
+  },
+  "session_lifecycle_report.json": {
+   "status": "EQUAL",
+   "bytes": 18025
+  },
+  "session_limits_and_stops.json": {
+   "status": "EQUAL",
+   "bytes": 11199
+  },
+  "session_manifest.json": {
+   "status": "DIFFERENT",
+   "first_difference": {
+    "at": "manifest.dislocation",
+    "a": "(absent)",
+    "b": "{'label': 'NOTIFY-ONLY: dislocation episodes are recorded and classed; nothing reads them (no quote, hedge, risk or kill-switch decision)', 'policy': {'open_bps': 10.0, 'close_bps': 8.0, 'close_hold_s"
+   },
+   "excluded": [
+    "run",
+    "manifest.release_identity"
+   ]
+  },
+  "session_markouts_decomposed.jsonl": {
+   "status": "EQUAL",
+   "bytes": 4055
+  },
+  "session_orders.jsonl": {
+   "status": "EQUAL",
+   "bytes": 15338
+  },
+  "session_pair_economics.json": {
+   "status": "EQUAL",
+   "bytes": 2174
+  },
+  "session_pair_economics.jsonl": {
+   "status": "EQUAL",
+   "bytes": 1481
+  },
+  "session_participation_audit.json": {
+   "status": "EQUAL",
+   "bytes": 483
+  },
+  "session_safety_events.jsonl": {
+   "status": "EQUAL",
+   "bytes": 10859463
+  },
+  "session_signals.jsonl": {
+   "status": "EQUAL",
+   "bytes": 8644
+  }
+ }
+}

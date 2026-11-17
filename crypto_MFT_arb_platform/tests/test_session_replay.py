@@ -1679,3 +1679,28 @@ class TheArbNeverChoosesATactic(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+@unittest.skipUnless(SLICES.is_dir(), "March slices not available (the profile needs a data root)")
+class DislocationNotifyOnlyInTheReplay(unittest.TestCase):
+    """W6: v1_13 (the dislocation block) against v1_12 on the same stream: orders, fills, positions and the intent journal are equal; only v1_13 has the episode list and the manifest key."""
+
+    def _run(self, name):
+        profile = load_profile(name)
+        cfg = apply_profile(profile, dataset="mar2024", data_root=str(SLICES), pair="SOLUSDT", start_date="2024-03-11", end_date="2024-03-11", output_dir="/tmp/x_disloc")
+        cfg.arb.max_position_base = 1.0
+        cfg.arb.participation_max = 0.0
+        return SessionReplay(cfg, profile, stream=stream()).run()
+
+    def test_notify_only(self):
+        off, on = self._run("perp_perp_maker_taker_v1_12"), self._run("perp_perp_maker_taker_v1_13")
+        self.assertTrue(on["orders"])
+        for k in ("orders", "fills", "positions", "signals", "intent_journal"):
+            self.assertEqual(on[k], off[k], k)
+        self.assertNotIn("_dislocation_episodes", off)
+        self.assertNotIn("dislocation", off["manifest"])
+        self.assertIsInstance(on["_dislocation_episodes"], list)
+        rep = on["manifest"]["dislocation"]
+        self.assertIs(rep["fail_closed_enabled"], False)
+        self.assertTrue(rep["label"].startswith("NOTIFY-ONLY"))
+        self.assertEqual(rep["episodes"], len(on["_dislocation_episodes"]))
