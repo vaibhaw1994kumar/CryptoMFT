@@ -1,0 +1,482 @@
+{
+ "label": "EXPLORATORY: D7d offline step, recorded Mac shakedown stream; not a strategy result",
+ "session": "d7d-run2",
+ "minutes": 60.0,
+ "profile": "perp_perp_maker_taker_v1_10",
+ "replay_gate_first": true,
+ "events": 335625,
+ "derivative_frames": 32064,
+ "config": "w2a/config_v1_10.json",
+ "keepalive_notes": 12823,
+ "identical": {
+  "ledger_events": false,
+  "positions": true,
+  "cash": true,
+  "plans": false,
+  "strategy_counters": false
+ },
+ "ledger_difference": {
+  "event_type_counts_replay": {
+   "CHILD_DISPATCH_COMPLETED": 1,
+   "CHILD_DISPATCH_IN_FLIGHT": 1,
+   "CHILD_DISPATCH_STARTED": 1,
+   "CHILD_REPORT_OBSERVED": 2,
+   "FEED_CONTROL_STATE_TRANSITION": 39,
+   "FEED_CONTROL_VENUE_CANCEL": 19,
+   "MARGIN_STATE_TRANSITION": 2,
+   "OPPORTUNITY": 1,
+   "ORDER_LIFECYCLE": 7,
+   "ORDER_REPORT_DEADLINE_SET": 1,
+   "ORDER_STATE_UPDATE_APPLIED": 5,
+   "PACKAGE_DISPATCH_COMPLETED": 1,
+   "PACKAGE_DISPATCH_STARTED": 1,
+   "PACKAGE_DISPATCH_THROTTLED": 1,
+   "PACKAGE_RISK_RELEASED": 1,
+   "PACKAGE_RISK_RESERVED": 1,
+   "PLAN_CLOSED": 1,
+   "PLAN_STATE_TRANSITION": 8,
+   "PRE_TRADE_VALIDATION": 1,
+   "QUOTE_WITHDRAWN": 1,
+   "RMS_INTERNAL_RECONCILIATION": 1,
+   "ROUTE_ELIGIBILITY": 1,
+   "TIME_INTEGRITY_BLOCK": 659,
+   "WORKING_ORDER_CANCEL_BEFORE_CLOSE": 1
+  },
+  "event_type_counts_paper": {
+   "FEED_CONTROL_STATE_TRANSITION": 39,
+   "FEED_CONTROL_VENUE_CANCEL": 19,
+   "LIMIT_STATE": 1,
+   "MARGIN_STATE_TRANSITION": 2,
+   "TIME_INTEGRITY_BLOCK": 659
+  },
+  "only_in_replay_by_type": {
+   "CHILD_DISPATCH_COMPLETED": 1,
+   "CHILD_DISPATCH_IN_FLIGHT": 1,
+   "CHILD_DISPATCH_STARTED": 1,
+   "CHILD_REPORT_OBSERVED": 2,
+   "OPPORTUNITY": 1,
+   "ORDER_LIFECYCLE": 7,
+   "ORDER_REPORT_DEADLINE_SET": 1,
+   "ORDER_STATE_UPDATE_APPLIED": 5,
+   "PACKAGE_DISPATCH_COMPLETED": 1,
+   "PACKAGE_DISPATCH_STARTED": 1,
+   "PACKAGE_DISPATCH_THROTTLED": 1,
+   "PACKAGE_RISK_RELEASED": 1,
+   "PACKAGE_RISK_RESERVED": 1,
+   "PLAN_CLOSED": 1,
+   "PLAN_STATE_TRANSITION": 8,
+   "PRE_TRADE_VALIDATION": 1,
+   "QUOTE_WITHDRAWN": 1,
+   "RMS_INTERNAL_RECONCILIATION": 1,
+   "ROUTE_ELIGIBILITY": 1,
+   "WORKING_ORDER_CANCEL_BEFORE_CLOSE": 1
+  },
+  "only_in_paper_by_type": {
+   "LIMIT_STATE": 1
+  },
+  "only_in_replay_rows": [
+   [
+    "OPPORTUNITY",
+    1794178802033795000,
+    null,
+    null,
+    "",
+    ""
+   ],
+   [
+    "PACKAGE_DISPATCH_STARTED",
+    1794178802033795000,
+    null,
+    null,
+    "",
+    ""
+   ],
+   [
+    "PACKAGE_RISK_RESERVED",
+    1794178802033795000,
+    null,
+    null,
+    "",
+    ""
+   ],
+   [
+    "PLAN_STATE_TRANSITION",
+    1794178802033795000,
+    null,
+    null,
+    "",
+    ""
+   ],
+   [
+    "PLAN_STATE_TRANSITION",
+    1794178802033795000,
+    null,
+    null,
+    "",
+    ""
+   ],
+   [
+    "PLAN_STATE_TRANSITION",
+    1794178802033795000,
+    null,
+    null,
+    "",
+    ""
+   ],
+   [
+    "PRE_TRADE_VALIDATION",
+    1794178802033795000,
+    null,
+    null,
+    "",
+    ""
+   ],
+   [
+    "ROUTE_ELIGIBILITY",
+    1794178802033795000,
+    null,
+    null,
+    "",
+    ""
+   ],
+   [
+    "CHILD_DISPATCH_IN_FLIGHT",
+    1794178802033795001,
+    "BYBIT",
+    null,
+    "",
+    ""
+   ],
+   [
+    "CHILD_DISPATCH_STARTED",
+    1794178802033795001,
+    "BYBIT",
+    null,
+    "",
+    ""
+   ],
+   [
+    "ORDER_LIFECYCLE",
+    1794178802033795001,
+    "BYBIT",
+    null,
+    "",
+    ""
+   ],
+   [
+    "ORDER_LIFECYCLE",
+    1794178802033795001,
+    "BYBIT",
+    null,
+    "0",
+    ""
+   ],
+   [
+    "ORDER_REPORT_DEADLINE_SET",
+    1794178802033795001,
+    "BYBIT",
+    null,
+    "",
+    ""
+   ],
+   [
+    "ORDER_STATE_UPDATE_APPLIED",
+    1794178802033795001,
+    null,
+    null,
+    "",
+    ""
+   ],
+   [
+    "CHILD_DISPATCH_COMPLETED",
+    1794178802033795002,
+    "BYBIT",
+    null,
+    "",
+    ""
+   ],
+   [
+    "PACKAGE_DISPATCH_COMPLETED",
+    1794178802033795003,
+    null,
+    null,
+    "",
+    ""
+   ],
+   [
+    "PACKAGE_DISPATCH_THROTTLED",
+    1794178802033795003,
+    null,
+    null,
+    "",
+    ""
+   ],
+   [
+    "CHILD_REPORT_OBSERVED",
+    1794178802041652328,
+    "BYBIT",
+    null,
+    "",
+    ""
+   ],
+   [
+    "ORDER_LIFECYCLE",
+    1794178802041652328,
+    "BYBIT",
+    null,
+    "0",
+    ""
+   ],
+   [
+    "ORDER_STATE_UPDATE_APPLIED",
+    1794178802041652328,
+    null,
+    null,
+    "",
+    ""
+   ],
+   [
+    "PLAN_STATE_TRANSITION",
+    1794178802041652328,
+    null,
+    null,
+    "",
+    ""
+   ],
+   [
+    "ORDER_LIFECYCLE",
+    1794178802187333000,
+    "BYBIT",
+    null,
+    "",
+    ""
+   ],
+   [
+    "ORDER_LIFECYCLE",
+    1794178802187333000,
+    "BYBIT",
+    null,
+    "0",
+    ""
+   ],
+   [
+    "ORDER_LIFECYCLE",
+    1794178802187333000,
+    "BYBIT",
+    null,
+    "0",
+    ""
+   ],
+   [
+    "ORDER_STATE_UPDATE_APPLIED",
+    1794178802187333000,
+    null,
+    null,
+    "",
+    ""
+   ],
+   [
+    "ORDER_STATE_UPDATE_APPLIED",
+    1794178802187333000,
+    null,
+    null,
+    "",
+    ""
+   ],
+   [
+    "QUOTE_WITHDRAWN",
+    1794178802187333000,
+    "BYBIT",
+    null,
+    "",
+    ""
+   ],
+   [
+    "WORKING_ORDER_CANCEL_BEFORE_CLOSE",
+    1794178802187333000,
+    "BYBIT",
+    null,
+    "",
+    ""
+   ],
+   [
+    "CHILD_REPORT_OBSERVED",
+    1794178802196330499,
+    "BYBIT",
+    null,
+    "",
+    ""
+   ],
+   [
+    "ORDER_LIFECYCLE",
+    1794178802196330499,
+    "BYBIT",
+    null,
+    "0",
+    ""
+   ],
+   [
+    "ORDER_STATE_UPDATE_APPLIED",
+    1794178802196330499,
+    null,
+    null,
+    "",
+    ""
+   ],
+   [
+    "PACKAGE_RISK_RELEASED",
+    1794178802196330499,
+    null,
+    null,
+    "",
+    ""
+   ],
+   [
+    "PLAN_CLOSED",
+    1794178802196330499,
+    null,
+    null,
+    "",
+    ""
+   ],
+   [
+    "PLAN_STATE_TRANSITION",
+    1794178802196330499,
+    null,
+    null,
+    "",
+    ""
+   ],
+   [
+    "PLAN_STATE_TRANSITION",
+    1794178802196330499,
+    null,
+    null,
+    "",
+    ""
+   ],
+   [
+    "PLAN_STATE_TRANSITION",
+    1794178802196330499,
+    null,
+    null,
+    "",
+    ""
+   ],
+   [
+    "PLAN_STATE_TRANSITION",
+    1794178802196330499,
+    null,
+    null,
+    "",
+    ""
+   ],
+   [
+    "RMS_INTERNAL_RECONCILIATION",
+    1794178802196330499,
+    null,
+    null,
+    "",
+    ""
+   ]
+  ],
+  "only_in_paper_rows": [
+   [
+    "LIMIT_STATE",
+    1794176142531500000,
+    null,
+    null,
+    "",
+    ""
+   ]
+  ]
+ },
+ "ledger_events_replay_paper": [
+  757,
+  720
+ ],
+ "first_differing_ledger_rows": [
+  0,
+  1,
+  2,
+  3,
+  4,
+  5,
+  6,
+  7,
+  8,
+  9
+ ],
+ "edge_diagnostics": {
+  "headroom_bps_to_a_quote_at_the_maker_touch": {
+   "bid": {
+    "n": 156213,
+    "p1": -6.397814027946173,
+    "p10": -5.233736895043316,
+    "p50": -4.07559480198171,
+    "p90": -2.909372647808976,
+    "p99": -1.7459738626691352,
+    "max": 1.7711220675357904,
+    "share_headroom_ge_0": 0.0005249243020747313
+   },
+   "ask": {
+    "n": 156213,
+    "p1": -8.385238738330212,
+    "p10": -7.22052612353049,
+    "p50": -6.053528843010199,
+    "p90": -4.894347479613394,
+    "p99": -3.729226442293216,
+    "max": 6.649317395752203,
+    "share_headroom_ge_0": 0.0010498486041494626
+   }
+  },
+  "maker_venue": "BYBIT",
+  "hedge_venue": "BINANCE",
+  "required_fee_bps_maker_plus_taker": null
+ },
+ "replay": {
+  "ledger_event_count": 757,
+  "positions": {},
+  "cash": {},
+  "plans": [
+   [
+    "CLOSED",
+    1
+   ]
+  ],
+  "orders_in_plans": 1,
+  "strategy": {
+   "evaluations": 154132,
+   "signals": 1,
+   "best_edge_seen_bps": 1.1101307544449608,
+   "rejects": {
+    "stale": 95,
+    "no_edge": 153180,
+    "maker_limit": 11,
+    "cross_venue_skew": 1672,
+    "funding_window_not_evaluable": 24,
+    "funding_term_unavailable": 24,
+    "participation_size_capped": 9,
+    "participation": 9,
+    "tick_rounding_joined_touch": 1
+   },
+   "entry_threshold_min_net_edge_bps": 1.0,
+   "safety_buffer_bps": 0.5
+  }
+ },
+ "paper": {
+  "ledger_event_count": 720,
+  "positions": {},
+  "cash": {},
+  "plans": [],
+  "orders_in_plans": 0,
+  "strategy": {
+   "evaluations": 0,
+   "signals": 0,
+   "best_edge_seen_bps": null,
+   "rejects": {},
+   "entry_threshold_min_net_edge_bps": 1.0,
+   "safety_buffer_bps": 0.5
+  }
+ }
+}

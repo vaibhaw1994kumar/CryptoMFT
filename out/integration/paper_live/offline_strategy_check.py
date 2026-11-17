@@ -4,7 +4,11 @@
 The recorded books, trades and the book connection's pong frames (as venue-message notes) are the SAME for both; the clock is each event's receive time. Compared: the ledger's events (type, time, venue, side, price, quantity),
 the final positions and cash, the OMS plans and their orders. Also reported: the strategy's own counters (evaluations, signals, the best net edge it saw, the reject reasons) against its entry threshold, which is the
 answer to "why no orders" when there are none.
-Usage: offline_strategy_check.py SESSION_DIR MINUTES OUT_JSON [PROFILE] [gate_first]
+Usage: offline_strategy_check.py SESSION_DIR MINUTES OUT_JSON [PROFILE] [gate_first] [CONFIG_JSON] [inject_clock]
+`inject_clock` (W2a): the PAPER side's clock gate (limit A3, v1_10 on) is given a measurement with zero uncertainty every 300 s, labelled INJECTED. An offline run has no server-time probe, so without it
+the paper session's gate stays "unknown" and it never quotes (the replay side is "not evaluable" and is never blocked): that is the gate working, not a wiring difference.
+W2a (owner 17 Nov): the recording is read as a stream twice (not held as a list), the recorded derivative frames (marks) are delivered to both wirings (a v1_10 session stops on missing marks), and the
+config file is an argument (default: the v1_5 one).
 `gate_first` (owner 9 Nov, D7d trace): the REPLAY side applies each book and evaluates the book gate on EVERY event before the session sees it, as the live service does; without it the replay evaluates the gate inside `session.on_event`,
 which returns early on a time-integrity-blocked event."""
 import json
@@ -21,23 +25,37 @@ from crypto_stat_arb.models import TradeEvent
 from crypto_stat_arb.paper_live import LivePaperSession
 from crypto_stat_arb.session import ExecutionMode, TradingSession
 from crypto_stat_arb.simulation.queue_adapter import SimulatedVenueFeeder, build_queue_simulation
-from new_backtest.session_replay import live_paper_setup, load_keepalive_notes, load_recorded_events
+from crypto_stat_arb.derivatives import DerivativeTicker
+from new_backtest.session_replay import iter_recorded_events, live_paper_setup, load_keepalive_notes
 
 session_dir, minutes, out_path = Path(sys.argv[1]), float(sys.argv[2]), Path(sys.argv[3])
 profile = sys.argv[4] if len(sys.argv) > 4 else "perp_perp_maker_taker_v1_5"
 GATE_FIRST = len(sys.argv) > 5 and sys.argv[5] == "gate_first"
-CONFIG = Path("/Users/vaibhav/Documents/Newproject/out/integration/paper_live/config_v1_5.json")
+INJECT_CLOCK = len(sys.argv) > 7 and sys.argv[7] == "inject_clock"
+CONFIG = Path(sys.argv[6]) if len(sys.argv) > 6 else Path("/Users/vaibhav/Documents/Newproject/out/integration/paper_live/config_v1_5.json")
 
-events_all = load_recorded_events(session_dir)
-t_first = events_all[0].receive_ts_ns
-events = [e for e in events_all if e.receive_ts_ns - t_first <= minutes * 60e9]
+t_first = next(e for e in iter_recorded_events(session_dir) if not isinstance(e, DerivativeTicker)).receive_ts_ns
+
+
+def events_stream():
+    for e in iter_recorded_events(session_dir):
+        if e.receive_ts_ns - t_first > minutes * 60e9:
+            return
+        yield e
+
+
 notes = [n for n in load_keepalive_notes(session_dir) if n[0] - t_first <= minutes * 60e9]
-print(f"{len(events)} events, {len(notes)} keepalive notes", flush=True)
+n_events = [0, 0]
 
 
-def drive(deliver_event, deliver_trade, note_cb):
+def drive(deliver_event, deliver_trade, note_cb, deliver_derivative):
     ni = 0
-    for ev in events:
+    for ev in events_stream():
+        if isinstance(ev, DerivativeTicker):
+            n_events[1] += 1
+            deliver_derivative(ev)
+            continue
+        n_events[0] += 1
         while ni < len(notes) and notes[ni][0] <= ev.receive_ts_ns:
             note_cb(notes[ni][1], notes[ni][0])
             ni += 1
@@ -93,7 +111,9 @@ def on_book_with_headroom(ev):
         headroom["ask"].append((mb.best_ask - px) / mb.best_ask * 1e4)
 
 
-drive(on_book_with_headroom, lambda ev: feeder.on_trade(ev), lambda v, t: sess.note_venue_message(v, t))
+drive(on_book_with_headroom, lambda ev: feeder.on_trade(ev), lambda v, t: sess.note_venue_message(v, t), lambda tk: sess.on_derivative(tk))
+events_count, derivative_count = n_events[0], n_events[1]
+print(f"{events_count} events, {derivative_count} derivative frames, {len(notes)} keepalive notes", flush=True)
 replay = snapshot(sess, sess.strategies[0])
 _dist = lambda v: {"n": len(v)} if not v else {"n": len(v), "p1": sorted(v)[int(len(v) * .01)], "p10": sorted(v)[int(len(v) * .1)], "p50": sorted(v)[len(v) // 2], "p90": sorted(v)[int(len(v) * .9)], "p99": sorted(v)[min(len(v) - 1, int(len(v) * .99))],
                                                   "max": max(v), "share_headroom_ge_0": sum(1 for x in v if x >= 0) / len(v)}
@@ -109,8 +129,15 @@ with tempfile.TemporaryDirectory() as tmp:
                              queue_simulation=setup2["queue_simulation"], session_kwargs=setup2["session_kwargs"], strategy_builder=setup2["strategy_builder"], clock_ns=lambda: clock["now"], tick_seconds=3600)
     books = paper.service.books
 
+    clock_fed = {"at": None, "n": 0}
+
     def paper_book(ev):
         clock["now"] = ev.receive_ts_ns
+        gate = getattr(paper.session, "clock_gate", None)
+        if INJECT_CLOCK and gate is not None and (clock_fed["at"] is None or ev.receive_ts_ns - clock_fed["at"] >= 300e9):
+            from crypto_stat_arb.time_integrity import ClockMeasurement
+            gate.update(ClockMeasurement(offset_ns=0, uncertainty_ns=0, measured_ts_ns=ev.receive_ts_ns, source="INJECTED:offline_parity"))
+            clock_fed["at"], clock_fed["n"] = ev.receive_ts_ns, clock_fed["n"] + 1
         book = books[ev.venue]
         book.apply(ev)                                                  # what the live service does before it calls the session's listener
         paper.service.book_gate.allow(tuple(books.values()), ev.receive_ts_ns)
@@ -124,7 +151,11 @@ with tempfile.TemporaryDirectory() as tmp:
         clock["now"] = max(clock["now"], t)
         paper.session.note_venue_message(v, t)
 
-    drive(paper_book, paper_trade, paper_note)
+    def paper_derivative(tk):
+        clock["now"] = max(clock["now"], tk.receive_ts_ns)
+        paper._on_derivative(tk)
+
+    drive(paper_book, paper_trade, paper_note, paper_derivative)
     pap = snapshot(paper.session, paper.session.strategies[0])
     paper.service.recorder.close({})
     paper.service.ohlc_writer.close()
@@ -139,7 +170,7 @@ ledger_diff = {"event_type_counts_replay": dict(Counter(r[0] for r in replay["le
                "only_in_paper_by_type": dict(Counter(r[0] for r in (Counter(map(tuple, pap["ledger_events"])) - Counter(map(tuple, replay["ledger_events"]))).elements())),
                "only_in_replay_rows": sorted((Counter(map(tuple, replay["ledger_events"])) - Counter(map(tuple, pap["ledger_events"]))).elements(), key=lambda r: str(r[1]))[:60],
                "only_in_paper_rows": sorted((Counter(map(tuple, pap["ledger_events"])) - Counter(map(tuple, replay["ledger_events"]))).elements(), key=lambda r: str(r[1]))[:60]}
-summary = {"label": "EXPLORATORY: D7d offline step, recorded Mac shakedown stream; not a strategy result", "session": session_dir.name, "minutes": minutes, "profile": profile, "replay_gate_first": GATE_FIRST, "events": len(events), "keepalive_notes": len(notes),
+summary = {"label": "EXPLORATORY: D7d offline step, recorded Mac shakedown stream; not a strategy result", "session": session_dir.name, "minutes": minutes, "profile": profile, "replay_gate_first": GATE_FIRST, "events": events_count, "derivative_frames": derivative_count, "config": str(CONFIG), "paper_clock_injected": INJECT_CLOCK, "keepalive_notes": len(notes),
            "identical": same, "ledger_difference": ledger_diff, "ledger_events_replay_paper": [replay["ledger_event_count"], pap["ledger_event_count"]], "first_differing_ledger_rows": differ,
            "edge_diagnostics": edge_diagnostics, "replay": {k: v for k, v in replay.items() if k != "ledger_events"}, "paper": {k: v for k, v in pap.items() if k != "ledger_events"}}
 out_path.write_text(json.dumps(summary, indent=1, default=str))

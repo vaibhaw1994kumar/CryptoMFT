@@ -155,6 +155,9 @@ class ArbBacktestConfig:
     fill_model_v1_path: str | None = None
     markout_horizons_s: tuple[float, ...] = (1.0, 5.0, 30.0)
     progress_every: int = 0          # print every N events; 0 = silent
+    # W2a (owner 17 Nov, hygiene): the session replay's per-evaluation reject trace (session_reject_trace.jsonl), a profile key now instead of an attribute a run wrapper set on the config. False (the
+    # default, every profile): nothing is recorded. Read by SessionReplay only; this backtester's own loop does not use it.
+    trace_rejects: bool = False
     max_trade_log: int = 200_000     # cap in-memory fill log on long runs
     # The data-quality preflight blocks the run when a venue's data is CRITICAL
     # (QualityGate REJECTED). A written justification here runs it anyway; the

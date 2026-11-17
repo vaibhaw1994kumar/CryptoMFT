@@ -51,7 +51,7 @@ from .fill_model import EmpiricalFillModel
 from .latency_model import LatencyBook
 from .timing import FixedOffsetAligner, Timelines, TimelinesLatencyModel, TruthBooks, dead_feed_blocks
 from collections import Counter
-from .event_loader import BOOK, DELTA, delta_fields, snapshot_levels
+from .event_loader import BOOK, DELTA, delta_fields, files_read, note_file_read, reset_files_read, snapshot_levels
 from .order_book import OrderBook
 
 # The dated price grid per dataset (the Phase B data checks' ticks) and the quantity step. The step is ASSUMED: no instrument master is stored for these datasets (lot NOT_MEASURED).
@@ -89,6 +89,46 @@ class TracedRejects(dict):
         super().__setitem__(key, value)
 
 
+def profile_safety_values(profile: dict, profile_safety: bool, layer_risk_mode: str | None = None, breaker_config=None):
+    """The layer risk mode and the circuit breaker a session runs with (owner 13 Nov). With `profile_safety` they are the PROFILE's own: `execution.risk_reservation` (mandatory: enforce) and the `breaker`
+    block. Without it: count and no breaker (every replay before 13 Nov). An explicit value always wins. Returns (layer_risk_mode, breaker_config)."""
+    if layer_risk_mode is None:
+        layer_risk_mode = str(((profile.get("execution") or {}).get("risk_reservation")) or "count") if profile_safety else "count"
+        if layer_risk_mode == "off":
+            layer_risk_mode = "count"
+    if profile_safety and breaker_config is None and profile.get("breaker"):
+        from crypto_stat_arb.circuit_breaker import CircuitBreakerConfig
+        b = profile["breaker"]
+        breaker_config = CircuitBreakerConfig(consecutive_failures=b["consecutive_failures"], failure_rate_window_n=b["failure_rate_window_n"], failure_rate_thresh=b["failure_rate_thresh"],
+                                              trip_on_failed_unwind=b["trip_on_failed_unwind"], net_exposure_s=b["net_exposure_s"], unknown_order_s=b["unknown_order_s"],
+                                              trip_on_gateway_down=b["trip_on_gateway_down"], heartbeat_timeout_s=b["heartbeat_timeout_s"], tripped_unwind_retries=b["tripped_unwind_retries"],
+                                              pause_on_gateway_down_when_flat=True)      # a gateway silent while flat PAUSES (resumes by itself); with exposure it TRIPS (manual reset): the replay's setting, not a profile key
+    return layer_risk_mode, breaker_config
+
+
+def profile_safety_default(profile: dict) -> bool:
+    """Whether a profile is run with its OWN safety values (its breaker block, its layer risk mode) when the caller does not say: v1_9 and later, the profiles that carry the 13 Nov production
+    limits, recognised by `hedge_faults.silent_carry_bound: below_one_lot` (a real-orders requirement no earlier profile meets). Earlier profiles keep the replay's defaults (count, no breaker), so
+    their paper sessions match their replays. The day-1 run wrappers pass the same choice by profile name; a paper session reads it here."""
+    return str((profile.get("hedge_faults") or {}).get("silent_carry_bound", "")) == "below_one_lot"
+
+
+def profile_session_rules(config, profile: dict, names: dict, *, hedge_policy, latency_model, layer_risk_mode: str, breaker_config, layer_route_mode: str = "count") -> dict:
+    """W2a (owner 17 Nov): the TradingSession arguments that are RULES OF THE PROFILE, in one place, for the replay (`SessionReplay`) and the paper session (`live_paper_setup`) alike. Nothing here
+    depends on where the events come from. A new profile rule is added HERE, once."""
+    return {
+        "dispatch_policy": DispatchPolicy.FILL_TRIGGERED, "maker_venues": tuple(names[v] for v in config.arb.maker_venues), "latency_model": latency_model, "hedge_policy": hedge_policy,
+        "gate_on_every_event": True,          # owner 9 Nov (D7d): the session runtime is v1_5 and later; the gate is evaluated on every event, as the live service does
+        "layer_route_mode": layer_route_mode, "breaker_config": breaker_config,      # owner 12 Nov (2k): the circuit breaker, off unless a config is passed
+        "execution_config": getattr(config, "execution", None),      # owner 13 Nov: the layer (and so the manifest) carries the profile's own execution block, not the defaults
+        "layer_risk_mode": layer_risk_mode,   # E0 step (c): count = the layer's base-ceiling gate only counts; enforce = it refuses before the OMS reserves anything
+        "intent_journal": True,               # E0 step (a) (owner 10 Nov): the orders are journaled as layer intents next to the OMS plan; observation only
+        "markout_horizons_s": tuple(config.markout_horizons_s),          # owner 9 Nov: forward markouts per fill, by venue and role (the core's MarkoutTracker)
+        "feed_health": feed_health_from_profile(profile),             # W1 (owner 17 Nov): None (nothing built) for every profile without the block
+        "session_limits": session_limits_from_profile(profile, float(config.arb.max_position_base)),      # owner 16 Nov (Order 3): None for every profile without the block
+    }
+
+
 class SessionReplay:
     """One replay on the session. `stream` is any iterable of `TimedEvent` built with `decimal_numbers=True` (the real feed or a synthetic list); consumed lazily."""
 
@@ -101,17 +141,7 @@ class SessionReplay:
         # Safety switches from the PROFILE (owner 13 Nov): with profile_safety the layer risk gate runs in the profile's own mode (execution.risk_reservation, mandatory: enforce) and the circuit breaker is the profile's
         # `breaker` block, instead of the replay's own defaults (count, no breaker). An explicit layer_risk_mode / breaker_config still wins. Off (the default) = every earlier replay is unchanged.
         self.safety_from_profile: dict = {"profile_safety": profile_safety}
-        if layer_risk_mode is None:
-            layer_risk_mode = str(((profile.get("execution") or {}).get("risk_reservation")) or "count") if profile_safety else "count"
-            if layer_risk_mode == "off":
-                layer_risk_mode = "count"
-        if profile_safety and breaker_config is None and profile.get("breaker"):
-            from crypto_stat_arb.circuit_breaker import CircuitBreakerConfig
-            b = profile["breaker"]
-            breaker_config = CircuitBreakerConfig(consecutive_failures=b["consecutive_failures"], failure_rate_window_n=b["failure_rate_window_n"], failure_rate_thresh=b["failure_rate_thresh"],
-                                                  trip_on_failed_unwind=b["trip_on_failed_unwind"], net_exposure_s=b["net_exposure_s"], unknown_order_s=b["unknown_order_s"],
-                                                  trip_on_gateway_down=b["trip_on_gateway_down"], heartbeat_timeout_s=b["heartbeat_timeout_s"], tripped_unwind_retries=b["tripped_unwind_retries"],
-                                                  pause_on_gateway_down_when_flat=True)      # a gateway silent while flat PAUSES (resumes by itself); with exposure it TRIPS (manual reset): the replay's setting, not a profile key
+        layer_risk_mode, breaker_config = profile_safety_values(profile, profile_safety, layer_risk_mode, breaker_config)
         self.safety_from_profile.update(layer_risk_mode=layer_risk_mode, breaker=None if breaker_config is None else dataclasses.asdict(breaker_config),
                                         layer_route_mode=layer_route_mode, reconcile_mode=reconcile_mode,
                                         not_set_by_the_profile="layer_route_mode and reconcile_mode have no profile key (count); risk_gate_mode is off in the session")
@@ -140,6 +170,9 @@ class SessionReplay:
         self._exchange_mark_venues: set[str] = set()
         self._last_synth_mark_ns: dict[str, int] = {}
         self.mark_ticks = {"exchange_mark": 0, "MARK_FROM_MID": 0}
+        reset_files_read()                # W2a: the input files this replay opens are noted from here on (the run record hashes them)
+        self.first_ns = None              # the receive time of the first event processed; with last_ns the data span of the run record
+        self.wall_s = None
         self.recorded = recorded          # the input is a recorded live session (core events already): `run_recorded`; no venue-truth books (they are built from raw research events)
         venues = tuple(config.venues)
         self.venues = venues
@@ -244,19 +277,15 @@ class SessionReplay:
             for adapter in self.adapters.values():
                 adapter.observer = sink
                 adapter.executor.obs_enabled = True      # the fill engine attaches its per-fill record (cause, volume offered and consumed, queue before the fill) to each fill
+        # W2a (owner 17 Nov; audit A2 12.2 finding 4): the session's PROFILE RULES come from one function, `profile_session_rules`, that the paper session (`live_paper_setup`) calls too, so a paper run of a
+        # profile runs the same dispatch policy, hedge policy, breaker, execution config, layer modes, intent journal, markout horizons, feed health and limits as its replay. Only what belongs to the
+        # replay itself is passed here: the simulated mode and adapters, and the resync rule of a recorded stream.
         self.session = TradingSession(
             self.app_config, execution_mode=ExecutionMode.INTERNAL_SIMULATION, adapters=self.adapters, strategies=[],
-            dispatch_policy=DispatchPolicy.FILL_TRIGGERED, maker_venues=tuple(self.names[v] for v in config.arb.maker_venues),
             resync_delay_ns=int(self.resync_delay_s * _NS), resync_source=self.feed.resync_snapshot,
-            resync_silence_ns=None if config.timing is None else int(config.timing.dead_feed_s * _NS), latency_model=self.latency_model, hedge_policy=hedge_policy,
-            gate_on_every_event=True,          # owner 9 Nov (D7d): the session runtime is v1_5 and later; the gate is evaluated on every event, as the live service does
-            layer_route_mode=layer_route_mode, breaker_config=breaker_config,      # owner 12 Nov (2k): the circuit breaker on the replay, off unless a config is passed
-            execution_config=getattr(config, "execution", None),      # owner 13 Nov: the layer (and so the manifest) carries the profile's own execution block, not the defaults
-            layer_risk_mode=layer_risk_mode,   # E0 step (c): count (default) = the layer's base-ceiling gate only counts; enforce = it refuses before the OMS reserves anything
-            intent_journal=True,               # E0 step (a) (owner 10 Nov): the orders are journaled as layer intents next to the OMS plan; observation only
-            markout_horizons_s=tuple(config.markout_horizons_s),          # owner 9 Nov: forward markouts per fill, by venue and role, as the backtester reports them (the core's MarkoutTracker)
-            feed_health=feed_health_from_profile(profile),             # W1 (owner 17 Nov): None (nothing built) for every profile without the block
-            session_limits=session_limits_from_profile(profile, float(config.arb.max_position_base)),      # owner 16 Nov (Order 3): oms.session_limits, None (nothing built) for every profile without the block
+            resync_silence_ns=None if config.timing is None else int(config.timing.dead_feed_s * _NS),
+            **profile_session_rules(config, profile, self.names, hedge_policy=hedge_policy, latency_model=self.latency_model, layer_risk_mode=layer_risk_mode, breaker_config=breaker_config,
+                                    layer_route_mode=layer_route_mode),
         )
         if self.session.feed_health is not None:                            # W1: the effective feed-health settings of the run, in the manifest only when the profile has the block
             self.config_notes["feed_health"] = feed_health_config_report(self.app_config, profile)
@@ -371,6 +400,15 @@ class SessionReplay:
         return self._run_events(events)
 
     def _run_events(self, events: Iterable) -> dict[str, Any]:
+        replay_interlock(session=self.session)
+        import time as _time
+        wall0 = _time.perf_counter()
+        try:
+            return self._run_loop(events)
+        finally:
+            self.wall_s = _time.perf_counter() - wall0        # W2a: for the run record only (session_run_record.json); never in the result or the manifest
+
+    def _run_loop(self, events: Iterable) -> dict[str, Any]:
         limit_ns = None if self.config.max_event_ts is None else int(self.config.max_event_ts * _NS)
         for event in events:
             if isinstance(event, DerivativeTicker):
@@ -381,6 +419,8 @@ class SessionReplay:
             if limit_ns is not None and event.receive_ts_ns > limit_ns:
                 break
             self.last_ns = event.receive_ts_ns
+            if self.first_ns is None:
+                self.first_ns = self.last_ns
             if self.decomp is not None and self.decomp.due(self.last_ns / _NS):
                 self.decomp.resolve_asof(self.last_ns / _NS, self._mid_pre)        # the mids as they stood BEFORE this event: the mid at each target
             if isinstance(event, TradeEvent):
@@ -982,7 +1022,238 @@ def participation_audit(fills: list[dict], traded: dict[tuple[str, str], float],
     return {"levels": levels, "excess": excess, "levels_checked": len(levels), "ok": not excess}
 
 
+# ---- W2a (owner 17 Nov; audit A2 2.4, 2.5): the replay interlock, the run record (input and output hashes, data span, speed) and the session compare -----------------------------------
+RUN_RECORD = "session_run_record.json"
+
+
+def replay_interlock(session=None, out_dir=None) -> None:
+    """A replay can never be mistaken for, or written over, a live session. Refused (ValueError):
+      a session that is not INTERNAL_SIMULATION, or that has an adapter other than the simulated venue (`QueueAwareVenueAdapter`): a replay never reaches a venue;
+      an output directory that is a live recording (it holds `live_manifest.json`, `live_part_manifest.json` or a `part-*` directory, or sits inside one): a replay never writes into a capture."""
+    if session is not None:
+        if session.execution_mode is not ExecutionMode.INTERNAL_SIMULATION:
+            raise ValueError(f"REPLAY_INTERLOCK: a replay runs only in INTERNAL_SIMULATION, not {session.execution_mode}")
+        real = sorted(v for v, a in session.router.adapters.items() if not isinstance(a, QueueAwareVenueAdapter))
+        if real:
+            raise ValueError(f"REPLAY_INTERLOCK: a replay runs only on the simulated venue; other adapters for {real}")
+    if out_dir is not None:
+        out_dir = Path(out_dir)
+        if out_dir.is_dir() and any(out_dir.glob("part-*")):
+            raise ValueError(f"REPLAY_INTERLOCK: {out_dir} holds part-* (a live recording): a replay never writes there")
+        for d in (out_dir, *out_dir.parents[:2]):               # the directory itself, or a recording it sits inside (a recorder session holds part-N/live_part_manifest.json)
+            if d.is_dir() and ((d / "live_manifest.json").exists() or (d / "live_part_manifest.json").exists()
+                               or any((p / "live_part_manifest.json").exists() for p in d.glob("part-*"))):
+                raise ValueError(f"REPLAY_INTERLOCK: {out_dir} is, or is inside, a live recording ({d}): a replay never writes there")
+
+
+def file_sha256(path, uncompressed: bool = False) -> str:
+    """sha256 of the file's bytes; with `uncompressed`, of the gzip stream's CONTENT (the recorder's part manifest hashes the file before it was compressed)."""
+    import hashlib
+    h = hashlib.sha256()
+    with (gzip.open(path, "rb") if uncompressed else Path(path).open("rb")) as fh:
+        for block in iter(lambda: fh.read(1 << 20), b""):
+            h.update(block)
+    return h.hexdigest()
+
+
+def _recorder_hash(path: Path) -> str | None:
+    """The sha256 the live recorder wrote for this file in its part manifest (of the uncompressed file), or None."""
+    manifest = path.parent / "live_part_manifest.json"
+    if not manifest.exists():
+        return None
+    try:
+        files = json.loads(manifest.read_text()).get("files", {})
+    except (OSError, ValueError):
+        return None
+    return (files.get(path.name.split(".")[0]) or {}).get("sha256")
+
+
+def input_file_rows(paths: Iterable, content_hash: bool = True) -> list[dict]:
+    """One row per input file a run opened: bytes, sha256 of the file as it is on disk and, for a gzip file, of its content; where the recorder's part manifest has a hash for the file, that hash and
+    whether the content equals it (a recording changed after it was made shows as recorder_match false)."""
+    rows = []
+    for p in paths:
+        p = Path(p)
+        if not p.exists():
+            rows.append({"path": str(p), "missing": True})
+            continue
+        row = {"path": str(p), "bytes": p.stat().st_size, "sha256": file_sha256(p)}
+        if p.suffix == ".gz" and content_hash:
+            try:
+                row["content_sha256"] = file_sha256(p, uncompressed=True)
+            except (OSError, EOFError) as e:
+                row["content_sha256"] = None
+                row["content_error"] = type(e).__name__          # a truncated gzip stream: the run used what could be read (event_loader.truncation_report)
+        recorded = _recorder_hash(p)
+        if recorded is not None:
+            row["recorder_sha256"] = recorded
+            row["recorder_match"] = (row.get("content_sha256", row["sha256"]) == recorded) if content_hash or p.suffix != ".gz" else None
+        rows.append(row)
+    return rows
+
+
+def write_run_record(out_dir: Path, replay: "SessionReplay | None" = None, *, input_paths: Iterable | None = None, content_hash: bool = True, notes: dict | None = None) -> dict:
+    """`session_run_record.json`, written LAST, next to the manifest and never inside it (a file cannot hold its own hash, and the wall time differs run to run): what went in and what came out.
+      inputs: every data file the replay opened (`event_loader.files_read`), hashed; the profile's own hash is already in the manifest's release_identity.
+      outputs: bytes and sha256 of every other file in the directory.
+      data_start_ns / data_end_ns: the receive time of the first and last event processed; wall_s; speed_x = data seconds per wall second.
+      effective_seeds, PYTHONHASHSEED and the Python version: what a second run needs to be the same run.
+    The session compare leaves this file out (`compare_sessions`)."""
+    import hashlib, os, platform
+    out_dir = Path(out_dir)
+    replay_interlock(out_dir=out_dir)
+    inputs = input_file_rows(files_read() if input_paths is None else input_paths, content_hash=content_hash)
+    outputs = {p.name: {"bytes": p.stat().st_size, "sha256": file_sha256(p)} for p in sorted(out_dir.iterdir()) if p.is_file() and p.name != RUN_RECORD}
+    span = None
+    if replay is not None and replay.first_ns is not None:
+        span = (replay.last_ns - replay.first_ns) / _NS
+    doc = {"label": "run record (W2a): input and output hashes, data span and speed. Not part of the identity comparison (wall time differs run to run)",
+           "inputs": inputs, "inputs_sha256": hashlib.sha256(json.dumps([(r["path"].rsplit("/", 3)[-3:] if "/" in r["path"] else r["path"], r.get("sha256")) for r in inputs]).encode()).hexdigest(),
+           "input_files": len(inputs), "input_bytes": sum(r.get("bytes", 0) for r in inputs), "inputs_recorder_checked": sum(1 for r in inputs if "recorder_match" in r),
+           "inputs_recorder_mismatch": [r["path"] for r in inputs if r.get("recorder_match") is False], "inputs_missing": [r["path"] for r in inputs if r.get("missing")],
+           "outputs": outputs, "outputs_sha256": hashlib.sha256(json.dumps(sorted((n, o["sha256"]) for n, o in outputs.items())).encode()).hexdigest(),
+           "data_start_ns": None if replay is None else replay.first_ns, "data_end_ns": None if replay is None or replay.first_ns is None else replay.last_ns,
+           "data_span_s": span, "wall_s": None if replay is None else replay.wall_s,
+           "speed_x": (span / replay.wall_s) if span is not None and replay.wall_s else None,
+           "effective_seeds": None if replay is None else replay.config_notes.get("effective_seeds"),
+           "python_hash_seed": os.environ.get("PYTHONHASHSEED", "not set (str hashes differ per process; no output may depend on set or dict-of-str order, see the contract)"),
+           "python": platform.python_version(), **({"notes": notes} if notes else {})}
+    (out_dir / RUN_RECORD).write_text(json.dumps(doc, indent=1, default=str))
+    return doc
+
+
+# What the identity comparison leaves out of session_manifest.json: `run` (wall time, labels of the run wrapper) and `manifest.release_identity` (git state, code hash, absolute paths). Everything else is compared.
+COMPARE_MANIFEST_EXCLUDED = (("run",), ("manifest", "release_identity"))
+
+
+def _first_json_difference(a, b, path: str = "") -> dict | None:
+    if type(a) is not type(b):
+        return {"at": path or "(root)", "a": repr(a)[:200], "b": repr(b)[:200]}
+    if isinstance(a, dict):
+        for k in sorted(set(a) | set(b), key=str):
+            if k not in a or k not in b:
+                return {"at": f"{path}.{k}" if path else str(k), "a": "(absent)" if k not in a else repr(a[k])[:200], "b": "(absent)" if k not in b else repr(b[k])[:200]}
+            d = _first_json_difference(a[k], b[k], f"{path}.{k}" if path else str(k))
+            if d:
+                return d
+        return None
+    if isinstance(a, list):
+        for i, (x, y) in enumerate(zip(a, b)):
+            d = _first_json_difference(x, y, f"{path}[{i}]")
+            if d:
+                return d
+        return None if len(a) == len(b) else {"at": f"{path}[{min(len(a), len(b))}]", "a": f"{len(a)} items", "b": f"{len(b)} items"}
+    return None if a == b else {"at": path or "(root)", "a": repr(a)[:200], "b": repr(b)[:200]}
+
+
+def compare_sessions(dir_a, dir_b, *, skip: Iterable[str] = (RUN_RECORD,), manifest_excluded=COMPARE_MANIFEST_EXCLUDED) -> dict:
+    """Two replay output directories, file by file. A .jsonl file: rows equal as text, else the FIRST differing row (number, the first differing field, both values). A .json file: equal bytes, else the first
+    differing key path; `session_manifest.json` is compared without the sections in `manifest_excluded`. Any other file: bytes, else the first differing offset. A file present on one side only is a difference.
+    Returns {"equal", "files": {name: {"status": EQUAL | DIFFERENT | ONLY_A | ONLY_B | EQUAL_EXCEPT_EXCLUDED, ...}}, "different": [names]}. Read-only."""
+    a, b = Path(dir_a), Path(dir_b)
+    names = sorted(({p.name for p in a.iterdir() if p.is_file()} | {p.name for p in b.iterdir() if p.is_file()}) - set(skip))
+    files: dict[str, dict] = {}
+    for name in names:
+        pa, pb = a / name, b / name
+        if not pa.exists() or not pb.exists():
+            files[name] = {"status": "ONLY_A" if pa.exists() else "ONLY_B"}
+            continue
+        ba, bb = pa.read_bytes(), pb.read_bytes()
+        if ba == bb:
+            files[name] = {"status": "EQUAL", "bytes": len(ba)}
+            continue
+        if name.endswith(".jsonl"):
+            la, lb = ba.splitlines(), bb.splitlines()
+            row = next((i for i, (x, y) in enumerate(zip(la, lb)) if x != y), min(len(la), len(lb)))
+            diff = {"row": row + 1, "rows_a": len(la), "rows_b": len(lb)}
+            if row < len(la) and row < len(lb):
+                try:
+                    diff["first_difference"] = _first_json_difference(json.loads(la[row]), json.loads(lb[row]))
+                except ValueError:
+                    diff["first_difference"] = {"a": la[row][:200].decode("utf-8", "replace"), "b": lb[row][:200].decode("utf-8", "replace")}
+            files[name] = {"status": "DIFFERENT", **diff}
+        elif name.endswith(".json"):
+            try:
+                ja, jb = json.loads(ba), json.loads(bb)
+            except ValueError:
+                files[name] = {"status": "DIFFERENT", "offset": next((i for i, (x, y) in enumerate(zip(ba, bb)) if x != y), min(len(ba), len(bb)))}
+                continue
+            excluded = []
+            if name == "session_manifest.json":
+                for keys in manifest_excluded:
+                    for doc in (ja, jb):
+                        node = doc
+                        for k in keys[:-1]:
+                            node = node.get(k, {}) if isinstance(node, dict) else {}
+                        if isinstance(node, dict):
+                            node.pop(keys[-1], None)
+                    excluded.append(".".join(keys))
+            d = _first_json_difference(ja, jb)
+            files[name] = {"status": "EQUAL_EXCEPT_EXCLUDED", "excluded": excluded} if d is None else {"status": "DIFFERENT", "first_difference": d, **({"excluded": excluded} if excluded else {})}
+        else:
+            files[name] = {"status": "DIFFERENT", "offset": next((i for i, (x, y) in enumerate(zip(ba, bb)) if x != y), min(len(ba), len(bb)))}
+    different = [n for n, f in files.items() if f["status"] not in ("EQUAL", "EQUAL_EXCEPT_EXCLUDED")]
+    return {"a": str(a), "b": str(b), "equal": not different, "files_compared": len(files), "different": different, "skipped": sorted(skip), "files": files}
+
+
+# ---- W2a hygiene (owner 17 Nov, decision 13: no logic under out/): the evidence files the day and scenario run wrappers used to build themselves. Moved here as they were: the bytes written are the same.
+SAFETY_EVENT_PREFIXES = ("BREAKER_", "LIMIT_STATE", "FEED_HEALTH", "KILL_SWITCH", "UNWIND_", "HEDGE_ALARM", "HEDGE_DUST", "HEDGE_CHAIN", "HEDGE_STATE", "MARGIN_", "NEW_RISK_HELD", "RECONCILIATION", "QUOTE_SKIPPED", "QUOTE_WITHDRAWN", "RESIDUAL_", "LAYER_RISK", "RISK_FLATTEN", "ORDER_LIFETIME", "TIME_INTEGRITY", "ORDER_TIMED_OUT", "ORDER_REJECT_CLASSIFIED")
+
+
+def safety_event_text(ledger_events: list[dict], prefixes: tuple = SAFETY_EVENT_PREFIXES) -> str:
+    """The ledger's safety events in full (payloads included), one JSON line each, in ledger order. Empty text when there are none."""
+    safety = [e for e in ledger_events if e["event_type"].startswith(prefixes)]
+    return "".join(json.dumps({k: (str(v) if not isinstance(v, (int, float, bool, type(None), list, dict)) else v) for k, v in e.items()}, sort_keys=True, default=str) + "\n" for e in safety)
+
+
+def write_evidence(replay: "SessionReplay", result: dict, out_dir: Path, traded: dict | None = None) -> None:
+    """After `write_result`: the files the rehearsal report reads that the result itself does not hold. The safety events in full; one file with every stop-quoting condition and every limit counter of the run,
+    read from the session (counts are complete, never a truncated list); the participation samples when the run recorded any; the participation audit (own passive fills against the public volume printed
+    at the same level, `traded` = {(venue, price text): quantity} summed from the capture by the caller); the impact overlay's summary when the run had one. Aggregates only."""
+    import collections
+    out = Path(out_dir)
+    replay_interlock(out_dir=out)
+    if getattr(replay, "impact", None) is not None:                     # step C: what the overlay did (aggregates only)
+        ov = replay.impact
+        (out / "session_impact.json").write_text(json.dumps({"label": "EXPLORATORY: level-3 impact overlay; the settings are in impact_settings, the label says where they come from", "impact_settings": dataclasses.asdict(ov.cfg) if hasattr(ov.cfg, "__dataclass_fields__") else {},
+            "counts": ov.counts, "orders": len(ov.orders), "orders_by_venue": {v: sum(1 for o in ov.orders if o.venue == v) for v in ov.ticks}, "mean_peak_bps": (sum(o.peak_bps for o in ov.orders) / len(ov.orders)) if ov.orders else None,
+            "max_peak_bps": max((o.peak_bps for o in ov.orders), default=None), "final_applied_ticks": ov.applied_ticks, "tick": ov.ticks}, indent=1))
+    sess = replay.session
+    led = sess.ledger.events
+    (out / "session_safety_events.jsonl").write_text(safety_event_text(led))
+    lim = getattr(sess.router, "scoped_limits", None)
+    rejects = getattr(replay.strategy, "rejects", None)
+    doc = {"label": "EXPLORATORY: every counter of the run; counts are complete (nothing truncated)",
+           "ledger_event_type_counts": dict(sorted(collections.Counter(e["event_type"] for e in led).items())),
+           "stop_quoting": {"signals_blocked_by_breaker": sess.signals_blocked_by_breaker, "breaker": sess.breaker_report().get("breaker"), "breaker_alarms": list(sess.breaker_alarms), "hedge_dust_carry": sess.breaker_report().get("hedge_dust_carry"),
+                            **({"feed_health": {k: v for k, v in sess.breaker_report()["feed_health"].items() if k != "transition_rows"}} if sess.breaker_report().get("feed_health") is not None else {}), "session_limits": sess.breaker_report().get("session_limits"), "no_requote": sess.breaker_report().get("no_requote"), "amend_guard": sess.breaker_report().get("amend_guard"), "reprice_counters": dict(sess.reprice_counters), "amend_refusals": {k: v for k, v in sess.oms.realism_counters.items() if "amend" in k},
+                            "margin_price_paused_at_end": sess.margin_price_paused, "signals_blocked_by_margin_price": sess.signals_blocked_by_margin_price,
+                            "quotes_skipped_rate_limit": sess.quotes_skipped_rate_limit, "quotes_withdrawn": sess.quotes_withdrawn, "risk_gate_refusals_by_reason": dict(sess.gate_counts),
+                            "kill_switch": bool(sess.oms.risk.kill_switch), "kill_switch_reason": getattr(sess.oms.risk, "kill_switch_reason", ""),
+                            "strategy_reject_counts": (dict(rejects.counts) if hasattr(rejects, "counts") else (dict(rejects) if isinstance(rejects, dict) else None)),
+                            "oms_new_risk_held": {k: v for k, v in sess.oms.realism_counters.items() if k.startswith("new_risk_held")}},
+           "limits_that_bound": {"rate_limiter": None if lim is None else lim.snapshot(getattr(replay, "last_ns", None)), "risk_engine_refusals": dict(getattr(sess.oms.risk, "refusals", {}) or {}),
+                                 "layer_gate": {k: v for k, v in (result.get("execution_layer", {}).get("layer", {}).get("counts", {}) or {}).items() if "risk" in k or "refus" in k},
+                                 "residual_breaches": result["manifest"].get("residual_risk") if isinstance(result.get("manifest"), dict) else None,
+                                 "oms_realism_counters": dict(sess.oms.realism_counters)},
+           "safety_from_profile": getattr(replay, "safety_from_profile", None)}
+    (out / "session_limits_and_stops.json").write_text(json.dumps(doc, indent=1, default=str))
+    if replay.strategy.participation_samples:
+        (out / "session_participation_samples.jsonl").write_text("".join(json.dumps({"ts": r[0], "price": r[1], "qty": r[2], "volume_in_window": r[3]}) + "\n" for r in replay.strategy.participation_samples))
+    audit = participation_audit(sess.ledger_fill_rows() if hasattr(sess, "ledger_fill_rows") else [e for e in led if e["event_type"] == "FILL"], dict(traded or {}))
+    (out / "session_participation_audit.json").write_text(json.dumps({"label": "EXPLORATORY: own passive fills vs the public volume printed at the same level over the day", **audit}, indent=1))
+
+
+def write_stage_trace(replay: "SessionReplay", result: dict, path: Path) -> int:
+    """The stage trace of a run (crypto_stat_arb.metrics.stage_trace over the ledger, each signal as a `signal-trigger` row), one JSON line per row. Returns the row count."""
+    from crypto_stat_arb.metrics import stage_trace
+    trace = stage_trace(replay.session.ledger.events, [(s["ts"], "signal-trigger", "book") for s in result["signals"]])
+    Path(path).write_text("".join(json.dumps(r, sort_keys=True, default=str) + "\n" for r in trace))
+    return len(trace)
+
+
 def write_result(result: dict, out_dir: Path) -> None:
+    replay_interlock(out_dir=out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
     for name in ("signals", "orders", "fills"):
         with (out_dir / f"session_{name}.jsonl").open("w") as fh:
@@ -1182,8 +1453,11 @@ def live_paper_setup(profile_name: str) -> dict:
                                query_attempt_limit=int(getattr(hf, "unknown_query_max_attempts", 3) or 3),
                                **hedge_policy_fields(hedge_cfg, cfg.arb.max_walk_bps), **hedge_dust_fields(profile))
     timelines = Timelines(cfg.timing) if cfg.timing is not None else None
-    session_kwargs = {"dispatch_policy": DispatchPolicy.FILL_TRIGGERED, "maker_venues": tuple(names[v] for v in cfg.arb.maker_venues), "hedge_policy": hedge_policy,
-                      "latency_model": TimelinesLatencyModel(timelines) if timelines is not None else None, "gate_on_every_event": True}
+    # W2a (owner 17 Nov): the same rules as the replay, from the one builder. A paper session of v1_9 or later runs the PROFILE's own safety values (its breaker block and its layer risk mode, enforce;
+    # `profile_safety_default`), and every paper session its execution config, the intent journal and the markout horizons: before this it ran none of them (audit A2 12.2 finding 4).
+    layer_risk_mode, breaker_config = profile_safety_values(profile, profile_safety_default(profile))
+    session_kwargs = profile_session_rules(cfg, profile, names, hedge_policy=hedge_policy, latency_model=TimelinesLatencyModel(timelines) if timelines is not None else None,
+                                           layer_risk_mode=layer_risk_mode, breaker_config=breaker_config)
 
     def build(paper) -> list:
         session = paper.session
@@ -1198,13 +1472,6 @@ def live_paper_setup(profile_name: str) -> dict:
     guard = amend_guard_from_profile(profile)
     if guard is not None:
         session_kwargs["amend_guard"] = guard             # owner 16 Nov: read by TradingSession only when it sends real orders
-    from crypto_stat_arb.config import session_limits_from_profile
-    limits = session_limits_from_profile(profile, float(cfg.arb.max_position_base))
-    if limits is not None:
-        session_kwargs["session_limits"] = limits         # owner 16 Nov (Order 3): the profile's oms.session_limits, the clip scaling the loss stop; absent in every earlier profile
-    fh = feed_health_from_profile(profile)
-    if fh is not None:
-        session_kwargs["feed_health"] = fh                # W1: the same block the replay passes
     return {"session_kwargs": session_kwargs, "queue_simulation": asdict(cfg.maker), "strategy_builder": build}
 
 
@@ -1212,7 +1479,9 @@ def _open_jsonl(path: Path):
     """Open a .jsonl or .jsonl.gz file for line-by-line reading."""
     gz = path.with_suffix(".jsonl.gz") if path.suffix == ".jsonl" else None
     if gz and gz.exists():
+        note_file_read(gz)
         return gzip.open(gz, "rt")
+    note_file_read(path)
     return path.open()
 
 

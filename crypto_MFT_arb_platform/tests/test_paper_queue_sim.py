@@ -256,6 +256,83 @@ class LivePaperRunsTheProfileStrategy(unittest.TestCase):
             finally:
                 self.close(paper)
 
+    def test_paper_and_replay_build_the_session_from_the_same_rules(self):
+        """W2a (owner 17 Nov; audit A2 12.2): one builder. For v1_5 (replay defaults), v1_9 and v1_10 (the profile's own safety values) the session arguments `live_paper_setup` hands the paper session
+        are the ones `SessionReplay` passes to `TradingSession`: breaker, layer risk mode, execution config, intent journal, markout horizons, hedge policy, feed health, session limits."""
+        from unittest import mock
+        import new_backtest.session_replay as sr
+        from new_backtest.profiles import apply_profile, load_profile
+        for name in ("perp_perp_maker_taker_v1_5", "perp_perp_maker_taker_v1_9", "perp_perp_maker_taker_v1_10", "perp_perp_maker_taker_v1_11"):
+            profile = load_profile(name)
+            cfg = apply_profile(profile, pair="SOLUSDT", start_date="2024-03-11", end_date="2024-03-11", data_root="", output_dir="")
+            with mock.patch.object(sr, "TradingSession", wraps=sr.TradingSession) as built:
+                sr.SessionReplay(cfg, profile, recorded=True, profile_safety=sr.profile_safety_default(profile))
+            replay_kw = built.call_args.kwargs
+            paper_kw = sr.live_paper_setup(name)["session_kwargs"]
+            rules = ("dispatch_policy", "maker_venues", "hedge_policy", "gate_on_every_event", "layer_route_mode", "breaker_config", "execution_config", "layer_risk_mode", "intent_journal",
+                     "markout_horizons_s", "feed_health", "session_limits")
+            for key in rules:
+                self.assertIn(key, paper_kw, (name, key))
+                self.assertEqual(paper_kw[key], replay_kw[key], (name, key))
+            self.assertEqual(type(paper_kw["latency_model"]), type(replay_kw["latency_model"]), name)
+            self.assertEqual(getattr(paper_kw["latency_model"], "seed", None), getattr(replay_kw["latency_model"], "seed", None), name)
+            self.assertEqual(set(paper_kw) - set(replay_kw), {"amend_guard"} & set(paper_kw), name)          # the only argument a paper session adds: the amend guard, read only when real orders are sent
+            late = sr.profile_safety_default(profile)
+            self.assertEqual(late, name.endswith(("v1_9", "v1_10", "v1_11")))
+            self.assertEqual(paper_kw["layer_risk_mode"], "enforce" if late else "count", name)
+            self.assertEqual(paper_kw["breaker_config"] is not None, late, name)
+            self.assertTrue(paper_kw["intent_journal"])
+
+    def test_a_killed_session_leaves_every_ledger_and_intent_record_on_disk(self):
+        """W2a (owner 17 Nov; audit A2 2.1): the journals are appended and flushed per record. A process killed without finalize (simulated: the files are read while the session is still open and
+        finalize is never called) has every record on disk, and its journal manifest says sealed false. A normal end seals it with the counts."""
+        with tempfile.TemporaryDirectory() as tmp:
+            paper, _ = self.build(Path(tmp))
+            try:
+                out = paper.output_dir
+                rows = lambda name: [json.loads(line) for line in (out / name).read_text().splitlines()]
+                before = len(paper.session.ledger.events)
+                self.assertEqual(len(rows("ledger_stream.jsonl")), before)                             # what the session recorded while it was built is already there
+                self.assertFalse(json.loads((out / "journal_manifest.json").read_text())["sealed"])
+                for n in range(3):
+                    paper.session.ledger.record("TEST_EVENT", 1_700_000_000_000_000_000 + n, note=f"n{n}")
+                    self.assertEqual(rows("ledger_stream.jsonl")[-1], json.loads(json.dumps(paper.session.ledger.events[-1], default=str)))   # on disk BEFORE the next record, no close
+                journal = paper.session.intent_observer.layer.journal
+                journal.append({"record": "TEST", "n": 1})
+                self.assertEqual(rows("session_intent_journal.jsonl"), [{"record": "TEST", "n": 1}])
+                paper._write_row({"record_type": "DECISION", "n": 1})
+                self.assertEqual(rows("paper_timestamps.jsonl")[-1], {"record_type": "DECISION", "n": 1})   # a decision row is flushed at once
+                paper._write_row({"record_type": "EVENT", "n": 2})
+                self.assertEqual(len(rows("paper_timestamps.jsonl")), 1)                               # a market-frame row waits for the recorder's bounded flush
+                self.assertEqual(len(rows("ledger_stream.jsonl")), before + 3)
+                self.assertFalse(json.loads((out / "journal_manifest.json").read_text())["sealed"])   # still unsealed: this is what a killed session leaves
+                paper.finalize({"venues": {}})
+                sealed = json.loads((out / "journal_manifest.json").read_text())
+                self.assertTrue(sealed["sealed"])
+                self.assertEqual(sealed["counts"]["ledger_events"], len(rows("ledger_stream.jsonl")))
+                self.assertEqual(sealed["counts"]["intent_records"], len(rows("session_intent_journal.jsonl")))
+                self.assertEqual(len(rows("paper_timestamps.jsonl")), 2)
+                self.assertIsNone(paper.session.ledger.event_sink)
+            finally:
+                self.close(paper)
+
+    def test_journal_streaming_off_writes_no_stream_files(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            from new_backtest.session_replay import live_paper_setup
+            setup = live_paper_setup(self.PROFILE)
+            (Path(tmp) / "a").mkdir()
+            base, _ = self.build(Path(tmp) / "a")
+            self.close(base)
+            cfg_file = Path(tmp) / "a" / "cfg.json"
+            paper = LivePaperSession(cfg_file, Path(tmp) / "b", "no-stream", LiveFeedSettings(udp_enabled=False, binance_market="linear", bybit_market="linear", durable=False),
+                                     queue_simulation=setup["queue_simulation"], session_kwargs=setup["session_kwargs"], strategy_builder=setup["strategy_builder"], tick_seconds=3600, journal_stream=False)
+            try:
+                self.assertIsNone(paper.session.ledger.event_sink)
+                self.assertFalse((paper.output_dir / "ledger_stream.jsonl").exists())
+                self.assertFalse((paper.output_dir / "journal_manifest.json").exists())
+            finally:
+                self.close(paper)
+
     def test_a_strategy_builder_without_the_queue_simulator_is_refused(self):
         with tempfile.TemporaryDirectory() as tmp:
             from new_backtest.profiles import apply_profile, load_profile

@@ -58,8 +58,26 @@ def truncation_report() -> dict:
     return {"truncated_files": len(_TRUNCATED), "files": sorted(_TRUNCATED), "note": "gzip streams that ended early; the rows read before the cut are used, nothing after it exists"}
 
 
+# W2a (owner 17 Nov; audit A2 2.5): the same kind of side channel for the INPUT FILES a run actually opened, in the order they were opened, so a run record can carry the sha256 of each. Nothing reads it
+# during a run. reset_files_read() when a replay is built, files_read() at its end.
+_FILES_READ: dict[str, None] = {}
+
+
+def reset_files_read() -> None:
+    _FILES_READ.clear()
+
+
+def note_file_read(path) -> None:
+    _FILES_READ[str(path)] = None
+
+
+def files_read() -> list[str]:
+    return list(_FILES_READ)
+
+
 def _iter_jsonl_gz(path: Path, parse_float=None) -> Iterator[dict]:
     """parse_float=Decimal (Phase D, D4): the record's numbers are read from their JSON text as exact Decimals, never through a float. Default None: floats, as before."""
+    note_file_read(path)
     try:
         with gzip.open(path, "rt") as fh:
             while True:

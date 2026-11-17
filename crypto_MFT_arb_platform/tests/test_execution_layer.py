@@ -42,6 +42,28 @@ class IntentTests(unittest.TestCase):
                            parent=p, parent_filled_qty=2.0)
         self.assertEqual((h.intent_id, h.parent_id), ("sig7-H1", "sig7-P1"))
 
+    def test_a_full_journal_counts_what_it_drops_and_says_so_in_the_report(self):
+        """W2a (owner 17 Nov; audit A2 0.2d): the journal stopped at 200,000 records without a word. It still stops there; every record not kept is counted and the report carries a flag.
+        A run that stays under the cap has neither key (its report is unchanged). A sink, when set, receives each record as it is appended."""
+        from unittest import mock
+        import crypto_stat_arb.ems.layer as layer_module
+        xl = layer()
+        primary(xl)
+        self.assertNotIn("journal_truncated", xl.report())
+        self.assertNotIn("journal_records_dropped", xl.report())
+        streamed = []
+        xl.journal.sink = streamed.append
+        with mock.patch.object(layer_module, "JOURNAL_MAX", 3):
+            xl2 = layer()
+            xl2.journal.sink = streamed.append
+            for n in range(5):
+                xl2.open_intent(role=Role.PRIMARY, side="buy", qty=1.0, venues=(BYBIT,), worst_price=100.0, now=float(n), signal_id=100 + n, reason="maker leg")
+            rep = xl2.report()
+            self.assertEqual(len(xl2.journal), 3)
+            self.assertEqual((rep["journal_entries"], rep["journal_truncated"], rep["journal_records_dropped"]), (3, True, 2))
+            self.assertEqual(len(xl2.intents), 5)                                  # the intents themselves are all there: only the journal is capped
+        self.assertEqual(streamed, list(xl2.journal))                              # the sink saw exactly the records the journal kept, in order
+
     def test_bad_intents_are_refused(self):
         xl = layer()
         with self.assertRaises(Exception):

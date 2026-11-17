@@ -43,7 +43,7 @@ cap = "--cap" in argv
 if cap:
     argv.remove("--cap")
 from new_backtest.profiles import apply_profile, load_profile           # after --src is on the path
-from new_backtest.session_replay import SessionReplay, dated_ticks, iter_recorded_events, write_result
+from new_backtest.session_replay import SessionReplay, dated_ticks, iter_recorded_events, write_evidence, write_result, write_run_record
 name, out = argv[0], Path(argv[1])
 minutes = float(argv[2]) if len(argv) > 2 else None
 profile = load_profile(name)
@@ -94,38 +94,9 @@ result["run"] = {"profile_overrides": overrides, "hedge_min_notional": hedge_min
                  "labels": ["EXPLORATORY", "recorder quality REJECTED; host clock UNKNOWN", "funding not included (no derivatives files locally); mark = mid", "S1 table out-of-period (SOL, fitted March 2024)",
                             "no own orders on the venues: simulated fills show mechanics only", f"size {size} SOL clip, net ceiling {size} SOL + headroom, {gross} SOL gross per venue (owner 11 Nov; sweep settings), participation cap {'ON' if cap else 'off'}", f"processing time strategy {proc_strategy} ms + risk {proc_risk} ms" + (" (ASSUMED sensitivity)" if proc_strategy or proc_risk else " (ASSUMED_ZERO)"), "marks: the recorded derivatives stream when present, else MARK_FROM_MID (replay only)"]}
 write_result(result, out)
-if getattr(replay, "impact", None) is not None:                     # step C: what the overlay did (aggregates only)
-    ov = replay.impact
-    (out / "session_impact.json").write_text(json.dumps({"label": "EXPLORATORY: level-3 impact overlay; the settings are in impact_settings, the label says where they come from", "impact_settings": dataclasses.asdict(ov.cfg) if hasattr(ov.cfg, "__dataclass_fields__") else {},
-        "counts": ov.counts, "orders": len(ov.orders), "orders_by_venue": {v: sum(1 for o in ov.orders if o.venue == v) for v in ov.ticks}, "mean_peak_bps": (sum(o.peak_bps for o in ov.orders) / len(ov.orders)) if ov.orders else None,
-        "max_peak_bps": max((o.peak_bps for o in ov.orders), default=None), "final_applied_ticks": ov.applied_ticks, "tick": ov.ticks}, indent=1))
-# Owner 13 Nov (the end-to-end rehearsal): the files the report needs that write_result does not make. The safety events in full (payloads included), and one file with every stop-quoting condition and every limit counter of the run,
-# read from the session (counts are complete, never a truncated list).
-import collections
-sess = replay.session
-led = sess.ledger.events
-safety = [e for e in led if e["event_type"].startswith(("BREAKER_", "LIMIT_STATE", "FEED_HEALTH", "KILL_SWITCH", "UNWIND_", "HEDGE_ALARM", "HEDGE_DUST", "HEDGE_CHAIN", "HEDGE_STATE", "MARGIN_", "NEW_RISK_HELD", "RECONCILIATION", "QUOTE_SKIPPED", "QUOTE_WITHDRAWN", "RESIDUAL_", "LAYER_RISK", "RISK_FLATTEN", "ORDER_LIFETIME", "TIME_INTEGRITY", "ORDER_TIMED_OUT", "ORDER_REJECT_CLASSIFIED"))]
-(out / "session_safety_events.jsonl").write_text("".join(json.dumps({k: (str(v) if not isinstance(v, (int, float, bool, type(None), list, dict)) else v) for k, v in e.items()}, sort_keys=True, default=str) + "\n" for e in safety))
-lim = getattr(sess.router, "scoped_limits", None)
-rejects = getattr(replay.strategy, "rejects", None)
-doc = {"label": "EXPLORATORY: every counter of the run; counts are complete (nothing truncated)",
-       "ledger_event_type_counts": dict(sorted(collections.Counter(e["event_type"] for e in led).items())),
-       "stop_quoting": {"signals_blocked_by_breaker": sess.signals_blocked_by_breaker, "breaker": sess.breaker_report().get("breaker"), "breaker_alarms": list(sess.breaker_alarms), "hedge_dust_carry": sess.breaker_report().get("hedge_dust_carry"),
-                        **({"feed_health": {k: v for k, v in sess.breaker_report()["feed_health"].items() if k != "transition_rows"}} if sess.breaker_report().get("feed_health") is not None else {}), "session_limits": sess.breaker_report().get("session_limits"), "no_requote": sess.breaker_report().get("no_requote"), "amend_guard": sess.breaker_report().get("amend_guard"), "reprice_counters": dict(sess.reprice_counters), "amend_refusals": {k: v for k, v in sess.oms.realism_counters.items() if "amend" in k},
-                        "margin_price_paused_at_end": sess.margin_price_paused, "signals_blocked_by_margin_price": sess.signals_blocked_by_margin_price,
-                        "quotes_skipped_rate_limit": sess.quotes_skipped_rate_limit, "quotes_withdrawn": sess.quotes_withdrawn, "risk_gate_refusals_by_reason": dict(sess.gate_counts),
-                        "kill_switch": bool(sess.oms.risk.kill_switch), "kill_switch_reason": getattr(sess.oms.risk, "kill_switch_reason", ""),
-                        "strategy_reject_counts": (dict(rejects.counts) if hasattr(rejects, "counts") else (dict(rejects) if isinstance(rejects, dict) else None)),
-                        "oms_new_risk_held": {k: v for k, v in sess.oms.realism_counters.items() if k.startswith("new_risk_held")}},
-       "limits_that_bound": {"rate_limiter": None if lim is None else lim.snapshot(getattr(replay, "last_ns", None)), "risk_engine_refusals": dict(getattr(sess.oms.risk, "refusals", {}) or {}),
-                             "layer_gate": {k: v for k, v in (result.get("execution_layer", {}).get("layer", {}).get("counts", {}) or {}).items() if "risk" in k or "refus" in k},
-                             "residual_breaches": result["manifest"].get("residual_risk") if isinstance(result.get("manifest"), dict) else None,
-                             "oms_realism_counters": dict(sess.oms.realism_counters)},
-       "safety_from_profile": getattr(replay, "safety_from_profile", None)}
-(out / "session_limits_and_stops.json").write_text(json.dumps(doc, indent=1, default=str))
-(out / "session_participation_samples.jsonl").write_text("".join(json.dumps({"ts": r[0], "price": r[1], "qty": r[2], "volume_in_window": r[3]}) + "\n" for r in replay.strategy.participation_samples)) if replay.strategy.participation_samples else None
-from new_backtest.session_replay import participation_audit
-audit = participation_audit(replay.session.ledger_fill_rows() if hasattr(replay.session, "ledger_fill_rows") else [e for e in led if e["event_type"] == "FILL"], dict(traded))
-(out / "session_participation_audit.json").write_text(json.dumps({"label": "EXPLORATORY: own passive fills vs the public volume printed at the same level over the day", **audit}, indent=1))
+# W2a hygiene (owner 17 Nov): the evidence files (safety events, limits and stops, participation, impact) are written by the replay module, not here; the run record (input and output hashes, data span,
+# speed) is written last.
+write_evidence(replay, result, out, traded)
+write_run_record(out, replay)
 print(json.dumps({"profile": name, "wall_s": result["run"]["wall_s"], "events": result["events"], "signals": len(result["signals"]), "orders": len(result["orders"]), "fills": len(result["fills"]),
                   "positions": result["positions"], "ledger_events": sum(result["ledger_event_counts"].values())}, indent=1))

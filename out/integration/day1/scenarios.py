@@ -19,7 +19,7 @@ from crypto_stat_arb.metrics import stage_trace
 from crypto_stat_arb.models import MarketEvent
 from crypto_stat_arb.orderbook import OrderBook
 from new_backtest.profiles import apply_profile, load_profile
-from new_backtest.session_replay import SessionReplay, dated_ticks, iter_recorded_events, write_result
+from new_backtest.session_replay import SessionReplay, dated_ticks, iter_recorded_events, safety_event_text, write_result, write_run_record, write_stage_trace
 
 SESSION = Path("/Users/vaibhav/Documents/Newproject/data/live_sessions/solusdt/2026-10-29/SOLUSDT/e9b81728a3054812a48035a1b3e02d42")
 DAY0 = 1793232000                      # 2026-10-29 00:00:00 UTC
@@ -361,9 +361,9 @@ result = replay.run_recorded(events())
 result["run"] = {"case": case, "settings": {k: v for k, v in st.items()}, "window_utc": st["window"], "wall_s": round(time.time() - t, 1), "labels": ["EXPLORATORY: mechanics only, no profit claim", "2-hour window of the 2026-10-29 capture; the books are warmed from the capture start (09:56 UTC) with quoting off until the window opens: counts of events and the regime samples include the warm-up",
                  "mark = mid, no funding", "regime boundaries IN-SAMPLE (the capture's own terciles)"]}
 write_result(result, out)
-safety = [e for e in replay.session.ledger.events if e["event_type"].startswith(("BREAKER_", "LIMIT_STATE", "FEED_HEALTH", "TIME_INTEGRITY", "KILL_SWITCH", "UNWIND_", "HEDGE_ALARM", "MARGIN_PRICE", "NEW_RISK_HELD", "RECONCILIATION", "QUOTE_SKIPPED"))]
+safety = safety_event_text(replay.session.ledger.events, ("BREAKER_", "LIMIT_STATE", "FEED_HEALTH", "TIME_INTEGRITY", "KILL_SWITCH", "UNWIND_", "HEDGE_ALARM", "MARGIN_PRICE", "NEW_RISK_HELD", "RECONCILIATION", "QUOTE_SKIPPED"))      # W2a hygiene: the writer lives in the replay module
 if safety:                                   # the safety events of the run in full (payloads included), next to the standard outputs
-    (out / "session_safety_events.jsonl").write_text("".join(json.dumps({k: (str(v) if not isinstance(v, (int, float, bool, type(None), list, dict)) else v) for k, v in e.items()}, sort_keys=True, default=str) + "\n" for e in safety))
+    (out / "session_safety_events.jsonl").write_text(safety)
 else:
     (out / "session_safety_events.jsonl").unlink(missing_ok=True)      # a rerun with no safety events must not leave the previous run's file behind
 if st.get("inject_move"):
@@ -376,9 +376,9 @@ if replay.session._limits is not None:             # Order 3: every limit, wheth
 from new_backtest.session_replay import s0_audit
 (out / "session_s0_audit.json").write_text(json.dumps(s0_audit(replay.session.ledger.events, replay.session.oms.plans, replay.session.reprice_counters), indent=1, default=str))       # owner 14 Nov: the counts for case 2i (a-j)
 sigs = result["signals"]
-trace = stage_trace(replay.session.ledger.events, [(s["ts"], "signal-trigger", "book") for s in sigs])
 cases_dir = Path("/Users/vaibhav/Documents/Newproject/out/integration/ems_cases")
 cases_dir.mkdir(parents=True, exist_ok=True)
-(out if layer_only else cases_dir).joinpath(f"scn_{case}.jsonl").write_text("".join(json.dumps(r, sort_keys=True, default=str) + "\n" for r in trace))
-print(json.dumps({"case": case, "wall_s": result["run"]["wall_s"], "events": result["events"], "signals": len(sigs), "orders": len(result["orders"]), "fills": len(result["fills"]), "trace_rows": len(trace),
+trace_rows = write_stage_trace(replay, result, (out if layer_only else cases_dir).joinpath(f"scn_{case}.jsonl"))      # W2a hygiene: the writer lives in the replay module
+write_run_record(out, replay)
+print(json.dumps({"case": case, "wall_s": result["run"]["wall_s"], "events": result["events"], "signals": len(sigs), "orders": len(result["orders"]), "fills": len(result["fills"]), "trace_rows": trace_rows,
                   "positions": result["positions"]}, indent=1))

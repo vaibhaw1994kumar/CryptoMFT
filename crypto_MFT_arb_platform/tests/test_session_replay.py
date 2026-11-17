@@ -1484,3 +1484,198 @@ class EmsNoteAlertContext(unittest.TestCase):
         self.assertGreater(float(a["pending_hedge_qty"]), 0.0)                                         # the hedge is still out
         self.assertGreater(a["oldest_exposure_age_s"], 0.0)
         self.assertTrue(a["execution_blocked_reason"])                                                  # new risk is blocked, and the alert says why
+
+
+@unittest.skipUnless(SLICES.is_dir(), "March slices not available (the profile needs a data root)")
+class RunRecordInterlockAndCompare(unittest.TestCase):
+    """W2a (owner 17 Nov; audit A2 2.4, 2.5). The replay interlock; the run record (every input file actually read, hashed and checked against the recorder's own hash; every output file hashed; data
+    span and speed); the session compare (structured, the first differing row). Synthetic stream: wiring only."""
+
+    @staticmethod
+    def _record(root: Path):
+        """The synthetic stream as a recorder session on disk: one part, gzip files, and the part manifest with the recorder's sha256 of each file BEFORE compression."""
+        import gzip
+        import hashlib
+        from dataclasses import asdict
+        from crypto_stat_arb.models import TradeEvent
+        events = RecordedReplayAndDecomposedMarkouts._core_events()
+        part = root / "part-000001"
+        part.mkdir(parents=True)
+        text = {"canonical": "", "trades": "", "trace": ""}
+        for ev in events:
+            kind = "trades" if isinstance(ev, TradeEvent) else "canonical"
+            text[kind] += json.dumps(asdict(ev), default=str) + "\n"
+            text["trace"] += json.dumps({"disposition": "TRADE" if kind == "trades" else "CANONICAL", "canonical_event_id": ev.event_id}) + "\n"
+        for name, body in text.items():
+            with gzip.open(part / f"{name}.jsonl.gz", "wt") as fh:
+                fh.write(body)
+        (part / "live_part_manifest.json").write_text(json.dumps({"files": {n: {"sha256": hashlib.sha256(b.encode()).hexdigest()} for n, b in text.items()}}))
+        return part
+
+    def _run(self, session_dir: Path, out: Path):
+        replay = RecordedReplayAndDecomposedMarkouts()._replay()
+        result = replay.run_recorded(sr.iter_recorded_events(session_dir))
+        sr.write_result(result, out)
+        return replay, result, sr.write_run_record(out, replay)
+
+    def test_the_run_record_lists_and_hashes_what_was_read_and_written(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as d:
+            part = self._record(Path(d) / "capture")
+            replay, result, record = self._run(Path(d) / "capture", Path(d) / "a")
+            self.assertGreater(len(result["fills"]), 0)
+            self.assertEqual([Path(r["path"]).name for r in record["inputs"]], ["canonical.jsonl.gz", "trades.jsonl.gz", "trace.jsonl.gz"])       # the files the reader opened, in that order: no empty list
+            for row in record["inputs"]:
+                self.assertEqual(row["sha256"], sr.file_sha256(row["path"]))
+                self.assertTrue(row["recorder_match"], row)                         # the content equals the hash the recorder wrote for it
+            self.assertEqual(record["inputs_recorder_checked"], 3)
+            self.assertEqual(record["inputs_recorder_mismatch"], [])
+            out = Path(d) / "a"
+            self.assertEqual(set(record["outputs"]), {p.name for p in out.iterdir()} - {sr.RUN_RECORD})
+            for name, o in record["outputs"].items():
+                self.assertEqual(o["sha256"], sr.file_sha256(out / name), name)
+            self.assertEqual((record["data_start_ns"], record["data_end_ns"]), (replay.first_ns, replay.last_ns))
+            self.assertGreater(record["data_span_s"], 6.0)
+            self.assertGreater(record["speed_x"], 0.0)
+            self.assertEqual(record["effective_seeds"], replay.config_notes["effective_seeds"])
+            self.assertNotIn("wall_s", json.dumps(result.get("manifest")))           # the wall time is in the run record only: the manifest is the same from run to run
+            # a recording changed after it was made: the recorder's hash no longer matches, and the record says which file
+            manifest = json.loads((part / "live_part_manifest.json").read_text())
+            manifest["files"]["trades"]["sha256"] = "0" * 64
+            (part / "live_part_manifest.json").write_text(json.dumps(manifest))
+            _, _, changed = self._run(Path(d) / "capture", Path(d) / "c")
+            self.assertEqual([Path(p).name for p in changed["inputs_recorder_mismatch"]], ["trades.jsonl.gz"])
+
+    def test_two_runs_compare_equal_and_a_one_character_change_is_found_at_its_row(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as d:
+            self._record(Path(d) / "capture")
+            self._run(Path(d) / "capture", Path(d) / "a")
+            self._run(Path(d) / "capture", Path(d) / "b")
+            same = sr.compare_sessions(Path(d) / "a", Path(d) / "b")
+            self.assertTrue(same["equal"], same["different"])
+            self.assertGreaterEqual(same["files_compared"], 4)
+            self.assertNotIn(sr.RUN_RECORD, same["files"])                          # the run record (wall time) is left out
+            fills = Path(d) / "b" / "session_fills.jsonl"
+            rows = fills.read_text().splitlines()
+            row = json.loads(rows[-1])
+            field = next(k for k, v in sorted(row.items()) if isinstance(v, str) and v)
+            row[field] = row[field] + "x"                                           # the smallest change: one character in one field of the last fill row
+            rows[-1] = json.dumps(row, default=str)
+            fills.write_text("\n".join(rows) + "\n")
+            (Path(d) / "b" / "extra.txt").write_text("x")
+            diff = sr.compare_sessions(Path(d) / "a", Path(d) / "b")
+            self.assertFalse(diff["equal"])
+            self.assertEqual(diff["different"], ["extra.txt", "session_fills.jsonl"])
+            self.assertEqual(diff["files"]["extra.txt"]["status"], "ONLY_B")
+            f = diff["files"]["session_fills.jsonl"]
+            self.assertEqual((f["status"], f["row"], f["first_difference"]["at"]), ("DIFFERENT", len(rows), field))
+            # the manifest: a difference in an excluded section is not a difference; one anywhere else is, with its key path
+            m = Path(d) / "b" / "session_manifest.json"
+            doc = json.loads(m.read_text())
+            doc["run"] = {"wall_s": 1.0}
+            doc["manifest"]["release_identity"]["git"] = "other"
+            m.write_text(json.dumps(doc, indent=1, default=str))
+            self.assertEqual(sr.compare_sessions(Path(d) / "a", Path(d) / "b")["files"]["session_manifest.json"]["status"], "EQUAL_EXCEPT_EXCLUDED")
+            doc["events"] = {"changed": 1}
+            m.write_text(json.dumps(doc, indent=1, default=str))
+            self.assertEqual(sr.compare_sessions(Path(d) / "a", Path(d) / "b")["files"]["session_manifest.json"]["first_difference"]["at"].split(".")[0], "events")
+
+    def test_the_interlock_refuses_a_live_session_real_adapters_and_a_recording_as_output(self):
+        import tempfile
+        from crypto_stat_arb.session import ExecutionMode
+        with tempfile.TemporaryDirectory() as d:
+            capture = Path(d) / "capture"
+            part = self._record(capture)
+            for target in (capture, part, capture / "paper"):                          # the recording itself, a part of it, a directory inside it
+                with self.assertRaisesRegex(ValueError, "REPLAY_INTERLOCK"):
+                    sr.write_result({"signals": [], "orders": [], "fills": []}, target)
+                with self.assertRaisesRegex(ValueError, "REPLAY_INTERLOCK"):
+                    sr.write_run_record(target)
+            live = Path(d) / "live"
+            live.mkdir()
+            (live / "live_manifest.json").write_text("{}")
+            with self.assertRaisesRegex(ValueError, "REPLAY_INTERLOCK"):
+                sr.write_result({"signals": [], "orders": [], "fills": []}, live)
+            self.assertFalse((capture / "session_manifest.json").exists())
+            replay = RecordedReplayAndDecomposedMarkouts()._replay()
+            replay.session.execution_mode = ExecutionMode.INTERNAL_PAPER
+            with self.assertRaisesRegex(ValueError, "INTERNAL_SIMULATION"):
+                replay.run_recorded(iter(()))
+            replay = RecordedReplayAndDecomposedMarkouts()._replay()
+            replay.session.router.adapters["BINANCE"] = object()
+            with self.assertRaisesRegex(ValueError, "simulated venue"):
+                replay.run_recorded(iter(()))
+            sr.replay_interlock(session=RecordedReplayAndDecomposedMarkouts()._replay().session, out_dir=Path(d) / "fresh")      # an ordinary replay and a new directory pass
+
+
+    def test_the_evidence_files_and_the_stage_trace_are_written_by_the_module(self):
+        """W2a hygiene (decision 13): the files the run wrappers under out/ used to build are written here. The byte-identity against the wrappers' own output is the v1_9 identity replay."""
+        import tempfile
+        with tempfile.TemporaryDirectory() as d:
+            self._record(Path(d) / "capture")
+            out = Path(d) / "a"
+            replay, result, _ = self._run(Path(d) / "capture", out)
+            sr.write_evidence(replay, result, out, traded={})
+            for name in ("session_safety_events.jsonl", "session_limits_and_stops.json", "session_participation_audit.json"):
+                self.assertTrue((out / name).exists(), name)
+            led = replay.session.ledger.events
+            lines = (out / "session_safety_events.jsonl").read_text().splitlines()
+            self.assertEqual(len(lines), sum(1 for e in led if e["event_type"].startswith(sr.SAFETY_EVENT_PREFIXES)))
+            self.assertEqual(sr.safety_event_text(led, ("NO_SUCH_EVENT",)), "")
+            doc = json.loads((out / "session_limits_and_stops.json").read_text())
+            self.assertEqual(sum(doc["ledger_event_type_counts"].values()), len(led))             # every ledger event is counted: nothing truncated
+            self.assertFalse((out / "session_participation_samples.jsonl").exists())           # written only when the run recorded samples
+            rows = sr.write_stage_trace(replay, result, out / "scn_x.jsonl")
+            self.assertEqual(rows, len((out / "scn_x.jsonl").read_text().splitlines()))
+            self.assertGreaterEqual(rows, len(result["signals"]))
+            record = sr.write_run_record(out, replay)                                             # written last: it covers the evidence files too
+            self.assertIn("session_limits_and_stops.json", record["outputs"])
+
+    def test_trace_rejects_is_a_profile_key_off_by_default(self):
+        from new_backtest.profiles import SWITCHES
+        self.assertIn("trace_rejects", {sw.key for sw in SWITCHES} if not isinstance(SWITCHES, dict) else SWITCHES)
+        profile = load_profile("perp_perp_maker_taker_v1_5")
+        self.assertNotIn("trace_rejects", profile)
+        kw = dict(dataset="mar2024", data_root=str(SLICES), pair="SOLUSDT", start_date="2024-03-11", end_date="2024-03-11", output_dir="/tmp/x_w2a")
+        off = apply_profile(profile, **kw)
+        self.assertFalse(off.trace_rejects)
+        self.assertIsNone(SessionReplay(off, profile, recorded=True).reject_trace)
+        on_profile = {**profile, "trace_rejects": True}
+        on = apply_profile(on_profile, **kw)
+        self.assertTrue(on.trace_rejects)
+        self.assertEqual(SessionReplay(on, on_profile, recorded=True).reject_trace, [])
+
+
+@unittest.skipUnless(SLICES.is_dir(), "March slices not available (the profile needs a data root)")
+class TheArbNeverChoosesATactic(unittest.TestCase):
+    """W2a (decision 11): `choose_tactic` is the market-making tactic switch. An arb run (signal, PostOnly maker, fill, hedge) never calls it, and an arb profile that asks for it is refused."""
+
+    def test_a_full_arb_run_never_calls_choose_tactic(self):
+        import crypto_stat_arb.ems.tactics.base as base
+        profile = load_profile("perp_perp_maker_taker_v1_9")
+        cfg = apply_profile(profile, dataset="mar2024", data_root=str(SLICES), pair="SOLUSDT", start_date="2024-03-11", end_date="2024-03-11", output_dir="/tmp/x_w2a_tactic")
+        cfg.arb.max_position_base = 1.0
+        cfg.arb.participation_max = 0.0
+        with mock.patch.object(base, "choose_tactic", side_effect=AssertionError("the arb called choose_tactic")) as chosen:
+            result = SessionReplay(cfg, profile, stream=stream()).run()
+        self.assertEqual(chosen.call_count, 0)
+        self.assertGreaterEqual(len(result["fills"]), 2)                                    # the run did trade: the maker fill and its hedge went through the layer
+
+    def test_every_arb_profile_leaves_the_switch_off_and_turning_it_on_is_refused(self):
+        from new_backtest.profiles import ProfileError
+        profiles = Path(__file__).resolve().parents[1] / "profiles"
+        seen = 0
+        for path in sorted(profiles.glob("perp_perp_maker_taker_v1*.yaml")):
+            doc = load_profile(path.stem)
+            self.assertIn((doc.get("execution") or {}).get("tactic_choice", "off"), ("off", None), path.name)
+            seen += 1
+        self.assertGreaterEqual(seen, 10)
+        profile = load_profile("perp_perp_maker_taker_v1_9")
+        bad = {**profile, "execution": {**profile["execution"], "tactic_choice": "market_state"}}
+        with self.assertRaises(ProfileError):
+            apply_profile(bad, dataset="mar2024", data_root=str(SLICES), pair="SOLUSDT", start_date="2024-03-11", end_date="2024-03-11", output_dir="/tmp/x_w2a_tactic")
+
+
+if __name__ == "__main__":
+    unittest.main()

@@ -1,0 +1,279 @@
+{
+ "label": "READ-ONLY: the live ledger of the 8 Nov paper run (d7d-run2) against a replay of its own recording on TODAY's code (v1_5, gate on every event). The 9 Nov replay (837 rows) was not stored; today's code writes a different row count because the mark rules changed on 11 and 16 Nov. Feed-control rows matched by venue, state, reason and time (50 ms)",
+ "ledger_rows": {
+  "live": 860,
+  "replay_9_nov_reported": 837,
+  "replay_today": 817
+ },
+ "counts_that_differ_live_vs_replay_today": {
+  "FEED_CONTROL_STATE_TRANSITION": [
+   56,
+   39
+  ],
+  "FEED_CONTROL_VENUE_CANCEL": [
+   28,
+   19
+  ],
+  "HEDGE_CAP_BREACH_AT_DISPATCH": [
+   2,
+   0
+  ],
+  "HEDGE_TOUCH_PAST_PLANNED_LIMIT": [
+   0,
+   2
+  ],
+  "KILL_SWITCH_STATE_TRANSITION": [
+   8,
+   4
+  ],
+  "MARGIN_BUFFER_ALERT": [
+   8,
+   4
+  ],
+  "MARGIN_STATE_TRANSITION": [
+   19,
+   11
+  ],
+  "RMS_RECONCILIATION": [
+   1,
+   0
+  ]
+ },
+ "feed_control_transitions": {
+  "live": 56,
+  "replay": 39,
+  "matched_within_50ms": 29,
+  "only_live": [
+   {
+    "t_s": 0.0,
+    "venue": "BINANCE",
+    "mode": "RISK_REDUCING_ONLY",
+    "reason": "SYNCING:awaiting_snapshot"
+   },
+   {
+    "t_s": 0.0,
+    "venue": "BYBIT",
+    "mode": "RISK_REDUCING_ONLY",
+    "reason": "SYNCING:connection_snapshot_required"
+   },
+   {
+    "t_s": 582.07,
+    "venue": "BINANCE",
+    "mode": "RISK_REDUCING_ONLY",
+    "reason": "STALE:market_data_stale"
+   },
+   {
+    "t_s": 582.114,
+    "venue": "BINANCE",
+    "mode": "ACTIVE",
+    "reason": ""
+   },
+   {
+    "t_s": 1183.456,
+    "venue": "BINANCE",
+    "mode": "RISK_REDUCING_ONLY",
+    "reason": "STALE:market_data_stale"
+   },
+   {
+    "t_s": 1183.478,
+    "venue": "BINANCE",
+    "mode": "ACTIVE",
+    "reason": ""
+   },
+   {
+    "t_s": 1395.612,
+    "venue": "BINANCE",
+    "mode": "RISK_REDUCING_ONLY",
+    "reason": "STALE:market_data_stale"
+   },
+   {
+    "t_s": 1486.891,
+    "venue": "BINANCE",
+    "mode": "RISK_REDUCING_ONLY",
+    "reason": "STALE:market_data_stale"
+   },
+   {
+    "t_s": 1486.891,
+    "venue": "BYBIT",
+    "mode": "RISK_REDUCING_ONLY",
+    "reason": "STALE:market_data_stale"
+   },
+   {
+    "t_s": 1488.748,
+    "venue": "BYBIT",
+    "mode": "ACTIVE",
+    "reason": ""
+   },
+   {
+    "t_s": 1498.218,
+    "venue": "BINANCE",
+    "mode": "RISK_REDUCING_ONLY",
+    "reason": "STALE:market_data_stale"
+   },
+   {
+    "t_s": 1498.218,
+    "venue": "BYBIT",
+    "mode": "RISK_REDUCING_ONLY",
+    "reason": "STALE:market_data_stale"
+   },
+   {
+    "t_s": 1499.924,
+    "venue": "BYBIT",
+    "mode": "ACTIVE",
+    "reason": ""
+   },
+   {
+    "t_s": 1717.879,
+    "venue": "BYBIT",
+    "mode": "RISK_REDUCING_ONLY",
+    "reason": "STALE:market_data_stale"
+   },
+   {
+    "t_s": 1740.198,
+    "venue": "BINANCE",
+    "mode": "RISK_REDUCING_ONLY",
+    "reason": "STALE:market_data_stale"
+   },
+   {
+    "t_s": 1741.402,
+    "venue": "BYBIT",
+    "mode": "RISK_REDUCING_ONLY",
+    "reason": "STALE:market_data_stale"
+   },
+   {
+    "t_s": 2166.736,
+    "venue": "BYBIT",
+    "mode": "RISK_REDUCING_ONLY",
+    "reason": "STALE:market_data_stale"
+   },
+   {
+    "t_s": 2166.986,
+    "venue": "BYBIT",
+    "mode": "ACTIVE",
+    "reason": ""
+   },
+   {
+    "t_s": 2275.123,
+    "venue": "BINANCE",
+    "mode": "RISK_REDUCING_ONLY",
+    "reason": "STALE:market_data_stale"
+   },
+   {
+    "t_s": 2744.203,
+    "venue": "BYBIT",
+    "mode": "RISK_REDUCING_ONLY",
+    "reason": "STALE:market_data_stale"
+   },
+   {
+    "t_s": 2745.043,
+    "venue": "BYBIT",
+    "mode": "ACTIVE",
+    "reason": ""
+   },
+   {
+    "t_s": 2821.609,
+    "venue": "BINANCE",
+    "mode": "RISK_REDUCING_ONLY",
+    "reason": "STALE:market_data_stale"
+   },
+   {
+    "t_s": 3012.385,
+    "venue": "BINANCE",
+    "mode": "RISK_REDUCING_ONLY",
+    "reason": "STALE:market_data_stale"
+   },
+   {
+    "t_s": 3012.496,
+    "venue": "BINANCE",
+    "mode": "ACTIVE",
+    "reason": ""
+   },
+   {
+    "t_s": 3155.676,
+    "venue": "BINANCE",
+    "mode": "RISK_REDUCING_ONLY",
+    "reason": "STALE:market_data_stale"
+   },
+   {
+    "t_s": 3155.752,
+    "venue": "BINANCE",
+    "mode": "ACTIVE",
+    "reason": ""
+   },
+   {
+    "t_s": 3246.898,
+    "venue": "BYBIT",
+    "mode": "RISK_REDUCING_ONLY",
+    "reason": "STALE:market_data_stale"
+   }
+  ],
+  "only_replay": [
+   {
+    "t_s": 0.187,
+    "venue": "BINANCE",
+    "mode": "RISK_REDUCING_ONLY",
+    "reason": "SYNCING:awaiting_snapshot"
+   },
+   {
+    "t_s": 1396.197,
+    "venue": "BINANCE",
+    "mode": "RISK_REDUCING_ONLY",
+    "reason": "STALE:market_data_stale"
+   },
+   {
+    "t_s": 1490.69,
+    "venue": "BINANCE",
+    "mode": "RISK_REDUCING_ONLY",
+    "reason": "STALE:market_data_stale"
+   },
+   {
+    "t_s": 1499.924,
+    "venue": "BINANCE",
+    "mode": "RISK_REDUCING_ONLY",
+    "reason": "STALE:market_data_stale"
+   },
+   {
+    "t_s": 1719.228,
+    "venue": "BYBIT",
+    "mode": "RISK_REDUCING_ONLY",
+    "reason": "STALE:market_data_stale"
+   },
+   {
+    "t_s": 1740.128,
+    "venue": "BINANCE",
+    "mode": "RISK_REDUCING_ONLY",
+    "reason": "STALE:market_data_stale"
+   },
+   {
+    "t_s": 1742.438,
+    "venue": "BYBIT",
+    "mode": "RISK_REDUCING_ONLY",
+    "reason": "STALE:market_data_stale"
+   },
+   {
+    "t_s": 2275.297,
+    "venue": "BINANCE",
+    "mode": "RISK_REDUCING_ONLY",
+    "reason": "STALE:market_data_stale"
+   },
+   {
+    "t_s": 2821.684,
+    "venue": "BINANCE",
+    "mode": "RISK_REDUCING_ONLY",
+    "reason": "STALE:market_data_stale"
+   },
+   {
+    "t_s": 3248.2,
+    "venue": "BYBIT",
+    "mode": "RISK_REDUCING_ONLY",
+    "reason": "STALE:market_data_stale"
+   }
+  ]
+ },
+ "reading": {
+  "start_up_rows_live_only": 1,
+  "live_only_short_stale_episodes": 8,
+  "rows_from_those_episodes": 16,
+  "episodes_on_both_sides_at_shifted_times": 9
+ }
+}

@@ -1,0 +1,82 @@
+{
+ "label": "run record (W2a): input and output hashes, data span and speed. Not part of the identity comparison (wall time differs run to run)",
+ "inputs_sha256": "06ddd03bfbc2c1ade006d88fea6ad0c962f0cdb046373c4d548ff82b9c600f47",
+ "input_files": 4356,
+ "input_bytes": 2580317214,
+ "inputs_recorder_checked": 4356,
+ "inputs_recorder_mismatch": [],
+ "inputs_missing": [],
+ "outputs": {
+  "maker_observations.jsonl": {
+   "bytes": 19023,
+   "sha256": "4bddd984714e2723d1baf6fc20f166080295f1efc7190d183ed3ab5d68fb7efe"
+  },
+  "session_decision_events.jsonl": {
+   "bytes": 3996,
+   "sha256": "1df53b1f243b51f88f2531ef80429ef1a041c2c06ea1963d27c214bb29fb591b"
+  },
+  "session_fills.jsonl": {
+   "bytes": 48925,
+   "sha256": "128306365aee4744c3e3fe23547538afa88eac892c8d362c529496915700a6c6"
+  },
+  "session_intent_fills.jsonl": {
+   "bytes": 4339,
+   "sha256": "305c9f4e1c367f32ed3316e1bdee3576a5e59267ae28860f683289be8ac3179e"
+  },
+  "session_intent_journal.jsonl": {
+   "bytes": 10590,
+   "sha256": "e620e25a22e58371ce38af92005e2454d1e6f0e467911e98dedbc635964ef2f8"
+  },
+  "session_limits_and_stops.json": {
+   "bytes": 6181,
+   "sha256": "07399c7ac8b31567654c219ddffa097eaac02934f194c80d0f2a0fc4fb7b1704"
+  },
+  "session_manifest.json": {
+   "bytes": 54147,
+   "sha256": "a2f9f23f9d1df97335de054ca90218959692423e4d2393e7c9eff08edd9f01b7"
+  },
+  "session_markouts_decomposed.jsonl": {
+   "bytes": 16491,
+   "sha256": "fd2317cc285176f66e2abfe3f010be16f152d22d70194d2b8261aa94511dc495"
+  },
+  "session_orders.jsonl": {
+   "bytes": 4669,
+   "sha256": "129ce1b45e185f7dd19086bffe2b4ce4175afba28b6360251364889863796e8c"
+  },
+  "session_pair_economics.json": {
+   "bytes": 2183,
+   "sha256": "5dc1d5d83fcb0e21b8e771263596510ebbf28c490ebe6b5f18e3c9d41f57c84a"
+  },
+  "session_pair_economics.jsonl": {
+   "bytes": 5995,
+   "sha256": "d6cb56185c04fcc12007b32d48e249c32bf2a088404fd863fc192ef769a6924e"
+  },
+  "session_participation_audit.json": {
+   "bytes": 958,
+   "sha256": "0f639d710c546591706e0593821739d652024c56c53471599ab605765ea2412b"
+  },
+  "session_safety_events.jsonl": {
+   "bytes": 20645,
+   "sha256": "122de48c26afd37f3df02d14219e93dd857dae7739d506edf169f6a6f0c58869"
+  },
+  "session_signals.jsonl": {
+   "bytes": 1116,
+   "sha256": "f0e29303e13d596cf9e957924832a7d351a2fa4d57ca40eed309f419d4524aa6"
+  }
+ },
+ "outputs_sha256": "1e7638d6c43c1eecf23efe8a67f7845a6d249f77d2f4ebf95bc22eed052e7368",
+ "data_start_ns": 1793267812413779778,
+ "data_end_ns": 1793318400871813666,
+ "data_span_s": 50588.458033888,
+ "wall_s": 1026.0941659159998,
+ "speed_x": 49.30196439498066,
+ "effective_seeds": {
+  "run_seed": 7,
+  "hedge_fault_seed": 11,
+  "latency_seed": 7,
+  "source": "code defaults (the profile sets none)"
+ },
+ "python_hash_seed": "not set (str hashes differ per process; no output may depend on set or dict-of-str order, see the contract)",
+ "python": "3.12.0",
+ "inputs": "4,356 rows (path, bytes, sha256, content_sha256, recorder_sha256, recorder_match) are in the run output's session_run_record.json, not committed"
+}
