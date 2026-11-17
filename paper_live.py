@@ -96,6 +96,8 @@ class LivePaperSession:
         incident_capture: dict | None = None,
         session_limits: dict | None = None,
         clock_source: str | None = None,
+        real_order_strategy: bool = False,
+        real_order_problems: list | None = None,
     ) -> None:
         self.cfg, _ = load_config(Path(config_path))
         settings = settings or LiveFeedSettings(udp_enabled=False)
@@ -167,11 +169,24 @@ class LivePaperSession:
         if queue_simulation is not None:
             # exchange-time eligibility stays off (ets None) until a measured host-clock offset exists (D7d); the venue names are the feed's own, so the name map is the identity
             self.feeder = SimulatedVenueFeeder(self.session, {v: v for v in self.cfg.venues}, self._views, self._states, adapters, ets_of=lambda ns: None)
+        self.real_order_views = False
         if strategy_builder is not None:
             # Phase D, D7d (owner 9 Nov): the strategy of the profile (ArbSessionStrategy for v1_5), built by a caller-supplied builder that reads this session's own ledger, OMS, views and states: the same
             # strategy object the replay runs, in place of the default spread strategy. The core never imports the builder's package: it is handed in by name (cli `--strategy-setup`).
             if self.feeder is None:
-                raise ValueError("a strategy builder needs queue_simulation: it reads the simulator's float views and venue states")
+                # (c), owner 17 Nov (out/integration/designs/C_real_order_session_design.md): with venue adapters the strategy's views come from the LIVE feed, through the same view builder the
+                # simulated venue uses, and no simulated venue exists (the queue simulator's books stay replay and simulated-paper only). Real orders stay OFF: this needs an explicit flag that
+                # nothing sets yet (the CLI refuses venue_testnet), and a profile that meets every real-order requirement.
+                if adapters is None or execution_mode == ExecutionMode.INTERNAL_PAPER:
+                    raise ValueError("a strategy builder needs queue_simulation (simulated paper) or venue adapters (a real-order session): it reads float views and venue states")
+                if not real_order_strategy:
+                    raise ValueError("a real-order strategy session is not enabled (real_order_strategy=False): see out/integration/designs/C_real_order_session_design.md; it is turned on with the testnet drill")
+                if real_order_problems:
+                    raise ValueError("the profile does not meet the real-order requirements: " + "; ".join(real_order_problems))
+                from .simulation.queue_adapter import SimulatedVenueFeeder, build_live_views
+                self._views, self._states = build_live_views(self.cfg)
+                self.feeder = SimulatedVenueFeeder(self.session, {v: v for v in self.cfg.venues}, self._views, self._states, {}, ets_of=lambda ns: None)
+                self.real_order_views = True
             built = list(strategy_builder(self))
             if not built:
                 raise ValueError("the strategy builder returned no strategy")

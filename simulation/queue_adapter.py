@@ -586,14 +586,15 @@ class SimulatedVenueFeeder:
         if apply_core:
             session.books[(event.venue, event.instrument_id)].apply(event)
         fv = self._feed_name[event.venue]
-        view, state, adapter, ets = self.views[fv], self.states[fv], self.adapters[event.venue], self.ets_of(event.exchange_ts_ns)
+        view, state, adapter, ets = self.views[fv], self.states[fv], self.adapters.get(event.venue), self.ets_of(event.exchange_ts_ns)
         produced: list = []
         if event.event_type == EventType.BOOK_SNAPSHOT:
             bids, asks = [[float(l.price), float(l.quantity)] for l in event.bids], [[float(l.price), float(l.quantity)] for l in event.asks]
             if bids and asks:
                 view.apply_snapshot(bids, asks, now_s)
                 state.on_book(view, now_s)
-                produced += adapter.feed_snapshot(view, now_s, ets)
+                if adapter is not None:
+                    produced += adapter.feed_snapshot(view, now_s, ets)
         else:
             if not view.ready:                                            # a live feed can start with a REST snapshot that never reached us as an event: the view is seeded from the core book once it is valid
                 core = session.books[(event.venue, event.instrument_id)]
@@ -604,10 +605,12 @@ class SimulatedVenueFeeder:
                 view.apply_delta(side, price, size, "modify", now_s)
             view.end_message()
             state.on_book(view, now_s)
-            for side, price, size in levels:
-                produced += adapter.feed_delta(side, price, view.level_size(side, price) if self.delta_uses_book_size else size, now_s, ets)
-        produced += adapter.feed_cross(view, now_s, ets)
-        self._deliver(adapter, produced, now, event.exchange_ts_ns)
+            if adapter is not None:
+                for side, price, size in levels:
+                    produced += adapter.feed_delta(side, price, view.level_size(side, price) if self.delta_uses_book_size else size, now_s, ets)
+        if adapter is not None:                                   # (c), owner 17 Nov: a venue with no simulated adapter (a real-order session) gets the view and state update only
+            produced += adapter.feed_cross(view, now_s, ets)
+            self._deliver(adapter, produced, now, event.exchange_ts_ns)
         return session.on_event(event, apply_book=False, **({} if gate_allowed is None else {"gate_allowed": gate_allowed}))
 
     def on_trade(self, trade: TradeEvent) -> bool:
@@ -623,11 +626,12 @@ class SimulatedVenueFeeder:
             session.feed_health_trade(trade, now)
         sign = 1 if trade.aggressor_side == "BUY" else -1
         fv = self._feed_name[trade.venue]
-        view, state, adapter, ets = self.views[fv], self.states[fv], self.adapters[trade.venue], self.ets_of(trade.exchange_ts_ns)
+        view, state, adapter, ets = self.views[fv], self.states[fv], self.adapters.get(trade.venue), self.ets_of(trade.exchange_ts_ns)
         view.on_trade(price, volume, sign, now_s)
         state.on_trade(now_s, price, volume, sign)
-        produced = list(adapter.feed_trade(price, volume, sign, now_s, ets, rpi=trade_is_rpi(trade))) + list(adapter.feed_cross(view, now_s, ets))
-        self._deliver(adapter, produced, now, trade.exchange_ts_ns)
+        if adapter is not None:                                   # (c): no simulated venue, no simulated fill: a fill can only come from the real venue's own report
+            produced = list(adapter.feed_trade(price, volume, sign, now_s, ets, rpi=trade_is_rpi(trade))) + list(adapter.feed_cross(view, now_s, ets))
+            self._deliver(adapter, produced, now, trade.exchange_ts_ns)
         return True
 
 
@@ -636,6 +640,15 @@ class NullOrderEventSink:
 
     def record_order_event(self, *args, **kwargs) -> None:
         return None
+
+
+def build_live_views(session_cfg) -> tuple[dict, dict]:
+    """(c), owner 17 Nov: the strategy's view books and venue states, one per venue: a persistent float view book (`SimBook`, absolute deltas, no tape repair, message-atomic) and a `VenueState`.
+    The ONE builder of these objects: the simulated venue (`build_queue_simulation`) and a real-order session (views fed from the live feed, no simulated venue) both use it, so they cannot drift."""
+    pair = session_cfg.instrument_id
+    views = {venue: SimBook(venue, pair, delta_semantics="absolute", tape_repair=False, message_atomic=True) for venue in session_cfg.venues}       # tape repair off: a public print never edits the view book
+    states = {venue: VenueState(venue) for venue in session_cfg.venues}
+    return views, states
 
 
 def build_queue_simulation(session_cfg, maker: dict | None = None):
@@ -648,11 +661,10 @@ def build_queue_simulation(session_cfg, maker: dict | None = None):
     settings = {"fill_evidence": "trade_confirm", **(maker or {})}
     executor = MakerExecutor(NullOrderEventSink(), MakerConfig(**settings))
     pair = session_cfg.instrument_id
-    adapters, views, states = {}, {}, {}
+    adapters = {}
+    views, states = build_live_views(session_cfg)
     for venue in session_cfg.venues:
         spec = session_cfg.instruments.get(venue, session_cfg.instrument_id)
-        views[venue] = SimBook(venue, pair, delta_semantics="absolute", tape_repair=False, message_atomic=True)       # tape repair off: a public print never edits the view book (plan: live books must never be edited from trades)
-        states[venue] = VenueState(venue)
         adapters[venue] = QueueAwareVenueAdapter(
             venue, executor, tick_size=float(spec.tick_size), maker_fee_bps=float(session_cfg.instruments.fee_bps(venue, session_cfg.instrument_id, Liquidity.MAKER)), pair=pair,
             state=states[venue], view_book=(lambda v=venue: views[v]), driver_fed=True,
