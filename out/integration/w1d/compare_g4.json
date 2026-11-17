@@ -1,0 +1,86 @@
+{
+ "a": "/Users/vaibhav/Documents/Newproject/out/integration/w1d/v110_ref",
+ "b": "/Users/vaibhav/Documents/Newproject/out/integration/w1d/v111_off",
+ "equal": false,
+ "files_compared": 16,
+ "different": [
+  "session_manifest.json"
+ ],
+ "skipped": [
+  "session_run_record.json"
+ ],
+ "files": {
+  "maker_observations.jsonl": {
+   "status": "EQUAL",
+   "bytes": 7458
+  },
+  "session_decision_events.jsonl": {
+   "status": "EQUAL",
+   "bytes": 1946
+  },
+  "session_ems_path_coverage.json": {
+   "status": "EQUAL",
+   "bytes": 2388
+  },
+  "session_fills.jsonl": {
+   "status": "EQUAL",
+   "bytes": 11637
+  },
+  "session_intent_fills.jsonl": {
+   "status": "EQUAL",
+   "bytes": 1073
+  },
+  "session_intent_journal.jsonl": {
+   "status": "EQUAL",
+   "bytes": 5504
+  },
+  "session_lifecycle_report.json": {
+   "status": "EQUAL",
+   "bytes": 13385
+  },
+  "session_limits_and_stops.json": {
+   "status": "EQUAL",
+   "bytes": 7706
+  },
+  "session_manifest.json": {
+   "status": "DIFFERENT",
+   "first_difference": {
+    "at": "profile",
+    "a": "'perp_perp_maker_taker_v1_10'",
+    "b": "'perp_perp_maker_taker_v1_11'"
+   },
+   "excluded": [
+    "run",
+    "manifest.release_identity"
+   ]
+  },
+  "session_markouts_decomposed.jsonl": {
+   "status": "EQUAL",
+   "bytes": 4149
+  },
+  "session_orders.jsonl": {
+   "status": "EQUAL",
+   "bytes": 2558
+  },
+  "session_pair_economics.json": {
+   "status": "EQUAL",
+   "bytes": 2171
+  },
+  "session_pair_economics.jsonl": {
+   "status": "EQUAL",
+   "bytes": 1478
+  },
+  "session_participation_audit.json": {
+   "status": "EQUAL",
+   "bytes": 487
+  },
+  "session_safety_events.jsonl": {
+   "status": "EQUAL",
+   "bytes": 18076
+  },
+  "session_signals.jsonl": {
+   "status": "EQUAL",
+   "bytes": 1116
+  }
+ }
+}

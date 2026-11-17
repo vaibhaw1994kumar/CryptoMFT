@@ -171,7 +171,7 @@ class TimeIntegrityFixes(unittest.TestCase):
 
 
 class ProfileBlock(unittest.TestCase):
-    def test_v1_11_is_v1_10_plus_the_feed_health_block_with_every_action_off(self):
+    def test_v1_11_is_v1_10_plus_the_feed_health_block_with_the_owners_actions(self):
         from new_backtest.profiles import load_profile
 
         def flat(d, p=""):
@@ -184,10 +184,12 @@ class ProfileBlock(unittest.TestCase):
         a, b = flat(load_profile("perp_perp_maker_taker_v1_10")), flat(load_profile("perp_perp_maker_taker_v1_11"))
         changed = {k for k in set(a) | set(b) if a.get(k) != b.get(k)}
         self.assertEqual(changed, {"name", "description", "feed_health.delay_degraded_ms", "feed_health.delay_unsafe_ms", "feed_health.silence_degraded_ms", "feed_health.silence_unsafe_ms",
-                                   "feed_health.own_lag_ms", "feed_health.recover_s", "feed_health.recorder_health_block", "feed_health.actions.block_new_quotes_on", "feed_health.actions.withdraw_quotes_on"})
+                                   "feed_health.own_lag_ms", "feed_health.recover_s", "feed_health.recorder_health_block", "feed_health.actions.block_new_quotes_on", "feed_health.actions.withdraw_quotes_on",
+                                   "feed_health.actions.withdraw_quotes_scope", "feed_health.actions.unsafe", "feed_health.actions.own_lag", "feed_health.feed_delayed_ms"})
         cfg = feed_health_from_profile(load_profile("perp_perp_maker_taker_v1_11"))
-        self.assertEqual(cfg["actions"], {"block_new_quotes_on": "none", "withdraw_quotes_on": "none"})      # PENDING the owner: nothing acts
-        self.assertIsNone(cfg["feed_delayed_ms"])                                                            # FEED_DELAYED stays off (1000 vs 2000 ms is not decided)
+        self.assertEqual(cfg["actions"], {"block_new_quotes_on": "DEGRADED", "withdraw_quotes_on": "DEGRADED", "withdraw_quotes_scope": "hedge_venue", "unsafe": "cancel_quotes_and_pause",
+                                          "own_lag": "no_new_quotes"})                                       # the owner's decisions of 16 Nov
+        self.assertEqual(cfg["feed_delayed_ms"], 1000.0)
         self.assertIsNone(feed_health_from_profile(load_profile("perp_perp_maker_taker_v1_10")))
         self.assertIsNone(feed_health_from_profile(load_profile("perp_perp_maker_taker_v1_9")))
 
@@ -202,7 +204,7 @@ class ProfileBlock(unittest.TestCase):
         from new_backtest.session_replay import feed_health_config_table
         table = feed_health_config_table(["perp_perp_maker_taker_v1_2", "perp_perp_maker_taker_v1_9", "perp_perp_maker_taker_v1_10", "perp_perp_maker_taker_v1_11"])
         for name in ("perp_perp_maker_taker_v1_9", "perp_perp_maker_taker_v1_10", "perp_perp_maker_taker_v1_11"):
-            self.assertIsNone(table[name]["time_policy"]["max_feed_delay_ms (FEED_DELAYED, blocking)"], name)
+            self.assertEqual(table[name]["time_policy"]["max_feed_delay_ms (FEED_DELAYED, blocking)"], 1000.0 if name.endswith("v1_11") else None, name)      # owner 16 Nov: 1000 ms in v1_11
             self.assertEqual(table[name]["book_gate_max_book_age_ms"], 500.0)
         self.assertEqual(table["perp_perp_maker_taker_v1_9"]["feed_health_block"], "absent (no feed-health state model; nothing is built)")
         self.assertEqual(table["perp_perp_maker_taker_v1_11"]["feed_health_block"]["silence_unsafe_ms"], 5000.0)
@@ -229,6 +231,9 @@ def hedge_feed_stops(stop_t=3.0, end_t=12.0, back_t=None):
         ev.append(snap(t + 0.01, "bybit", 100.00, 100.30))
         t = round(t + 0.1, 6)
     return sorted(ev, key=lambda e: (e.exchange_ts, e.venue))
+
+
+OFF = {"block_new_quotes_on": "none", "withdraw_quotes_on": "none", "withdraw_quotes_scope": "any", "unsafe": "none", "own_lag": "none"}       # observation only (the W1 build before the owner's decisions)
 
 
 @unittest.skipUnless(HAVE_SLICES, "March slices not available (the profile needs a data root)")
@@ -265,7 +270,7 @@ class SessionWiring(unittest.TestCase):
     def test_the_hedge_feed_goes_stale_with_a_quote_resting_observation_only_one_event_per_change_and_the_quote_stays(self):
         """Audit A1 1.4 gap 5, now on record: with the actions off (v1_11 as it is) a resting maker quote is NOT taken down when the hedge venue's feed goes silent. The state model records
         DEGRADED and then UNSAFE once each, with the alert context; nothing else changes."""
-        rep = self.replay(hedge_feed_stops(stop_t=3.0, end_t=6.0))                 # ends before the quote's 15 s lifetime
+        rep = self.replay(hedge_feed_stops(stop_t=3.0, end_t=6.0), actions=OFF)    # ends before the quote's 15 s lifetime
         rep.run()
         self.assertEqual([m for m in self.health(rep) if m[0] == "BINANCE"], [("BINANCE", "book", "HEALTHY", "DEGRADED", "silence")])
         self.assertEqual(self.withdrawn(rep), [])
@@ -273,11 +278,11 @@ class SessionWiring(unittest.TestCase):
         (ev,) = [e for e in rep.session.ledger.events if e["event_type"] == "FEED_HEALTH_STATE" and e["venue"] == "BINANCE"]
         for key in ("confirmed_residual_base", "pending_hedge_qty", "execution_blocked_reason"):
             self.assertIn(key, ev)                                                   # a worsening is an alert and carries its context
-        self.assertEqual(rep.session.feed_health_report()["actions"], {"block_new_quotes_on": "none", "withdraw_quotes_on": "none"})
+        self.assertEqual(rep.session.feed_health_report()["actions"], OFF)
         self.assertIn("feed_health", rep.config_notes)
 
     def test_unsafe_after_five_seconds_and_one_recovery_after_the_feed_returns(self):
-        rep = self.replay(hedge_feed_stops(stop_t=3.0, end_t=14.0, back_t=9.0))
+        rep = self.replay(hedge_feed_stops(stop_t=3.0, end_t=14.0, back_t=9.0), actions=OFF)
         rep.run()
         self.assertEqual([m for m in self.health(rep) if m[0] == "BINANCE"],
                          [("BINANCE", "book", "HEALTHY", "DEGRADED", "silence"), ("BINANCE", "book", "DEGRADED", "UNSAFE", "silence"), ("BINANCE", "book", "UNSAFE", "HEALTHY", "recovered")])
@@ -304,15 +309,75 @@ class SessionWiring(unittest.TestCase):
     def test_block_new_quotes_holds_quoting_through_the_recovery_hold_when_the_switch_is_on(self):
         """While a book is stale the existing book gate already stops the strategy (so the switch adds nothing there). What it adds is everything the gate does not see: here the 2 s recovery hold
         after the feed returns (the gate resumes on the first fresh frame; the state model does not), and in live a delay, an own lag or an unsynced clock on a fresh book."""
-        on = self.replay(hedge_feed_stops(stop_t=3.0, end_t=9.0, back_t=5.0), actions={"block_new_quotes_on": "DEGRADED"})
+        on = self.replay(hedge_feed_stops(stop_t=3.0, end_t=9.0, back_t=5.0), actions={**OFF, "block_new_quotes_on": "DEGRADED"})
         on.run()
         blocked = on.session.feed_health_counters.get("signals_blocked_by_feed_health", 0)
         self.assertGreater(blocked, 0)
         self.assertLessEqual(blocked, 2 * 21)                                        # only during the hold: about 2 s of book events on two venues at 10 per second each
-        off = self.replay(hedge_feed_stops(stop_t=3.0, end_t=9.0, back_t=5.0))
+        off = self.replay(hedge_feed_stops(stop_t=3.0, end_t=9.0, back_t=5.0), actions=OFF)
         off.run()
         self.assertNotIn("signals_blocked_by_feed_health", off.session.feed_health_counters)
         self.assertEqual(self.health(on), self.health(off))                          # the state model itself is the same with the action on or off
+
+
+
+def maker_feed_stops(stop_t=3.0, end_t=6.0):
+    """As hedge_feed_stops, but the MAKER venue (Bybit) goes silent while the hedge venue keeps updating."""
+    ev = [snap(1.0, "bybit", 100.00, 100.30), snap(1.0, "binance", 100.30, 100.31)]
+    t = 1.1
+    while t < end_t:
+        ev.append(snap(t, "binance", 100.30, 100.31))
+        if t < stop_t:
+            ev.append(snap(t + 0.01, "bybit", 100.00, 100.30))
+        t = round(t + 0.1, 6)
+    return sorted(ev, key=lambda e: (e.exchange_ts, e.venue))
+
+
+@unittest.skipUnless(HAVE_SLICES, "March slices not available (the profile needs a data root)")
+class OwnerActions(SessionWiring):
+    """Queue item (d), owner decisions of 16 Nov, as v1_11 carries them: withdraw on the HEDGE feed DEGRADED, no new quotes on either feed DEGRADED, UNSAFE cancels and pauses, OWN_LAG blocks."""
+
+    def test_the_hedge_feed_degraded_withdraws_the_resting_quote_once(self):
+        rep = self.replay(hedge_feed_stops(stop_t=3.0, end_t=6.0))
+        rep.run()
+        self.assertEqual(len(self.withdrawn(rep)), 1)
+        self.assertIn(":DEGRADED:BINANCE:", self.withdrawn(rep)[0]["reason"])
+        self.assertEqual(self.resting(rep), [])
+
+    def test_the_maker_feed_degraded_blocks_new_quotes_but_withdraws_nothing(self):
+        rep = self.replay(maker_feed_stops(stop_t=3.0, end_t=4.5))                  # Bybit silent 1.5 s: DEGRADED, not UNSAFE
+        rep.run()
+        self.assertEqual([m[:4] for m in self.health(rep) if m[0] == "BYBIT"], [("BYBIT", "book", "HEALTHY", "DEGRADED")])
+        self.assertEqual(self.withdrawn(rep), [])                                    # the scope is the hedge venue: a maker-feed DEGRADED is not a feed-health withdrawal (the book gate's own rules act on a stale maker book, as before)
+        self.assertTrue(rep.session._feed_health_blocks(rep.last_ns))                # and no new quote may go out while it is DEGRADED (the book gate also blocks a stale book: the two agree here)
+
+    def test_unsafe_cancels_every_resting_quote_and_pauses_even_with_no_level_of_its_own(self):
+        rep = self.replay(hedge_feed_stops(stop_t=3.0, end_t=9.5), actions={**OFF, "unsafe": "cancel_quotes_and_pause"})       # the hedge feed silent > 5 s: UNSAFE; no DEGRADED action set
+        rep.run()
+        self.assertTrue(any(m[:4] == ("BINANCE", "book", "DEGRADED", "UNSAFE") for m in self.health(rep)))
+        self.assertEqual(len(self.withdrawn(rep)), 1)
+        self.assertIn(":UNSAFE:BINANCE:", self.withdrawn(rep)[0]["reason"])           # at UNSAFE, not at DEGRADED
+        self.assertEqual(self.resting(rep), [])
+        self.assertTrue(rep.session._feed_health_blocks(rep.last_ns))                # and new quotes pause while it is UNSAFE
+        off = self.replay(hedge_feed_stops(stop_t=3.0, end_t=9.5), actions=OFF)
+        off.run()
+        self.assertEqual(self.withdrawn(off), [])
+
+    def test_own_lag_blocks_new_quotes(self):
+        rep = self.replay(hedge_feed_stops(stop_t=99.0, end_t=3.0), actions={**OFF, "own_lag": "no_new_quotes"})
+        rep.session.feed_health.own_lag_active = True                                # our processing is behind (in live: the arrival stamp; set here directly)
+        self.assertTrue(rep.session._feed_health_blocks(1))
+        self.assertEqual(rep.session.feed_health_counters["signals_blocked_by_own_lag"], 1)
+        rep.session.feed_health.own_lag_active = False
+        self.assertFalse(rep.session._feed_health_blocks(2))
+
+    def test_the_new_action_keys_are_validated_and_default_to_the_w1_behaviour(self):
+        good = {"delay_degraded_ms": 500, "delay_unsafe_ms": 2000, "silence_degraded_ms": 500, "silence_unsafe_ms": 5000, "own_lag_ms": 100, "recover_s": 2}
+        self.assertEqual({k: v for k, v in feed_health_from_profile({"feed_health": dict(good)})["actions"].items()}, OFF)
+        for bad in ({"withdraw_quotes_scope": "maker"}, {"unsafe": "flatten"}, {"own_lag": "slow"}):
+            with self.assertRaises(ValueError):
+                feed_health_from_profile({"feed_health": {**good, "actions": bad}})
+
 
 if __name__ == "__main__":
     unittest.main()

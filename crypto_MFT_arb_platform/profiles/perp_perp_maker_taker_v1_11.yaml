@@ -1,4 +1,4 @@
-# perp_perp_maker_taker_v1_11 = perp_perp_maker_taker_v1_10 + ONE block (W1, owner 17 Nov): feed_health. Observation only: with the block's actions at none the replay's orders, fills and positions equal v1_10's; the block adds FEED_HEALTH_STATE events and a feed-health report. v1_10 is unchanged.
+# perp_perp_maker_taker_v1_11 = perp_perp_maker_taker_v1_10 + ONE block (W1, owner 17 Nov): feed_health, with the OWNER DECISIONS of 16 Nov applied 17 Nov (queue item d): FEED_DELAYED 1000 ms; no new quotes on DEGRADED; withdraw on the hedge feed DEGRADED; UNSAFE cancels quotes and pauses; OWN_LAG no new quotes. Thresholds ASSUMED. v1_10 is unchanged.
 # Owner 13 Nov (E0 decisions, applied to v1_9 itself, not a new profile): oms.maker_ack_deadline ON; hedge_faults.silent_carry_bound below_one_lot (a failed hedge always unwinds, whatever its size). Both are safety rules, not strategy changes; results labelled v1_9 before this date carried neither.
 # perp_perp_maker_taker_v1_9 = perp_perp_maker_taker_v1_7 + ONE change (owner 12 Nov, EMS note section 1, price-cap construction): execution.hedge.cap size_aware. The hedge cap starts from the level the hedge quantity reaches on the bot's VIEW of the hedge book, plus the slack floor (5 bps) and an optional volatility/latency term (k = 0, ASSUMED), never beyond the touch by more than max_slip_bps (15, ASSUMED), on the venue's grid without loosening; where the view book has no depth beyond the touch it falls back to touch_slack and says so. Quote withdrawal (v1_8) is NOT in v1_9: one change at a time. EXPLORATORY. v1_5 to v1_8 are unchanged.
 # Owner 11 Nov (S1 label check): the 50 ms hedge-move horizon of the adverse table is below the data resolution for March 2024 (Bybit receive time constructed, Binance best bid/ask). Label only: no number, no switch and no table changed (decision_status.s1_label_resolution).
@@ -49,7 +49,7 @@ adverse_table:                           # S1 (owner 9 Nov): PINNED by sha256 li
 # numbers name their source; LEGACY_COMPAT switches exist only so legacy_v0 stays reachable. Values marked PROVISIONAL / PLACEHOLDER /
 # ASSUMED are not yet calibrated and are reported as such in every result (release_identity).
 name: perp_perp_maker_taker_v1_11
-description: "v1.11 = v1.10 + feed health (W1, owner 17 Nov), the feed_health block (HEALTHY / DEGRADED / UNSAFE per venue, instrument and stream, rollups, one FEED_HEALTH_STATE event per transition). OBSERVATION ONLY in this version, both actions are none and FEED_DELAYED stays off until the owner decides (threshold 1000 vs 2000 ms, cancel or withdraw on DEGRADED). Everything else is v1.10 unchanged. EXPLORATORY."
+description: "v1.11 = v1.10 + feed health (W1), the feed_health block (HEALTHY / DEGRADED / UNSAFE per venue, instrument and stream, rollups, one FEED_HEALTH_STATE event per transition) WITH ACTIONS (owner decisions 16 Nov, applied 17 Nov): FEED_DELAYED at 1000 ms; no new quotes while either feed is DEGRADED or worse; resting quotes withdrawn when the hedge feed (Binance) turns DEGRADED; UNSAFE on any feed cancels quotes and pauses; OWN_LAG blocks new quotes. Hedges and unwinds are never held. Every threshold is ASSUMED. Everything else is v1.10 unchanged."
 product: perp
 decision_status:                         # carried into every result's release_identity
   block_on_toxic: OFF_BY_HOLDOUT_GATE_SCORE_EXPLORATORY_SHA256_e1db1d0cf6c847ec8162ef891f7c4b27dbcedb38f45d7c8de18814c2897b256f   # v1_7 (owner 10 Nov): the toxic gate is off; two HOLDOUT day blocks only
@@ -200,11 +200,14 @@ feed_health:                             # W1 (owner 17 Nov). Every threshold is
   silence_unsafe_ms: 5000.0              # silent longer than this: UNSAFE (= timing.dead_feed_s, the resubscribe trigger)
   own_lag_ms: 100.0                      # a frame processed later than this after its arrival raises the OWN_LAG flag (the processor is behind, not the venue); with feed_arrival_stamp on
   recover_s: 2.0                         # hysteresis: a state improves only after this long of observations that are all better (ASSUMED)
-  feed_delayed_ms: null                  # PENDING the owner (1000 vs 2000 ms): a number turns the blocking FEED_DELAYED flag on (time.max_feed_delay_ms); null = off, as in every earlier profile
+  feed_delayed_ms: 1000.0                # OWNER DECISION 16 Nov: the blocking FEED_DELAYED flag on at 1000 ms (time.max_feed_delay_ms); every earlier profile keeps it off
   recorder_health_block: true            # the live recorder writes a feed-health block into each part manifest (live only; a replay has no recorder)
-  actions:                               # PENDING the owner (cancel or withdraw on DEGRADED is a trading-policy decision). none | UNSAFE | DEGRADED = the level from which the action applies
-    block_new_quotes_on: none            # no new quotes while any feed is at or above the level; hedges, unwinds and cancels are never held
-    withdraw_quotes_on: none             # at a transition to the level or worse every resting maker quote is withdrawn, once per transition
+  actions:                               # OWNER DECISIONS 16 Nov (queue item d). Hedges, unwinds and cancels are never held by any of these
+    block_new_quotes_on: DEGRADED        # no new quotes while EITHER feed is DEGRADED or worse
+    withdraw_quotes_on: DEGRADED         # at a transition to DEGRADED or worse ...
+    withdraw_quotes_scope: hedge_venue   # ... of the HEDGE venue's feed (Binance) every resting maker quote is withdrawn, once per transition
+    unsafe: cancel_quotes_and_pause      # UNSAFE on ANY feed: every resting quote is cancelled and new quotes pause until it recovers
+    own_lag: no_new_quotes               # OWN_LAG (our own processing is behind): throttle, no new quotes
 oms:
   rate_limits:                           # owner 13 Nov (production limits approved; ASSUMED: no venue data for the shares). New quotes use at most 70% of each rate-limit window and always leave at least 2 requests free;
     enabled: true                        # hedges, unwinds and flattens are NEVER refused by the limiter (they queue with priority and may use the whole window); cancels are unrestricted (the whole window).

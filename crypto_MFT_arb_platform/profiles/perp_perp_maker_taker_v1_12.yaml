@@ -201,11 +201,14 @@ feed_health:                             # W1 (owner 17 Nov). Every threshold is
   silence_unsafe_ms: 5000.0              # silent longer than this: UNSAFE (= timing.dead_feed_s, the resubscribe trigger)
   own_lag_ms: 100.0                      # a frame processed later than this after its arrival raises the OWN_LAG flag (the processor is behind, not the venue); with feed_arrival_stamp on
   recover_s: 2.0                         # hysteresis: a state improves only after this long of observations that are all better (ASSUMED)
-  feed_delayed_ms: null                  # PENDING the owner (1000 vs 2000 ms): a number turns the blocking FEED_DELAYED flag on (time.max_feed_delay_ms); null = off, as in every earlier profile
+  feed_delayed_ms: 1000.0                # OWNER DECISION 16 Nov: the blocking FEED_DELAYED flag on at 1000 ms (time.max_feed_delay_ms); every earlier profile keeps it off
   recorder_health_block: true            # the live recorder writes a feed-health block into each part manifest (live only; a replay has no recorder)
-  actions:                               # PENDING the owner (cancel or withdraw on DEGRADED is a trading-policy decision). none | UNSAFE | DEGRADED = the level from which the action applies
-    block_new_quotes_on: none            # no new quotes while any feed is at or above the level; hedges, unwinds and cancels are never held
-    withdraw_quotes_on: none             # at a transition to the level or worse every resting maker quote is withdrawn, once per transition
+  actions:                               # OWNER DECISIONS 16 Nov (queue item d). Hedges, unwinds and cancels are never held by any of these
+    block_new_quotes_on: DEGRADED        # no new quotes while EITHER feed is DEGRADED or worse
+    withdraw_quotes_on: DEGRADED         # at a transition to DEGRADED or worse ...
+    withdraw_quotes_scope: hedge_venue   # ... of the HEDGE venue's feed (Binance) every resting maker quote is withdrawn, once per transition
+    unsafe: cancel_quotes_and_pause      # UNSAFE on ANY feed: every resting quote is cancelled and new quotes pause until it recovers
+    own_lag: no_new_quotes               # OWN_LAG (our own processing is behind): throttle, no new quotes
 incident_capture:                        # W2b (owner 17 Nov). Read by the live feed service only (paper and live); a replay has no recorder and never reads it
   enabled: true
   pre_seconds: 90.0                      # the window starts at the newest mark at least this long before the trigger (the audit's minimum)
