@@ -143,7 +143,8 @@ VENUES: dict[tuple[str, str], VenueCapabilities] = {
     ),
 }
 
-# What each of our adapters implements (from crypto_stat_arb.testnet / execution).
+# What each of our adapters implements (from crypto_stat_arb.testnet / execution). (e), owner 17 Nov: the two perpetual transports amend IN PLACE (Bybit amend-order, Binance modify-order):
+# replace True; the spot transports refuse an amend: replace False.
 INTERNAL = AdapterCapabilities("internal simulation / paper", ("LIMIT", "MARKET"), ("GTC", "IOC", "FOK"),
                                post_only=True, reduce_only_sent=True, replace=True)
 ADAPTERS: dict[tuple[str, str], AdapterCapabilities] = {
@@ -152,13 +153,13 @@ ADAPTERS: dict[tuple[str, str], AdapterCapabilities] = {
                                              reduce_only_sent=False, replace=False),
     ("BINANCE", "PERP"): AdapterCapabilities("BinanceFuturesTestnetTransport", ("LIMIT", "MARKET"),
                                              ("GTC", "IOC", "FOK"), post_only=True,
-                                             reduce_only_sent=True, replace=False),
+                                             reduce_only_sent=True, replace=True),
     ("BYBIT", "SPOT"): AdapterCapabilities("BybitV5TestnetTransport", ("LIMIT", "MARKET"),
                                            ("GTC", "IOC", "FOK"), post_only=True,
                                            reduce_only_sent=False, replace=False),
     ("BYBIT", "PERP"): AdapterCapabilities("BybitV5LinearTestnetTransport", ("LIMIT", "MARKET"),
                                            ("GTC", "IOC", "FOK"), post_only=True,
-                                           reduce_only_sent=True, replace=False),
+                                           reduce_only_sent=True, replace=True),
 }
 
 _VENUE_ORDER_TYPE = {"Limit": "LIMIT", "Market": "MARKET", "LIMIT_MAKER": "LIMIT"}
