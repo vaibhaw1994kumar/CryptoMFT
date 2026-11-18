@@ -130,6 +130,8 @@ PIN_BEGIN, PIN_END = "<!-- PINS:BEGIN -->", "<!-- PINS:END -->"
 OUTER_ROOT = Path(__file__).resolve().parents[2]          # Newproject/ (the outer repo root); the pin paths are relative to it
 STATUSES = ("PINNED", "FROZEN", "NOT_FROZEN", "NOT_CREATED", "GOLDEN", "GOLDEN_NOCHECK")
 GROUPS = ("inputs", "profiles", "freeze", "golden")
+# owner 18 Nov 2026 (go-live stage 1): these profiles are PINNED; the block must list each of them as PINNED or FROZEN, never NOT_FROZEN or absent (a line edited back is a FAIL, not an INFO)
+MUST_BE_PINNED = tuple(f"crypto_MFT_arb_platform/profiles/perp_perp_maker_taker_v1_{n}.yaml" for n in (11, 12, 13, 14, 15))
 
 
 def _file_sha(p: Path):
@@ -184,6 +186,9 @@ def check_pins(root: Path, gates: Path, golden_root=None, head=True):
     use_head = head and (root / ".git").exists()
     goldens_checked = goldens_total = 0
     by_path = {p["path"]: p for p in pins}
+    for rel in MUST_BE_PINNED:
+        if rel not in by_path or by_path[rel]["status"] not in ("PINNED", "FROZEN"):
+            lines.append(("FAIL", "profiles", rel, "must be PINNED (owner 18 Nov) but the block lists it as " + (by_path[rel]["status"] if rel in by_path else "absent")))
     for p in pins:
         g, st, sha, rel = p["group"], p["status"], p["sha"], p["path"]
         if g == "golden":
@@ -299,6 +304,11 @@ def hashes_selftest():
             l5, c5 = check_pins(root, gates, head=False)
             case("an edit to a NOT_FROZEN profile is INFO, not FAIL", c5["FAIL"] == 0 and any(v == "INFO" and p == nf[0]["path"] and "CHANGED" in d for v, g, p, d in l5))
         gtext = gates.read_text(encoding="utf-8")
+        must = MUST_BE_PINNED[0]
+        gates.write_text(gtext.replace(f"profiles | PINNED | {_file_sha(real / must)} | {must}", f"profiles | NOT_FROZEN | {_file_sha(real / must)} | {must}"), encoding="utf-8")
+        l5b, c5b = check_pins(root, gates, head=False)
+        case("a profile pinned by the owner on 18 Nov listed back as NOT_FROZEN gives FAIL", any(v == "FAIL" and p == must and "must be PINNED" in d for v, g, p, d in l5b))
+        gates.write_text(gtext, encoding="utf-8")
         nc_rel = "crypto_MFT_arb_platform/profiles/selftest_not_created.yaml"       # synthetic: the real block may hold no NOT_CREATED row
         gates.write_text(gtext.replace(PIN_END, f"profiles | NOT_CREATED | - | {nc_rel}\n{PIN_END}"), encoding="utf-8")
         l6a, c6a = check_pins(root, gates, head=False)
