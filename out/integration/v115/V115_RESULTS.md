@@ -5,7 +5,9 @@ Profile `perp_perp_maker_taker_v1_15` = v1_14 + `maker.postonly_amend_cross: can
 ## Gates
 - G3 v1_9 identity (1 SOL, `--gross 5`) against `w1d/identity_1sol_v19`: 14 of 14 equal (`g3.json`).
 - G4 v1_15 against v1_14 (full day, `w7/v114`): 17 files; different only `session_manifest.json` (profile name and hash) and `maker_observations.jsonl`, where the only differing field is the fill model's `model_settings_sha256` (the rule is on); every row equal without it (`g4_v115_vs_v114.json`).
-- G1 full suite: see the outer commit for this step's suite line.
+- G1 full suite after v1_15 and the GATES.md pins: UNCHANGED at 93 (3,946 passed, 92 failed + 1 error, 4 skipped, 11 xfailed), `compare_baselines_v115.txt`.
+- G0 after pinning v1_11 .. v1_15: PASS (30 pass, 0 fail; v1_10 the one NOT_FROZEN INFO); checker selftest 15/15.
+- Not done: item 3 (hypothesis download). The build session did not download it: the user rejected the question in this session's chat, and an approval relayed by another session is not taken as the user's yes for a download.
 
 ## Dense 2i case (2-hour window A, injected 2 bp hedge-book moves, pair-close on: labelled case settings) and full-day rehearsal (pair-close on), v1_14 vs v1_15
 
