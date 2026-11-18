@@ -62,6 +62,10 @@ crypto-stat-arb = "crypto_stat_arb.cli:main"
 # (fill_label / fill_model_v1, also under crypto_stat_arb.advanced_backtest) fit a
 # scikit-learn LogisticRegression
 backtest = ["requests>=2.31", "scikit-learn>=1.5"]
+# Test-only pin (owner 18 Nov): tests/test_queue_v2_cohort.py. Not a runtime dependency.
+# hypothesis-6.170.15-cp312-cp312-macosx_11_0_arm64.whl sha256 7953ad8f123b4289801b833666aaab757ba52e91ed687d954eb26f4af7328e5b (794,302 bytes)
+# sortedcontainers-2.4.0-py2.py3-none-any.whl sha256 a163dcaede0f1c021485e957a39245190e74249897e2ae4b2aa38595db237ee0 (29,575 bytes)
+test = ["hypothesis==6.170.15", "sortedcontainers==2.4.0"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
