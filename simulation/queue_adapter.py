@@ -454,6 +454,8 @@ class QueueAwareVenueAdapter(DeterministicVenueAdapter):
             average_price=self._decimal(notional / filled) if filled > _EPS else Decimal("0"),
         ),)
 
+    AMEND_CROSS_ENDED = "post-only amend to a crossing price: order cancelled by venue"
+
     def _replace_own(self, request: CanonicalOrderRequest, book: CoreBook | None) -> tuple[ExecutionCallback, ...]:
         """2i item 1b (owner 17 Nov): Bybit amends IN PLACE. Every check is made BEFORE the resting order is touched: the order is open, something is left to offer, the book at arrival is valid and the new price
         would not cross it. A failed check rejects the AMEND and the order rests unchanged, at its old price and queue place. Only then is the order moved: it rests at the new price with the queue place LOST
@@ -469,6 +471,14 @@ class QueueAwareVenueAdapter(DeterministicVenueAdapter):
             return (self._callback(request, ExecutionEventType.REJECTED, reason="replace target is already filled"),)
         moved = dataclasses.replace(request, quantity=left) if left != request.quantity else request
         refused = self._place_check(moved, book)
+        if refused is not None and refused.reason == "postonly_would_take_liquidity" and getattr(self.executor.config, "postonly_amend_cross", "reject_keep") == "cancel_order":
+            # owner 18 Nov (v1_15): a PostOnly amend to a crossing price ENDS the order, as both testnets did on 17 Nov: the amend is rejected and the resting order is cancelled (nothing rests)
+            self.executor.cancel(maker_id, self._at(request))
+            self.amends_ended_by_crossing = getattr(self, "amends_ended_by_crossing", 0) + 1
+            filled, notional = self._cum.get(target, (0.0, 0.0))
+            ended = self._callback(dataclasses.replace(request, order_id=target), ExecutionEventType.CANCELLED, filled=self._decimal(filled),
+                                   average_price=self._decimal(notional / filled) if filled > _EPS else Decimal("0"), reason=self.AMEND_CROSS_ENDED)
+            return (dataclasses.replace(refused, reason=f"{self.AMEND_CROSS_ENDED}: {refused.reason}"), ended)
         if refused is not None:
             return (dataclasses.replace(refused, reason=f"amend rejected, order unchanged: {refused.reason}"),)
         self.executor.cancel(maker_id, self._at(request))

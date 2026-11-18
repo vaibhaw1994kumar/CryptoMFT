@@ -408,6 +408,8 @@ class MakerConfig:
                 raise ValueError("cohort_hazard_theta and cohort_unknown_age_s must be >= 0")
             if self.cohort_age == "hazard":
                 warnings.warn(f"cohort_age='hazard' uses cohort_hazard_theta={self.cohort_hazard_theta}, {HAZARD_THETA_PROVENANCE}: not a perp fit, keep it out of the perp sensitivity range", RuntimeWarning, stacklevel=2)
+        if self.postonly_amend_cross not in ("reject_keep", "cancel_order"):
+            raise ValueError(f"postonly_amend_cross must be 'reject_keep' or 'cancel_order', got {self.postonly_amend_cross!r}")
         if not (self.opposite_cross_confirm_ms >= 0.0):
             raise ValueError(f"opposite_cross_confirm_ms must be >= 0, got {self.opposite_cross_confirm_ms!r}")
         if self.opposite_cross_confirm_ms > 0.0 and not self.opposite_cross_fills:
@@ -447,6 +449,10 @@ class MakerConfig:
     # RPI prints (Bybit Retail Price Improvement, owner 13 Nov, upstreamed from the MM session): a print flagged `rpi` executed against RPI liquidity, not the displayed book. True: such a print never fills our orders and is not
     # matched against a book decrease or counted as queue drain (it is counted in diag["rpi_trades_excluded"]). False (default, every arb profile): every print is treated alike, byte-identical to before.
     exclude_rpi_trades: bool = False
+    # Owner 18 Nov (go-live stage 1, from the 17 Nov testnet drill): what the simulated venue does with an amend of a resting PostOnly order to a price that would cross the book. "reject_keep" (default,
+    # every profile up to v1_14): the amend is rejected and the order rests unchanged (the 2i item 1b assumption). "cancel_order": the amend is rejected AND the order ends (cancelled), nothing rests: what
+    # both testnets did (Bybit and Binance, post-only amend to a crossing price). ASSUMED: the venue's reply to the amend itself (the drill's REST path saw no reply and timed out; the end state is proven).
+    postonly_amend_cross: str = "reject_keep"
     # Queue model v2 (step 8), opt-in; only with fill_through_prints. False (default): a print strictly through our price fills the order in full. True: the fill is
     # limited by the print's volume (one budget shared by every order the print went through): what a print can really have executed at a level it passed through.
     through_print_volume_limited: bool = False
@@ -582,6 +588,8 @@ class MakerExecutor:
                 settings.pop("participation_cap", None)
             if not settings.get("exclude_rpi_trades"):
                 settings.pop("exclude_rpi_trades", None)        # 2i item 8 (owner 17 Nov): listed only when on (core 1509601 added it to every hash): earlier profiles' hashes match again
+            if settings.get("postonly_amend_cross") == "reject_keep":
+                settings.pop("postonly_amend_cross", None)      # owner 18 Nov: listed only when it is not the default, so every earlier profile's settings hash is unchanged
             self._settings_hash = hashlib.sha256(json.dumps(settings, sort_keys=True, default=str).encode()).hexdigest()
         return self._settings_hash
 
