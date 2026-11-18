@@ -276,3 +276,40 @@ class AmendPriceOnGrid(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+@unittest.skipUnless(SLICES.is_dir(), "March slices not available (the profile needs a data root)")
+class AmendToACrossingPriceEndsTheQuote(unittest.TestCase):
+    """Owner 18 Nov (v1_15): on the session with the simulated venue and maker.postonly_amend_cross cancel_order, an amend that reaches the venue at a crossing price ENDS the quote: the OMS records the
+    amend rejected (ended by the venue), the old order CANCELLED, nothing live at the venue, no second live order, no fill booked twice."""
+
+    def test_the_quote_ends_in_the_oms_and_at_the_venue(self):
+        import dataclasses as dc
+        from decimal import Decimal
+        from crypto_stat_arb.simulation.queue_adapter import QueueAwareVenueAdapter
+        from new_backtest.session_replay import s0_audit
+        real = QueueAwareVenueAdapter._replace_own
+
+        def crossing(self, request, book):                       # the amend arrives after the book moved through its price (forced here: the synthetic stream has no such move)
+            if book is not None and book.is_tradable:
+                request = dc.replace(request, price=Decimal(str(book.best_ask)) if request.side.value.upper() == "BUY" else Decimal(str(book.best_bid)))
+            return real(self, request, book)
+        QueueAwareVenueAdapter._replace_own = crossing
+        self.addCleanup(setattr, QueueAwareVenueAdapter, "_replace_own", real)
+        rep = replay(moved_stream(1.6, bin_bid=100.288, bin_ask=100.298))
+        for a in rep.session.router.adapters.values():
+            if hasattr(a, "executor"):
+                a.executor.config = dc.replace(a.executor.config, postonly_amend_cross="cancel_order")
+        rep.run()
+        rejected = events(rep, "AMEND_REJECTED")
+        self.assertGreaterEqual(len(rejected), 1)
+        self.assertTrue(all("order cancelled by venue" in e["reason"] for e in rejected))
+        old_ids = {e["order_id"] for e in rejected}
+        states = {c.order_id: c.state.value for p in rep.session.oms.plans.values() for c in p.children}
+        self.assertTrue(all(states[o] == "CANCELLED" for o in old_ids), {o: states[o] for o in old_ids})
+        bybit = rep.session.router.adapters["BYBIT"]
+        self.assertEqual(bybit.amends_ended_by_crossing, len(rejected))
+        audit = s0_audit(rep.session.ledger.events, rep.session.oms.plans, rep.session.reprice_counters)
+        self.assertEqual(audit["amends_ended_by_crossing"], len(rejected))
+        self.assertEqual((audit["duplicate_fills_booked_twice"], audit["lineage_overfill"], audit["two_live_orders"]), (0, 0, 0))
+        self.assertEqual(events(rep, "AMEND_CONFIRMED"), [])

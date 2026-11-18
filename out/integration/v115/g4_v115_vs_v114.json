@@ -1,0 +1,98 @@
+{
+ "a": "/Users/vaibhav/Documents/Newproject/out/integration/w7/v114",
+ "b": "/Users/vaibhav/Documents/Newproject/out/integration/v115/v115",
+ "equal": false,
+ "files_compared": 17,
+ "different": [
+  "maker_observations.jsonl",
+  "session_manifest.json"
+ ],
+ "skipped": [
+  "session_run_record.json"
+ ],
+ "files": {
+  "maker_observations.jsonl": {
+   "status": "DIFFERENT",
+   "row": 18,
+   "rows_a": 41,
+   "rows_b": 41,
+   "first_difference": {
+    "at": "fill.model_settings_sha256",
+    "a": "'d8a79567d7ff57bd2db3ecca9af575cec99b94a4a0cd5ce75f303f284d476c7f'",
+    "b": "'46e325a2871a6f88e2cc25cde2598f1dab3b20f56e0d08cd8b88f42af11cc103'"
+   }
+  },
+  "session_decision_events.jsonl": {
+   "status": "EQUAL",
+   "bytes": 11445
+  },
+  "session_dislocation_episodes.jsonl": {
+   "status": "EQUAL",
+   "bytes": 90410
+  },
+  "session_ems_path_coverage.json": {
+   "status": "EQUAL",
+   "bytes": 2364
+  },
+  "session_fills.jsonl": {
+   "status": "EQUAL",
+   "bytes": 11626
+  },
+  "session_intent_fills.jsonl": {
+   "status": "EQUAL",
+   "bytes": 1073
+  },
+  "session_intent_journal.jsonl": {
+   "status": "EQUAL",
+   "bytes": 87259
+  },
+  "session_lifecycle_report.json": {
+   "status": "EQUAL",
+   "bytes": 18025
+  },
+  "session_limits_and_stops.json": {
+   "status": "EQUAL",
+   "bytes": 11199
+  },
+  "session_manifest.json": {
+   "status": "DIFFERENT",
+   "first_difference": {
+    "at": "profile",
+    "a": "'perp_perp_maker_taker_v1_14'",
+    "b": "'perp_perp_maker_taker_v1_15'"
+   },
+   "excluded": [
+    "run",
+    "manifest.release_identity"
+   ]
+  },
+  "session_markouts_decomposed.jsonl": {
+   "status": "EQUAL",
+   "bytes": 4055
+  },
+  "session_orders.jsonl": {
+   "status": "EQUAL",
+   "bytes": 15338
+  },
+  "session_pair_economics.json": {
+   "status": "EQUAL",
+   "bytes": 2174
+  },
+  "session_pair_economics.jsonl": {
+   "status": "EQUAL",
+   "bytes": 1481
+  },
+  "session_participation_audit.json": {
+   "status": "EQUAL",
+   "bytes": 483
+  },
+  "session_safety_events.jsonl": {
+   "status": "EQUAL",
+   "bytes": 10859463
+  },
+  "session_signals.jsonl": {
+   "status": "EQUAL",
+   "bytes": 58871
+  }
+ }
+}

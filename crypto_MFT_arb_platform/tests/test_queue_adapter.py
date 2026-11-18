@@ -361,3 +361,57 @@ class ThinnedHedgeBookTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class PostOnlyAmendToACrossingPrice(unittest.TestCase):
+    """Owner 18 Nov (v1_15, from the 17 Nov testnet drill: both venues CANCEL a post-only order amended to a crossing price). MakerConfig.postonly_amend_cross: "reject_keep" (default, every profile up to
+    v1_14) rejects the amend and the order rests unchanged; "cancel_order" rejects the amend AND ends the order: nothing rests and a later print cannot fill it."""
+
+    def _amend_to_cross(self, **cfg):
+        a, book = adapter(**cfg), core_book(BIDS, ASKS)
+        a.handle(request("m1", Side.BUY, "100.00", "10"), book)
+        out = a.handle(request("m2", Side.BUY, "100.02", "10", action=OrderAction.REPLACE, target="m1", ts=3 * S), book)
+        return a, out
+
+    def test_default_the_amend_is_rejected_and_the_order_rests_unchanged(self):
+        a, out = self._amend_to_cross()
+        self.assertEqual([(c.event_type, c.order_id) for c in out], [(ExecutionEventType.REJECTED, "m2")])
+        self.assertIn("order unchanged", out[0].reason)
+        (maker,) = a.executor.live_orders(VENUE)
+        self.assertEqual(maker.price, 100.00)
+        self.assertEqual(a.query_order("m1").state, ExecutionEventType.ACKNOWLEDGED)
+
+    def test_cancel_order_the_amend_ends_the_order_and_nothing_rests(self):
+        a, out = self._amend_to_cross(postonly_amend_cross="cancel_order")
+        self.assertEqual([(c.event_type, c.order_id) for c in out], [(ExecutionEventType.REJECTED, "m2"), (ExecutionEventType.CANCELLED, "m1")])
+        self.assertTrue(all(QueueAwareVenueAdapter.AMEND_CROSS_ENDED in c.reason for c in out))
+        self.assertEqual(a.executor.live_orders(VENUE), [])
+        self.assertEqual(a.query_order("m1").state, ExecutionEventType.CANCELLED)
+        self.assertEqual(a.amends_ended_by_crossing, 1)
+        self.assertEqual(a.on_trade(sell_print("100.00", "500", 4 * S)), ())                         # an ended order never fills
+
+    def test_cancel_order_keeps_what_the_old_order_filled_and_other_rejects_keep_the_order(self):
+        a, book = adapter(postonly_amend_cross="cancel_order"), core_book([["100.00", "5"]], ASKS)
+        a.handle(request("m1", Side.BUY, "100.00", "10"), book)
+        a.on_trade(sell_print("100.00", "9", 3 * S))                                                 # 5 drain the queue, 4 fill
+        (rej,) = a.handle(request("m2", Side.BUY, "100.01", "10", action=OrderAction.REPLACE, target="m1", ts=4 * S), None)      # no book: an ordinary reject, the order is kept
+        self.assertIn("order unchanged", rej.reason)
+        self.assertEqual(len(a.executor.live_orders(VENUE)), 1)
+        out = a.handle(request("m3", Side.BUY, "100.02", "10", action=OrderAction.REPLACE, target="m1", ts=5 * S), book)
+        self.assertEqual(out[1].event_type, ExecutionEventType.CANCELLED)
+        self.assertEqual(out[1].cumulative_filled_quantity, Decimal("4"))                            # the cancel report carries what the order had filled
+
+    def test_the_settings_hash_of_every_earlier_profile_is_unchanged_and_bad_values_are_refused(self):
+        default, explicit = MakerExecutor(EmpiricalFillModel(), MakerConfig()), MakerExecutor(EmpiricalFillModel(), MakerConfig(postonly_amend_cross="reject_keep"))
+        on = MakerExecutor(EmpiricalFillModel(), MakerConfig(postonly_amend_cross="cancel_order"))
+        self.assertEqual(default._settings_sha(), explicit._settings_sha())
+        self.assertNotEqual(default._settings_sha(), on._settings_sha())
+        settings = dataclasses.asdict(MakerConfig())
+        settings.pop("postonly_amend_cross")
+        for k in ("depletion_ledger", "participation_cap", "exclude_rpi_trades"):
+            if not settings.get(k):
+                settings.pop(k, None)
+        import hashlib, json
+        self.assertEqual(default._settings_sha(), hashlib.sha256(json.dumps(settings, sort_keys=True, default=str).encode()).hexdigest())
+        with self.assertRaises(ValueError):
+            MakerConfig(postonly_amend_cross="cancel")

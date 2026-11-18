@@ -40,6 +40,9 @@ overrides = []                                                    # owner 16 Nov
 while "--set" in argv:
     i = argv.index("--set"); overrides.append(argv[i + 1]); del argv[i:i + 2]
 cap = "--cap" in argv
+s0 = "--s0-audit" in argv                                       # owner 18 Nov: also write session_s0_audit.json (the case-2i amend counts from the run's ledger); off by default, so the identity file set is unchanged
+if s0:
+    argv.remove("--s0-audit")
 if cap:
     argv.remove("--cap")
 from new_backtest.profiles import apply_profile, load_profile           # after --src is on the path
@@ -73,7 +76,7 @@ cfg.maker.participation_cap = cap or bool(cfg.maker.participation_cap)          
 if proc_strategy or proc_risk:
     import dataclasses
     cfg.timing = dataclasses.replace(cfg.timing, processing_ms={k: v for k, v in (("strategy", proc_strategy), ("risk", proc_risk)) if v})
-replay = SessionReplay(cfg, profile, ticks=dated_ticks("2026-10-29"), recorded=True, decompose_markouts=True, mark_from_mid=True, lifecycle_report=boundaries is not None, regime_boundaries=boundaries, profile_safety=(name in ("perp_perp_maker_taker_v1_9", "perp_perp_maker_taker_v1_10", "perp_perp_maker_taker_v1_11", "perp_perp_maker_taker_v1_12", "perp_perp_maker_taker_v1_13", "perp_perp_maker_taker_v1_14")), hedge_min_notional=hedge_min_notional)      # owner 13 Nov: v1_9 runs with the profile's own safety values (layer gate enforce, the breaker block)
+replay = SessionReplay(cfg, profile, ticks=dated_ticks("2026-10-29"), recorded=True, decompose_markouts=True, mark_from_mid=True, lifecycle_report=boundaries is not None, regime_boundaries=boundaries, profile_safety=(name in ("perp_perp_maker_taker_v1_9", "perp_perp_maker_taker_v1_10", "perp_perp_maker_taker_v1_11", "perp_perp_maker_taker_v1_12", "perp_perp_maker_taker_v1_13", "perp_perp_maker_taker_v1_14", "perp_perp_maker_taker_v1_15")), hedge_min_notional=hedge_min_notional)      # owner 13 Nov: v1_9 runs with the profile's own safety values (layer gate enforce, the breaker block)
 if samples:
     replay.strategy.participation_sample_cap = 400_000
 events = iter_recorded_events(SESSION)
@@ -97,6 +100,9 @@ write_result(result, out)
 # W2a hygiene (owner 17 Nov): the evidence files (safety events, limits and stops, participation, impact) are written by the replay module, not here; the run record (input and output hashes, data span,
 # speed) is written last.
 write_evidence(replay, result, out, traded)
+if s0:
+    from new_backtest.session_replay import s0_audit
+    (out / "session_s0_audit.json").write_text(json.dumps(s0_audit(replay.session.ledger.events, replay.session.oms.plans, replay.session.reprice_counters), indent=1, default=str))
 write_run_record(out, replay)
 print(json.dumps({"profile": name, "wall_s": result["run"]["wall_s"], "events": result["events"], "signals": len(result["signals"]), "orders": len(result["orders"]), "fills": len(result["fills"]),
                   "positions": result["positions"], "ledger_events": sum(result["ledger_event_counts"].values())}, indent=1))

@@ -1009,6 +1009,9 @@ def s0_audit(ledger_events: list[dict], plans: dict, reprice_counters: dict | No
             # item 10 (owner 17 Nov), after the 2i fixes: why amends were rejected, how many timeouts were LOST requests, and the owed venue queries that followed (aggregates only)
             "amend_reject_reasons": dict(Counter(str(e.get("reason", ""))[:80] for e in ev if e["event_type"] == "AMEND_REJECTED")),
             "amend_timeouts_lost": sum(1 for e in ev if e["event_type"] == "AMEND_TIMEOUT" and e.get("lost")),
+            # owner 18 Nov (v1_15): amends that ENDED the order (a PostOnly amend to a crossing price, cancelled by the venue), and the venue queries owed after an amend timeout (one per old order)
+            "amends_ended_by_crossing": sum(1 for e in ev if e["event_type"] == "AMEND_REJECTED" and "order cancelled by venue" in str(e.get("reason", ""))),
+            "amend_queries_owed": len({e.get("order_id") for e in ev if e["event_type"] == "AMEND_TIMEOUT"}),
             "amend_owed_queries": sum(1 for e in ev if e["event_type"] == "VENUE_ORDER_QUERY" and e.get("purpose") == "amend_timeout"),
             "amend_owed_queries_answered": sum(1 for e in ev if e["event_type"] == "VENUE_ORDER_QUERY" and e.get("purpose") == "amend_timeout" and e.get("answered"))}
 

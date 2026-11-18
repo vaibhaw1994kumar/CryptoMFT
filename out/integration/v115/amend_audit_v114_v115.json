@@ -1,0 +1,86 @@
+{
+ "dense_v114": {
+  "amend_requests": 8,
+  "amends_confirmed": 3,
+  "amends_rejected": 5,
+  "amend_timeouts": 0,
+  "amends_ended_by_crossing": 0,
+  "amend_reject_reasons": {
+   "replace target is not open": 5
+  },
+  "duplicate_fills_booked_twice": 0,
+  "lineage_overfill": 0,
+  "lineage_overfill_alarms": 0,
+  "amend_queries_owed": 0,
+  "amend_owed_queries": 0,
+  "amend_owed_queries_answered": 0,
+  "two_live_orders": 0,
+  "fills_during_amend_pending": 5,
+  "maker_filled": "136.719754928657",
+  "hedge_filled": "136.24",
+  "fills": 483
+ },
+ "dense_v115": {
+  "amend_requests": 8,
+  "amends_confirmed": 3,
+  "amends_rejected": 5,
+  "amend_timeouts": 0,
+  "amends_ended_by_crossing": 0,
+  "amend_reject_reasons": {
+   "replace target is not open": 5
+  },
+  "duplicate_fills_booked_twice": 0,
+  "lineage_overfill": 0,
+  "lineage_overfill_alarms": 0,
+  "amend_queries_owed": 0,
+  "amend_owed_queries": 0,
+  "amend_owed_queries_answered": 0,
+  "two_live_orders": 0,
+  "fills_during_amend_pending": 5,
+  "maker_filled": "136.719754928657",
+  "hedge_filled": "136.24",
+  "fills": 483
+ },
+ "rehearsal_v114": {
+  "amend_requests": 3,
+  "amends_confirmed": 2,
+  "amends_rejected": 1,
+  "amend_timeouts": 0,
+  "amends_ended_by_crossing": 0,
+  "amend_reject_reasons": {
+   "replace target is not open": 1
+  },
+  "duplicate_fills_booked_twice": 0,
+  "lineage_overfill": 0,
+  "lineage_overfill_alarms": 0,
+  "amend_queries_owed": 0,
+  "amend_owed_queries": 0,
+  "amend_owed_queries_answered": 0,
+  "two_live_orders": 0,
+  "fills_during_amend_pending": 3,
+  "maker_filled": "6.0",
+  "hedge_filled": "5.99",
+  "fills": 37
+ },
+ "rehearsal_v115": {
+  "amend_requests": 3,
+  "amends_confirmed": 2,
+  "amends_rejected": 1,
+  "amend_timeouts": 0,
+  "amends_ended_by_crossing": 0,
+  "amend_reject_reasons": {
+   "replace target is not open": 1
+  },
+  "duplicate_fills_booked_twice": 0,
+  "lineage_overfill": 0,
+  "lineage_overfill_alarms": 0,
+  "amend_queries_owed": 0,
+  "amend_owed_queries": 0,
+  "amend_owed_queries_answered": 0,
+  "two_live_orders": 0,
+  "fills_during_amend_pending": 3,
+  "maker_filled": "6.0",
+  "hedge_filled": "5.99",
+  "fills": 37
+ }
+}
