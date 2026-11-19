@@ -55,3 +55,23 @@ Commits: core `255816e`, outer (this commit). Gates: G3 v1_9 identity running af
 - Finding (not changed): a venue cancel or end report whose average price differs from the stream fill's (rounding) trips the ledger's `fee regressed` check (seen with a fake venue, not on the testnets).
 
 F07 parse on the RECORDED fixtures (`tests/fixtures/f07_account_rules`, redacted: F07 fields only, prices rounded, times to the hour, no ids, no balances): DONE. Bybit position info carries riskId (281 on the testnet account; tier limit 50000, leverage 10, REGULAR_MARGIN, cross, maintenance 0.005, initial 0.1); Binance brackets and position risk parse (bracket in force at leverage 20: 3; maintenance by notional bracket; initial 0.05); nothing UNKNOWN. Tests `F07RecordedFixtures` (2) pass.
+
+## F05 labelled replay with pair close ON (EXPLORATORY; 29 Oct capture, waiver: mechanics only; v1_16, 1 SOL, `--set arb.close_pairs=reduce_only_quote arb.close_reservation=true arb.close_unfilled_after_s=60`)
+
+Close reservations 18, released 18, capped 0, nothing-closable 0, open at the end 0; children reduce-only by position 25, not reduce-only 0; CLOSE_PAIR_BEYOND_FLAT 0; all 18 closing signals by the edge trigger; CLOSE_UNFILLED 0. Amend audit: two live orders 0, booked twice 0, lineage overfill 0. Maker filled 6.0, hedged 5.99: the 0.01 difference is the carried dust balance at the end.
+
+FINDING for the owner (F06, from this run): the dust bound LATCHED for the rest of the day. A 0.01 SOL balance (about 1 USDT, below Binance's 5 USDT minimum) was carried at 21:49:01 UTC; 300 s later the age bound (ASSUMED placeholder) was reached and new quotes stopped; with no new quote there is no fill to take the dust in, so it stayed reached to the end of the capture: 370,535 signals blocked, no fill after 21:49, `active_at_end` true. As built, one sub-minimum remainder stops quoting for the session 300 s later until a manual step. Owner decision needed (not changed here): the age bound value, or a remedy that can clear it (for example letting a quote whose hedge would take the dust in through, or a manual-reset rule).
+
+## Phase gates (end of phase, fresh)
+
+- G1 suite: the full suite in 4 parallel shards (same files, `suite_shard*.log`, `compare_baselines_suite.txt`): 4,710 tests ran; 97 failing against the 93 baseline; the 4 extra are timing / performance tests (`tests/platform_kit/test_minreq_execution.py::test_performance_limits_are_enforced_on_the_target_platform_only` x3, `tests/test_live_feed_a9.py::ArrivalStamp::test_a_processor_that_keeps_up_changes_nothing`) that failed only under the parallel load (4 shards plus 4 full-day replays on 8 cores) and pass when run alone, twice (`suite_rerun_load_sensitive.log`: 4 passed). No other change against the baseline; no test no longer failing.
+- G2: `perp_perp_maker_taker_v1_16` listed NOT_FROZEN in GATES.md with sha256 209b3e28bd6dff3a5dba80df29cc91b1eed7f5eb01d3d8179624aa16df7e185f; `compare_baselines.py hashes` G0 PASS (pass 30, fail 0).
+- G3 v1_9 identity: 14 of 14 after every item (`g3_f06.json`, `g3_f05.json`, `g3_f07.json`, `g3_f04.json`).
+- G4 v1_16 with every Phase 1 switch off (`--set hedge_faults.dust_max_notional_usdt=null hedge_faults.dust_max_age_s=null hedge_faults.late_fill_after_close=refuse oms.session_limits.account_tier_check=null`; pair close and the reservation are already off in the profile) against v1_15, both fresh on the full 29 Oct day: 16 of 17 files byte-identical; `session_manifest.json` differs only in the profile name (the one difference, checked field by field) (`g4_v116_vs_v115.json`).
+
+## Per item
+
+- F04: a DONE, b DONE, c DONE, d READY TO FLIP (not flipped), e NOT DONE (waits for the owner's flip; the Binance testnet leverage 20 vs 10 must be set first).
+- F05: DONE (production candidate: pair close OFF).
+- F06: DONE (owner decision needed on the latch, above).
+- F07: DONE (offline parts and the parse on recorded fixtures).
