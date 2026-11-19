@@ -99,6 +99,9 @@ class HedgePolicy:
     latency_s: float = 0.0                    # size_aware: the hedge latency the volatility term scales with
     dust_carry: str = "off"                   # owner 16 Nov: "next_hedge" = a hedge chunk below the hedge venue's minimum is carried in a signed balance per (venue, instrument) and added to the next hedge; "off" (default) = the old refusal
     dust_alarm_after_s: float = 60.0          # ASSUMED (owner 16 Nov): carried dust older than this raises HEDGE_DUST_ALARM once (it never blocks new risk)
+    dust_max_notional_usdt: float | None = None   # F06 (owner 20 Nov): aggregate dust cap, USDT per direction over every venue and instrument (same instrument netted across venues); None = no cap (ASSUMED placeholder 50)
+    late_fill_after_close: str = "refuse"     # F06 c (owner 20 Nov): "reopen" = a fill reported for an order of a CLOSED plan (cumulative above what was booked; a cancel confirmed at a lower fill, then the fill) is booked, the plan reopens and the ordinary hedge runs; "refuse" (default) = the old CLOSED_PLAN_UPDATE_REJECTED and raise
+    dust_max_age_s: float | None = None       # F06 (owner 20 Nov): carried dust older than this reaches the bound too; None = no age bound (ASSUMED placeholder 300)
     calibration_label: str = "DECISION_PENDING_CALIBRATION"
 
 

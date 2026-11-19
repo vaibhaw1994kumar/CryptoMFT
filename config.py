@@ -656,6 +656,19 @@ def hedge_dust_fields(profile: dict) -> dict:
         out["dust_carry"] = mode
     if "dust_alarm_after_s" in hf:
         out["dust_alarm_after_s"] = float(hf["dust_alarm_after_s"])
+    if "late_fill_after_close" in hf:                                      # F06 c (owner 20 Nov): what a fill reported after its plan closed gets
+        mode = str(hf["late_fill_after_close"])
+        if mode not in ("refuse", "reopen"):
+            raise ValueError(f"hedge_faults.late_fill_after_close must be refuse or reopen, got {mode!r}")
+        out["late_fill_after_close"] = mode
+    for key in ("dust_max_notional_usdt", "dust_max_age_s"):               # F06 (owner 20 Nov): the aggregate dust bound; absent = no bound (every earlier profile)
+        if hf.get(key) is not None:
+            value = float(hf[key])
+            if value <= 0:
+                raise ValueError(f"hedge_faults.{key} must be positive, got {value}")
+            if out.get("dust_carry", "off") != "next_hedge":
+                raise ValueError(f"hedge_faults.{key} needs hedge_faults.dust_carry next_hedge")
+            out[key] = value
     return out
 
 

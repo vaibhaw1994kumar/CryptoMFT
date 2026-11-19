@@ -614,6 +614,9 @@ class TradingSession:
             if self.margin_price_paused and not hasattr(strategy, "force_exit"):
                 self.signals_blocked_by_margin_price += 1       # no price for the margin check: no new risk until it is back
                 continue
+            if getattr(self.oms, "dust_bound", None) is not None and not hasattr(strategy, "force_exit"):
+                self.oms.dust_bound_stats["signals_blocked"] += 1     # F06 (owner 20 Nov): the aggregate dust bound is reached: no new risk; hedges, unwinds and closing quotes continue
+                continue
             if self.feed_health is not None and not hasattr(strategy, "force_exit") and self._feed_health_blocks(now):
                 continue                                           # W1 action (off unless the profile turns it on): no new quotes while a feed is at or above the configured level
             if self._limits is not None and not hasattr(strategy, "force_exit") and self._new_quote_stop(now) is not None:
@@ -803,6 +806,8 @@ class TradingSession:
             return "breaker"
         if self.margin_price_paused:
             return "margin_price_missing"
+        if getattr(self.oms, "dust_bound", None) is not None:
+            return "dust_bound"
         if self.feed_health is not None and self._feed_health_blocks(now):
             return "feed_health"
         return self._new_quote_stop(now)
