@@ -879,7 +879,7 @@ class SessionReplay:
         cash = {v: str(c) for v, c in s.ledger.cash_deltas.items()}
         equity = sum((s.ledger.cash_deltas.get(v, Decimal(0)) for v in mids), Decimal(0)) + sum((q * mids[v] for (v, i), q in s.ledger.positions.items() if v in mids), Decimal(0))
         signals = [{"opportunity_id": k, "ts": sig.ts, "buy_venue": sig.buy_venue, "sell_venue": sig.sell_venue, "qty": sig.qty, "buy_price": sig.buy_price, "sell_price": sig.sell_price,
-                    "net_edge_bps": sig.net_edge_bps, **({"estimate": sig.estimate} if sig.estimate is not None else {})} for k, sig in self.shim.signals.items()]      # W7 7.D: the key only when the profile asks
+                    "net_edge_bps": sig.net_edge_bps, **({"estimate": sig.estimate} if sig.estimate is not None else {}), **({"close_trigger": sig.close_trigger} if getattr(sig, "close_trigger", None) is not None else {})} for k, sig in self.shim.signals.items()]      # W7 7.D: the key only when the profile asks
         return {
             "label": "EXPLORATORY: session runtime, not a result to quote", "runtime": "session", "profile": self.profile.get("name"), "pair": self.config.pair,
             "days": [self.config.start_date, self.config.end_date], "size_base": float(self.config.arb.max_position_base), "fee_presets": self.profile.get("fee_presets"),
@@ -1242,6 +1242,7 @@ def write_evidence(replay: "SessionReplay", result: dict, out_dir: Path, traded:
     doc = {"label": "EXPLORATORY: every counter of the run; counts are complete (nothing truncated)",
            "ledger_event_type_counts": dict(sorted(collections.Counter(e["event_type"] for e in led).items())),
            "stop_quoting": {"signals_blocked_by_breaker": sess.signals_blocked_by_breaker, "breaker": sess.breaker_report().get("breaker"), "breaker_alarms": list(sess.breaker_alarms), "hedge_dust_carry": sess.breaker_report().get("hedge_dust_carry"),
+                            **({"close_reservation": sess.oms.close_report()} if getattr(sess.oms, "close_reservation", False) else {}),
                             **({"feed_health": {k: v for k, v in sess.breaker_report()["feed_health"].items() if k != "transition_rows"}} if sess.breaker_report().get("feed_health") is not None else {}), "session_limits": sess.breaker_report().get("session_limits"), "no_requote": sess.breaker_report().get("no_requote"), "amend_guard": sess.breaker_report().get("amend_guard"), "reprice_counters": dict(sess.reprice_counters), "amend_refusals": {k: v for k, v in sess.oms.realism_counters.items() if "amend" in k},
                             "margin_price_paused_at_end": sess.margin_price_paused, "signals_blocked_by_margin_price": sess.signals_blocked_by_margin_price,
                             "quotes_skipped_rate_limit": sess.quotes_skipped_rate_limit, "quotes_withdrawn": sess.quotes_withdrawn, "risk_gate_refusals_by_reason": dict(sess.gate_counts),

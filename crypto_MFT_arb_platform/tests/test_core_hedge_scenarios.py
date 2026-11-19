@@ -846,6 +846,191 @@ class ClosePair(Scenario):
         self.assertEqual(self.events_of("CLOSE_PAIR_BEYOND_FLAT"), [])
 
 
+class PerPairCloseReservation(unittest.TestCase):
+    """F05 (owner 20 Nov; arb.close_reservation, OFF by default). Pair A = entry maker BUY 2.0 on BYBIT at 100, hedged SELL 2.0 on BINANCE at 99 (legs BYBIT +2, BINANCE -2). A closing plan is a maker SELL on
+    BYBIT (reduce the long) hedged by a BUY on BINANCE. Every case ends with both venues reconciled (the pairs' legs sum to the ledger position on each venue, nothing reserved) and asserts the reduce-only flag
+    of every child: reduce-only only where the child really reduces the venue position."""
+
+    def setUp(self, residual=None):
+        self.ledger = Ledger()
+        self.bybit = Venue("BYBIT", [], price="99.0")
+        self.binance = Venue("BINANCE", [], price="99.0")
+        self.books = scenario_books()
+        inst = scenario_instruments()
+        self.oms = OMS(inst, risk(), self.ledger, router=StrategyDirectedRouter(inst, adapters={"BYBIT": self.bybit, "BINANCE": self.binance}), dispatch_policy=DispatchPolicy.FILL_TRIGGERED,
+                       residual_policy=residual)
+        self.oms.close_reservation = True
+        self.n = 0
+
+    def entry(self, op, qty, ts, *, fill=True, maker_sell=False):
+        self.bybit.script.append("ack")
+        if fill:
+            self.binance.script.append(("fill", None))
+        opp = replace(opportunity(qty), opportunity_id=op, observed_ts_ns=ts, buy_venue="BYBIT", sell_venue="BINANCE", buy_price=Decimal("100.0"), sell_price=Decimal("99.0"))
+        if maker_sell:
+            opp = replace(opp, buy_venue="BINANCE", sell_venue="BYBIT", buy_price=Decimal("99.0"), sell_price=Decimal("100.0"))
+        plan = self.oms.execute(opp, self.books, maker_venue="BYBIT")
+        if fill:
+            self.fill(plan, qty, ts + 1 * MS, ExecutionEventType.FILLED)
+        return plan
+
+    def close(self, op, qty, ts, hedge=(("fill", None),)):
+        self.bybit.script.append("ack")
+        self.binance.script.extend(hedge)
+        opp = replace(opportunity(qty), opportunity_id=op, observed_ts_ns=ts, buy_venue="BINANCE", sell_venue="BYBIT", buy_price=Decimal("99.0"), sell_price=Decimal("100.0"))
+        return self.oms.execute(opp, self.books, maker_venue="BYBIT", close_pair=True)
+
+    def fill(self, plan, cum, ts, state=ExecutionEventType.PARTIAL):
+        self.n += 1
+        maker = plan.children[0]
+        self.oms.ingest_order_update(replace(maker_update(plan, maker, self.n, state, cum, ts, f"u-{self.n}"), average_price=Decimal(str(maker.limit_price))))
+
+    def cancel_rest(self, plan, ts):
+        maker = plan.children[0]
+        if plan.state.value != "CLOSED" and maker.state.value not in ("CANCELLED", "FILLED"):     # the unwind path may already have cancelled the remainder
+            self.fill(plan, str(maker.filled_quantity), ts, ExecutionEventType.CANCELLED)
+
+    def events_of(self, *names):
+        return [e for e in self.ledger.events if e["event_type"] in names]
+
+    def assert_reconciled(self):
+        legs = self.oms.pair_positions(INSTR)
+        for venue in ("BYBIT", "BINANCE"):
+            self.assertEqual(sum((row.get(venue, Decimal("0")) for row in legs.values()), Decimal("0")), self.ledger.positions.get((venue, INSTR), Decimal("0")), venue)
+        self.assertEqual({k: q for k, q in self.oms.close_outstanding().items() if q}, {})
+        self.assertEqual(self.events_of("CLOSE_PAIR_BEYOND_FLAT"), [])
+
+    def flags(self, plan):
+        return [(o.order_role, o.venue, o.side.value, o.reduce_only) for o in plan.children]
+
+    def test_off_by_default_nothing_is_reserved(self):
+        self.oms.close_reservation = False
+        self.entry("a", "2.0", 1 * MS)
+        c = self.close("c", "2.0", 10 * MS)
+        self.assertEqual((self.events_of("CLOSE_RESERVED"), self.oms._close_alloc), ([], {}))
+        self.assertTrue(c.children[0].reduce_only)                                   # the Order 3 B rule: reduce-only by the flag
+
+    def test_case1_partial_maker_close_then_partial_hedge_close_and_the_rest_is_completed_reduce_only_where_it_reduces(self):
+        a = self.entry("a", "2.0", 1 * MS)
+        c = self.close("c", "2.0", 10 * MS, hedge=[("ioc_partial", "0.6")])
+        (res,) = self.events_of("CLOSE_RESERVED")
+        self.assertEqual((res["reserved"], res["allocations"]), ("2.0", [[a.parent_id, "2.0"]]))
+        self.fill(c, "1.0", 11 * S)                                                   # the closing maker sells 1.0; its hedge buys 0.6 of it and the 0.4 left is unwound (bought back on BYBIT)
+        self.oms.advance_time(20 * S, self.books)
+        self.cancel_rest(c, 21 * S)
+        self.oms.advance_time(30 * S, self.books)
+        self.assertEqual(self.ledger.positions[("BYBIT", INSTR)], Decimal("1.0"))
+        self.assertEqual(self.ledger.positions[("BINANCE", INSTR)], Decimal("-1.0"))
+        flags = self.flags(c)
+        self.assertEqual(flags[0], ("PRIMARY", "BYBIT", "SELL", True))               # the closing quote reduces the BYBIT long
+        self.assertIn(("HEDGE", "BINANCE", "BUY", True), flags)                      # the closing hedge reduces the BINANCE short
+        self.assertIn(("UNWIND", "BINANCE", "BUY", True), flags)                     # the residual 0.4 is completed on BINANCE (the default unwind venue order): it reduces the short, so reduce-only
+        (rel,) = self.events_of("CLOSE_RESERVATION_RELEASED")
+        self.assertEqual(rel["pairs"][0]["closed"], {"BINANCE": "1.0", "BYBIT": "1.0"})
+        self.assertEqual(rel["pairs"][0]["reserved"], "2.0")                          # 1.0 released unused
+        self.assert_reconciled()
+
+    def test_case2_partial_maker_close_then_failed_hedge_close_is_unwound_and_the_reservation_released(self):
+        from crypto_stat_arb.execution import ResidualPolicy
+        self.setUp(residual=ResidualPolicy(max_residual_base=risk().limits.max_residual_base, max_residual_age_ns=5 * S, hedge_venue_priority=("BYBIT",)))         # the failed close is unwound where the closing fill was: buying BYBIT back RE-OPENS the long
+        self.entry("a", "2.0", 1 * MS)
+        c = self.close("c", "2.0", 10 * MS, hedge=[("reject", "-2010")])
+        self.fill(c, "1.0", 11 * S)
+        self.oms.advance_time(20 * S, self.books)
+        self.cancel_rest(c, 21 * S)
+        self.oms.advance_time(30 * S, self.books)
+        self.assertEqual((self.ledger.positions[("BYBIT", INSTR)], self.ledger.positions[("BINANCE", INSTR)]), (Decimal("2.0"), Decimal("-2.0")))   # back to the open pair
+        unwinds = [f for f in self.flags(c) if f[0] == "UNWIND"]
+        self.assertTrue(unwinds and all(f[1:] == ("BYBIT", "BUY", False) for f in unwinds))   # it re-opens: NOT reduce-only (a reduce-only flag here would be rejected by the venue and leave the residual open)
+        self.assertEqual(c.state.value, "CLOSED")
+        self.assertEqual(len(self.events_of("CLOSE_RESERVATION_RELEASED")), 1)
+        _, qty = self.oms.closable_quantity("BYBIT", "BINANCE", INSTR)
+        self.assertEqual(qty, Decimal("2.0"))                                          # all of it is closable again
+        self.assert_reconciled()
+
+    def test_case3_a_second_exit_while_the_first_closes_is_capped_at_what_is_left_or_refused(self):
+        self.entry("a", "2.0", 1 * MS)
+        c1 = self.close("c1", "1.5", 10 * MS)
+        c2 = self.close("c2", "2.0", 11 * MS)
+        (r1, r2) = self.events_of("CLOSE_RESERVED")
+        self.assertEqual((r1["reserved"], r2["reserved"], r2["capped"]), ("1.5", "0.5", True))
+        self.assertEqual(c2.children[0].quantity, Decimal("0.5"))
+        c3 = self.close("c3", "1.0", 12 * MS)
+        self.assertEqual(c3.terminal_outcome or c3.state.value, c3.terminal_outcome or "CLOSED")
+        self.assertEqual(len(self.events_of("CLOSE_NOTHING_CLOSABLE")), 1)
+        self.fill(c1, "1.5", 13 * S, ExecutionEventType.FILLED)
+        self.fill(c2, "0.5", 14 * S, ExecutionEventType.FILLED)
+        self.oms.advance_time(20 * S, self.books)
+        self.assertEqual((self.ledger.positions[("BYBIT", INSTR)], self.ledger.positions[("BINANCE", INSTR)]), (Decimal("0.0"), Decimal("0.0")))
+        self.assert_reconciled()
+
+    def test_case4_a_late_entry_fill_during_a_close_opens_a_new_pair_and_never_takes_the_close_beyond_flat(self):
+        a = self.entry("a", "2.0", 1 * MS)
+        b = self.entry("b", "1.0", 2 * MS, fill=False)
+        c = self.close("c", "2.0", 10 * MS)
+        self.binance.script.append(("fill", None))
+        self.fill(b, "1.0", 11 * S, ExecutionEventType.FILLED)                        # B's maker fills while A's close rests
+        _, qty = self.oms.closable_quantity("BYBIT", "BINANCE", INSTR)
+        self.assertEqual(qty, Decimal("1.0"))                                          # only B is closable: A's 2.0 is reserved
+        self.fill(c, "2.0", 12 * S, ExecutionEventType.FILLED)
+        self.oms.advance_time(20 * S, self.books)
+        legs = self.oms.pair_positions(INSTR)
+        self.assertNotIn(a.parent_id, legs)                                            # A is closed
+        self.assertEqual(legs[b.parent_id], {"BYBIT": Decimal("1.0"), "BINANCE": Decimal("-1.0")})
+        self.assert_reconciled()
+
+    def test_case5_a_restart_mid_close_keeps_the_reservation_and_the_close_plan(self):
+        import tempfile
+        from crypto_stat_arb.plan_store import ParentPlanStore
+        with tempfile.TemporaryDirectory() as d:
+            path = Path(d) / "plans.sqlite"
+            store = ParentPlanStore(path)
+            inst = scenario_instruments()
+            self.oms = OMS(inst, risk(), self.ledger, router=StrategyDirectedRouter(inst, adapters={"BYBIT": self.bybit, "BINANCE": self.binance}), dispatch_policy=DispatchPolicy.FILL_TRIGGERED, plan_store=store)
+            self.oms.close_reservation = True
+            self.entry("a", "2.0", 1 * MS)
+            c = self.close("c", "2.0", 10 * MS)
+            self.fill(c, "0.5", 11 * S)
+            before = (self.oms.close_outstanding(), self.oms.closable_quantity("BYBIT", "BINANCE", INSTR), self.oms.pair_positions(INSTR))
+            store.close()
+            store2 = ParentPlanStore(path)
+            binance2 = Venue("BINANCE", [("fill", None)], price="99.0")
+            inst2 = scenario_instruments()
+            ledger2 = Ledger()
+            oms2 = OMS(inst2, risk(), ledger2, router=StrategyDirectedRouter(inst2, adapters={"BYBIT": Venue("BYBIT"), "BINANCE": binance2}), dispatch_policy=DispatchPolicy.FILL_TRIGGERED, plan_store=store2)
+            oms2._books.update(scenario_books())
+            oms2.close_reservation = True
+            self.assertIn(c.parent_id, oms2._close_pair_plans)
+            self.assertEqual((oms2.close_outstanding(), oms2.closable_quantity("BYBIT", "BINANCE", INSTR), oms2.pair_positions(INSTR)), before)
+            plan = oms2.plans[c.parent_id]
+            maker = plan.children[0]
+            oms2.ingest_order_update(replace(maker_update(plan, maker, 9, ExecutionEventType.FILLED, "2.0", 12 * S, "after-restart"), average_price=Decimal("100.0")))
+            oms2.advance_time(20 * S, scenario_books())
+            self.assertEqual([r.quantity for r in binance2.submits], [Decimal("1.5")])     # only the new part is hedged after the restart
+            self.assertEqual({k: q for k, q in oms2.close_outstanding().items() if q}, {})
+            self.assertEqual(len([e for e in ledger2.events if e["event_type"] == "CLOSE_RESERVATION_RELEASED"]), 1)
+            store2.close()
+
+    def test_case6_inventory_partly_closed_manually_caps_the_close_at_the_venue_position(self):
+        self.entry("a", "2.0", 1 * MS)
+        self.ledger.positions[("BYBIT", INSTR)] = Decimal("1.5")                      # 0.5 of the long was closed by hand outside the bot (the venue says 1.5)
+        c = self.close("c", "2.0", 10 * MS)
+        (res,) = self.events_of("CLOSE_RESERVED")
+        self.assertEqual((res["reserved"], res["capped"], res["cap_maker"]), ("1.5", True, "1.5"))
+        self.fill(c, "1.5", 11 * S, ExecutionEventType.FILLED)
+        self.oms.advance_time(20 * S, self.books)
+        self.assertEqual(self.ledger.positions[("BYBIT", INSTR)], Decimal("0.0"))     # flat, never beyond
+        self.assertEqual(self.ledger.positions[("BINANCE", INSTR)], Decimal("-0.5"))  # the hedge leg of the hand-closed 0.5 stays open: on record, not hidden
+        self.assertEqual(self.flags(c)[0][3], True)
+        self.assertEqual(self.events_of("CLOSE_PAIR_BEYOND_FLAT"), [])
+
+    def test_an_entry_hedge_is_never_reduce_only_even_where_it_would_reduce(self):
+        self.entry("a", "2.0", 1 * MS)                                                 # BINANCE -2
+        b = self.entry("b", "1.0", 2 * MS, maker_sell=True)                              # maker SELL on BYBIT, hedge BUY 1.0 on BINANCE: it would reduce the -2, but it is an entry
+        (h,) = [o for o in b.children if o.order_role == "HEDGE"]
+        self.assertFalse(h.reduce_only)
+        self.assertFalse(b.children[0].reduce_only)
+
 class HedgeDustCarry(Scenario):
     """Owner 16 Nov (hedge dust carry; HedgePolicy dust_carry next_hedge). Maker BUY on BYBIT at 100, hedge SELL on BINANCE at 99.0 (lot 0.001, minimum notional 5: the smallest hedge is 0.051). A hedge chunk below the
     venue minimum is not sent and not unwound: it is carried in one signed balance per (hedge venue, instrument), added to the next hedge, and sent alone as soon as it reaches the minimum."""

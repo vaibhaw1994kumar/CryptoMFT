@@ -15,3 +15,16 @@ Built (core `oms.py`, `hedge_lifecycle.py`, `config.py`, `session.py`; switches 
 Tests (all pass): `tests/test_core_hedge_scenarios.py` `DustBound` (6), `LateFillAfterKill` (7); `tests/test_session_breaker.py` `F06DustBoundStopsNewQuotes` (1). Focused files: 387 passed.
 
 Commits: core `4eeb9b6`, outer (this commit). Gates: G3 v1_9 identity 14 of 14 (`g3_f06.json`, run after the late-fill fix). G1, G2, G4 at the end of the phase.
+
+## F05 per-pair close reservation: DONE
+
+Built behind `arb.close_reservation` (default false; v1_16 writes `close_pairs: off` and `close_reservation: false` explicitly, so the production candidate does NOT close pairs) and the exit keys (inert in v1_16):
+- a. Pair id = the entry plan's parent id. A closing plan reserves, at its creation, quantity on named pairs (oldest first, ASSUMED), each at most its closable quantity on both venues, in total at most the ledger position on each venue less every outstanding reservation (`OMS._close_allocate`, `CLOSE_RESERVED`); nothing closable: `CLOSE_NOTHING_CLOSABLE`, refused. Held until the closing plan is CLOSED, then the unused part is released (`CLOSE_RESERVATION_RELEASED`). Pair legs come from the fills (never stored): a restart rebuilds them, plus the allocation (`CLOSE_RESERVED` on the plan store), the closing-plan marker and the beyond-flat flag (`CLOSE_PAIR_ALARM`). The strategy sizes the closing quote from `OMS.closable_quantity` (the double count during a pending amend is gone with the switch on).
+- b. Reduce-only by the venue position when the child is built: closing quote, closing hedge, unwinds (an unwind that re-opens the position is NOT reduce-only). An entry hedge is never reduce-only.
+- c. Cases (`tests/test_core_hedge_scenarios.py` `PerPairCloseReservation`, both venues reconciled at the end, every child's reduce-only flag asserted): partial maker close then partial hedge close; partial maker close then FAILED hedge close (unwound on the maker venue, not reduce-only); a second exit while the first closes (capped, a third refused); a late entry fill during a close; a restart mid-close; inventory partly closed by hand (capped at the venue position). Off by default: nothing reserved.
+- d. Exit rules (`ArbConfig`, ASSUMED values, off): `close_triggers` (edge default; time_stop, funding, inventory_limit, margin_limit, end_of_session rest the close at the maker touch, never aggressive), `max_pair_hold_s` 3600, `funding_close_lead_s` 300, `end_of_session_utc_s` off, `close_unfilled_after_s` (CLOSE_UNFILLED report, ASSUMED 60 when on). Tests: `tests/test_close_pairs.py` `F05ExitRules` (6).
+- e. `CLOSE_PAIR_BEYOND_FLAT` = 0 in every case test. A labelled 29 Oct replay with `close_pairs` and `close_reservation` on (`f05_close_on.sh`, EXPLORATORY, 29 Oct waiver) is reported in the next update of this file.
+
+Found and fixed in passing (behind the switch): the closing-plan marker and the beyond-flat flag were not rebuilt on restart; a pending amend could count a closing quote twice. Not changed: the instrument leverage in the profile path is hard-coded 10 (equal to the A8 expected leverage).
+
+Commits: core `dafb82e`, outer (this commit). Gates: G3 v1_9 identity 14 of 14 (`g3_f05.json`).

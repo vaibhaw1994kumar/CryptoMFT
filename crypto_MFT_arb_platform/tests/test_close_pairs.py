@@ -140,5 +140,71 @@ class Shim(unittest.TestCase):
         self.assertEqual(pending.sells.get("bybit"), 0.75)                           # and only the opening quote is pending sell exposure
 
 
+
+class F05ExitRules(unittest.TestCase):
+    """F05 (owner 20 Nov): close_reservation sizes the closing quote from the OMS's per-pair closable quantity; close_triggers other than "edge" rest the closing quote at the maker touch whatever the edge
+    (ASSUMED; post-only, never aggressive). All off by default. SYNTHETIC books (no edge either way unless asked)."""
+
+    def strat(self, **kw):
+        return strategy(close_pairs="reduce_only_quote", close_reservation=True, **kw)
+
+    def test_off_by_default(self):
+        cfg = ArbConfig()
+        self.assertEqual((cfg.close_reservation, tuple(cfg.close_triggers), cfg.max_pair_hold_s, cfg.end_of_session_utc_s, cfg.close_unfilled_after_s), (False, ("edge",), 0.0, -1.0, 0.0))
+
+    def test_the_keys_need_close_pairs_and_their_own_inputs(self):
+        with self.assertRaises(ValueError):
+            strategy(close_reservation=True)
+        with self.assertRaises(ValueError):
+            strategy(close_pairs="reduce_only_quote", close_triggers=("edge", "time_stop"))           # no reservation (pair ages), no hold time
+        with self.assertRaises(ValueError):
+            strategy(close_pairs="reduce_only_quote", close_triggers=("edge", "sometimes"))
+        with self.assertRaises(ValueError):
+            strategy(close_pairs="reduce_only_quote", close_triggers=("end_of_session",))            # no end time
+
+    def test_the_closing_size_is_the_oms_closable_quantity_not_the_position(self):
+        pending = PendingExposure()
+        pending.closable = {"bybit": 0.6, "binance": 0.0}                            # 1.0 open, 0.4 reserved by another closing plan
+        sig = evaluate(self.strat(), books(close_edge=True), inv(1.0, -1.0), pending)
+        self.assertTrue(sig.close_pair)
+        self.assertAlmostEqual(sig.qty, 0.6)
+        self.assertEqual(sig.close_trigger, "edge")
+        pending.closable = {"bybit": 0.0, "binance": 0.0}
+        self.assertIsNone(evaluate(self.strat(), books(close_edge=True), inv(1.0, -1.0), pending))
+
+    def test_without_edge_nothing_closes_unless_a_trigger_is_active_then_it_rests_at_the_touch(self):
+        pending = PendingExposure()
+        pending.closable, pending.oldest_pair_ts = {"bybit": 1.0}, {"bybit": NOW - 100.0}
+        self.assertIsNone(evaluate(self.strat(), books(), inv(1.0, -1.0), pending))                                     # no edge either way: the edge rule quotes nothing
+        sig = evaluate(self.strat(close_triggers=("edge", "time_stop"), max_pair_hold_s=60.0), books(), inv(1.0, -1.0), pending)
+        self.assertIsNotNone(sig)
+        self.assertEqual((sig.close_trigger, sig.legs[0].side, sig.sell_price), ("time_stop", "sell", 100.30))          # a sell at the bybit touch ask: passive
+        self.assertAlmostEqual(sig.qty, 1.0)
+        self.assertIsNone(evaluate(self.strat(close_triggers=("edge", "time_stop"), max_pair_hold_s=600.0), books(), inv(1.0, -1.0), pending))   # younger than the hold time
+
+    def test_end_of_session_inventory_and_margin_triggers(self):
+        pending = PendingExposure()
+        pending.closable = {"bybit": 1.0}
+        eos = self.strat(close_triggers=("end_of_session",), end_of_session_utc_s=NOW % 86400 - 1)
+        self.assertEqual(evaluate(eos, books(), inv(1.0, -1.0), pending).close_trigger, "end_of_session")
+        self.assertIsNone(evaluate(self.strat(close_triggers=("end_of_session",), end_of_session_utc_s=NOW % 86400 + 10), books(), inv(1.0, -1.0), pending))
+        inv_full = self.strat(close_triggers=("inventory_limit",))
+        self.assertEqual(evaluate(inv_full, books(), inv(5.0, -5.0), pending).close_trigger, "inventory_limit")         # max_venue_imbalance_base 5.0: no room left in the opening direction
+        self.assertIsNone(evaluate(inv_full, books(), inv(1.0, -1.0), pending))
+        margin = self.strat(close_triggers=("margin_limit",))
+        margin.margin_limit_active = lambda: True
+        self.assertEqual(evaluate(margin, books(), inv(1.0, -1.0), pending).close_trigger, "margin_limit")
+        margin.margin_limit_active = lambda: False
+        self.assertIsNone(evaluate(margin, books(), inv(1.0, -1.0), pending))
+
+    def test_funding_trigger_reads_the_next_funding_time(self):
+        pending = PendingExposure()
+        pending.closable = {"bybit": 1.0}
+        f = self.strat(close_triggers=("funding",), funding_close_lead_s=300.0)
+        self.assertIsNone(evaluate(f, books(), inv(1.0, -1.0), pending))                                                # no funding time known
+        f._next_funding["binance"] = NOW + 200.0
+        self.assertEqual(evaluate(f, books(), inv(1.0, -1.0), pending).close_trigger, "funding")
+
+
 if __name__ == "__main__":
     unittest.main()
