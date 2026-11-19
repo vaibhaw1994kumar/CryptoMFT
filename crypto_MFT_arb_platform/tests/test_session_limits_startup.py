@@ -331,3 +331,88 @@ class W1PaperSide(unittest.IsolatedAsyncioTestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class F07AccountRules(unittest.TestCase):
+    """F07 (owner 20 Nov): the account's EFFECTIVE rules parsed into a snapshot with source and time (a missing riskId is UNKNOWN, never defaulted), the start-up match against the margin engine's tier table
+    at the hard cap, and the fee and risk-tier snapshots kept apart. Responses here are HAND-WRITTEN in the documented shapes; the parse is re-run on the redacted RECORDED testnet responses in
+    tests/fixtures/f07_account_rules (F07RecordedFixtures) once the drill has recorded them."""
+
+    BYBIT_POSITIONS = {"retCode": 0, "time": 1_700_000_000_123, "result": {"category": "linear", "list": [
+        {"symbol": "SOLUSDT", "riskId": 2, "riskLimitValue": "400000", "leverage": "10", "tradeMode": 0, "autoAddMargin": 0, "markPrice": "150", "positionIdx": 0, "size": "0"}]}}
+    BYBIT_INFO = {"retCode": 0, "result": {"marginMode": "REGULAR_MARGIN"}}
+    BINANCE_RISK = [{"symbol": "SOLUSDT", "leverage": "10", "marginType": "cross", "isAutoAddMargin": "false", "maxNotionalValue": "50000", "markPrice": "150", "positionAmt": "0", "updateTime": 1_700_000_000_456}]
+
+    def test_bybit_rules_with_and_without_a_risk_id(self):
+        from crypto_stat_arb.testnet import account_rules_bybit
+        r = account_rules_bybit(self.BYBIT_POSITIONS, self.BYBIT_INFO, BYBIT_LIMITS, "SOLUSDT", 1_700_000_000_123_000_000)
+        self.assertEqual((r["risk_id"], r["max_notional"], r["leverage"], r["margin_mode"], r["position_trade_mode"], r["auto_add_margin"], r["maintenance_rate"], r["initial_rate"]),
+                         ("2", "400000", "10", "REGULAR_MARGIN", "CROSS", "0", "0.01", "0.1"))                 # the tier's 0.02 (50x) raised to 1 / the account's leverage 10
+        self.assertEqual((r["source"].split()[0], r["fetched_ts_ns"], r["unknown"]), ("BYBIT", 1_700_000_000_123_000_000, []))
+        bare = {"retCode": 0, "result": {"list": [{"symbol": "SOLUSDT", "leverage": "10"}]}}
+        r2 = account_rules_bybit(bare, self.BYBIT_INFO, BYBIT_LIMITS, "SOLUSDT", None)
+        self.assertEqual(r2["risk_id"], "UNKNOWN")                                   # never defaulted to the lowest tier
+        self.assertIn("risk_id", r2["unknown"])
+        self.assertEqual(r2["maintenance_rate"], "UNKNOWN")
+
+    def test_binance_rules_take_the_bracket_in_force_at_the_account_leverage(self):
+        from crypto_stat_arb.testnet import account_rules_binance
+        r = account_rules_binance(BINANCE_BRACKETS, self.BINANCE_RISK, "SOLUSDT", 1)
+        self.assertEqual((r["risk_id"], r["max_notional"], r["leverage"], r["margin_mode"], r["maintenance_rate"], r["initial_rate"]), ("2", "50000", "10", "CROSS", "0.01", "0.1"))
+        r2 = account_rules_binance(BINANCE_BRACKETS, [{"symbol": "SOLUSDT"}], "SOLUSDT", 1)
+        self.assertEqual((r2["risk_id"], r2["leverage"], r2["initial_rate"]), ("UNKNOWN", "UNKNOWN", "UNKNOWN"))
+
+    def schedule(self, mm="0.01", im="0.1", cap="100000"):
+        from crypto_stat_arb.margin import RiskTier, TierSchedule
+        return TierSchedule((RiskTier(max_notional=Decimal(cap), maintenance_rate=Decimal(mm), initial_rate=Decimal(im)),))
+
+    def test_the_effective_tier_must_match_the_engine_at_the_hard_cap(self):
+        from crypto_stat_arb.margin import check_account_tier
+        from crypto_stat_arb.testnet import account_rules_binance
+        rules = account_rules_binance(BINANCE_BRACKETS, self.BINANCE_RISK, "SOLUSDT", 1)
+        self.assertEqual(check_account_tier(rules, self.schedule(mm="0.0065"), Decimal("5")), [])                    # 5 SOL x 150 = 750 USDT: bracket 1 (0.0065), inside the 50000 limit at 10x
+        self.assertTrue(any("maintenance rate" in p for p in check_account_tier(rules, self.schedule(mm="0.005"), Decimal("5"))))
+        self.assertTrue(any("maintenance rate" in p for p in check_account_tier(rules, self.schedule(mm="0.0065"), Decimal("100"))))  # 15000 USDT: the account's bracket 2 (0.01)
+        self.assertTrue(any("initial rate" in p for p in check_account_tier(rules, self.schedule(mm="0.0065", im="0.02"), Decimal("5"))))   # the engine would reserve at 50x for a 10x account
+        self.assertTrue(any("below the hard-cap" in p for p in check_account_tier(rules, self.schedule(mm="0.01"), Decimal("400"))))     # 60000 USDT above the account's 50000
+        unknown = dict(rules, risk_id="UNKNOWN")
+        self.assertTrue(any("risk_id UNKNOWN" in p for p in check_account_tier(unknown, self.schedule(mm="0.0065"), Decimal("5"))))
+
+    def test_the_start_up_refuses_on_a_mismatch_and_keeps_the_two_snapshots_apart(self):
+        from crypto_stat_arb.config import load_config
+        cfg, _ = load_config(StartUp.CONFIG)
+        tier = cfg.margin.venues[cfg.venues[0]].tiers[cfg.instrument_id]
+        cap = Decimal(str(cfg.risk_limits.max_position_base))
+        found = tier.tier(cap * Decimal("150"))[1]
+
+        class Reader:
+            def __init__(self, venue, mm):
+                self.venue, self.mm = venue, mm
+
+            def account_rules(self, instrument_id):
+                return {"venue": self.venue, "symbol": "SOLUSDT", "source": "hand-written", "fetched_ts_ns": 1, "risk_id": "1", "max_notional": "1000000000", "leverage": "10",
+                        "margin_mode": "CROSS", "position_trade_mode": "CROSS", "auto_add_margin": "0", "maintenance_rate": str(self.mm), "initial_rate": str(found.initial_rate), "mark_price": "150", "unknown": []}
+        ok = StartUp().make({"account_tier_check": True}, {v: Reader(v, found.maintenance_rate) for v in cfg.venues})
+        self.assertEqual(sorted(ok.account_checks["account_rules"]), sorted(cfg.venues))
+        self.assertNotIn("mark_price", ok.account_checks["account_rules"][cfg.venues[0]])
+        with self.assertRaisesRegex(ValueError, "maintenance rate"):
+            StartUp().make({"account_tier_check": True}, {v: Reader(v, found.maintenance_rate + Decimal("0.001")) for v in cfg.venues})
+        from crypto_stat_arb.config import session_limits_from_profile
+        self.assertEqual(session_limits_from_profile({"oms": {"session_limits": {"account_tier_check": True}}}, 1.0), {"account_tier_check": True, "clip_base": 1.0})
+
+    def test_account_read_tiers_are_raised_to_the_account_leverage_so_a_real_start_with_both_reads_passes(self):
+        from crypto_stat_arb.config import load_config
+        from crypto_stat_arb.testnet import account_rules_binance, risk_tier_rows_binance
+        cfg, _ = load_config(StartUp.CONFIG)
+
+        class Reader:
+            def account_risk_tiers(self, instrument_id):
+                return tuple(risk_tier_rows_binance(BINANCE_BRACKETS, "SOLUSDT"))
+
+            def account_rules(self, instrument_id):
+                return account_rules_binance(BINANCE_BRACKETS, F07AccountRules.BINANCE_RISK, "SOLUSDT", 1)
+        paper = StartUp().make({"tier_table": "read_at_start", "account_tier_check": True}, {v: Reader() for v in cfg.venues})
+        sched = paper.session.margin_config.venues[cfg.venues[0]].tiers[cfg.instrument_id]
+        self.assertTrue(sched.source.endswith("ACCOUNT_LEVERAGE_10"))
+        self.assertEqual({t.initial_rate for t in sched.tiers}, {Decimal("0.1")})                # 1/75 and 1/50 raised to 1/10
+

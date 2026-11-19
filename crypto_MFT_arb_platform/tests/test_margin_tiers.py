@@ -222,6 +222,19 @@ class ReservationTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "insufficient margin: BINANCE"):
             risk.reserve(self.opportunity(3, qty="0.4"))
 
+    def test_f07_margin_reserved_for_resting_orders_is_counted_on_both_venues(self):
+        """F07 c (owner 20 Nov): a package's resting legs reserve initial margin on BOTH venues (the buy leg on BINANCE, the sell leg on BYBIT), and each venue's margin row counts its reserved leg in the
+        worst-case exposure. (Recorded, not changed: the reserved position is one SIGNED sum per venue, so a resting bid and a resting ask on the SAME venue would offset; the arb rests one side per venue.)"""
+        ledger, risk = make_risk_env(usdt=("1000", "1000"))
+        risk.margin_marks = {(v, PERP): Decimal("100") for v in ("BINANCE", "BYBIT")}
+        reserved = risk.reserve(self.opportunity(1))
+        self.assertGreater(reserved.margin_by_venue.get("BINANCE", Decimal("0")), 0)
+        self.assertGreater(reserved.margin_by_venue.get("BYBIT", Decimal("0")), 0)
+        report = risk.evaluate_margin(ledger=ledger, now_ns=10, mark_prices=risk.margin_marks, enforce_controls=False, dry_run=True)
+        rows = {r.venue: r for r in report.venues}
+        for venue in ("BINANCE", "BYBIT"):
+            self.assertGreater(rows[venue].initial_margin_required, 0, venue)          # nothing is held yet: the initial margin is the resting legs'
+
     def test_exposure_above_the_last_tier_is_refused(self):
         ledger, risk = make_risk_env(usdt=("100000", "100000"))
         with self.assertRaisesRegex(ValueError, "above the last risk tier"):
