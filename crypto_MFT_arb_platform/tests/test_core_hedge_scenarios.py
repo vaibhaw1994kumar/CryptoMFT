@@ -1032,6 +1032,214 @@ class HedgeDustCarry(Scenario):
 
 
 
+class DustBound(HedgeDustCarry):
+    """F06 (owner 20 Nov): the AGGREGATE dust bound (hedge_faults.dust_max_notional_usdt per direction in USDT, dust_max_age_s; both ASSUMED placeholders 50 and 300 in v1_16, absent before). Netting: only
+    the same instrument across venues. At the bound: new risk stops, ONE alarm DUST_BOUND_REACHED (with the alert context), the resting opening quotes are withdrawn once, what is sendable is hedged and
+    the rest is reported (DUST_BOUND_UNSENT); it clears when the dust is back under every bound. Maker BUY on BYBIT at 100, the 0.04 dust = 4 USDT at the Binance mid 100."""
+
+    def bound_policy(self, **kw):
+        return self.dust_policy(**{"dust_max_notional_usdt": 50.0, "dust_max_age_s": 300.0, **kw})
+
+    def test_off_by_default_no_bound_events_and_no_bound_block_in_the_report(self):
+        self.build(qty="1.0", policy=self.dust_policy())
+        self.maker_fill("0.04", 5 * S)
+        self.oms.advance_time(1000 * S, self.books)
+        self.assertFalse(self.oms.dust_bound_on)
+        self.assertIsNone(self.oms.dust_bound)
+        self.assertEqual(self.events_of("DUST_BOUND_REACHED", "DUST_BOUND_UNSENT", "DUST_BOUND_CLEARED"), [])
+        self.assertNotIn("bound", self.oms.dust_report(1000 * S))
+
+    def test_the_profile_keys_need_the_dust_carry_and_a_positive_value(self):
+        from crypto_stat_arb.config import hedge_dust_fields
+        self.assertEqual(hedge_dust_fields({"hedge_faults": {"dust_carry": "next_hedge", "dust_max_notional_usdt": 50, "dust_max_age_s": 300}}),
+                         {"dust_carry": "next_hedge", "dust_max_notional_usdt": 50.0, "dust_max_age_s": 300.0})
+        self.assertEqual(hedge_dust_fields({"hedge_faults": {"dust_carry": "next_hedge"}}), {"dust_carry": "next_hedge"})
+        with self.assertRaises(ValueError):
+            hedge_dust_fields({"hedge_faults": {"dust_max_notional_usdt": 50}})
+        with self.assertRaises(ValueError):
+            hedge_dust_fields({"hedge_faults": {"dust_carry": "next_hedge", "dust_max_age_s": 0}})
+
+    def test_dust_older_than_the_age_bound_stops_new_risk_with_one_alarm_withdraws_the_quote_and_reports_the_unsendable_rest(self):
+        self.build(qty="1.0", policy=self.bound_policy(), hedge=[("fill", None)])
+        self.maker_fill("0.04", 5 * S)                                            # 0.04 x 99 = 3.96 USDT: carried; the maker remainder 0.96 still rests
+        self.oms.advance_time(200 * S, self.books)
+        self.assertIsNone(self.oms.dust_bound)
+        self.oms.advance_time(306 * S, self.books)
+        self.oms.advance_time(400 * S, self.books)
+        (ev,) = self.events_of("DUST_BOUND_REACHED")
+        self.assertEqual((ev["reasons"], ev["alarm"], ev["label"]), ("age", True, "ASSUMED"))
+        for key in ("confirmed_residual_base", "pending_hedge_qty", "oldest_exposure_age_s", "execution_blocked_reason"):
+            self.assertIn(key, ev)
+        self.assertEqual(self.oms.dust_bound["reasons"], ["age"])
+        self.assertEqual(self.bybit.cancels, 1)                                   # the resting opening quote was withdrawn, once
+        (unsent,) = self.events_of("DUST_BOUND_UNSENT")
+        self.assertEqual((unsent["venue"], unsent["balance"]), ("BINANCE", "0.04"))  # below the Binance minimum: not sendable, reported
+        self.assertEqual(self.binance.submits, [])
+        rep = self.oms.dust_report(400 * S)["bound"]
+        self.assertEqual((rep["episodes"], rep["quotes_withdrawn"], rep["unsent_reports"], rep["active_at_end"], rep["label"]), (1, 1, 1, True, "ASSUMED"))
+        plan2, maker2 = self.second_plan("1.0")                                   # a hedge-bearing fill still takes the dust in (risk-reducing work continues)
+        self.fill_plan(plan2, maker2, "0.10", 410 * S, 1)
+        self.assertEqual(self.oms.dust_balance_total(), Decimal("0"))
+        self.oms.advance_time(411 * S, self.books)
+        self.assertIsNone(self.oms.dust_bound)
+        self.assertEqual(len(self.events_of("DUST_BOUND_CLEARED")), 1)
+        self.assertEqual(len(self.events_of("DUST_BOUND_REACHED")), 1)
+
+    def test_the_notional_cap_binds_per_direction_at_the_book_mid(self):
+        self.build(qty="1.0", policy=self.bound_policy(dust_max_notional_usdt=4.0))   # test cap (the profile's 50 cannot be reached by one key: one key holds less than one minimum order)
+        self.maker_fill("0.04", 5 * S)
+        self.oms.advance_time(6 * S, self.books)
+        (ev,) = self.events_of("DUST_BOUND_REACHED")
+        self.assertEqual(ev["reasons"], "notional_long")
+        self.assertEqual(Decimal(ev["long_usdt"]), Decimal("4.0"))               # 0.04 x the Binance mid 100
+        self.assertEqual(Decimal(ev["short_usdt"]), Decimal("0"))
+
+    def test_only_the_same_instrument_is_netted_across_venues_and_the_directions_are_separate(self):
+        self.build(qty="1.0", policy=self.bound_policy())
+        rows = self.oms._dust
+        rows[("BINANCE", INSTR)] = {"exposure": Decimal("0.04"), "since_ns": 1 * S, "alarmed": False, "host": None}
+        rows[("BYBIT", INSTR)] = {"exposure": Decimal("-0.03"), "since_ns": 1 * S, "alarmed": False, "host": None}
+        rows[("BINANCE", "OTHER-PERP")] = {"exposure": Decimal("-0.5"), "since_ns": 1 * S, "alarmed": False, "host": None, "px": Decimal("10")}
+        x = self.oms.dust_exposure_usdt(2 * S)
+        self.assertEqual(x["by_instrument"][INSTR]["net_base"], "0.01")          # same instrument, two venues: netted
+        self.assertEqual(x["long_usdt"], Decimal("1.000"))                         # 0.01 x mid 100
+        self.assertEqual(x["short_usdt"], Decimal("5.0"))                          # the other instrument is not netted against it: 0.5 x its own price 10
+
+    def test_the_carried_dust_is_in_the_strategy_net_exposure_and_the_ledger_position_but_not_in_the_breaker_timer_net(self):
+        self.build(qty="1.0", policy=self.bound_policy())
+        self.maker_fill("0.04", 5 * S)
+        strategies, _, _ = self.oms.risk._exposure_values(plans=self.oms.plans, ledger=self.ledger, mark_prices={("BYBIT", INSTR): Decimal("100"), ("BINANCE", INSTR): Decimal("100")})
+        (row,) = strategies.values()
+        self.assertEqual(row["net"], Decimal("4.000"))                             # the strategy net check (risk, from fills) sees the unhedged 0.04
+        self.assertEqual(self.ledger.positions[("BYBIT", INSTR)], Decimal("0.04")) # the margin engine and the A2 equity read these positions
+        net_for_breaker = sum(self.ledger.positions.values(), Decimal(0)) - self.oms.dust_balance_total()
+        self.assertEqual(net_for_breaker, Decimal("0"))                            # session._net_abs: the breaker's net-exposure timer is exempt (kept)
+        self.assertIn("breaker", self.oms.dust_bound_report(6 * S)["counted_in"])
+
+
+class _CancelInFlightBybit(Venue):
+    """Acks a submit; a CANCEL stays in flight (no answer): the race a late fill report comes through."""
+
+    def handle(self, req, book):
+        from crypto_stat_arb.execution import OrderAction
+        if req.action == OrderAction.CANCEL:
+            self.cancels += 1
+            return ()
+        return super().handle(req, book)
+
+
+class LateFillAfterKill(Scenario):
+    """F06 c (owner 20 Nov): a maker fill reported after a kill still gets its hedge within the hedge deadline. Where: the A2 / A5 kills call activate_kill_switch(keep_risk_reducing=True), which cancels the
+    quote but leaves the plan open (oms.activate_kill_switch); a late maker fill then runs the ordinary _hedge_for_maker_fill, and the hedge is dispatched as RISK-REDUCING, which the kill switch lets through
+    (LEGGING_CONTROL_OVERRIDE GLOBAL:kill_switch in _record_legging_control_override). The default kill (manual, hedge unknown, liquidation) is checked too and its result is on record here."""
+
+    def build(self, *a, **k):
+        super().build(*a, **k)
+        quiet = _CancelInFlightBybit("BYBIT", [], price="99.0")
+        self.oms.router.adapters["BYBIT"] = quiet                                  # the kill's cancel stays in flight: the fill that raced it is reported after the kill
+        self.bybit = quiet
+        return self
+
+    def kill(self, ts, keep=True):
+        kw = {"keep_risk_reducing": True, "source": "LIMIT_DAILY_LOSS_STOP"} if keep else {}
+        self.oms.activate_kill_switch(reason="daily loss stop" if keep else "manual", now_ns=ts, operator_id="session-limits" if keep else "op", **kw)
+
+    def hedges(self, plan=None):
+        return [o for o in (plan or self.plan).children if o.order_role == "HEDGE"]
+
+    def test_kill_then_filled_the_whole_late_fill_is_hedged_at_once(self):
+        self.build(hedge=[("fill", None)], qty="1.0")
+        self.kill(4 * S)
+        self.assertEqual(self.bybit.cancels, 1)                                    # the quote was cancelled by the kill
+        self.maker_fill("1.0", 5 * S, ExecutionEventType.FILLED)                   # ... but it had filled before the cancel landed: the report comes late
+        (h,) = self.hedges()
+        self.assertEqual((h.side.value, h.filled_quantity), ("SELL", Decimal("1.0")))
+        self.assertEqual(self.binance.submits[0].quantity, Decimal("1.0"))
+        self.assertTrue(any("GLOBAL:kill_switch" in e.get("controls", []) for e in self.ledger.events if e["event_type"] == "LEGGING_CONTROL_OVERRIDE"))
+        self.assertEqual(sum(self.ledger.positions.values(), Decimal(0)), Decimal("0"))
+        self.assertTrue(self.oms.risk.kill_switch)
+
+    def test_kill_then_partial_the_partial_is_hedged(self):
+        self.build(hedge=[("fill", None)], qty="1.0")
+        self.kill(4 * S)
+        self.maker_fill("0.4", 5 * S, ExecutionEventType.PARTIAL)
+        (h,) = self.hedges()
+        self.assertEqual(h.filled_quantity, Decimal("0.4"))
+        self.assertEqual(sum(self.ledger.positions.values(), Decimal(0)), Decimal("0"))
+
+    def test_kill_restart_then_late_fill_is_hedged_after_the_restart(self):
+        import tempfile
+        from crypto_stat_arb.plan_store import ParentPlanStore
+        with tempfile.TemporaryDirectory() as d:
+            path = Path(d) / "plans.sqlite"
+            store = ParentPlanStore(path)
+            self.ledger = Ledger()
+            inst = scenario_instruments()
+            self.bybit, self.binance, self.books = _CancelInFlightBybit("BYBIT", ["ack"], price="99.0"), Venue("BINANCE", [], price="99.0"), scenario_books()
+            self.oms = OMS(inst, risk(), self.ledger, router=StrategyDirectedRouter(inst, adapters={"BYBIT": self.bybit, "BINANCE": self.binance}), dispatch_policy=DispatchPolicy.FILL_TRIGGERED, plan_store=store)
+            opp = replace(opportunity("1.0"), buy_venue="BYBIT", sell_venue="BINANCE", buy_price=Decimal("100.0"), sell_price=Decimal("99.0"))
+            self.plan = self.oms.execute(opp, self.books, maker_venue="BYBIT")
+            self.maker = self.plan.children[0]
+            self.kill(4 * S)
+            store.close()
+            store2 = ParentPlanStore(path)
+            binance2 = Venue("BINANCE", [("fill", None)], price="99.0")
+            inst2 = scenario_instruments()
+            ledger2 = Ledger()
+            oms2 = OMS(inst2, risk(), ledger2, router=StrategyDirectedRouter(inst2, adapters={"BYBIT": Venue("BYBIT"), "BINANCE": binance2}), dispatch_policy=DispatchPolicy.FILL_TRIGGERED, plan_store=store2)
+            oms2._books.update(scenario_books())
+            oms2.risk.activate_kill_switch(now_ns=5 * S, reason="daily loss stop (latched across the restart)", source="LIMIT_DAILY_LOSS_STOP", ledger=ledger2)
+            plan = oms2.plans[self.plan.parent_id]
+            maker = next(o for o in plan.children if o.order_id == self.maker.order_id)
+            oms2.ingest_order_update(replace(maker_update(plan, maker, 1, ExecutionEventType.FILLED, "1.0", 6 * S), average_price=Decimal("100.0")))
+            self.assertEqual([r.quantity for r in binance2.submits], [Decimal("1.0")])
+            self.assertEqual(sum(ledger2.positions.values(), Decimal(0)), Decimal("0"))
+            store2.close()
+
+    def out_of_order(self, policy):
+        """The cancel is CONFIRMED with nothing filled (Bybit: the order-state query was not visible yet, so the transport says CANCELLED with no fill), the plan closes, and the fill is reported after."""
+        Scenario.build(self, hedge=[("fill", None)], qty="1.0", policy=policy)          # the instant-cancel venue
+        self.kill(4 * S)
+        self.assertEqual(self.plan.state.value, "CLOSED")
+
+    def test_out_of_order_off_by_default_the_late_fill_on_the_closed_plan_is_refused_and_raised_as_before(self):
+        self.out_of_order(None)
+        with self.assertRaises(ValueError):
+            self.maker_fill("1.0", 5 * S, ExecutionEventType.FILLED)
+        self.assertEqual(len([e for e in self.ledger.events if e["event_type"] == "CLOSED_PLAN_UPDATE_REJECTED"]), 1)
+
+    def test_out_of_order_with_reopen_the_late_fill_is_booked_the_plan_reopens_and_it_is_hedged_once(self):
+        self.out_of_order(HedgePolicy(late_fill_after_close="reopen"))
+        self.maker_fill("1.0", 5 * S, ExecutionEventType.FILLED)
+        (ev,) = [e for e in self.ledger.events if e["event_type"] == "LATE_FILL_AFTER_CLOSE"]
+        self.assertEqual((ev["filled_before"], ev["cumulative_after"], ev["late_quantity"], ev["alarm"]), ("0", "1.0", "1.0", True))
+        (h,) = self.hedges()
+        self.assertEqual((h.side.value, h.filled_quantity), ("SELL", Decimal("1.0")))
+        self.assertEqual(sum(self.ledger.positions.values(), Decimal(0)), Decimal("0"))
+        self.assertEqual(self.ledger.positions[("BYBIT", INSTR)], Decimal("1.0"))        # booked once
+        self.maker_fill("1.0", 6 * S, ExecutionEventType.FILLED)                          # the same report again: a duplicate, nothing new
+        self.assertEqual(len(self.hedges()), 1)
+        self.assertEqual(self.ledger.positions[("BYBIT", INSTR)], Decimal("1.0"))
+        self.assertEqual(self.oms.realism_counters["late_fill_after_close"], 1)
+
+    def test_out_of_order_partial_then_more_after_the_close_hedges_only_the_new_part(self):
+        Scenario.build(self, hedge=[("fill", None), ("fill", None)], qty="1.0", policy=HedgePolicy(late_fill_after_close="reopen"))
+        self.maker_fill("0.4", 3 * S, ExecutionEventType.PARTIAL)
+        self.kill(4 * S)                                                                   # cancel confirmed at once with the 0.4 booked: the plan closes once its hedge is done
+        self.oms.advance_time(5 * S, self.books)
+        self.assertEqual(self.plan.state.value, "CLOSED")
+        self.maker_fill("0.7", 6 * S, ExecutionEventType.FILLED)                           # the venue had filled 0.3 more before the cancel
+        self.assertEqual(self.oms.realism_counters["late_fill_after_close"], 1)
+        self.assertEqual(sorted(h.filled_quantity for h in self.hedges()), [Decimal("0.3"), Decimal("0.4")])
+        self.assertEqual(sum(self.ledger.positions.values(), Decimal(0)), Decimal("0"))
+
+    def test_the_default_kill_finalises_the_plan_and_what_a_late_fill_then_gets_is_on_record(self):
+        self.build(hedge=[("fill", None)], qty="1.0")
+        self.kill(4 * S, keep=False)
+        self.maker_fill("1.0", 5 * S, ExecutionEventType.FILLED)
+        self.oms.advance_time(30 * S, self.books)
+        self.assertEqual(sum(self.ledger.positions.values(), Decimal(0)), Decimal("0"))    # the late fill is closed (a hedge or a risk-reducing unwind), never left open
+
 class HeldHedgeTimerConverges(Scenario):
     """Found by case 2i on v1_10 (16 Nov): a hedge held on a book that is not valid is escalated by the residual age (5 s). The timer for it was taken as int((opened + age) * 1e9) + 1 ns, but the breach test works in float
     seconds, and at today's epoch one float step is about 240 ns: the timer could land just BEFORE the breach, so advance_time never converged ('EMS timers did not converge'). The timer now lands where the test is true."""

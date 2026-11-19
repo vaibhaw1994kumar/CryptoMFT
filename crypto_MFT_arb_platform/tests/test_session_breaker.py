@@ -594,6 +594,27 @@ class A1OrderRate(unittest.TestCase):
         self.assertEqual(counters, {"amend_skipped_order_rate": 1})                                # skipped before anything was requested
 
 
+class F06DustBoundStopsNewQuotes(unittest.TestCase):
+    """F06 (owner 20 Nov): while the aggregate dust bound is reached the session asks the strategy for no new signal (counted on the OMS), and a quote strategy is told `dust_bound`. It LATCHES in a session:
+    with no new quote there is no maker fill to take the carried dust in, so it clears only by a price move that makes the balance sendable, an opposite fill, or a manual step (contract)."""
+
+    def test_no_new_signal_while_the_bound_is_reached_and_the_strategy_runs_again_once_it_clears(self):
+        fake = Fake()
+        s = session(strategies=[fake])
+        with_books(s)
+        s.on_event(snapshot(A, 1 * S), gate_allowed=True)
+        calls = fake.calls
+        s.oms.dust_bound = {"since_ns": 1 * S, "reasons": ["age"]}
+        s.on_event(snapshot(A, 2 * S), gate_allowed=True)
+        self.assertEqual(fake.calls, calls)
+        self.assertEqual(s.oms.dust_bound_stats["signals_blocked"], 1)
+        self.assertEqual(s._quote_new_risk_block(2 * S), "dust_bound")
+        s.oms.dust_bound = None
+        s.on_event(snapshot(A, 3 * S), gate_allowed=True)
+        self.assertEqual(fake.calls, calls + 1)
+        self.assertIsNone(s._quote_new_risk_block(3 * S))
+
+
 class A2DailyLossStop(unittest.TestCase):
     def loss_session(self, limit="-5.0", clip=1.0):
         s = session(session_limits=limits(clip_base=clip, daily_loss_stop={"usdt_per_sol_of_clip": float(limit) / clip, "limit_usdt": float(limit)}))

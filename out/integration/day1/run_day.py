@@ -76,7 +76,7 @@ cfg.maker.participation_cap = cap or bool(cfg.maker.participation_cap)          
 if proc_strategy or proc_risk:
     import dataclasses
     cfg.timing = dataclasses.replace(cfg.timing, processing_ms={k: v for k, v in (("strategy", proc_strategy), ("risk", proc_risk)) if v})
-replay = SessionReplay(cfg, profile, ticks=dated_ticks("2026-10-29"), recorded=True, decompose_markouts=True, mark_from_mid=True, lifecycle_report=boundaries is not None, regime_boundaries=boundaries, profile_safety=(name in ("perp_perp_maker_taker_v1_9", "perp_perp_maker_taker_v1_10", "perp_perp_maker_taker_v1_11", "perp_perp_maker_taker_v1_12", "perp_perp_maker_taker_v1_13", "perp_perp_maker_taker_v1_14", "perp_perp_maker_taker_v1_15")), hedge_min_notional=hedge_min_notional)      # owner 13 Nov: v1_9 runs with the profile's own safety values (layer gate enforce, the breaker block)
+replay = SessionReplay(cfg, profile, ticks=dated_ticks("2026-10-29"), recorded=True, decompose_markouts=True, mark_from_mid=True, lifecycle_report=boundaries is not None, regime_boundaries=boundaries, profile_safety=(name in ("perp_perp_maker_taker_v1_9", "perp_perp_maker_taker_v1_10", "perp_perp_maker_taker_v1_11", "perp_perp_maker_taker_v1_12", "perp_perp_maker_taker_v1_13", "perp_perp_maker_taker_v1_14", "perp_perp_maker_taker_v1_15", "perp_perp_maker_taker_v1_16")), hedge_min_notional=hedge_min_notional)      # owner 13 Nov: v1_9 runs with the profile's own safety values (layer gate enforce, the breaker block)
 if samples:
     replay.strategy.participation_sample_cap = 400_000
 events = iter_recorded_events(SESSION)

@@ -1,0 +1,370 @@
+# perp_perp_maker_taker_v1_16 = perp_perp_maker_taker_v1_15 + PHASE 1 real-order correctness (owner 20 Nov; F04, F05, F06, F07, one item per commit). F06: hedge_faults.dust_max_notional_usdt 50 and dust_max_age_s 300 (both ASSUMED owner placeholders): the aggregate dust bound (stop new risk, one alarm DUST_BOUND_REACHED, withdraw the opening quotes, hedge what is sendable, report the rest); hedge_faults.late_fill_after_close reopen (a fill reported after its plan closed is booked and hedged). v1_15 is unchanged. NOT FROZEN.
+# perp_perp_maker_taker_v1_15 = perp_perp_maker_taker_v1_14 + ONE simulator rule (owner 18 Nov, go-live stage 1): maker.postonly_amend_cross cancel_order. In the simulated venue a PostOnly amend to a price that would cross the book ENDS the order (the amend is rejected and the resting order cancelled, nothing rests), as both testnets did on 17 Nov (out/integration/testnet_drill). Strategy unchanged. ASSUMED: the venue's reply to the amend itself (the drill's REST path timed out); the end state is proven. v1_14 is unchanged.
+# perp_perp_maker_taker_v1_14 = perp_perp_maker_taker_v1_13 + ONE block (W7 7.D only, owner 17 Nov): cost_records.estimate_at_decision. Each maker-taker signal row and its primary (maker) intent record carry the pre-trade estimate (fees, expected hedge move and slippage, hedge walk, funding, failure cost, safety buffer, naive / conditional / net edge, half spread; impact, delay and fill probability marked missing): read from the variables the gate used, nothing recomputed. It changes no decision. p_fail / loss_fail stay ASSUMED placeholders. v1_13 is unchanged.
+# perp_perp_maker_taker_v1_13 = perp_perp_maker_taker_v1_12 + ONE block (W6, owner decision 5 of 16 Nov): dislocation. NOTIFY-ONLY: dislocation episodes are recorded and classed (DATA / VENUE_EVENT / TRADEABLE / UNCLASSIFIED); nothing reads them and no action is wired into quoting or hedging; the fail-closed rule is a definition and cannot be switched on. Every threshold ASSUMED. v1_12 is unchanged.
+# perp_perp_maker_taker_v1_12 = perp_perp_maker_taker_v1_11 + ONE block (W2b, owner 17 Nov): incident_capture. It records windows of a LIVE recording on a trigger; a replay never reads it, so every replay output equals v1_11's. v1_11 is unchanged.
+# perp_perp_maker_taker_v1_11 = perp_perp_maker_taker_v1_10 + ONE block (W1, owner 17 Nov): feed_health. Observation only: with the block's actions at none the replay's orders, fills and positions equal v1_10's; the block adds FEED_HEALTH_STATE events and a feed-health report. v1_10 is unchanged.
+# Owner 13 Nov (E0 decisions, applied to v1_9 itself, not a new profile): oms.maker_ack_deadline ON; hedge_faults.silent_carry_bound below_one_lot (a failed hedge always unwinds, whatever its size). Both are safety rules, not strategy changes; results labelled v1_9 before this date carried neither.
+# perp_perp_maker_taker_v1_9 = perp_perp_maker_taker_v1_7 + ONE change (owner 12 Nov, EMS note section 1, price-cap construction): execution.hedge.cap size_aware. The hedge cap starts from the level the hedge quantity reaches on the bot's VIEW of the hedge book, plus the slack floor (5 bps) and an optional volatility/latency term (k = 0, ASSUMED), never beyond the touch by more than max_slip_bps (15, ASSUMED), on the venue's grid without loosening; where the view book has no depth beyond the touch it falls back to touch_slack and says so. Quote withdrawal (v1_8) is NOT in v1_9: one change at a time. EXPLORATORY. v1_5 to v1_8 are unchanged.
+# Owner 11 Nov (S1 label check): the 50 ms hedge-move horizon of the adverse table is below the data resolution for March 2024 (Bybit receive time constructed, Binance best bid/ask). Label only: no number, no switch and no table changed (decision_status.s1_label_resolution).
+# perp_perp_maker_taker_v1_7 = perp_perp_maker_taker_v1_6 + ONE switch (owner 10 Nov, S3 / the HOLDOUT gate score): arb.block_on_toxic false. EXPLORATORY. Evidence: out/integration/s3/study/s3_gate_holdout_report.json (sha256 e1db1d0cf6c847ec8162ef891f7c4b27dbcedb38f45d7c8de18814c2897b256f):
+# on HOLDOUT 2024-03-13 and 03-14 (full days; 03-15 had not finished, so TWO day blocks: the interval is degenerate) the events the gate flags earned +1.99 bps net each against +1.90 for the unflagged (strict queue rule; flagged minus unflagged +0.09, p5 -0.015 bps, the rule's bar is -1.0),
+# i.e. the gate does not protect anything on the market-data events; on SELECT (217 events) it removed 18 events at +2.07 bps each. The S3 filter that was to replace it was REJECTED on reduced data (rerun after Phase E), so v1_7 is the gate OFF, nothing in its place.
+# Caveat (C64): the event study overstates tradeable events (51% fail the entry rule on the strategy's delayed view) and the replay's toxic gate fires on far more evaluations than the study's flag; the effect of the gate on v1_6 REPLAYS is not measured here.
+# perp_perp_maker_taker_v1_6 = perp_perp_maker_taker_v1_5 + ONE switch (owner 9 Nov, S1): adverse_table. The strategy's expected hedge move per side (the pinned -0.488 bps) is replaced by a table fitted from MARKET-DATA labels only
+# (every public print on Bybit that would fill a passive quote; the Binance mid move at 50 ms and at 1 s afterwards), by depth reached, hedge-mid volatility and same-direction flow; TRAIN 03-01..03-07, scheme and shrinkage chosen on SELECT, HOLDOUT never read.
+# block_on_toxic is NOT changed here (one change at a time); the table-with-toxic-gate-off variant is a separate labelled run.
+# perp_perp_maker_taker_v1_5 = perp_perp_maker_taker_v1_4 + runtime: session (Phase D, owner 8 Nov). Everything else is v1_4's, byte for byte, so v1_5 against v1_4 isolates the runtime. The session path is wired in step D5.
+resync_delay_s: 5.0                      # ASSUMED (Phase D, owner 8 Nov): seconds trading stays suspended after a book goes invalid with no snapshot in the data (a message that ends crossed, a gap) before the venue is resubscribed and resynced from the data's own state. Live reconnect backoff is 1 s; this adds a snapshot round trip and the start-up gate. Labelled ASSUMED in every manifest; sensitivity 1 s and 15 s are separate labelled runs.
+# perp_perp_maker_taker_v1_4 = perp_perp_maker_taker_v1_3 + the B2 accounting switches, added ONE AT A TIME (owner 7 Nov). Step 7 (ledger): ledger_source: core. Step 6 (margin): margin_source: core. Step 5 (funding): funding_source: core. Step 4 (fees): fee_source: core, the rates come from the core FeeSchedule (crypto_stat_arb.fees.FEE_TIERS), the headline tiers are Bybit VIP 5 + Binance VIP 9 (PUBLIC_SCHEDULE_UNVERIFIED, 2.7 bps per maker-hedge pair). With fee_presets overridden to bybit_perp_mm + binance_perp_vip0 this profile equals v1_2 byte for byte (the identity cell).
+# perp_perp_maker_taker_v1_3 = perp_perp_maker_taker_v1_2 (FROZEN) + ONE switch (owner 7 Nov, S0): execution.primary.reprice, quote repricing. Everything else is v1_2 unchanged; with the switch off the results equal v1_2's.
+# perp_perp_maker_taker_v1_2 = perp_perp_maker_taker_v1_1 (kept byte-identical as the control) + ONE switch (owner decision, Phase B0, 5 Nov 2026):
+#   arb.join_touch_on_tick_rounding: a quote that was inside the spread before tick rounding and lands ON the touch once rounded joins the back of that level's queue (full displayed size ahead)
+#   if the edge recomputed at the rounded price still passes, instead of being refused. v1.1 refuses it (tick_rounding_no_improve). Results depend on the fees, which stay ASSUMED.
+# Owner 6 Nov: (1) the hedge move pin is the 7-day 45 ms arrival estimate (hedge_move_calibration below); (2) timing.floors_ms: min 35 ms on the Binance entry and cancel timelines, ASSUMED; (3) message_atomic_book: true; (4) margin.above_last_tier: breach (A9); (5) hedge_faults.query_before_replace: true (OMS03); (7) owner 6 Nov, after the ledger result: trust_local_ts false on both venues (ASSUMED, own change); (8) owner 6 Nov: through-print rule, volume-limited version only (maker.fill_through_prints and maker.through_print_volume_limited, both true; the full version is refused at startup); (6) owner 6 Nov, Phase B depletion ledger: maker.depletion_ledger: true (a depth decrease records the head movement it applied; its print then moves the queue only by the rest, and trade_after_front uses only the print left after that movement).
+# Everything below is v1.1 unchanged except `name`, `description`, that one key, the pinned hedge move and the run-defining keys added in B0.
+# perp_perp_maker_taker_v1_1 = perp_perp_maker_taker_v1 (kept frozen as the reference) + the audit's integrity ladder (L3 audit decisions, 2026-11-04).
+# Seven cumulative switches, in this order, each measured in v1_1_switch_ladder_report.html; everything else is byte-for-byte v1.
+#   1 data manifest gate + truncation count (applied by the runner: --data-manifest; the path is not a profile key)   2 trade_dedupe: multiset
+#   3 maker.ledger_epoch   4 own_impact: overlay   5 book_tape_repair: false   6 fitted unknown queue (floor 0, flagged fallback 25)
+placement_book: view                    # v1_2 switch (owner 7 Nov): 'truth' = a passive order joins the venue-truth book at its arrival (the book PostOnly is judged on) when it is complete there, the view book otherwise (counted). Built and measured alone; OFF in the profile until the owner approves the measurement
+trust_local_ts:                      # v1_2 (owner 6 Nov, own change after the depletion ledger): ASSUMED. The March-2024 local stamps are exchange time + exactly 2.000 ms on every record (constructed, not measured), so they are NOT used as receive time; the latency preset's feed delay is applied instead (one sample per exchange message). v1.1: both venues trusted
+  bybit: false
+  binance: false
+message_atomic_book: true            # v1_2 (owner Phase B): the deltas of one exchange message (same venue, exchange_ts, receive time) are one unit: a cross inside it is not repaired, the strategy, touch and maker queue updates run after the whole message. v1.1: false
+#   7 evidence-required fills (vanish_clears_queue: false, fill_evidence: trade_confirm)   8 maker.opposite_cross_confirm_ms: 500 (cross fills need a reaching print within +-500 ms; 2026-11-04 owner step).
+# Step 9 (owner, 2026-11-04, after the review of the step-8 reports): five corrections, each an opt-in switch, all on here:
+#   9a arb.expected_hedge_move_bps_{bid,ask} are estimated from MARKET DATA only (Binance mid move 0-1 s after each Bybit print on our side, TRAIN days; new_backtest/market_hedge_move.py), never from
+#      simulated fills (the runner supplies the number; the profile alone carries 0)   9b arb.round_quotes_to_tick (bids down, asks up; the runner declares the venue ticks)
+#   9c maker.opposite_cross_cap_to_print: a confirmed cross fills at most the reaching prints' volume, each print spent once   9d arb.maker_venues is NOT set here (a data-dependent choice: the March runner
+#      sets ["bybit"] because Binance March-2024 has no depth)   9e hedge_arrival_book: truth (the hedge executes on the venue-truth book at its arrival, for every dataset).
+hedge_move_calibration:                  # PINNED (owner 6 Nov, replaces the B0.2 pin): the PROBE estimate on the 7 TRAIN days 03-01..03-07, Binance mid move from the fill to a FIXED 45 ms after it = -0.488 bps (bid only: the probe quotes a bid; the ask value is the market-data one, unused while maker_passive_side is bid)
+  file: config/hedge_move_arrival45ms_mar2024_train_0301_0307_v1.json
+  sha256: c369b1b97af87dd7cecf146cce0583361be0d026a1d6dc6e3fed0d32506e8de7
+  # an ARRIVAL ESTIMATE: the 45 ms is an ASSUMED hedge arrival delay (the singapore preset gives about 31-52 ms), NOT measured on mainnet. The probe slices cover 00:00-02:00 UTC of each day only. Estimated on the simulator's own probe fills (EXPLORATORY).
+  # The earlier pins stay on disk: 1 s window, 03-01..03 (-0.771, config/hedge_move_probe_mar2024_train_0301_0303.json); 7-day 130 ms sensitivity value -0.862 (to be run at the Phase B freeze).
+adverse_table:                           # S1 (owner 9 Nov): PINNED by sha256 like hedge_move_calibration; the days it was fitted on must all end before the run starts. Fitted on FULL March-2024 days (24 h, 4.7M print events; the first pass used the 00:00-02:00 slices only). Scheme depth + flow, depth buckets (1, 2, 4, 8) in ticks of 0.001 (the March 2024 SOLUSDT tick), shrinkage k = 1000, chosen on SELECT at 50 ms. EXPLORATORY: market-data labels, not a simulator-validated adverse-selection model
+  file: config/adverse_table_mar2024_train_0301_0307_fullday_v1.json
+  sha256: 9c06b5c983e7d56cbaeacbd6eb188a6f42fa79246fd78e99febafbe090198854
+  horizon_s: 0.05                        # the hedge move in the quote price and the entry rule: the label horizon closest to the assumed 45 ms hedge arrival delay (no measured Binance delay exists), so v1_6 against v1_5 is conditioning at the same horizon
+  requote_horizon_s: 1.0                 # the repricing rule (S0, off in this profile) and markouts read the 1 s table
+# Queue parameters remain a SPOT PRIOR, perp-unvalidated (decision E), and say so in every result.
+# perp_perp_maker_taker_v1 — passive leg on one USDT-perp venue, taker hedge on the other, dispatched on the maker fill.
+# Every switch is classified (see src/new_backtest/profiles.py SWITCHES): MANDATORY controls cannot be disabled here; CALIBRATED
+# numbers name their source; LEGACY_COMPAT switches exist only so legacy_v0 stays reachable. Values marked PROVISIONAL / PLACEHOLDER /
+# ASSUMED are not yet calibrated and are reported as such in every result (release_identity).
+name: perp_perp_maker_taker_v1_16
+description: "v1.16 = v1.15 + Phase 1 real-order correctness (owner 20 Nov): F06 aggregate dust bound (50 USDT per direction, 300 s; ASSUMED) and late fills after a close booked and hedged. v1.15 = v1.14 + the simulator rule that a PostOnly amend to a crossing price ends the order (cancelled, as both testnets showed); strategy unchanged. v1.14 = v1.13 + the pre-trade estimate per order (W7 7.D, cost_records.estimate_at_decision; no decision changes). v1.13 = v1.12 + dislocation episodes (W6), NOTIFY-ONLY: the gap between the two venues' mids against a rolling baseline opens and closes episodes, each classed DATA / VENUE_EVENT / TRADEABLE / UNCLASSIFIED with the evidence and the action a fail-closed rule WOULD take; nothing reads them, no action is wired into quoting or hedging, fail_closed cannot be enabled. Every threshold ASSUMED. Everything else is v1.12 unchanged."
+product: perp
+decision_status:                         # carried into every result's release_identity
+  block_on_toxic: OFF_BY_HOLDOUT_GATE_SCORE_EXPLORATORY_SHA256_e1db1d0cf6c847ec8162ef891f7c4b27dbcedb38f45d7c8de18814c2897b256f   # v1_7 (owner 10 Nov): the toxic gate is off; two HOLDOUT day blocks only
+  march_stamps: ASSUMED_CONSTRUCTED_LOCAL_TS_NOT_TRUSTED_PRESET_FEED_DELAY_APPLIED   # owner 6 Nov: the 2 ms March stamps are constructed; the feed delay is the preset's (ASSUMED, not measured)
+  net_ceiling_multiple: DECISION_PENDING_CALIBRATION
+  fill_headroom_base: DECISION_PENDING_CALIBRATION   # value is the assistant's starting choice
+  breaker: DECISION_PENDING_CALIBRATION
+  unwind_band_bps: DECISION_PENDING_CALIBRATION
+  unwind_max_attempts: DECISION_PENDING_CALIBRATION
+  case2i_passed: false                   # owner 16 Nov: the real-order amend guard (config.amend_guard_from_profile): with real orders no amend is sent until BOTH flags are true; set by the owner after case 2i on this profile and the testnet amend drill
+  testnet_amend_drill_passed: false
+  residual_limit: DECISION_PENDING_CALIBRATION   # owner 8 Nov 2026: the core's two stages, hold new risk at 5 s and kill switch at 30 s (the backtester's own 5 s net-exposure breaker stays until Phase D)
+  unwind_band_core: DECISION_PENDING_CALIBRATION   # owner 8 Nov 2026: 15 bps in the core too (it was 10)
+  hedge_unknown_escalation: DECISION_PENDING_CALIBRATION   # H16, accepted 8 Nov 2026: FAILED with alarm and kill switch, in the core
+  p_fail: SCENARIO_NOT_CALIBRATED          # Phase C (owner 7 Nov): no execution logs exist; failure costs are reported per scenario, never as a measured rate
+  loss_fail_bps: SCENARIO_NOT_CALIBRATED   # 7.8 came from a simulated hedge-failure study, not execution logs
+  fees: PUBLIC_SCHEDULE_UNVERIFIED_BYBIT_VIP5_BINANCE_VIP9   # B2 step 4: owner-confirmed tiers, public rates as given 7 Nov 2026; the account's own SOLUSDT rates are not read; the Bybit -0.5 rebate is a scenario, not the headline
+  requote: TRADER_SET_NOT_FITTED_OFF_BY_DEFAULT   # S0: the rule is built and modular; the numbers are the trader's (or the live bot's, labelled LIVE_VALUES); none is fitted
+  queue_parameters: SPOT_PRIOR_PERP_UNVALIDATED   # decision E: calibrated on Bybit SPOT orders, never validated on the perp target
+  hedge_move: PROBE_ARRIVAL_ESTIMATE_45MS_PINNED_BY_SHA256_EXPLORATORY
+  adverse_table: MARKET_DATA_LABELS_TRAIN_ONLY_PINNED_BY_SHA256_EXPLORATORY   # S1: replaces the single hedge-move number in the quote price, the entry rule and the repricing rule
+  s1_label_resolution: BELOW_DATA_RESOLUTION_50MS_MARCH_2024_BYBIT_RECEIVE_TIME_CONSTRUCTED_BINANCE_BEST_BID_ASK   # owner 11 Nov: 50 ms is below the data resolution for March 2024 (Bybit receive time constructed, Binance best bid/ask); the 1 s table is not affected
+  data_manifest: REQUIRED_AT_RUN                  # ladder step 1: the runner supplies the manifest path; a truncated day needs a written reason
+  unknown_queue_fit: PER_DAY_FILE_FROM_STRICTLY_EARLIER_DAYS   # ladder step 6: the runner supplies the day's fit; the profile alone cannot run a fitted queue
+product_fee_consistency: true            # MANDATORY: fee presets must be perp presets
+seed: 7                                  # owner 16 Nov: the run seed as a profile key (the current default; outputs unchanged)
+latency_preset: singapore                # ASSUMED (host co-located with Bybit, ~35 ms to Binance) until ollog measurements replace it.
+                                         # Owner decision 2026-11-02: was colocated_both, which config.py calls physically impossible
+                                         # (sensitivity upper bound only); every v1 result before 2026-11-02 used colocated_both.
+runtime: session                        # Phase D (owner 8 Nov): the core TradingSession behind the QueueAwareVenueAdapter replays the feed (v1_4 and every reference profile run on the backtester's own loop). Reference profiles refuse this value.
+ledger_source: core                      # B2 step 7 (owner 7 Nov): headline equity and cash P&L come from the core ledger at the common-timestamp marks; the strict bridge, the reconciliation and the economics gate are the core's (run directory: economic_reconciliation.json, funding_report.json). v1_2 / v1_3: the backtester's own books
+margin_source: core                      # B2 step 6 (owner 7 Nov): margin checks and the admission gate come from the core RiskEngine (tiers ASSUMED, cross, capital per venue as before). above_last_tier below becomes redundant (the core fails closed). v1_2 / v1_3: margin_model
+funding_source: core                     # B2 step 5 (owner 7 Nov): funding is booked by the core FundingEngine: the funding record's own mark price where present, otherwise the book mid, flagged FUNDING_MARK_FALLBACK and counted in every result. v1_2 / v1_3: funding_settler
+fee_source: core                         # B2 step 4 (owner 7 Nov): the names below are tier names of the core FeeSchedule (crypto_stat_arb.fees.FEE_TIERS), not backtester presets. v1_2 / v1_3: presets
+fee_presets:                             # headline after B2: Bybit VIP 5 + Binance VIP 9 = 2.7 bps per maker-hedge pair, PUBLIC_SCHEDULE_UNVERIFIED until the account's own SOLUSDT rates are read.
+  bybit: bybit_perp_vip5                 # scenarios (override at run time, labelled): bybit_perp_mm + binance_perp_vip9 = 1.2 bps (MM rebate, UNCONFIRMED); bybit_perp_mm + binance_perp_vip0 = 4.5 bps (the old ASSUMED set)
+  binance: binance_perp_vip9
+hedge_arrival_book: truth                # v1.1 step 9e: a hedge / retry IOC executes against the venue-truth book at its arrival time (v1 keeps the strategy's view book); one setting for every dataset
+valuation: common_timestamp              # MANDATORY (R11)
+own_impact: overlay                     # v1.1 step 4: own taker consumption lives in a shadow overlay; the public book is never mutated by an own fill (consume_liquidity stays on)
+book_tape_repair: false                  # v1.1 step 5: the public book is not lowered from the trade tape (no double depletion when the depth decrease comes first)
+equity_bridge: raise                     # MANDATORY
+enforce_book_state: true                 # MANDATORY (WP4)
+trade_dedupe: multiset                   # MANDATORY (native ids when present). v1.1 step 2: id-less data drops only repeats ACROSS files, never genuine identical prints
+delta_uses_book_size: true               # MANDATORY (depth-size fix)
+cancel_time_basis: exchange              # MANDATORY (D-03)
+postonly_reject_model: "on"              # MANDATORY (lifecycle task 5): modelled PostOnly rejects at exchange time, arrival = decision + sampled ENTRY latency
+calibration:                             # perp lifecycle calibration (ollog TESTNET runs from the Mac); refused if its product is not perp
+  file: config/lifecycle_calibration_perp_bybit.json
+  venue: bybit                           # the maker venue; its entry-latency grid ('all' = REST round trip / 2, local clock only) feeds ack_latency
+  period: all
+  source: MEASURED_TESTNET_FROM_MAC      # NOT mainnet and NOT VM -> exchange; see the report for what this does and does not establish
+arb:
+  profile: perp_perp_maker_taker_v1
+  mode: maker_taker
+  dispatch_mode: fill_triggered          # MANDATORY
+  maker_passive_side: bid
+  min_net_edge_bps: 1.0
+  maker_max_age_s: 15.0                  # MANDATORY: order lifetime
+  count_pending_exposure: true           # MANDATORY
+  count_unknown_exposure: true           # MANDATORY
+  net_ceiling_multiple: 1.0              # MANDATORY — hard net ceiling 1x max_position_base (DECISION_PENDING_CALIBRATION)
+  max_venue_imbalance_base: 2.0          # owner 13 Nov (production limits approved): gross per venue 2.0 SOL at stage 0 (the replays used 5.0; the run scripts still set their own unless told: run_day.py takes the profile's value now). ASSUMED: no data basis, a smaller number makes a bug cheaper
+  fill_headroom_base: 0.25               # SEPARATE fill headroom on top of the ceiling, base units at max_position_base=1 (STARTING VALUE chosen
+                                         # by the assistant: 25% of one position, not specified by the owner; the size sweeps scale it with size)
+  p_fail: 0.07                           # PLACEHOLDER — NOT MEASURED (assumed; a replay with no injected failures cannot measure it); sensitivity in the report
+  loss_fail_bps: 7.8                     # SCENARIO, NOT CALIBRATED (came from a simulated hedge-failure study, not execution logs); report failure costs per scenario
+  funding_expected_holding_s: 28800      # owner 14 Nov: the expected funding cost of the pair is charged for 8 h of holding (ASSUMED; to be replaced by the measured median holding time from the stage-0 logs, owner-approved); net funding of the pair from each venue's current predicted rate (the long venue's paid minus the short venue's received), per direction; with no rate (a replay without derivative data) the term is 0 and counted (funding_term_unavailable)
+  funding_credit: floor_zero             # owner 14 Nov: funding may only LOWER the edge; a net credit counts as 0
+  participation_max: 0.10                # E3 (owner 13 Nov): a NEW quote's size is capped at this share of the public volume printed at its price level on the maker venue over the last participation_window_s; a cap below the minimum clip refuses the quote (reject participation). ASSUMED 10% of the last 60 s, owner to approve. Hedges are never touched. Earlier profiles: off
+  participation_window_s: 60
+  quote_withdraw: true                   # v1_9s (owner 14 Nov): quote validity runs first on every book update (a quote that lost its edge is withdrawn), then the S0 controller
+  quote_withdraw_hysteresis_bps: 1.5     # ASSUMED, WIDER than v1_8's 0.5 on purpose: the S0 stickiness band (1.0 bp) must be inside the withdrawal tolerance, or validity would always cancel a quote before the repricing rule could move it. Repricing acts at a 1.0 bp adverse move; validity withdraws only when the edge is still gone at 1.5 bps (an amend that has not taken effect yet, or no target)
+  requote_delay_after_withdraw_s: 1.0   # owner 16 Nov (approved; ASSUMED 1 s): a quote withdrawn by validity is not placed again on the same venue and side for this long; counted
+  funding_window_s: 30                   # owner 14 Nov: no new quote within 30 s before a funding timestamp on either venue (next funding time from the derivative stream); resting quotes are withdrawn when the window starts; quoting resumes when the stream shows the next settlement. No next-funding time = "not evaluable", counted (funding_window_not_evaluable), nothing blocked
+  entry_hedge_price: vwap                # owner 13 Nov (edge calibration item 1): the hedge is priced at the VWAP the hedge-venue book gives for the quote's size, in the quote price and the entry edge (the same walk quote_validity uses); every earlier profile: touch (the ArbConfig default). expected_hedge_slippage_bps stays 0 by design.
+  round_quotes_to_tick: true             # v1.1 step 9b: the quote is rounded onto the venue's price grid before the improve-the-touch check and the edge (the runner supplies arb.venue_ticks)
+  join_touch_on_tick_rounding: true      # v1.2 (B0): a quote rounded onto the touch joins the back of its queue if the edge at the rounded price still passes; v1.1 refuses it
+  # Run-defining settings that the runners used to set from the environment (B0, owner 5 Nov): they now live in the profile, so the profile hash identifies a run.
+  # MARCH-2024 SOLUSDT set-up: Bybit-only makers (Binance March-2024 has no depth), 0.001 tick on both venues (measured: gcd of traded prices and first-snapshot levels).
+  # Another dataset needs its own values (January 2022: Bybit tick 0.005, makers on both venues).
+  maker_venues: [bybit]
+  venue_ticks: {bybit: 0.001, binance: 0.001}
+  block_on_toxic: false                  # v1_7 (S3, owner 10 Nov): OFF, the ONE change against v1_6 (v1_6 and every earlier profile: true, the ArbConfig default)
+  max_cross_venue_skew_s: 0.2            # same as the ArbConfig default
+  fill_gate_horizon_s: 5                 # the runners set 5 (the ArbConfig default is 15); it matters only when min_fill_prob > 0, which is 0 here
+  expected_hedge_move_bps_bid: 0.0       # CALIBRATED: set per run by the runner from MARKET DATA on the TRAIN days (v1.1 step 9a; v1 used legacy_v0 fills), 0 = no information
+  expected_hedge_move_bps_ask: 0.0
+maker:
+  min_queue_ahead: 25.0                  # LEGACY floor, superseded by unknown_queue_model below
+  unknown_queue_model: depth_aware       # CALIBRATED (WP4)
+  unknown_queue_dist: fitted             # v1.1 step 6: fitted on strictly earlier days (the runner supplies unknown_queue_fit per day)
+  unknown_queue_fit: ""                   # PER DAY: set by the runner; empty here on purpose
+  unknown_queue_floor: 0.0               # no universal floor on a fitted draw
+  unknown_queue_fallback: 25.0           # used, and COUNTED (unknown_queue_fit_missing_venue_used_floor), only where the fit has no data for the venue
+  cancel_model: proportional             # CALIBRATED (fill-evidence study 2026-10-30)
+  vanish_clears_queue: false             # v1.1 step 7: a vanished level alone never fills an order
+  fill_evidence: trade_confirm           # v1.1 step 7: every fill that rests on a depth decrease or a snapshot shrink needs a confirming print within evidence_window_ms
+  ledger_epoch: true                     # v1.1 step 3: a snapshot / reset invalidates old netting credit; ambiguous associations are flagged
+  fill_through_prints: false             # OFF in v1_2 and off the freeze list (owner 7 Nov, after the Step 8 re-check): the logic is correct and the engine is fixed (one print budget across the cross, through and ordinary rules; a netted print still reaches the through rule), but the rule is not part of v1_2. History: on from 6 Nov 18:31, off 7 Nov. A print strictly through our price means the level we rest on was consumed ...
+  through_print_volume_limited: false    # ... but the fill is limited by the print's volume (ONE budget per print). The full version (fill_through_prints without this) is refused at startup. Turn BOTH on together only on the owner's instruction
+  depletion_ledger: true                 # v1_2 (owner Phase B, step 4): both arrival orders of one execution (depth decrease / print) give the same queue ahead and the same fills when the print is at least as large as the decrease; netted pairs with no other proof are counted. v1.1: false
+  evidence_window_ms: 20.0
+  participation_cap: true                # E3 (owner 13 Nov): one budget per public print across every own order and every rule: own fills never exceed the volume of the print that caused them. Earlier profiles: off (default)
+  share_trade_volume: true               # MANDATORY
+  dedupe_trade_depth: true               # MANDATORY
+  exchange_time_eligibility: true        # MANDATORY (causal fills)
+  level_creator_trade_only: false        # LEGACY_COMPAT (opt-in)
+  opposite_cross_fills: true             # CALIBRATED — PROVISIONAL: price priority, a resting order fills in full once the opposite best quote
+                                         # reaches its price (hftbacktest probe cross-check 2026-11-03; owner decision 2026-11-04)
+  opposite_cross_confirm_ms: 500.0       # v1.1 step 8: a cross is a fill only if a reaching print on the SAME venue executed within +-500 ms (before: fills at the cross; after: at the print); else dropped, no side effect
+  postonly_amend_cross: cancel_order     # v1_15 (owner 18 Nov): a PostOnly amend to a crossing price ends the order (cancelled), as both testnets did; v1_14 and earlier: reject_keep (amend rejected, order kept)
+  opposite_cross_cap_to_print: true      # v1.1 step 9c: a confirmed cross fills min(remaining, the reaching prints' unused volume); one print never fills more than its size in total
+  # Cohort queue (queue_model: cohort) is a v1_2 SENSITIVITY case only; the headline runs stay on the scalar queue. The sensitivity range uses cohort_age: uniform, run WITH this profile's cross rule
+  # (opposite_cross_fills, its confirm window, cap-to-print), like v1.1. cohort_hazard_theta 0.5 is SPOT_CALIBRATED (spot data 04-19..04-22), NOT a perp fit: the hazard age rule stays out of the
+  # range until a perp fit from probe data exists; any result that runs it carries cohort_hazard_theta.provenance.
+dataset_settings:                        # v1_2 (owner 7 Nov): per-dataset settings, merged over this profile only when the runner names the dataset; January and every unnamed run keep the maker defaults (0.05 s / 20 ms)
+  mar2024:
+    maker:
+      dedupe_window_s: 0.15              # March-2024 Bybit depth arrives in ~100 ms batches (lag median ~60 ms, report C6): the 50 ms trade/depth window missed pairs. PROPOSED by the TRAIN-day matching study, owner-approved 7 Nov
+      evidence_window_ms: 50.0           # same study; January keeps 50 ms / 20 ms
+timing:                                  # WP3; numbers ASSUMED from the latency preset until calibrated
+  from_latency_preset: singapore         # same preset as latency_preset (owner decision 2026-11-02)
+  equal_time_policy: market_first
+  floors_ms:                             # ASSUMED (owner 6 Nov): a floor of 35 ms on the Binance entry and cancel timelines, the cross-region venue of the singapore preset (host near Bybit, Binance in Tokyo); draws below it are raised to it. Not measured. No decision time is added. A preset other than singapore gets no floor.
+    singapore:
+      binance: {entry: 35.0, cancel: 35.0}
+  dead_feed_s: 5.0                       # MANDATORY
+  truth_books: true                      # MANDATORY
+  clock:
+    host_offset_ns: 0                    # ASSUMED (no clock record for the Jan-2022 collector)
+    uncertainty_ns: 0
+    source: ASSUMED
+breaker:                                 # MANDATORY — DECISION_PENDING_CALIBRATION: starting values given by the owner 2026-11-01
+  consecutive_failures: 3                # 3 consecutive hedge FAILURES (one per hedge chain: a rejected hedge and its retries count once)
+  failure_rate_window_n: 20              # failures in the last 20 hedge chains ...
+  failure_rate_thresh: 0.05              # ... above 5% (i.e. 2 or more of 20; needs a full window of 20)
+  trip_on_failed_unwind: true            # any unwind whose attempts are exhausted
+  net_exposure_s: 5.0                    # |net| != 0 continuously for more than 5 s
+  unknown_order_s: 2.0                   # an order UNKNOWN (ack timeout expired, unresolved) for more than 2 s
+  trip_on_gateway_down: true             # a venue's gateway silent for heartbeat_timeout_s
+  heartbeat_timeout_s: 10.0              # ASSUMED (not specified by the owner): the engine default
+  tripped_unwind_retries: 10             # unwind sends still allowed while tripped (engine default)
+# Reset is MANUAL ONLY: nothing in the simulator or the strategy clears a tripped breaker (bt.reset_breaker() is an operator action).
+feed_health:                             # W1 (owner 17 Nov). Every threshold is ASSUMED (no calibration: the recorded live sessions that could set them are the D7d runs and the 29 Oct capture, whose recorder quality is REJECTED)
+  delay_degraded_ms: 500.0               # corrected venue-to-host delay above this: DEGRADED (ASSUMED: the book age limit)
+  delay_unsafe_ms: 2000.0                # above this: UNSAFE (ASSUMED: the value of time.max_feed_delay_ms in the three research configs)
+  silence_degraded_ms: 500.0             # a BOOK stream silent longer than this: DEGRADED (= strategy max_book_age). Per stream: a trade print does not make the book stream healthy; trade streams are judged on delay only
+  silence_unsafe_ms: 5000.0              # silent longer than this: UNSAFE (= timing.dead_feed_s, the resubscribe trigger)
+  own_lag_ms: 100.0                      # a frame processed later than this after its arrival raises the OWN_LAG flag (the processor is behind, not the venue); with feed_arrival_stamp on
+  recover_s: 2.0                         # hysteresis: a state improves only after this long of observations that are all better (ASSUMED)
+  feed_delayed_ms: 1000.0                # OWNER DECISION 16 Nov: the blocking FEED_DELAYED flag on at 1000 ms (time.max_feed_delay_ms); every earlier profile keeps it off
+  recorder_health_block: true            # the live recorder writes a feed-health block into each part manifest (live only; a replay has no recorder)
+  actions:                               # OWNER DECISIONS 16 Nov (queue item d). Hedges, unwinds and cancels are never held by any of these
+    block_new_quotes_on: DEGRADED        # no new quotes while EITHER feed is DEGRADED or worse
+    withdraw_quotes_on: DEGRADED         # at a transition to DEGRADED or worse ...
+    withdraw_quotes_scope: hedge_venue   # ... of the HEDGE venue's feed (Binance) every resting maker quote is withdrawn, once per transition
+    unsafe: cancel_quotes_and_pause      # UNSAFE on ANY feed: every resting quote is cancelled and new quotes pause until it recovers
+    own_lag: no_new_quotes               # OWN_LAG (our own processing is behind): throttle, no new quotes
+dislocation:                             # W6 (owner decision 5 of 16 Nov): NOTIFY-ONLY. Read by the session runtime; nothing reads an episode back
+  enabled: true                          # the monitor records; it acts on nothing
+  open_bps: 10.0                         # ASSUMED: deviation from the rolling baseline that opens an episode (1.6x the 29 Oct abs p99 of 6.19 bps; about 3 sd of March)
+  close_bps: 8.0                         # ASSUMED hysteresis
+  close_hold_s: 1.0                      # ASSUMED
+  baseline_window_s: 3600.0              # ASSUMED: one gap value per second, frozen while an episode is open; WARMING_UP until half the window is covered
+  max_episode_s: 600.0                   # ASSUMED: an older episode closes REBASED and the baseline restarts
+  pair_max_skew_ms: 500.0                # ASSUMED (= the book age limit)
+  max_unobservable_s: 5.0                # ASSUMED (= feed_health silence_unsafe_ms): a book not usable this long closes an open episode UNOBSERVABLE
+  data_lookback_s: 5.0                   # ASSUMED: DATA evidence this long before the open counts
+  venue_event_min_baseline_n: 30         # ASSUMED: VENUE_EVENT needs this many non-DATA episodes for its persistence baseline, and a venue-side signal (mark gap)
+  size_from: clip                        # executable price at size = the profile's clip
+  reference: {enabled: false}            # W6-C, not built (no independent reference source on this Mac)
+  fail_closed: {enabled: false}          # the DEFINITION only; true is refused at load
+incident_capture:                        # W2b (owner 17 Nov). Read by the live feed service only (paper and live); a replay has no recorder and never reads it
+  enabled: true
+  pre_seconds: 90.0                      # the window starts at the newest mark at least this long before the trigger (the audit's minimum)
+  post_seconds: 5.0                      # and ends this long after it (the audit's minimum)
+  mark_seconds: 5.0                      # the ring: file sizes and a copy of each venue's book every 5 s (ASSUMED); the window start is aligned to a mark, so it can be up to this much longer than pre_seconds
+  cooldown_seconds: 30.0                 # a trigger within this long after a capture is counted and not captured again (ASSUMED); one inside an open window joins that window
+  max_captures: 50                       # per session (ASSUMED); further triggers are counted
+  min_free_bytes: 1073741824             # below 1 GiB free on the recording's disk a window is NOT copied and its manifest says INCOMPLETE: DISK_PRESSURE (ASSUMED)
+  rules:                                 # the trigger table (live_feed.INCIDENT_RULES); every rule can be switched off here. markout_worse_than (W7) and venue_dislocation (W6) are named in the table and not built
+    feed_unsafe: true                    # a FEED_HEALTH_STATE UNSAFE event, or a book-stream silence
+    book_invalid: true                   # a book entering GAP_DETECTED, INVALID_DATA, PRICE_ANOMALY or CHECKSUM_FAILED
+    breaker_trip: true
+    kill_switch: true
+    hedge_unfilled: true                 # HEDGE_ALARM, UNWIND_EXHAUSTED_ALARM, HEDGE_LOT_RESIDUAL_ALARM
+    ghost_hedge: true                    # HEDGE_LATE_FILL, LATE_REPORT_FOR_CLOSED_PLAN
+    unknown_order_state: true            # NEW_RISK_HELD_HEDGE_UNKNOWN, HEDGE_CHAINS_ESCALATED, AMEND_TIMEOUT
+    reconciliation_mismatch: true        # RECONCILIATION_DISAGREEMENT
+    limit_stop: true                     # a session limit going ACTIVE (LIMIT_STATE)
+    manual: true                         # a file named TRIGGER in <session>/incidents/
+oms:
+  rate_limits:                           # owner 13 Nov (production limits approved; ASSUMED: no venue data for the shares). New quotes use at most 70% of each rate-limit window and always leave at least 2 requests free;
+    enabled: true                        # hedges, unwinds and flattens are NEVER refused by the limiter (they queue with priority and may use the whole window); cancels are unrestricted (the whole window).
+    quote_share: 0.7                     # v1_5 to v1_8 and the core default: 0.8
+    quote_min_free: 2
+  session_limits:                        # owner 16 Nov (Order 3, limits A1-A6 and A8; A7 is arb.requote_delay_after_withdraw_s above). Off in every earlier profile. Values are the owner's approved numbers; none is calibrated.
+    order_rate: {per_s: 2.0, burst: 5}   # A1: new maker orders and amends per venue, a token bucket; skipped, never queued; hedges, unwinds and cancels are never refused. On top of rate_limits above
+    daily_loss_stop_usdt_per_sol_of_clip: -5.0   # A2: realised + marked P&L since 00:00 UTC (or the session start) at or below this per SOL of clip -> latched kill switch (quotes cancelled, hedges in flight finish). Scales with the clip (-5 at a 1 SOL clip)
+    clock_offset: {max_uncertainty_ms: 5.0, max_age_s: 900}   # A3: no new quotes while the clock offset is unknown or its uncertainty is above 5 ms (server-time probe); max_age_s 900 is ASSUMED (probe every 300 s). A replay with no measured clock reports "not evaluable", counted, never blocked
+    margin_warning: {free_margin_multiple: 10.0, resume_hysteresis_s: 5.0}   # A4: a margin WARNING (not a missing price) or free margin below 10x the initial margin at the hard cap stops new quotes; resumes after 5 s clear (ASSUMED)
+    missing_marks_kill_s: 60.0           # A5: a margin price pause longer than 60 s trips a latched kill switch
+    feed_arrival_stamp: true             # owner 17 Nov (A9 fix b): book frames are stamped at ARRIVAL in the live feed, so a backlog shows as book age and the gate, and a backlog beyond the book age limit resynchronises the connection. Live feed only: a replay has no live feed, so no replay output changes
+    tier_table: read_at_start            # A6: real-order modes read each account's own risk-limit / leverage brackets at start-up and refuse to start if they cannot be read; replays keep the ASSUMED tiers below, labelled
+    verify_account: {enabled: true, margin_mode: cross, leverage: 10}   # A8: paper/live start-up refuses unless one-way mode, this margin mode and leverage (10 = the instrument rule used here, ASSUMED), and reduce-only accepted
+  maker_ack_deadline: true               # owner 13 Nov: a sent PostOnly quote is watched from the send, not only from its ack (a submit or ack lost in a gateway outage ends TIMED_OUT with the kill switch instead of sitting SENT unwatched; 565 s in the 2l replay). Earlier profiles: off. REQUIRED for any profile used with real orders (config.REAL_ORDER_REQUIRED)
+  account_fee_check: true                # owner 13 Nov (edge calibration item 2): a declaration for live/paper: the session reads the account's SOLUSDT maker/taker rates on both venues at start-up and refuses to start if they differ from fee_presets (crypto_stat_arb.fees.verify_account_fee_rates). No effect on a backtest. REQUIRED for any profile used with real orders
+hedge_faults:                            # the response policy (recovery), not injected faults
+  seed: 11                               # owner 16 Nov: the hedge-fault seed as a profile key (the current default; outputs unchanged)
+  response: retry_unwind                 # MANDATORY (not the legacy oracle)
+  query_before_replace: true             # OMS03 (v1_2, Phase B): a hedge that gets no answer in an outage is queried before any retry or unwind is sent (the query waits for the gateway and for a ghost to land). v1.1: false
+  max_retries: 2
+  retry_backoff_s: 0.25
+  entry_guard: true
+  unwind_band_bps: 15.0                  # price-banded unwind, 15 bps (DECISION_PENDING_CALIBRATION)
+  silent_carry_bound: below_one_lot      # owner 13 Nov: a failed hedge ALWAYS acts. When a hedge chain exhausts its retries the residual is unwound with MARKET_BANDED at the touch band (unwind_band_bps) whatever its size, and a failed unwind is the persistent alarm. Only a remainder below one hedge-venue lot (it cannot be sent) is carried silently, with the end-of-day warning. v1_7 and earlier: position_size (a residual under the position size, 1.0 SOL in the replay, was carried without any action)
+  dust_carry: next_hedge                 # owner 16 Nov: a hedge chunk below the hedge venue's minimum is carried (one signed balance per venue and instrument) and added to the next hedge; sent alone as soon as it reaches the minimum; REQUIRED with real orders
+  dust_alarm_after_s: 60.0               # ASSUMED (owner 16 Nov): carried dust older than this raises HEDGE_DUST_ALARM once (it blocks nothing)
+  dust_max_notional_usdt: 50.0           # v1_16 F06 (owner 20 Nov), ASSUMED placeholder: aggregate carried dust per direction in USDT over every venue and instrument (same instrument netted across venues); at it: no new risk, DUST_BOUND_REACHED, remedy
+  late_fill_after_close: reopen          # v1_16 F06 c (owner 20 Nov): a fill reported for an order of a CLOSED plan is booked, the plan reopens and the ordinary hedge runs (before: refused and raised)
+  dust_max_age_s: 300.0                  # v1_16 F06 (owner 20 Nov), ASSUMED placeholder: carried dust older than this reaches the same bound
+  unwind_max_attempts: 3                 # 3 unwind sends per failed hedge chain, then the persistent ALARM (DECISION_PENDING_CALIBRATION)
+  unknown_query_max_attempts: 3
+margin:                                  # MANDATORY in a perp profile; tiers ASSUMED, prefunded capital per venue
+  check_every_s: 1.0
+  mark_stamp: own_timestamp              # owner 16 Nov: the 5 s mark rule fixed from v1_10: a mark older than 5 s by its OWN timestamp pauses, nothing is re-stamped (v1_9 and earlier re-stamp: marks live 9-10 s, LEGACY)
+  flatten_other_venue: true
+  above_last_tier: breach                # A9 (owner Phase B, the core rule wins): a position above the venue's last tier is a margin breach (POSITION_ABOVE_RISK_LIMIT, fail closed). v1.1: ignore
+  venues:
+    bybit:
+      initial_capital: 1000.0
+      mode: cross
+      liquidation_fee_bps: 10.0
+      source: ASSUMED
+      tiers:
+        - {max_notional: 50000.0, initial_rate: 0.02, maintenance_rate: 0.01}
+        - {max_notional: 500000.0, initial_rate: 0.05, maintenance_rate: 0.025}
+    binance:
+      initial_capital: 1000.0
+      mode: cross
+      liquidation_fee_bps: 10.0
+      source: ASSUMED
+      tiers:
+        - {max_notional: 50000.0, initial_rate: 0.02, maintenance_rate: 0.01}
+        - {max_notional: 500000.0, initial_rate: 0.05, maintenance_rate: 0.025}
+
+execution:                               # canonical execution layer, phase 0: values that reproduce today's behaviour exactly
+  pairing: maker_taker                   # maker_taker | maker_maker (phase 3, experimental) | taker_taker; must equal arb.mode
+  price_cap_required: true               # CALIBRATED until the cap decision (brief step 11): every non-unwind intent carries a worst price and each child stays inside it
+  one_hedge_child: enforce               # MANDATORY (never 'off'): the canonical contract; a ghost child blocks a second one until it is resolved (4h.4)
+  risk_reservation: enforce              # MANDATORY (never 'off'): atomic check-and-reserve of primary exposure (4h.2)
+  primary:
+    tactic: PASSIVE
+    placement: deep                      # touch | improve | deep. deep = the price the CONDITIONAL edge requires (inside the spread): today's behaviour
+    price_rule: conditional_edge
+    reprice:                             # S0 (owner 7 Nov): the ONE change of v1_3. The rule is core (ems/tactics/passive.py decide_reprice); the trader supplies every number, none is defaulted or fitted here.
+      enabled: true                      # v1_9s (owner 14 Nov): S0 ON in the session runtime. The numbers below are ASSUMED and labelled ILLUSTRATIVE_NOT_FITTED until the trader's or stage-0-measured values are owner-approved
+      source: ILLUSTRATIVE_NOT_FITTED    # carried into every result
+      band_down_bps: 1.0                 # ASSUMED stickiness band: reprice only when the target is more than 1 bp below a resting bid (above a resting ask)
+      band_up_bps: null                  # null: favourable moves never move a quote
+      debounce_ms: null                  # after a hedge-price jump, favourable reprices wait this long
+      jump_bps: null                     # what counts as a jump
+      min_interval_ms: 1000.0            # ASSUMED: at least 1 s between two reprice requests of one quote (at most ~1 amend/s per quote, inside the quote tier of the rate limiter)
+      max_age_s: 15.0                    # as the 15 s lifetime backstop (arb.maker_max_age_s): a quote this old is cancelled and re-quoted
+      queue_hold: true                   # an order with a real queue ahead keeps its place against favourable moves
+      amend_first: true                  # false: every price change is a cancel and a new order
+  hedge:
+    tactic: IOC_CAPPED
+    cap: size_aware                      # v1_9 (owner 12 Nov): the ONE change against v1_7 (touch_slack); the level the hedge size reaches on the view book + the slack floor, bounded by max_slip_bps
+    slack_bps_floor: 5.0
+    max_slip_bps: 15.0                   # ASSUMED (owner 12 Nov): never beyond the touch by more than this
+    vol_k: 0.0                           # ASSUMED: the k of k * short_vol * sqrt(hedge_latency); 0 = off
+    latency_s: 0.0                       # the hedge latency the volatility term scales with
+  unwind:
+    tactic: MARKET_BANDED                # the unwind price band is hedge_faults.unwind_band_bps
+
+# Owner 13 Nov: production limits APPROVED as proposed (out/integration/production_limits_proposal.md) with two changes: silent residual carry only below one hedge-venue lot (0.01 SOL), failed hedges always unwind or alarm
+# (not 0.10 SOL); hedges are never refused by the limiter, new quotes use at most 70% of each window with at least 2 requests free, cancels unrestricted. Every value without data is ASSUMED. Status of each item in code
+# (ENFORCED = a rule reads it; CONFIG = the profile carries it and the run uses it; NOT BUILT = approved, no code enforces it yet; this list is documentation, the loader ignores keys that start with an underscore):
+_production_limits_approved_13nov:
+  ENFORCED_OR_CONFIG:
+    clip_sol: "1.0 (run setting: arb.max_position_base; EXISTING)"
+    net_ceiling_multiple: "1.0 (arb.net_ceiling_multiple; EXISTING, DECISION_PENDING_CALIBRATION -> approved)"
+    fill_headroom_base: "0.25 (arb.fill_headroom_base; ASSUMED, the assistant's starting value, now approved)"
+    gross_per_venue_sol: "2.0 (arb.max_venue_imbalance_base; ASSUMED)"
+    open_quotes: "1 per venue (the strategy places one; EXISTING)"
+    residual_hold_and_kill: "hold new risk after 5 s, kill switch after 30 s (EXISTING, owner 8 Nov)"
+    silent_carry_bound: "below one hedge-venue lot, 0.01 SOL (hedge_faults.silent_carry_bound: below_one_lot); a failed hedge always unwinds or alarms (the 0.10 SOL proposal is WITHDRAWN)"
+    unwind: "15 bps band, 3 attempts, then the persistent alarm (EXISTING)"
+    hedge_cap: "size_aware, 5 bps floor, 15 bps absolute limit (ASSUMED values)"
+    quote_lifetime_s: "15 (arb.maker_max_age_s)"
+    rate_limits: "oms.rate_limits: quote_share 0.7, quote_min_free 2, hedges never refused, cancels unrestricted (ASSUMED shares)"
+    layer_risk_gate: "enforce (execution.risk_reservation). The proposal said count until day-1 and spot validation; the owner's later order (13 Nov) runs v1_9 in the profile's mandatory enforce mode, and the gate refused nothing in 22 runs: the later order stands"
+    funding_quiet_window: "ENFORCED (owner 14 Nov): arb.funding_window_s 30: no new quote within 30 s before a funding timestamp on either venue, resting quotes withdrawn at the window start (reason funding_window), quoting resumes when the stream shows the next settlement (after at most arb.funding_window_after_s 30, ASSUMED); no next-funding time = not evaluable, counted"
+    participation_limit: "arb.participation_max 0.10 of the volume printed at the quote's price level over the last arb.participation_window_s 60 (ASSUMED, owner to approve); a new quote cut below the minimum clip is refused (reject participation); hedges never blocked (owner 13 Nov, E3)"
+    participation_cap_simulator: "maker.participation_cap true: one budget per public print across every own order (the simulator cannot fill more than was printed)"
+    funding_in_edge: "arb.funding_expected_holding_s 28800 (8 h, ASSUMED) with funding_credit floor_zero (owner 14 Nov)"
+    account_fee_check_at_startup: "oms.account_fee_check + fees.verify_account_fee_rates: a session that sends real orders refuses to start when either venue's account rates cannot be read or differ from the profile (owner 14 Nov); Binance endpoint path confirmed in the testnet drill; replays keep the profile fees, labelled"
+    breaker: "the profile's breaker block (trips, flatten, dust rules of 13 Nov)"
+    restart_gate_and_snapshot: "oms.restart_reconcile_gate + account_snapshot adapters built; a session setting, not a profile key"
+  BUILT_16NOV_ORDER3:                    # owner 16 Nov (Order 3): the approved limits that had no code, in v1_10 under oms.session_limits (A7 under arb.requote_delay_after_withdraw_s); see docs/strategy_contract.md "Session limits"
+    new_maker_orders_per_second: "ENFORCED (A1): oms.session_limits.order_rate, a per-venue token bucket 2/s burst 5, skipped never queued, on top of the window limiter"
+    daily_loss_stop: "ENFORCED (A2): oms.session_limits.daily_loss_stop_usdt_per_sol_of_clip -5.0 x the clip; latched kill switch, hedges in flight finish"
+    clock_offset_gate: "ENFORCED (A3): oms.session_limits.clock_offset 5 ms; server-time probe; not evaluable (counted) in a replay without a measured clock; a real-order session refuses to start without a source"
+    margin_warning_stop: "ENFORCED (A4): oms.session_limits.margin_warning (a real WARNING or free margin below 10x the hard-cap initial margin; 5 s hysteresis ASSUMED)"
+    missing_mark_kill_after_60s: "ENFORCED (A5): oms.session_limits.missing_marks_kill_s 60, latched kill switch"
+    tier_table_read_at_startup: "BUILT (A6): oms.session_limits.tier_table; the endpoint shapes are UNVERIFIED against the live endpoints; the replays keep the ASSUMED tiers below"
+    account_settings_check_at_startup: "BUILT (A8): oms.session_limits.verify_account; reduce-only acceptance is derived from one-way mode, UNVERIFIED by an order"
+    quote_requote_delay_after_withdraw_1s: "ENFORCED (A7, Order 2): arb.requote_delay_after_withdraw_s 1.0"
+    market_data_stress: "MEASURED (A9): scripts/stress_feed.py, 10,000 events/s for 5 s per venue through the live parse, book and session path on this Mac; the result is in out/integration/stress/"
+cost_records:                            # W7 7.D (owner 17 Nov): ONLY the pre-trade estimate per order; the other W7 keys are not built and are refused
+  estimate_at_decision: true
