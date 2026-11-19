@@ -521,6 +521,10 @@ class LivePaperSession:
         summary["paper_timestamps"] = "paper_timestamps.jsonl"
         summary["events_dropped_from_memory"] = self.dropped_from_memory
         summary["flatten_started"] = self.flatten_started
+        if not internal:
+            # F04 item 5 (owner 20 Nov): every real-order session ends with the amend journal audit; a non-zero two-live-orders / booked-twice / overfill count is one REAL_ORDER_AUDIT_ALARM
+            from .session_audit import real_order_audit
+            summary["real_order_audit"] = real_order_audit(self.session.ledger, self.session.oms.plans, stopped, self.session.oms.alert_context(stopped))
         if self.account_fee_check is not None:
             summary["account_fee_snapshot"] = self.account_fee_check            # F07 (owner 20 Nov): the fee-rate snapshot and the risk-tier snapshot are kept apart
         if self.account_checks:

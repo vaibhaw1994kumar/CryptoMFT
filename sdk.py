@@ -253,7 +253,7 @@ class TestnetVenueAdapter:
                     cumulative, native.get("reason", ""),
                 )),
                 request_id=request.request_id,
-                order_id=request.order_id,
+                order_id=str(native.get("for_order_id") or request.order_id),          # F04: an amend that ended the order also reports the targeted order's end
                 parent_opportunity_id=request.parent_opportunity_id,
                 parent_order_id=request.parent_order_id,
                 venue=request.venue,

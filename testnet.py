@@ -58,7 +58,7 @@ TESTNET_HOSTS = frozenset({"testnet.binance.vision", "testnet.binancefuture.com"
 HttpCall = Callable[[str, str, dict[str, str], bytes | None, float], tuple[int, str]]
 
 REDUCE_ONLY_NOTE = ("DERIVED_FROM_ONE_WAY_MODE (both venues accept a reduce-only order in one-way mode; Binance rejects it in hedge mode). UNVERIFIED by an order: the start-up check sends none. "
-                    "Whether a reduce-only order is exempt from the minimum notional is also UNVERIFIED; both are items of the testnet drill")
+                    "Minimum notional: a Binance reduce-only order below it was ACCEPTED in the 17 Nov testnet drill; Bybit's exemption is UNTESTED")
 
 
 def verified_ssl_context() -> ssl.SSLContext:
@@ -317,6 +317,18 @@ def risk_tier_rows_bybit(payload: Any, symbol: str) -> list[dict[str, str]]:
         out.append({"max_notional": str(r["riskLimitValue"]), "maintenance_rate": str(r["maintenanceMargin"]), "initial_rate": str(r["initialMargin"]),
                     "maintenance_deduction": str(r.get("mmDeduction") or "0")})
     return out
+
+
+AMEND_CROSS_ENDED = "post-only amend to a crossing price: order cancelled by venue"      # F04 (owner 20 Nov): the same reason the v1_15 simulator gives (simulation.queue_adapter); a test pins the equality
+
+
+def amend_ended_events(target_order_id: str, executed: Decimal, average: Decimal, cross_evidence: str | None, end_fields: str) -> tuple[dict[str, Any], ...]:
+    """F04 (owner 20 Nov, conditions 1a/2): the amend's settle query shows the order ENDED. Reported at once as the simulator does: REJECTED for the amend, then CANCELLED for the order it targeted, with the
+    venue's cumulative fill (booked once by the OMS's cumulative reducer). The reason is AMEND_CROSS_ENDED ONLY when the venue's own response or order record says post-only would take liquidity
+    (`cross_evidence`, quoted); otherwise the true end state with reason UNKNOWN and the fields seen."""
+    reason = f"{AMEND_CROSS_ENDED}: {cross_evidence}" if cross_evidence else f"amend ended the order: reason UNKNOWN ({end_fields})"
+    fill = {"cumulative_filled_quantity": decimal_text(executed), "last_fill_quantity": decimal_text(executed), "average_price": decimal_text(average)}
+    return ({"event_type": "REJECTED", "reason": reason}, {"event_type": "CANCELLED", "for_order_id": target_order_id, "reason": reason, **fill})
 
 
 def _known(value: Any) -> str:
@@ -581,6 +593,9 @@ class BybitV5TestnetTransport(VenueTestnetTransport):
     def _row(self, order_link_id: str, symbol: str, key: str, secret: bytes) -> dict[str, Any] | None:
         payload = self._signed("GET", "/v5/order/realtime", key, secret, params={"category": self.category, "symbol": symbol, "orderLinkId": order_link_id})
         rows = payload.get("result", {}).get("list", []) if payload.get("retCode") == 0 else []
+        if not rows:                                   # F04: an order that just ended may already be in the history only
+            payload = self._signed("GET", "/v5/order/history", key, secret, params={"category": self.category, "symbol": symbol, "orderLinkId": order_link_id})
+            rows = payload.get("result", {}).get("list", []) if payload.get("retCode") == 0 else []
         return rows[0] if rows else None
 
     def amend(self, request, symbol, key, secret):
@@ -603,6 +618,10 @@ class BybitV5TestnetTransport(VenueTestnetTransport):
             return ({"event_type": "REJECTED", "reason": f"amend rejected, order unchanged: bybit {code}: {payload.get('retMsg')}"},)
         for attempt in range(self.settle_queries):
             row = self._row(root, symbol, key, secret)
+            if row is not None and self.STATUS.get(str(row.get("orderStatus", ""))) in ("CANCELLED", "REJECTED"):
+                why = str(row.get("rejectReason") or "")
+                return amend_ended_events(str(request["target_order_id"]), Decimal(str(row.get("cumExecQty") or "0")), Decimal(str(row.get("avgPrice") or "0")),
+                                          f"bybit rejectReason={why}" if "postonly" in why.lower() else None, f"bybit orderStatus={row.get('orderStatus')}, rejectReason={why or 'none'}")
             if row is not None and Decimal(str(row.get("price") or "0")) == new_price:
                 executed = Decimal(str(row.get("cumExecQty") or "0"))
                 self._aliases[str(request["order_id"])] = {"root": root, "base": executed, "since_ms": self.clock_ms()}
@@ -718,7 +737,7 @@ class BinanceFuturesTestnetTransport(BinanceSpotTestnetTransport):
     def amend(self, request, symbol, key, secret):
         """(e), owner 17 Nov: Binance USD-M modify-order (PUT /fapi/v1/order) moves the SAME order (LIMIT orders; the venue re-queues it): symbol, side, the order's new TOTAL quantity and price,
         addressed by the original client id. Counted only when the venue's answer shows the new price: then REPLACED and the order live; the replacement id becomes an alias of the venue order.
-        A refused modify is REJECTED and the order is unchanged. UNVERIFIED until the drill: whether a GTX (post-only) order can be modified."""
+        A refused modify is REJECTED and the order is unchanged. A GTX (post-only) order CAN be modified (17 Nov drill); a modify to a crossing price ended it (F04: reported at once, see amend_ended_events)."""
         root, _base, _since = self._root(str(request["target_order_id"]))
         new_price = Decimal(str(request["price"]))
         status, payload = self._signed("PUT", self.ORDER_PATH, {
@@ -727,7 +746,16 @@ class BinanceFuturesTestnetTransport(BinanceSpotTestnetTransport):
         }, key, secret)
         if status == 400 and payload.get("code") in (-2011, -2013):
             return ({"event_type": "REJECTED", "reason": f"replace target is not open (binance {payload.get('code')}: {payload.get('msg')})"},)
+        cross = f"binance code={payload.get('code')} msg={payload.get('msg')}" if status != 200 and (payload.get("code") == -5022 or "post only" in str(payload.get("msg", "")).lower()) else None
+        if status == 200 and self.STATUS.get(str(payload.get("status", ""))) in ("CANCELLED", "REJECTED"):
+            return amend_ended_events(str(request["target_order_id"]), Decimal(str(payload.get("executedQty") or "0")), Decimal(str(payload.get("avgPrice") or "0")), None,
+                                      f"binance status={payload.get('status')}, timeInForce={payload.get('timeInForce')}")
         if status != 200:
+            if cross is not None:                      # F04: the venue says the post-only amend would take liquidity: did it END the order? (Binance UNVERIFIED until the drill) the order's own record answers
+                q_status, row = self._signed("GET", self.ORDER_PATH, {"symbol": symbol, "origClientOrderId": root}, key, secret)
+                if q_status == 200 and self.STATUS.get(str(row.get("status", ""))) in ("CANCELLED", "REJECTED"):
+                    return amend_ended_events(str(request["target_order_id"]), Decimal(str(row.get("executedQty") or "0")), Decimal(str(row.get("avgPrice") or "0")), cross,
+                                              f"binance status={row.get('status')}")
             return ({"event_type": "REJECTED", "reason": f"amend rejected, order unchanged: binance {payload.get('code')}: {payload.get('msg')}"},)
         if Decimal(str(payload.get("price") or "0")) != new_price:
             return ({"event_type": "AMEND_ACCEPTED"},)

@@ -817,3 +817,95 @@ def audit_incident(incident_dir: Path, output_dir: Path | None = None, *, source
         output_dir.mkdir(parents=True, exist_ok=True)
         (output_dir / "incident_audit.json").write_text(json.dumps(result, indent=2, sort_keys=True, default=str), encoding="utf-8")
     return result
+
+
+def amend_journal_audit(ledger_events: list[dict], plans: dict, reprice_counters: dict | None = None, *, label: str = "EXPLORATORY: mechanics of S0 repricing on the 2026-10-29 capture, no profit claim") -> dict:
+    """F04 (owner 20 Nov): moved here from new_backtest.session_replay.s0_audit (unchanged; the replay calls this) so a REAL-ORDER session runs it at its end too (paper_live). Case 2i on the arb (owner 14 Nov, S0 in the session runtime): the counts of the EMS-note section 5 invariants a-j from one replay's ledger. Read-only; decides nothing.
+      amends: requested / confirmed / rejected / timed out / fallback-to-cancel / accepted-but-not-confirmed;  fills_during_amend_pending: fills of the OLD order between its amend request and the venue's answer;
+      cancels_during_amend: cancel or withdraw requests on a lineage member while its amend was pending;  duplicate_fills_booked_twice: (order, cumulative) pairs booked more than once (must be 0);
+      lineage_overfill: a lineage that filled more than the quote's quantity (must be 0);  maker_filled / hedge_filled: totals, hedged = filled check;  two_live_orders: the most venue-live primary orders of ONE quote at once, minus one
+      (must be 0: live = from the venue's acknowledgement to the terminal report; at the same instant an end is processed before a start)."""
+    from collections import Counter, defaultdict
+    from decimal import Decimal
+    ev = sorted(ledger_events, key=lambda e: e["ts_ns"])
+    kinds = Counter(e["event_type"] for e in ev)
+    requested = [e for e in ev if e["event_type"] == "AMEND_REQUESTED"]
+    answers = [e for e in ev if e["event_type"] in ("AMEND_CONFIRMED", "AMEND_REJECTED", "AMEND_TIMEOUT")]
+    fills = [e for e in ev if e["event_type"] == "FILL"]
+    life = [e for e in ev if e["event_type"] == "ORDER_LIFECYCLE"]
+    during = cancels_during = 0
+    for r in requested:
+        answer = next((a for a in answers if a["order_id"] == r["order_id"] and a["ts_ns"] >= r["ts_ns"]), None)
+        end = answer["ts_ns"] if answer else float("inf")
+        members = {r["order_id"], r.get("replacement_order_id")}
+        during += sum(1 for f in fills if f["order_id"] == r["order_id"] and r["ts_ns"] < f["ts_ns"] < end)
+        cancels_during += sum(1 for e in life if e.get("lifecycle_event") in ("CANCEL_REQUESTED", "CANCEL") and e.get("order_id") in members and r["ts_ns"] < e["ts_ns"] < end) \
+            + sum(1 for e in ev if e["event_type"] == "QUOTE_WITHDRAWN" and e.get("order_id") in members and r["ts_ns"] < e["ts_ns"] < end)
+    seen, dup = Counter(), 0
+    for f in fills:
+        key = (f["order_id"], f.get("cumulative_filled_quantity"))
+        seen[key] += 1
+    dup = sum(1 for v in seen.values() if v > 1)
+    primary_qty = {}
+    for plan in plans.values():
+        for c in plan.children:
+            if c.order_role == "PRIMARY" and c.post_only and not getattr(c, "replaces_order_id", None):
+                primary_qty[plan.parent_id] = primary_qty.get(plan.parent_id, Decimal("0")) + c.quantity
+    filled_by_plan = defaultdict(lambda: Decimal("0"))
+    for plan in plans.values():
+        for c in plan.children:
+            if c.order_role == "PRIMARY" and c.post_only:
+                filled_by_plan[plan.parent_id] += c.filled_quantity
+    overfill = sum(1 for pid, q in primary_qty.items() if filled_by_plan[pid] > q)
+    maker_filled = sum((c.filled_quantity for plan in plans.values() for c in plan.children if c.order_role == "PRIMARY" and c.post_only), Decimal("0"))
+    hedge_filled = sum((c.filled_quantity for plan in plans.values() for c in plan.children if c.order_role == "HEDGE"), Decimal("0"))
+    primary_ids = {c.order_id: plan.parent_id for plan in plans.values() for c in plan.children if c.order_role == "PRIMARY" and c.post_only}
+    replaced_by = {c.order_id: c.replaces_order_id for plan in plans.values() for c in plan.children if getattr(c, "replaces_order_id", None)}
+    points = []
+    for e in life:
+        oid = e.get("order_id")
+        if oid not in primary_ids:
+            continue
+        le = e.get("lifecycle_event")
+        if le == "REPLACED" and replaced_by.get(oid) in primary_ids:
+            points.append((e["ts_ns"], 0, replaced_by[oid]))           # 2i item 1b (owner 17 Nov): an amend IN PLACE: when the venue reports REPLACED the old order IS the replacement: it ends here
+        if le in ("ACKNOWLEDGED", "REPLACED"):
+            points.append((e["ts_ns"], 1, oid))
+        elif le in ("CANCELLED", "FILLED", "REJECTED", "TIMED_OUT", "EXPIRED"):
+            points.append((e["ts_ns"], 0, oid))
+    live, worst = defaultdict(set), 0
+    for ts, is_start, oid in sorted(points):                         # at the same instant an end (0) sorts before a start (1)
+        pid = primary_ids[oid]
+        (live[pid].add if is_start else live[pid].discard)(oid)
+        worst = max(worst, len(live[pid]))
+    return {"label": label,
+            "amend_requests": kinds["AMEND_REQUESTED"], "amends_confirmed": kinds["AMEND_CONFIRMED"], "amends_rejected": kinds["AMEND_REJECTED"], "amend_timeouts": kinds["AMEND_TIMEOUT"],
+            "amend_fallback_cancel": kinds["AMEND_FALLBACK_CANCEL"], "amend_accepted_not_confirmed": kinds["AMEND_ACCEPTED_NOT_CONFIRMED"],
+            "fills_during_amend_pending": during, "cancels_during_amend": cancels_during, "quotes_withdrawn": kinds["QUOTE_WITHDRAWN"],
+            "late_fills_reducing_replacement": sum(1 for r in requested if any(f["order_id"] == r["order_id"] and f["ts_ns"] > r["ts_ns"] for f in fills)),
+            "duplicate_fills_booked_twice": dup, "lineage_overfill": overfill, "lineage_overfill_alarms": kinds["AMEND_LINEAGE_OVERFILL"],
+            "maker_filled": str(maker_filled), "hedge_filled": str(hedge_filled), "hedged_equals_filled": maker_filled == hedge_filled,
+            "two_live_orders": max(0, worst - 1), "controller_counters": dict(reprice_counters or {}),
+            # item 10 (owner 17 Nov), after the 2i fixes: why amends were rejected, how many timeouts were LOST requests, and the owed venue queries that followed (aggregates only)
+            "amend_reject_reasons": dict(Counter(str(e.get("reason", ""))[:80] for e in ev if e["event_type"] == "AMEND_REJECTED")),
+            "amend_timeouts_lost": sum(1 for e in ev if e["event_type"] == "AMEND_TIMEOUT" and e.get("lost")),
+            # owner 18 Nov (v1_15): amends that ENDED the order (a PostOnly amend to a crossing price, cancelled by the venue), and the venue queries owed after an amend timeout (one per old order)
+            "amends_ended_by_crossing": sum(1 for e in ev if e["event_type"] == "AMEND_REJECTED" and "order cancelled by venue" in str(e.get("reason", ""))),
+            "amend_queries_owed": len({e.get("order_id") for e in ev if e["event_type"] == "AMEND_TIMEOUT"}),
+            "amend_owed_queries": sum(1 for e in ev if e["event_type"] == "VENUE_ORDER_QUERY" and e.get("purpose") == "amend_timeout"),
+            "amend_owed_queries_answered": sum(1 for e in ev if e["event_type"] == "VENUE_ORDER_QUERY" and e.get("purpose") == "amend_timeout" and e.get("answered"))}
+
+
+REAL_ORDER_AUDIT_MUST_BE_ZERO = ("two_live_orders", "duplicate_fills_booked_twice", "lineage_overfill")
+
+
+def real_order_audit(ledger, plans: dict, now_ns: int, alert_context: dict | None = None) -> dict:
+    """F04 item 5 (owner 20 Nov): at the end of every real-order session the amend journal audit runs on the session's own ledger and plans; any non-zero count of the must-be-zero invariants (two live
+    orders of one quote, a fill booked twice, a lineage overfill) records ONE alarm (REAL_ORDER_AUDIT_ALARM, with the counts). Aggregates only."""
+    audit = amend_journal_audit(list(ledger.events), plans, label="REAL-ORDER SESSION: the amend journal audit at the session end (aggregates only)")
+    bad = {k: audit[k] for k in REAL_ORDER_AUDIT_MUST_BE_ZERO if audit.get(k)}
+    audit["alarm"] = bool(bad)
+    if bad:
+        ledger.record("REAL_ORDER_AUDIT_ALARM", now_ns, alarm=True, counts=bad, **(alert_context or {}))
+    return audit
+

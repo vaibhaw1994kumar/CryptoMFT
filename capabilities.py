@@ -17,8 +17,9 @@ Notable consequences:
 
 * **Reduce-only on spot is platform-only.** Spot venues have no reduce-only flag; the
   OMS sizes unwinds to the residual, but the venue does not enforce it.
-* **Our testnet transports do not implement replace/amend.** A ``REPLACE`` there would
-  have placed a second order and left the first live, so testnet routes refuse it.
+* **Testnet amend.** The perpetual testnet transports amend in place (Bybit /v5/order/amend, Binance PUT
+  /fapi/v1/order; 17 Nov drill, table below); the spot transports still refuse a ``REPLACE`` (it would have placed
+  a second order and left the first live).
 """
 
 from __future__ import annotations
