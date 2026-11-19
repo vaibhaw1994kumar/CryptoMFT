@@ -210,6 +210,8 @@ class VenueTestnetTransport:
             return (self.account_fee_rate(request, symbol, key, secret_bytes),)
         if action == "ACCOUNT_RISK_TIERS":
             return (self.account_risk_tiers(request, symbol, key, secret_bytes),)
+        if action == "ACCOUNT_RULES":                 # F07: read-only
+            return (self.account_rules(request, symbol, key, secret_bytes),)
         if action == "VERIFY_ACCOUNT":
             return self.verify_account(request, symbol, key, secret_bytes)
         if action == "REPLACE":                     # (e): an amend in place, NEVER a second order (until 17 Nov a REPLACE was sent as a SUBMIT)
@@ -314,6 +316,62 @@ def risk_tier_rows_bybit(payload: Any, symbol: str) -> list[dict[str, str]]:
     for r in sorted(rows, key=lambda r: Decimal(str(r["riskLimitValue"]))):
         out.append({"max_notional": str(r["riskLimitValue"]), "maintenance_rate": str(r["maintenanceMargin"]), "initial_rate": str(r["initialMargin"]),
                     "maintenance_deduction": str(r.get("mmDeduction") or "0")})
+    return out
+
+
+def _known(value: Any) -> str:
+    """A field the venue gave, as text; "UNKNOWN" when it is missing or empty (never defaulted)."""
+    return "UNKNOWN" if value is None or str(value).strip() == "" else str(value)
+
+
+def account_rules_bybit(positions: Any, account_info: Any, ladder: Any, symbol: str, fetched_ts_ns: int | None) -> dict[str, Any]:
+    """F07 (owner 20 Nov): the account's EFFECTIVE rules for `symbol` on Bybit v5 linear, from GET /v5/position/list (riskId, riskLimitValue, leverage, tradeMode, autoAddMargin, markPrice),
+    GET /v5/account/info (marginMode) and the symbol ladder GET /v5/market/risk-limit (the row whose `id` is the position's riskId gives its maintenance and initial rates). A missing riskId is UNKNOWN, never
+    defaulted; every missing field is listed in `unknown`. No balance or account id is kept. Shapes from the public documentation; confirmed against recorded testnet responses (tests/fixtures)."""
+    rows = [r for r in ((positions or {}).get("result") or {}).get("list", []) if str(r.get("symbol")) == symbol] if isinstance(positions, dict) else []
+    row = rows[0] if rows else {}
+    risk_id = _known(row.get("riskId"))
+    tier = None
+    if risk_id != "UNKNOWN" and isinstance(ladder, dict):
+        tier = next((r for r in (ladder.get("result") or {}).get("list", []) if str(r.get("symbol")) == symbol and str(r.get("id")) == risk_id), None)
+    trade_mode = {"0": "CROSS", "1": "ISOLATED"}.get(str(row.get("tradeMode")), "UNKNOWN")
+    out = {
+        "venue": "BYBIT", "symbol": symbol, "source": "BYBIT /v5/position/list + /v5/account/info + /v5/market/risk-limit", "fetched_ts_ns": fetched_ts_ns,
+        "risk_id": risk_id, "max_notional": _known(row.get("riskLimitValue") or (tier or {}).get("riskLimitValue")), "leverage": _known(row.get("leverage")),
+        "margin_mode": _known(((account_info or {}).get("result") or {}).get("marginMode") if isinstance(account_info, dict) else None), "position_trade_mode": trade_mode,
+        "auto_add_margin": _known(row.get("autoAddMargin")), "maintenance_rate": _known((tier or {}).get("maintenanceMargin")), "initial_rate": _known((tier or {}).get("initialMargin")),
+        "mark_price": _known(row.get("markPrice")),
+    }
+    if out["initial_rate"] != "UNKNOWN" and out["leverage"] != "UNKNOWN" and Decimal(out["leverage"]) > 0:
+        out["initial_rate"] = str(max(Decimal(out["initial_rate"]), Decimal(1) / Decimal(out["leverage"])))     # the initial margin is the position value / the ACCOUNT leverage (never below the tier's own rate)
+    out["unknown"] = sorted(k for k, v in out.items() if v == "UNKNOWN")
+    return out
+
+
+def account_rules_binance(brackets: Any, position_risk: Any, symbol: str, fetched_ts_ns: int | None) -> dict[str, Any]:
+    """F07 (owner 20 Nov): the account's EFFECTIVE rules for `symbol` on Binance USD-M, from GET /fapi/v1/leverageBracket (the account's brackets) and GET /fapi/v2/positionRisk (leverage, marginType,
+    isAutoAddMargin, maxNotionalValue = the largest notional the account's leverage allows, markPrice). Binance has no risk id: `risk_id` is the bracket number in force at the account's leverage (the highest
+    bracket whose initial leverage still allows it), UNKNOWN when it cannot be found. The maintenance rate is that bracket's; the initial rate is 1 / the ACCOUNT leverage (not the bracket's maximum)."""
+    items = brackets if isinstance(brackets, list) else [brackets]
+    entry = next((x for x in items if isinstance(x, dict) and str(x.get("symbol")) == symbol), None)
+    rows = sorted((entry or {}).get("brackets") or [], key=lambda b: Decimal(str(b.get("notionalCap", "0"))))
+    pos = next((r for r in position_risk if isinstance(r, dict) and str(r.get("symbol")) == symbol), {}) if isinstance(position_risk, list) else {}
+    leverage = _known(pos.get("leverage"))
+    in_force = None
+    if leverage != "UNKNOWN" and rows:
+        lev = Decimal(leverage)
+        allowed = [b for b in rows if Decimal(str(b.get("initialLeverage", "0"))) >= lev]
+        in_force = allowed[-1] if allowed else None
+    out = {
+        "venue": "BINANCE", "symbol": symbol, "source": "BINANCE /fapi/v1/leverageBracket + /fapi/v2/positionRisk", "fetched_ts_ns": fetched_ts_ns,
+        "risk_id": _known((in_force or {}).get("bracket")), "max_notional": _known(pos.get("maxNotionalValue") or (in_force or {}).get("notionalCap")), "leverage": leverage,
+        "margin_mode": _known(str(pos.get("marginType", "")).upper() or None), "position_trade_mode": _known(str(pos.get("marginType", "")).upper() or None),
+        "auto_add_margin": _known(pos.get("isAutoAddMargin")), "maintenance_rate": _known((in_force or {}).get("maintMarginRatio")),
+        "initial_rate": "UNKNOWN" if leverage == "UNKNOWN" or Decimal(leverage) <= 0 else str(Decimal(1) / Decimal(leverage)), "mark_price": _known(pos.get("markPrice")),
+        # Binance charges maintenance by the position's notional bracket (the leverage only bounds the notional): the ladder is kept so the start-up check reads the bracket at the hard cap
+        "maintenance_ladder": [[str(b.get("notionalCap")), str(b.get("maintMarginRatio"))] for b in rows],
+    }
+    out["unknown"] = sorted(k for k, v in out.items() if v == "UNKNOWN")
     return out
 
 
@@ -801,6 +859,18 @@ class BinanceFuturesTestnetTransport(BinanceSpotTestnetTransport):
             positions[instrument_id] = decimal_text(amount)
         return {"event_type": "ACCOUNT_SNAPSHOT", "orders": list(orders.values()), "executions": executions, "positions": positions, "fetched_ts_ns": now_ms * 1_000_000}
 
+    def account_rules(self, request, symbol, key, secret) -> dict[str, Any]:
+        """F07: the account's effective rules (read-only): the account's leverage brackets and the position-risk row. Raw payloads only on `record_raw` (see the Bybit transport)."""
+        status, brackets = self._signed("GET", "/fapi/v1/leverageBracket", {"symbol": symbol}, key, secret)
+        if status != 200:
+            raise ConnectionError(f"binance futures leverageBracket failed: {brackets.get('msg') if isinstance(brackets, dict) else brackets}")
+        status, rows = self._signed("GET", "/fapi/v2/positionRisk", {"symbol": symbol}, key, secret)
+        if status != 200:
+            raise ConnectionError(f"binance futures positionRisk failed: {rows.get('msg') if isinstance(rows, dict) else rows}")
+        fetched = max((int(r.get("updateTime", 0)) for r in rows if isinstance(r, dict)), default=0) * 1_000_000 if isinstance(rows, list) else 0
+        rules = account_rules_binance(brackets, rows, symbol, fetched or None)
+        return {"event_type": "ACCOUNT_RULES", "rules": rules, **({"raw": {"leverage_bracket": brackets, "position_risk": rows}} if request.get("record_raw") else {})}
+
     def account_risk_tiers(self, request, symbol, key, secret) -> dict[str, Any]:
         status, payload = self._signed("GET", "/fapi/v1/leverageBracket", {"symbol": symbol}, key, secret)
         if status != 200:
@@ -954,6 +1024,16 @@ class BybitV5LinearTestnetTransport(BybitV5TestnetTransport):
             positions[instrument_id] = decimal_text(amount)
         return {"event_type": "ACCOUNT_SNAPSHOT", "orders": list(orders.values()),
                 "executions": sorted(executions.values(), key=lambda e: (e["ts_ns"], e["execution_id"])), "positions": positions, "fetched_ts_ns": now_ms * 1_000_000}
+
+    def account_rules(self, request, symbol, key, secret) -> dict[str, Any]:
+        """F07: the account's effective rules (read-only): position info, the account's margin mode and the symbol ladder. The raw payloads are returned beside the parsed rules ONLY when the request asks
+        (`record_raw`, the drill's fixture recording, which redacts them before anything is written); they are never logged."""
+        positions = self._signed("GET", "/v5/position/list", key, secret, params={"category": self.category, "symbol": symbol})
+        info = self._signed("GET", "/v5/account/info", key, secret, params={})
+        ladder = self._signed("GET", "/v5/market/risk-limit", key, secret, params={"category": self.category, "symbol": symbol})
+        fetched = int(positions.get("time", 0)) * 1_000_000 if isinstance(positions, dict) and positions.get("time") else None
+        rules = account_rules_bybit(positions, info, ladder, symbol, fetched)
+        return {"event_type": "ACCOUNT_RULES", "rules": rules, **({"raw": {"position_list": positions, "account_info": info, "risk_limit": ladder}} if request.get("record_raw") else {})}
 
     def account_risk_tiers(self, request, symbol, key, secret) -> dict[str, Any]:
         payload = self._signed("GET", "/v5/market/risk-limit", key, secret, params={"category": self.category, "symbol": symbol})

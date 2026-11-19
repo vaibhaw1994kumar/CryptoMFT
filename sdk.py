@@ -312,6 +312,15 @@ class TestnetVenueAdapter:
             raise ConnectionError(f"{self.venue} returned no account risk tiers")
         return tuple(dict(t) for t in row["tiers"])
 
+    def account_rules(self, instrument_id: str, *, record_raw: bool = False) -> dict[str, Any]:
+        """F07 (owner 20 Nov): the account's effective rules for the instrument (risk id, the tier limit, leverage, margin mode, auto-add-margin, maintenance and initial rates, mark price, source and time;
+        missing fields UNKNOWN) through the credentialed transport. Read-only. `record_raw` also returns the raw responses (the drill's redacted fixtures only)."""
+        natives = tuple(self.transport({"action": "ACCOUNT_RULES", "instrument_id": instrument_id, **({"record_raw": True} if record_raw else {})}))
+        row = next((n for n in natives if n.get("event_type") == "ACCOUNT_RULES"), None)
+        if row is None or not row.get("rules"):
+            raise ConnectionError(f"{self.venue} returned no account rules")
+        return dict(row) if record_raw else dict(row["rules"])
+
     def verify_account(self, instrument_id: str, expected_margin_mode: str | None = None, expected_leverage: int | None = None) -> dict[str, Any]:
         """Owner 16 Nov (limit A8): one-way position mode, the expected margin mode and leverage, and (derived, UNVERIFIED by an order) reduce-only acceptance, read through the credentialed transport. Raises on any
         mismatch or a read that fails; returns the facts it saw. Read-only."""

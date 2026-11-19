@@ -403,6 +403,61 @@ def read_account_tiers(readers: dict[str, Any], venues: tuple[str, ...], instrum
     return out
 
 
+def check_account_tier(rules: dict[str, Any], schedule: TierSchedule | None, cap_base: Decimal, mark: Decimal | None = None) -> list[str]:
+    """F07 (owner 20 Nov): the account's EFFECTIVE tier must match the tier table the margin engine uses, at the session's hard cap. Problems (empty = match): an UNKNOWN risk id, limit, rate or leverage (never
+    defaulted); the account's tier limit below the hard-cap notional (the venue would refuse orders the engine allows); the engine's tier at the hard cap with another maintenance rate than the account's
+    effective tier, or a LOWER initial rate than the account's (the engine would under-reserve: the A4 denominator would be too small). The hard-cap notional uses `mark`, else the account's own mark price."""
+    venue = rules.get("venue", "?")
+    problems = [f"{venue}: {k} UNKNOWN" for k in ("risk_id", "max_notional", "maintenance_rate", "initial_rate", "leverage") if rules.get(k, "UNKNOWN") == "UNKNOWN"]
+    price = mark if mark is not None else (None if rules.get("mark_price", "UNKNOWN") == "UNKNOWN" else Decimal(str(rules["mark_price"])))
+    if price is None or price <= 0:
+        problems.append(f"{venue}: no mark price for the hard-cap notional")
+    if schedule is None:
+        problems.append(f"{venue}: the margin engine has no tier table")
+    if problems:
+        return problems
+    cap_notional = cap_base * price
+    if Decimal(str(rules["max_notional"])) < cap_notional:
+        problems.append(f"{venue}: the account tier limit {rules['max_notional']} USDT is below the hard-cap notional {cap_notional} USDT")
+    found = schedule.tier(cap_notional)
+    if found is None:
+        problems.append(f"{venue}: the engine has no tier for the hard-cap notional {cap_notional} USDT")
+        return problems
+    tier = found[1]
+    account_mm = Decimal(str(rules["maintenance_rate"]))
+    if rules.get("maintenance_ladder"):                                  # Binance: the bracket that covers the hard-cap notional
+        row = next((r for r in rules["maintenance_ladder"] if Decimal(str(r[0])) >= cap_notional), None)
+        if row is None:
+            problems.append(f"{venue}: no account bracket covers the hard-cap notional {cap_notional} USDT")
+            return problems
+        account_mm = Decimal(str(row[1]))
+    if tier.maintenance_rate != account_mm:
+        problems.append(f"{venue}: maintenance rate: engine {tier.maintenance_rate} at the hard cap, account {account_mm} (risk id {rules['risk_id']})")
+    if tier.initial_rate < Decimal(str(rules["initial_rate"])):
+        problems.append(f"{venue}: initial rate: engine {tier.initial_rate} at the hard cap is below the account's {rules['initial_rate']} (leverage {rules['leverage']})")
+    return problems
+
+
+def with_account_leverage(schedule: TierSchedule, rules: dict[str, Any]) -> TierSchedule:
+    """F07: an ACCOUNT_READ tier table with each tier's initial rate raised to 1 / the account's leverage (a venue reserves the position value / the leverage; a bracket's own rate is 1 / its MAXIMUM leverage).
+    Unchanged when the leverage is UNKNOWN (the start-up check then refuses on it)."""
+    from dataclasses import replace as _replace
+
+    lev = rules.get("leverage", "UNKNOWN")
+    if lev == "UNKNOWN" or Decimal(str(lev)) <= 0:
+        return schedule
+    floor = ONE / Decimal(str(lev))
+    return TierSchedule(tuple(_replace(t, initial_rate=max(t.initial_rate, floor)) for t in schedule.tiers), source=f"{schedule.source}:ACCOUNT_LEVERAGE_{lev}")
+
+
+def max_usable_gross_usdt(schedule: TierSchedule, cap_base: Decimal, mark: Decimal, free_margin_multiple: Decimal) -> dict[str, str]:
+    """F07: the figures the A4 rule implies for one venue: the hard-cap notional (the largest position the session can hold there), the initial margin at it, and the free margin A4 needs to keep quoting
+    (free_margin_multiple x that initial margin)."""
+    notional = cap_base * mark
+    initial = schedule.initial(notional)
+    return {"hard_cap_notional_usdt": str(notional), "initial_margin_at_cap_usdt": str(initial), "free_margin_needed_usdt": str(None if initial is None else free_margin_multiple * initial)}
+
+
 def apply_account_tiers(config: MarginConfig, tiers: dict[str, TierSchedule], instrument_id: str) -> MarginConfig:
     """The margin configuration with the account-read tiers in place of the ASSUMED ones, for the venues it configures. Nothing else changes."""
     from dataclasses import replace as _replace

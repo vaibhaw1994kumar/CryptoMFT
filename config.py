@@ -502,7 +502,7 @@ REAL_ORDER_REQUIRED: tuple[RealOrderRequirement, ...] = (
 )
 
 
-SESSION_LIMIT_DEFAULT_KEYS = ("order_rate", "daily_loss_stop_usdt_per_sol_of_clip", "clock_offset", "margin_warning", "missing_marks_kill_s", "tier_table", "verify_account", "feed_arrival_stamp")
+SESSION_LIMIT_DEFAULT_KEYS = ("order_rate", "daily_loss_stop_usdt_per_sol_of_clip", "clock_offset", "margin_warning", "missing_marks_kill_s", "tier_table", "verify_account", "feed_arrival_stamp", "account_tier_check")
 
 
 def session_limits_from_profile(profile: dict, clip_base: float | None = None) -> dict | None:
@@ -546,6 +546,8 @@ def session_limits_from_profile(profile: dict, clip_base: float | None = None) -
         out["tier_table"] = "read_at_start"
     if block.get("feed_arrival_stamp") is not None:
         out["feed_arrival_stamp"] = bool(block["feed_arrival_stamp"])
+    if block.get("account_tier_check") is not None:                    # F07 (owner 20 Nov): at start-up the account's effective tier must match the engine's tier table, or the session refuses
+        out["account_tier_check"] = bool(block["account_tier_check"])
     va = block.get("verify_account")
     if va is not None:
         out["verify_account"] = {"enabled": bool(va.get("enabled", True)), "margin_mode": str(va.get("margin_mode", "cross")).lower(), "leverage": int(va["leverage"]) if va.get("leverage") is not None else None}
@@ -765,7 +767,10 @@ def raw_config_from_profile(
         row = (margin.get("venues") or {}).get(v)
         if row is None:
             continue
-        margin_venues[v.upper()] = {"mode": "CROSS", "liquidation": {"enabled": False}, "tiers": {instrument_id: {"source": str(row.get("source", "ASSUMED")), "tiers": [
+        mode = str(row.get("mode", "cross")).upper()                  # F07 (found 20 Nov): the profile's own margin mode (every profile says cross, so nothing changes for them); it was hard-coded CROSS
+        if mode not in ("CROSS", "ISOLATED"):
+            raise ValueError(f"margin.venues.{v}.mode must be cross or isolated, got {row.get('mode')!r}")
+        margin_venues[v.upper()] = {"mode": mode, "liquidation": {"enabled": False}, "tiers": {instrument_id: {"source": str(row.get("source", "ASSUMED")), "tiers": [
             {"max_notional": repr(t["max_notional"]), "maintenance_rate": repr(t["maintenance_rate"]), "initial_rate": repr(t["initial_rate"])} for t in row["tiers"]]}}}
     for key, why in (("book_sanity", "core defaults (500 bps mid jump and spread), KEPT (owner 8 Nov, Q-G3); the backtester has no price-sanity gate; triggers are counted in the manifest"),
                      ("time", "core defaults except feed age = max_book_age_s and correct_host_offset true (owner 8 Nov, Q-G4); replay receive stamps are the backtester's"), ("quality", "core defaults (preflight limits are not used by the session)"),

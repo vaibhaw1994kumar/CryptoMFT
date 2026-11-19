@@ -135,6 +135,34 @@ class LivePaperSession:
                 if self.cfg.margin is not None and self.cfg.margin.configured:
                     self.cfg = _dc_replace(self.cfg, margin=apply_account_tiers(self.cfg.margin, tiers, self.cfg.instrument_id))
                 self.account_checks["tier_table"] = {v: {"source": t.source, "tiers": len(t.tiers), "last_max_notional": str(t.tiers[-1].max_notional)} for v, t in tiers.items()}
+            if session_limits.get("account_tier_check") and real:
+                # F07 (owner 20 Nov): read each account's EFFECTIVE rules (risk id, tier limit, leverage, margin mode, rates; UNKNOWN never defaulted) and refuse to start unless they match the tier table the
+                # margin engine now uses at the session's hard cap. Kept apart from the fee snapshot.
+                from .margin import check_account_tier, with_account_leverage
+                rules, problems = {}, []
+                from decimal import Decimal
+                cap = Decimal(str(self.cfg.risk_limits.max_position_base))
+                for venue in self.cfg.venues:
+                    reader = (readers or {}).get(venue)
+                    if reader is None or not hasattr(reader, "account_rules"):
+                        problems.append(f"{venue}: no account rules reader")
+                        continue
+                    try:
+                        rules[venue] = reader.account_rules(self.cfg.instrument_id)
+                    except Exception as exc:
+                        problems.append(f"{venue}: the account rules could not be read ({type(exc).__name__}: {exc})")
+                        continue
+                    schedule = self.cfg.margin.venues[venue].tiers.get(self.cfg.instrument_id) if self.cfg.margin is not None and venue in self.cfg.margin.venues else None
+                    if schedule is not None and schedule.source.startswith("ACCOUNT_READ"):
+                        # the account's own tiers were read (A6): the engine reserves at the ACCOUNT leverage, as the venue does
+                        schedule = with_account_leverage(schedule, rules[venue])
+                        venues = dict(self.cfg.margin.venues)
+                        venues[venue] = _dc_replace(venues[venue], tiers={**venues[venue].tiers, self.cfg.instrument_id: schedule})
+                        self.cfg = _dc_replace(self.cfg, margin=_dc_replace(self.cfg.margin, venues=venues))
+                    problems += check_account_tier(rules[venue], schedule, cap)
+                self.account_checks["account_rules"] = {v: {k: r[k] for k in r if k != "mark_price"} for v, r in rules.items()}
+                if problems:
+                    raise ValueError("the account's effective risk tier does not match the margin engine's tier table: " + "; ".join(problems))
             if session_limits.get("clock_offset") is not None and real and clock_source is None:
                 raise ValueError("a session that sends real orders needs a clock source for the clock-offset gate (clock_source='server_time'); it refuses to start without one")
         self.clock_ns = clock_ns
@@ -493,6 +521,10 @@ class LivePaperSession:
         summary["paper_timestamps"] = "paper_timestamps.jsonl"
         summary["events_dropped_from_memory"] = self.dropped_from_memory
         summary["flatten_started"] = self.flatten_started
+        if self.account_fee_check is not None:
+            summary["account_fee_snapshot"] = self.account_fee_check            # F07 (owner 20 Nov): the fee-rate snapshot and the risk-tier snapshot are kept apart
+        if self.account_checks:
+            summary["account_risk_snapshot"] = self.account_checks
         if self.maker_simulator is not None:
             self.maker_simulator.finish()  # end at the last event, as a replay does
             maker = self.maker_simulator.report()
