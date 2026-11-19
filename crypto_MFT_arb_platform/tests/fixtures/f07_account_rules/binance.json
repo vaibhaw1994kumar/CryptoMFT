@@ -1,0 +1,106 @@
+{
+ "fields_seen": [
+  "adlQuantile",
+  "breakEvenPrice",
+  "entryPrice",
+  "isAutoAddMargin",
+  "isolated",
+  "isolatedMargin",
+  "isolatedWallet",
+  "leverage",
+  "liquidationPrice",
+  "marginType",
+  "markPrice",
+  "maxNotionalValue",
+  "notional",
+  "positionAmt",
+  "positionSide",
+  "symbol",
+  "unRealizedProfit",
+  "updateTime"
+ ],
+ "label": "RECORDED testnet response, BINANCE, 2026-11-19, REDACTED (F07 fields only; prices rounded; times to the hour; no ids, no balances)",
+ "leverage_bracket": [
+  {
+   "brackets": [
+    {
+     "bracket": 1,
+     "cum": 0.0,
+     "initialLeverage": 50,
+     "maintMarginRatio": 0.01,
+     "notionalCap": 50000,
+     "notionalFloor": 0
+    },
+    {
+     "bracket": 2,
+     "cum": 500.0,
+     "initialLeverage": 25,
+     "maintMarginRatio": 0.02,
+     "notionalCap": 150000,
+     "notionalFloor": 50000
+    },
+    {
+     "bracket": 3,
+     "cum": 1250.0,
+     "initialLeverage": 20,
+     "maintMarginRatio": 0.025,
+     "notionalCap": 900000,
+     "notionalFloor": 150000
+    },
+    {
+     "bracket": 4,
+     "cum": 23750.0,
+     "initialLeverage": 10,
+     "maintMarginRatio": 0.05,
+     "notionalCap": 1800000,
+     "notionalFloor": 900000
+    },
+    {
+     "bracket": 5,
+     "cum": 113750.0,
+     "initialLeverage": 5,
+     "maintMarginRatio": 0.1,
+     "notionalCap": 4800000,
+     "notionalFloor": 1800000
+    },
+    {
+     "bracket": 6,
+     "cum": 233750.0,
+     "initialLeverage": 4,
+     "maintMarginRatio": 0.125,
+     "notionalCap": 6000000,
+     "notionalFloor": 4800000
+    },
+    {
+     "bracket": 7,
+     "cum": 983750.0,
+     "initialLeverage": 2,
+     "maintMarginRatio": 0.25,
+     "notionalCap": 18000000,
+     "notionalFloor": 6000000
+    },
+    {
+     "bracket": 8,
+     "cum": 5483750.0,
+     "initialLeverage": 1,
+     "maintMarginRatio": 0.5,
+     "notionalCap": 30000000,
+     "notionalFloor": 18000000
+    }
+   ],
+   "symbol": "SOLUSDT"
+  }
+ ],
+ "position_risk": [
+  {
+   "isAutoAddMargin": "false",
+   "leverage": "20",
+   "marginType": "cross",
+   "markPrice": "73",
+   "maxNotionalValue": "900000",
+   "positionSide": "BOTH",
+   "symbol": "SOLUSDT",
+   "updateTime": 1795129200000
+  }
+ ]
+}

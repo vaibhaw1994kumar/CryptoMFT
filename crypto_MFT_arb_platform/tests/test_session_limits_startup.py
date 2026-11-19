@@ -416,3 +416,35 @@ class F07AccountRules(unittest.TestCase):
         self.assertTrue(sched.source.endswith("ACCOUNT_LEVERAGE_10"))
         self.assertEqual({t.initial_rate for t in sched.tiers}, {Decimal("0.1")})                # 1/75 and 1/50 raised to 1/10
 
+
+class F07RecordedFixtures(unittest.TestCase):
+    """F07 (owner 20 Nov): the parsers on the REDACTED responses RECORDED on the testnets by the F04 drill (scripts/testnet_amend_drill.py record_fixtures; only the fields F07 parses, prices rounded, times to
+    the hour, no ids, no balances). Skipped until the drill has written them."""
+    DIR = Path(__file__).resolve().parent / "fixtures" / "f07_account_rules"
+
+    def load(self, venue):
+        import json
+        path = self.DIR / f"{venue}.json"
+        if not path.exists():
+            self.skipTest(f"no recorded fixture {path.name} (the drill writes it)")
+        return json.loads(path.read_text())
+
+    def test_bybit_recorded_position_info_parses_with_a_known_risk_id(self):
+        from crypto_stat_arb.testnet import account_rules_bybit
+        doc = self.load("bybit")
+        self.assertIn("RECORDED", doc["label"])
+        rules = account_rules_bybit(doc["position_list"], doc["account_info"], doc["risk_limit"], "SOLUSDT", doc["position_list"].get("time"))
+        self.assertIn("riskId", doc["position_list"]["fields_seen"])                              # the venue sends riskId in position info
+        self.assertNotEqual(rules["risk_id"], "UNKNOWN")
+        for k in ("max_notional", "leverage", "margin_mode", "maintenance_rate", "initial_rate"):
+            self.assertNotEqual(rules[k], "UNKNOWN", k)
+
+    def test_binance_recorded_brackets_and_position_risk_parse(self):
+        from crypto_stat_arb.testnet import account_rules_binance
+        doc = self.load("binance")
+        self.assertIn("RECORDED", doc["label"])
+        rules = account_rules_binance(doc["leverage_bracket"], doc["position_risk"], "SOLUSDT", 1)
+        for k in ("risk_id", "max_notional", "leverage", "margin_mode", "maintenance_rate", "initial_rate"):
+            self.assertNotEqual(rules[k], "UNKNOWN", k)
+        self.assertTrue(rules["maintenance_ladder"])
+

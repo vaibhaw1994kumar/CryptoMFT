@@ -14,7 +14,13 @@ Steps, per venue unless stated:
      minimum notional) shows whether a reduce-only order is exempt from the minimum notional; the rest is then closed reduce-only.
 At the end every drill order is cancelled and both positions are checked flat (a non-flat position is closed reduce-only and reported).
 
-Usage: python3.12 scripts/testnet_amend_drill.py OUT_DIR [--fill-wait-s 60]
+F04 rerun (owner 20 Nov): `--profile` (default perp_perp_maker_taker_v1_15); every step on BOTH venues (D on Bybit = a reduce-only order at the 0.1 SOL minimum QUANTITY; the Bybit minimum-notional
+exemption stays UNTESTED); step B asserts the end state the v1_15 simulator gives (order ended, nothing resting, no second order, fills kept) and the event path where the venue gave the post-only reason;
+every drill order's venue-reported fill is booked once; the amend journal audit runs at the end (two live orders and booked twice must be 0); read-only account / position / leverage-bracket responses are
+recorded as REDACTED fixtures for F07 (only the fields F07 parses, prices rounded, times to the hour, no ids, no balances) in tests/fixtures/f07_account_rules; a per-venue outcome table is written.
+The drill sets oms.amend_enabled directly (testnet only); the profile flags testnet_amend_drill_passed and case2i_passed are NOT changed (bypassed for the drill, they stay false).
+
+Usage: python3.12 scripts/testnet_amend_drill.py OUT_DIR [--fill-wait-s 60] [--profile NAME]
 """
 from __future__ import annotations
 
@@ -75,12 +81,12 @@ def public_book(venue: str, instrument_id: str, seq: int) -> MarketEvent:
                                   "sequence": seq, "bids": [{"price": p, "quantity": q} for p, q in bids], "asks": [{"price": p, "quantity": q} for p, q in asks]})
 
 
-def build(tmp: Path):
+def build(tmp: Path, profile_name: str = "perp_perp_maker_taker_v1_15"):
     from new_backtest.profiles import apply_profile, load_profile
     from new_backtest.session_replay import SessionReplay, dated_ticks
     from crypto_stat_arb.config import config_from_raw
-    profile = load_profile("perp_perp_maker_taker_v1_10")
-    cfg = apply_profile(profile, dataset="mar2024", data_root="", pair="SOLUSDT", start_date="2026-10-29", end_date="2026-10-29", output_dir=str(tmp))
+    profile = load_profile(profile_name)
+    cfg = apply_profile(profile, dataset=None, data_root="", pair="SOLUSDT", start_date="2026-10-29", end_date="2026-10-29", output_dir=str(tmp))
     raw = SessionReplay(cfg, profile, ticks=dated_ticks("2026-10-29"), recorded=True).raw_config
     app, _ = config_from_raw(raw)
     manager = CallbackSecretManager("macos-keychain", create=lambda *a: None, read=read_secret, rotate=refuse, revoke=refuse)
@@ -176,10 +182,20 @@ class Drill:
         out.update({k: len(self.events(k)) - before[k] for k in before})
         snap = self.snapshot(venue)
         venue_status = self.session.router.query_order(venue, head.order_id, self.now())
-        out.update({"oms_live_orders": len(self.live(plan)), "venue_open_drill_orders": snap["open_drill_orders"], "reject_reasons": sorted({str(e.get("reason", ""))[:120] for e in self.events("AMEND_REJECTED")[before["AMEND_REJECTED"]:]}),
-                    "venue_state_of_the_order": None if venue_status is None or venue_status.state is None else venue_status.state.value})
-        consistent = out["oms_live_orders"] == snap["open_drill_orders"] and out["AMEND_CONFIRMED"] == 0
-        out["result"] = "PASS" if consistent and out["AMEND_REJECTED"] == 1 else "PASS_ORDER_ENDED_BY_VENUE" if consistent and snap["open_drill_orders"] == 0 else "FAIL"
+        reasons = sorted({str(e.get("reason", ""))[:160] for e in self.events("AMEND_REJECTED")[before["AMEND_REJECTED"]:]})
+        out.update({"oms_live_orders": len(self.live(plan)), "venue_open_drill_orders": snap["open_drill_orders"], "reject_reasons": reasons,
+                    "venue_state_of_the_order": None if venue_status is None or venue_status.state is None else venue_status.state.value,
+                    "head_state": head.state.value, "fills_kept": str(head.filled_quantity)})
+        # F04 a: the SAME end state the v1_15 simulator gives for this sequence (order ended, nothing resting, no second order, fills kept), always asserted; the event path (AMEND_REJECTED with the
+        # AMEND_CROSS_ENDED reason, the old order CANCELLED, no AMEND_CONFIRMED) only where the venue gave the post-only reason (owner condition 1a)
+        from crypto_stat_arb.testnet import AMEND_CROSS_ENDED
+        end_state = out["oms_live_orders"] == 0 and snap["open_drill_orders"] == 0 and out["AMEND_CONFIRMED"] == 0 and head.state == OrderState.CANCELLED
+        cross_reason = any(r.startswith(AMEND_CROSS_ENDED) for r in reasons)
+        out["simulator_end_state_equal"] = end_state
+        out["venue_gave_postonly_reason"] = cross_reason
+        out["event_path"] = "AMEND_TIMEOUT then the owed query then CANCELLED" if out["AMEND_TIMEOUT"] else "AMEND_REJECTED then CANCELLED" if out["AMEND_REJECTED"] else "other"
+        out["simulator_event_path_equal"] = (cross_reason and out["AMEND_REJECTED"] == 1 and out["AMEND_TIMEOUT"] == 0) if cross_reason else "NOT ASSERTED (no post-only reason from the venue)"
+        out["result"] = "PASS" if end_state and (not cross_reason or out["simulator_event_path_equal"] is True) else "FAIL"
         self.cancel_all(plan)
         return out
 
@@ -238,16 +254,66 @@ class Drill:
         return [n.get("event_type") for n in natives], [str(n.get("reason", ""))[:120] for n in natives if n.get("event_type") == "REJECTED"]
 
     def step_d(self, venue="BINANCE"):
+        """Binance: a reduce-only sell of 0.01 SOL, far below the 5 USDT minimum notional (is it exempt?). Bybit (owner 20 Nov, item 3): a reduce-only sell AT the 0.1 SOL minimum quantity, its own row; the
+        Bybit minimum-notional exemption stays UNTESTED."""
+        qty = Decimal("0.01") if venue == "BINANCE" else SIZE[venue]
         pos = Decimal(self.snapshot(venue)["position"])
-        out = {"position_before": str(pos)}
+        out = {"position_before": str(pos), "reduce_only_quantity": str(qty)}
         if pos < SIZE[venue]:
             out["open"] = self.raw(venue, "BUY", SIZE[venue], reduce_only=False, tag="open")[0]
         pos = Decimal(self.snapshot(venue)["position"])
         out["position_open"] = str(pos)
-        events, reasons = self.raw(venue, "SELL", Decimal("0.01"), reduce_only=True, tag="ro-min")
-        out.update({"reduce_only_0_01_events": events, "reduce_only_0_01_reject_reasons": reasons})
-        out["reduce_only_below_min_notional"] = "ACCEPTED (exempt)" if "FILLED" in events else "REFUSED" if "REJECTED" in events else "UNCLEAR"
-        out["result"] = "PASS" if out["reduce_only_below_min_notional"] != "UNCLEAR" else "UNVERIFIED"
+        events, reasons = self.raw(venue, "SELL", qty, reduce_only=True, tag="ro-min")
+        out.update({"reduce_only_events": events, "reduce_only_reject_reasons": reasons})
+        out["outcome"] = "ACCEPTED" if "FILLED" in events else "REFUSED" if "REJECTED" in events else "UNCLEAR"
+        out["result"] = "PASS" if out["outcome"] != "UNCLEAR" else "UNVERIFIED"
+        return out
+
+    def booked_once(self) -> dict:
+        """F04 item 2: each drill order's cumulative fill as the VENUE reports it equals what the OMS booked (once), per venue; and the amend journal audit's must-be-zero counts."""
+        from crypto_stat_arb.session_audit import real_order_audit
+        out = {}
+        for venue in self.adapters:
+            (native,) = self.adapters[venue].transport({"action": "ACCOUNT_SNAPSHOT", "instrument_id": self.inst, "since_ns": self.now() - 3_600_000_000_000})
+            venue_filled = {o["order_id"]: Decimal(str(o.get("filled_quantity", "0"))) for o in native["orders"]}
+            oms = {c.order_id: c.filled_quantity for plan in self.session.oms.plans.values() for c in plan.children if c.venue == venue and c.order_id in venue_filled and not c.replaces_order_id}
+            out[venue] = {"orders_compared": len(oms), "mismatches": sum(1 for oid, q in oms.items() if q != venue_filled[oid])}
+        audit = real_order_audit(self.session.ledger, self.session.oms.plans, self.now())
+        out["journal_audit"] = {k: audit[k] for k in ("two_live_orders", "duplicate_fills_booked_twice", "lineage_overfill", "amend_requests", "amends_confirmed", "amends_rejected", "amend_timeouts",
+                                                      "amend_owed_queries", "amend_owed_queries_answered", "amends_ended_by_crossing", "alarm")}
+        return out
+
+    def record_fixtures(self, fixture_dir: Path) -> dict:
+        """F07 fixtures (owner item 7, read-only calls only): the account / position / leverage-bracket responses, REDACTED to the fields F07 parses (prices rounded to whole USDT, times to the hour,
+        no account or order id, no balance) plus the list of fields the venue sent (the shape). Written under tests/fixtures; nothing of it goes into a report."""
+        fixture_dir.mkdir(parents=True, exist_ok=True)
+        hour = lambda ms: int(int(ms) // 3_600_000 * 3_600_000) if str(ms).strip() not in ("", "None") else None
+        rnd = lambda x: str(round(float(x))) if str(x).strip() not in ("", "None") else x
+        out = {}
+        for venue, adapter in self.adapters.items():
+            row = adapter.account_rules(self.inst, record_raw=True)
+            raw = row["raw"]
+            if venue == "BYBIT":
+                pos_rows = [r for r in (raw["position_list"].get("result") or {}).get("list", []) if r.get("symbol") == "SOLUSDT"]
+                keep = ("symbol", "riskId", "riskLimitValue", "leverage", "tradeMode", "autoAddMargin", "positionIdx", "markPrice")
+                red = {"position_list": {"retCode": raw["position_list"].get("retCode"), "time": hour(raw["position_list"].get("time", "")), "result": {"category": "linear", "list": [
+                           {k: (rnd(r[k]) if k == "markPrice" else r[k]) for k in keep if k in r} for r in pos_rows]}, "fields_seen": sorted({k for r in pos_rows for k in r})},
+                       "account_info": {"retCode": raw["account_info"].get("retCode"), "result": {"marginMode": (raw["account_info"].get("result") or {}).get("marginMode")},
+                                        "fields_seen": sorted((raw["account_info"].get("result") or {}).keys())},
+                       "risk_limit": {"retCode": raw["risk_limit"].get("retCode"), "result": {"category": "linear", "list": [
+                           {k: r.get(k) for k in ("id", "symbol", "riskLimitValue", "maintenanceMargin", "initialMargin", "isLowestRisk", "maxLeverage", "mmDeduction")} for r in (raw["risk_limit"].get("result") or {}).get("list", [])[:8]]}}}
+            else:
+                items = raw["leverage_bracket"] if isinstance(raw["leverage_bracket"], list) else [raw["leverage_bracket"]]
+                entry = next((x for x in items if x.get("symbol") == "SOLUSDT"), {})
+                prow = [r for r in raw["position_risk"] if r.get("symbol") == "SOLUSDT"]
+                keep = ("symbol", "leverage", "marginType", "isAutoAddMargin", "maxNotionalValue", "positionSide", "markPrice", "updateTime")
+                red = {"leverage_bracket": [{"symbol": "SOLUSDT", "brackets": [{k: b.get(k) for k in ("bracket", "initialLeverage", "notionalCap", "notionalFloor", "maintMarginRatio", "cum")} for b in entry.get("brackets", [])]}],
+                       "position_risk": [{k: (rnd(r[k]) if k == "markPrice" else hour(r[k]) if k == "updateTime" else r[k]) for k in keep if k in r} for r in prow],
+                       "fields_seen": sorted({k for r in prow for k in r})}
+            red["label"] = f"RECORDED testnet response, {venue}, {time.strftime('%Y-%m-%d', time.gmtime())}, REDACTED (F07 fields only; prices rounded; times to the hour; no ids, no balances)"
+            (fixture_dir / f"{venue.lower()}.json").write_text(json.dumps(red, indent=1, sort_keys=True))
+            parsed = row["rules"]
+            out[venue] = {"unknown": parsed.get("unknown"), "risk_id_known": parsed.get("risk_id") != "UNKNOWN", "fixture": f"{venue.lower()}.json"}
         return out
 
     def flatten(self):
@@ -265,24 +331,31 @@ def main() -> int:
     out_dir = Path(sys.argv[1])
     wait_s = float(sys.argv[sys.argv.index("--fill-wait-s") + 1]) if "--fill-wait-s" in sys.argv else 60.0
     out_dir.mkdir(parents=True, exist_ok=True)
+    profile_name = sys.argv[sys.argv.index("--profile") + 1] if "--profile" in sys.argv else "perp_perp_maker_taker_v1_15"
     with tempfile.TemporaryDirectory() as tmp:
-        app, session, adapters = build(Path(tmp))
+        app, session, adapters = build(Path(tmp), profile_name)
         drill = Drill(app, session, adapters)
         steps = drill.report["steps"]
         try:
             for venue in ("BYBIT", "BINANCE"):
-                for name, fn in (("A_amend_moves_the_same_order", drill.step_a), ("B_amend_to_a_crossing_price", drill.step_b), ("B2_amend_refused_out_of_band", drill.step_b2)):
+                for name, fn in (("A_amend_moves_the_same_order", drill.step_a), ("B_amend_to_a_crossing_price", drill.step_b), ("B2_amend_refused_out_of_band", drill.step_b2),
+                                 ("C_amend_after_a_fill", lambda v: drill.step_c(v, wait_s)), ("D_reduce_only_at_the_minimum", drill.step_d)):
                     try:
                         steps[f"{venue}:{name}"] = fn(venue)
                     except Exception as exc:          # a step that cannot run is reported, never hidden
                         steps[f"{venue}:{name}"] = {"result": "ERROR", "error": f"{type(exc).__name__}: {str(exc)[:200]}"}
-            for name, fn in (("C_amend_after_a_fill", lambda: drill.step_c("BINANCE", wait_s)), ("D_reduce_only_at_the_minimum", drill.step_d)):
-                try:
-                    steps[f"BINANCE:{name}"] = fn()
-                except Exception as exc:
-                    steps[f"BINANCE:{name}"] = {"result": "ERROR", "error": f"{type(exc).__name__}: {str(exc)[:200]}"}
+            try:
+                drill.report["f07_fixtures"] = drill.record_fixtures(ROOT / "tests/fixtures/f07_account_rules")
+            except Exception as exc:
+                drill.report["f07_fixtures"] = {"result": "ERROR", "error": f"{type(exc).__name__}: {str(exc)[:200]}"}
         finally:
             drill.report["cleanup"] = drill.flatten()
+            try:
+                drill.report["booked_once"] = drill.booked_once()
+            except Exception as exc:
+                drill.report["booked_once"] = {"result": "ERROR", "error": f"{type(exc).__name__}: {str(exc)[:200]}"}
+            drill.report["profile"] = profile_name
+            drill.report["flags"] = "testnet_amend_drill_passed and case2i_passed bypassed for the drill (oms.amend_enabled set directly, testnet only); they stay false in every profile"
             drill.report["counts"] = {"ledger_event_types": {k: sum(1 for e in session.ledger.events if e["event_type"] == k) for k in
                                                              ("AMEND_REQUESTED", "AMEND_CONFIRMED", "AMEND_REJECTED", "AMEND_TIMEOUT", "VENUE_ORDER_QUERY", "FILL")},
                                       "transport_errors": {v: len(a.transport_errors) for v, a in adapters.items()}}

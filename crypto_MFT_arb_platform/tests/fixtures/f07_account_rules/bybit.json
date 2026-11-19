@@ -1,0 +1,166 @@
+{
+ "account_info": {
+  "fields_seen": [
+   "dcpStatus",
+   "isMasterTrader",
+   "marginMode",
+   "smpGroup",
+   "spotHedgingStatus",
+   "timeWindow",
+   "unifiedMarginStatus",
+   "updatedTime"
+  ],
+  "result": {
+   "marginMode": "REGULAR_MARGIN"
+  },
+  "retCode": 0
+ },
+ "label": "RECORDED testnet response, BYBIT, 2026-11-19, REDACTED (F07 fields only; prices rounded; times to the hour; no ids, no balances)",
+ "position_list": {
+  "fields_seen": [
+   "adlRankIndicator",
+   "autoAddMargin",
+   "avgPrice",
+   "breakEvenPrice",
+   "bustPrice",
+   "createdTime",
+   "cumRealisedPnl",
+   "curRealisedPnl",
+   "isReduceOnly",
+   "leverage",
+   "leverageSysUpdatedTime",
+   "liqPrice",
+   "markPrice",
+   "mmrSysUpdatedTime",
+   "netDeltaRatio",
+   "openTime",
+   "positionBalance",
+   "positionIM",
+   "positionIMByMp",
+   "positionIdx",
+   "positionMM",
+   "positionMMByMp",
+   "positionStatus",
+   "positionValue",
+   "riskId",
+   "riskLimitValue",
+   "seq",
+   "sessionAvgPrice",
+   "side",
+   "size",
+   "stopLoss",
+   "symbol",
+   "takeProfit",
+   "tpslMode",
+   "tradeMode",
+   "trailingStop",
+   "unrealisedPnl",
+   "updatedTime"
+  ],
+  "result": {
+   "category": "linear",
+   "list": [
+    {
+     "autoAddMargin": 0,
+     "leverage": "10",
+     "markPrice": "73",
+     "positionIdx": 0,
+     "riskId": 281,
+     "riskLimitValue": "50000",
+     "symbol": "SOLUSDT",
+     "tradeMode": 0
+    }
+   ]
+  },
+  "retCode": 0,
+  "time": 1795129200000
+ },
+ "risk_limit": {
+  "result": {
+   "category": "linear",
+   "list": [
+    {
+     "id": 281,
+     "initialMargin": "0.01",
+     "isLowestRisk": 1,
+     "maintenanceMargin": "0.005",
+     "maxLeverage": "100.00",
+     "mmDeduction": "",
+     "riskLimitValue": "50000",
+     "symbol": "SOLUSDT"
+    },
+    {
+     "id": 282,
+     "initialMargin": "0.0111",
+     "isLowestRisk": 0,
+     "maintenanceMargin": "0.0056",
+     "maxLeverage": "90.00",
+     "mmDeduction": "30",
+     "riskLimitValue": "100000",
+     "symbol": "SOLUSDT"
+    },
+    {
+     "id": 283,
+     "initialMargin": "0.0125",
+     "isLowestRisk": 0,
+     "maintenanceMargin": "0.0063",
+     "maxLeverage": "80.00",
+     "mmDeduction": "100",
+     "riskLimitValue": "250000",
+     "symbol": "SOLUSDT"
+    },
+    {
+     "id": 284,
+     "initialMargin": "0.0133",
+     "isLowestRisk": 0,
+     "maintenanceMargin": "0.0067",
+     "maxLeverage": "75.00",
+     "mmDeduction": "200",
+     "riskLimitValue": "400000",
+     "symbol": "SOLUSDT"
+    },
+    {
+     "id": 285,
+     "initialMargin": "0.0143",
+     "isLowestRisk": 0,
+     "maintenanceMargin": "0.0071",
+     "maxLeverage": "70.00",
+     "mmDeduction": "360",
+     "riskLimitValue": "550000",
+     "symbol": "SOLUSDT"
+    },
+    {
+     "id": 286,
+     "initialMargin": "0.0154",
+     "isLowestRisk": 0,
+     "maintenanceMargin": "0.0077",
+     "maxLeverage": "65.00",
+     "mmDeduction": "690",
+     "riskLimitValue": "700000",
+     "symbol": "SOLUSDT"
+    },
+    {
+     "id": 287,
+     "initialMargin": "0.0182",
+     "isLowestRisk": 0,
+     "maintenanceMargin": "0.0091",
+     "maxLeverage": "55.00",
+     "mmDeduction": "1670",
+     "riskLimitValue": "850000",
+     "symbol": "SOLUSDT"
+    },
+    {
+     "id": 288,
+     "initialMargin": "0.02",
+     "isLowestRisk": 0,
+     "maintenanceMargin": "0.01",
+     "maxLeverage": "50.00",
+     "mmDeduction": "2435",
+     "riskLimitValue": "1000000",
+     "symbol": "SOLUSDT"
+    }
+   ]
+  },
+  "retCode": 0
+ }
+}

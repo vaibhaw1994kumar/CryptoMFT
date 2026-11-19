@@ -507,6 +507,10 @@ class _FakePerpVenue:
 
     def __init__(self, venue: str):
         self.venue, self.orders, self.calls, self.refuse_amend, self.next_id = venue, {}, [], False, 1000
+        self.cross = None              # F04b: None | "reason" (the amend ENDS the order and the venue says post-only) | "silent" (it ends the order and gives no reason)
+        self.fail_amend = 0            # F04b: the next n amend calls raise (no answer: a timeout / a disconnect after the send); the amend still REACHES the venue when `amend_lands`
+        self.amend_lands = False
+        self.fail_query = 0            # F04b: the next n order queries raise (the gateway is down)
 
     def fill(self, link, qty):
         o = self.orders[link]
@@ -516,11 +520,12 @@ class _FakePerpVenue:
     def _bybit_row(self, link):
         o = self.orders[link]
         status = {"NEW": "New", "PARTIAL": "PartiallyFilled", "FILLED": "Filled", "CANCELLED": "Cancelled"}[o["status"]]
-        return {"orderId": o["id"], "orderLinkId": link, "price": str(o["price"]), "qty": str(o["qty"]), "cumExecQty": str(o["cum"]), "avgPrice": str(o["price"]) if o["cum"] else "0", "orderStatus": status}
+        return {"orderId": o["id"], "orderLinkId": link, "price": str(o["price"]), "qty": str(o["qty"]), "cumExecQty": str(o["cum"]), "avgPrice": str(o["price"]) if o["cum"] else "0", "orderStatus": status,
+                "rejectReason": o.get("reject", "EC_NoError")}
 
     def _binance_row(self, link):
         o = self.orders[link]
-        status = {"NEW": "NEW", "PARTIAL": "PARTIALLY_FILLED", "FILLED": "FILLED", "CANCELLED": "CANCELED"}[o["status"]]
+        status = {"NEW": "NEW", "PARTIAL": "PARTIALLY_FILLED", "FILLED": "FILLED", "CANCELLED": "CANCELED", "EXPIRED": "EXPIRED"}[o["status"]]
         return {"orderId": o["id"], "clientOrderId": link, "price": str(o["price"]), "origQty": str(o["qty"]), "executedQty": str(o["cum"]), "avgPrice": str(o["price"]) if o["cum"] else "0", "status": status, "updateTime": 1}
 
     def __call__(self, method, url, headers, body, timeout):
@@ -528,6 +533,28 @@ class _FakePerpVenue:
         q = {k: v[0] for k, v in parse_qs(parsed.query).items()}
         b = json.loads(body) if body else {}
         self.calls.append((method, parsed.path))
+        is_amend = parsed.path == "/v5/order/amend" or method == "PUT"
+        is_query = parsed.path in ("/v5/order/realtime", "/v5/order/history") or (method == "GET" and parsed.path == "/fapi/v1/order")
+        if is_amend and self.fail_amend:
+            self.fail_amend -= 1
+            if self.amend_lands:                                      # the request reached the venue (a lost answer): it moved the order
+                link = b.get("orderLinkId") or q.get("origClientOrderId")
+                self.orders[link]["price"] = Decimal(b.get("price") or q.get("price"))
+            raise ConnectionError("injected: no answer to the amend")
+        if is_query and self.fail_query:
+            self.fail_query -= 1
+            raise ConnectionError("injected: the gateway is down")
+        if is_amend and self.cross is not None:
+            link = b.get("orderLinkId") or q.get("origClientOrderId")
+            o = self.orders[link]
+            if self.venue == "BYBIT":
+                o["status"] = "CANCELLED"
+                o["reject"] = "EC_PostOnlyWillTakeLiquidity" if self.cross == "reason" else "EC_NoError"
+                return 200, json.dumps({"retCode": 0, "result": {"orderId": o["id"]}})
+            o["status"] = "EXPIRED"
+            if self.cross == "reason":
+                return 400, json.dumps({"code": -5022, "msg": "Due to the order could not be executed as maker, the Post Only order will be rejected."})
+            return 200, json.dumps({**self._binance_row(link), "timeInForce": "GTX"})
         if self.venue == "BYBIT":
             if parsed.path == "/v5/order/create":
                 self.next_id += 1
@@ -562,7 +589,7 @@ class _FakePerpVenue:
                 return 400, json.dumps({"code": -2013, "msg": "Order does not exist."})
             if method == "PUT":
                 o = self.orders[link]
-                if o["status"] in ("FILLED", "CANCELLED"):
+                if o["status"] in ("FILLED", "CANCELLED", "EXPIRED"):
                     return 400, json.dumps({"code": -2013, "msg": "Order does not exist."})
                 if self.refuse_amend:
                     return 400, json.dumps({"code": -5027, "msg": "No need to modify the order."})
@@ -572,7 +599,7 @@ class _FakePerpVenue:
                 return 200, json.dumps(self._binance_row(link))
             if method == "DELETE":
                 o = self.orders[link]
-                if o["status"] in ("FILLED", "CANCELLED"):
+                if o["status"] in ("FILLED", "CANCELLED", "EXPIRED"):
                     return 400, json.dumps({"code": -2011, "msg": "Unknown order sent."})
                 o["status"] = "CANCELLED"
                 return 200, json.dumps(self._binance_row(link))
@@ -653,3 +680,126 @@ class PerpetualAmend(unittest.TestCase):
             self.assertEqual(event["event_type"], "REJECTED")
             self.assertIn("amend not supported", event["reason"])
             self.assertEqual(http.calls, [])
+
+
+class F04bAmendFaultsThroughTheRealOrderPath(unittest.TestCase):
+    """F04 b (owner 20 Nov): what the testnet drill cannot induce, on FAKE venues with fault injection, through the real-order chain OMS -> TestnetVenueAdapter -> perpetual transport -> fake venue: a post-only
+    amend to a crossing price that ENDS the order (with and without the venue's post-only reason), an amend timeout (the amend lost or landed), a disconnect during an amend, and a duplicate Filled. The state
+    contract is the v1_15 simulator's: the order ends (or stays) as the venue says, nothing rests that the venue does not have, no second order is ever placed, fills are booked once and kept. No network."""
+
+    def build(self, venue):
+        from dataclasses import replace as _r
+        from crypto_stat_arb.execution import DispatchPolicy, OrderTimeoutPolicy, StrategyDirectedRouter
+        from crypto_stat_arb.hedge_lifecycle import HedgePolicy
+        from crypto_stat_arb.ledger import Ledger
+        from crypto_stat_arb.oms import OMS
+        from crypto_stat_arb.sdk import TestnetVenueAdapter
+        from crypto_stat_arb.testnet import BinanceFuturesTestnetTransport, BybitV5LinearTestnetTransport
+        from test_restart_resilience import INSTR_FT, ScriptedVenue, _ft_books, _ft_instruments, _ft_opportunity, risk
+        self.fake = _FakePerpVenue(venue)
+        cls = BybitV5LinearTestnetTransport if venue == "BYBIT" else BinanceFuturesTestnetTransport
+        transport = cls(symbols={INSTR_FT: "SOLUSDT"}, http=self.fake, clock_ms=lambda: 1_700_000_000_000, sleep=lambda s: None, settle_queries=2)
+        self.adapter = TestnetVenueAdapter(venue, lambda req: transport(req, SECRET))
+        other = "BINANCE" if venue == "BYBIT" else "BYBIT"
+        inst = _ft_instruments()
+        self.oms = OMS(inst, risk(), Ledger(), router=StrategyDirectedRouter(inst, adapters={venue: self.adapter, other: ScriptedVenue(other, ["fill"] * 4, price="60000")}),
+                       dispatch_policy=DispatchPolicy.FILL_TRIGGERED, hedge_policy=HedgePolicy(retry_limit=1),
+                       order_timeout_policy=OrderTimeoutPolicy(report_timeout_ns=100_000_000, query_interval_ns=50_000_000, max_queries=5))
+        self.oms.amend_enabled = True
+        self.books = _ft_books()
+        self.plan = self.oms.execute(_r(_ft_opportunity(), buy_venue=venue, sell_venue=other), self.books, maker_venue=venue)
+        self.maker = self.plan.children[0]
+        self.t = 200_000_000
+        self.assertEqual(self.maker.state.value, "ACKNOWLEDGED", venue)
+        return self
+
+    def creates(self):
+        return sum(1 for m, p in self.fake.calls if p == "/v5/order/create" or (m == "POST" and p == "/fapi/v1/order"))
+
+    def events(self, *names):
+        return [e for e in self.oms.ledger.events if e["event_type"] in names]
+
+    def live(self):
+        return [c for c in self.plan.children if c.order_role == "PRIMARY" and c.state.value in ("ACKNOWLEDGED", "PARTIAL", "AMEND_PENDING", "SENT")]
+
+    def booked(self):
+        ids = {c.order_id for c in self.plan.children if c.order_role == "PRIMARY"}
+        return sum((Decimal(str(e["fill_quantity"])) for e in self.events("FILL") if e.get("order_id") in ids), Decimal("0"))
+
+    def contract(self, venue):
+        """The invariants every case shares: one order ever placed at the venue, never two live primary orders, what the venue filled booked once."""
+        self.assertEqual(self.creates(), 1, venue)
+        self.assertLessEqual(len(self.live()), 1, venue)
+        self.assertEqual(self.booked(), self.fake.orders[next(iter(self.fake.orders))]["cum"], venue)
+
+    def fill_at_venue(self, qty):
+        from test_oms_amend import stream_update
+        from crypto_stat_arb.execution import ExecutionEventType
+        link = next(iter(self.fake.orders))
+        self.fake.fill(link, qty)
+        self.oms.ingest_order_update(stream_update(self.plan, self.maker, 1, ExecutionEventType.PARTIAL, str(self.fake.orders[link]["cum"]), self.t, price=str(self.fake.orders[link]["price"])))
+
+    def test_crossing_amend_with_the_venue_reason_ends_the_order_as_the_simulator_does(self):
+        from crypto_stat_arb.simulation.queue_adapter import QueueAwareVenueAdapter
+        from crypto_stat_arb.testnet import AMEND_CROSS_ENDED
+        self.assertEqual(AMEND_CROSS_ENDED, QueueAwareVenueAdapter.AMEND_CROSS_ENDED)          # the same reason text as the v1_15 simulator
+        for venue in ("BYBIT", "BINANCE"):
+            self.build(venue)
+            self.fill_at_venue("0.001")                                                         # a fill before the amend is kept
+            self.fake.cross = "reason"
+            self.assertEqual(self.oms.request_amend(self.maker.order_id, self.maker.limit_price + Decimal("100"), self.t + 1), "REQUESTED")
+            (rej,) = self.events("AMEND_REJECTED")
+            self.assertTrue(rej["reason"].startswith(AMEND_CROSS_ENDED), (venue, rej["reason"]))
+            self.assertIn("rejectReason=EC_PostOnlyWillTakeLiquidity" if venue == "BYBIT" else "code=-5022", rej["reason"])   # the venue field and value used, quoted
+            self.assertEqual((self.maker.state.value, self.events("AMEND_CONFIRMED"), self.events("AMEND_TIMEOUT")), ("CANCELLED", [], []), venue)
+            self.assertEqual(self.live(), [])
+            self.contract(venue)
+
+    def test_crossing_amend_with_no_reason_reports_the_end_state_with_reason_unknown(self):
+        from crypto_stat_arb.testnet import AMEND_CROSS_ENDED
+        for venue in ("BYBIT", "BINANCE"):
+            self.build(venue)
+            self.fake.cross = "silent"
+            self.oms.request_amend(self.maker.order_id, self.maker.limit_price + Decimal("100"), self.t + 1)
+            (rej,) = self.events("AMEND_REJECTED")
+            self.assertFalse(rej["reason"].startswith(AMEND_CROSS_ENDED), venue)                # never claimed without the venue's own reason
+            self.assertIn("reason UNKNOWN", rej["reason"])
+            self.assertEqual(self.maker.state.value, "CANCELLED", venue)
+            self.contract(venue)
+
+    def test_an_amend_timeout_keeps_the_timeout_and_the_owed_query_then_the_venue_answer_decides(self):
+        for venue in ("BYBIT", "BINANCE"):
+            for lands in (False, True):
+                self.build(venue)
+                self.fake.fail_amend, self.fake.amend_lands = 1, lands
+                self.oms.request_amend(self.maker.order_id, self.maker.limit_price + Decimal("1"), self.t + 1)
+                for k in range(1, 40):
+                    self.oms.advance_time(self.t + k * 50_000_000, self.books)
+                self.assertEqual(len(self.events("AMEND_TIMEOUT")), 1, (venue, lands))         # kept in the journal (owner condition 1b)
+                self.assertTrue(self.events("VENUE_ORDER_QUERY"), (venue, lands))
+                self.assertFalse(self.oms.amend_query_owed(self.maker.order_id), (venue, lands))
+                self.contract(venue)
+                self.assertEqual(len(self.live()), 1, (venue, lands))                           # the venue still has the order: exactly one live order, never two
+
+    def test_a_disconnect_during_an_amend_queries_until_the_gateway_answers(self):
+        for venue in ("BYBIT", "BINANCE"):
+            self.build(venue)
+            self.fake.fail_amend, self.fake.fail_query = 1, 3
+            self.oms.request_amend(self.maker.order_id, self.maker.limit_price + Decimal("1"), self.t + 1)
+            for k in range(1, 60):
+                self.oms.advance_time(self.t + k * 50_000_000, self.books)
+            self.assertEqual(len(self.events("AMEND_TIMEOUT")), 1, venue)
+            self.assertFalse(self.oms.amend_query_owed(self.maker.order_id), venue)               # answered once the gateway came back
+            self.assertEqual(self.fake.fail_query, 0, venue)
+            self.contract(venue)
+
+    def test_a_duplicate_filled_is_booked_once(self):
+        from test_oms_amend import stream_update
+        from crypto_stat_arb.execution import ExecutionEventType
+        for venue in ("BYBIT", "BINANCE"):
+            self.build(venue)
+            link = next(iter(self.fake.orders))
+            self.fake.fill(link, str(self.fake.orders[link]["qty"]))
+            for n in (1, 2):                                                                    # the venue reports Filled twice
+                self.oms.ingest_order_update(stream_update(self.plan, self.maker, n, ExecutionEventType.FILLED, str(self.fake.orders[link]["cum"]), self.t + n, price=str(self.fake.orders[link]["price"])))
+            self.contract(venue)
