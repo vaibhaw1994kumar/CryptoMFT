@@ -158,6 +158,18 @@ class ArbConfig:
     # open size (less what a closing quote already rests for), priced by the same edge formula in the reducing direction (fees, S1 table, VWAP hedge, funding). The hedge that follows a fill closes the other leg and is
     # reduce-only. It never opens risk and never takes a position through flat. Maker-taker mode only. A separate switch, NOT in v1_10.
     close_pairs: str = "off"
+    # F05 (owner 20 Nov; all OFF by default, read only with close_pairs on): `close_reservation` True = a closing quote is sized from the OMS's per-pair closable quantity (pair legs less outstanding close
+    # reservations, capped by the venue position) and reserves it until it ends; False = the Order 3 B rule (|position| less resting closing quotes). `close_triggers`: what may send a closing quote: "edge" (the
+    # Order 3 B rule: the edge formula in the reducing direction; the default) and, each sending the closing quote at the maker touch (ASSUMED; post-only, never aggressive) whatever the edge: "time_stop" (the
+    # oldest open pair is older than max_pair_hold_s), "funding" (a funding settlement within funding_window_s + funding_close_lead_s), "inventory_limit" (no inventory room left in the pair's opening direction),
+    # "margin_limit" (the A4 margin stop is active), "end_of_session" (UTC second of day at or after end_of_session_utc_s). `close_unfilled_after_s` > 0: a closing quote resting longer is reported once as
+    # CLOSE_UNFILLED (nothing aggressive is sent). Every number ASSUMED.
+    close_reservation: bool = False
+    close_triggers: tuple = ("edge",)
+    max_pair_hold_s: float = 0.0
+    funding_close_lead_s: float = 0.0
+    end_of_session_utc_s: float = -1.0
+    close_unfilled_after_s: float = 0.0
     # W7 7.D (owner 17 Nov, profile block `cost_records.estimate_at_decision`): False (every profile up to v1_13) | True: each maker-taker signal carries `estimate`, the pre-trade cost and edge terms
     # the gate used, taken from the same variables (never recomputed). It changes no decision; only the signal row and the primary intent record gain the key.
     estimate_at_decision: bool = False
@@ -296,6 +308,7 @@ class ArbSignal:
     conditional_edge_bps: float | None = None
     edge_ref: str = "buy_ask"
     close_pair: bool = False             # Order 3 B: this signal CLOSES an open pair (a reducing quote; its hedge is reduce-only)
+    close_trigger: str | None = None     # F05: why a closing quote was sent ("edge" or a non-edge trigger); None for every opening signal and with the F05 keys off
     estimate: dict | None = None         # W7 7.D: the pre-trade estimate (ArbConfig.estimate_at_decision only; None otherwise and the key is never written)
 
     # MAKER_TAKER: the passive leg is legs[0]; the hedge is a taker on the other venue, on the opposite side. For a passive
@@ -318,6 +331,8 @@ class PendingExposure:
     """Base quantity (positive magnitudes) per venue that would still be bought / sold if every order that is not in the
     InventoryBook yet executed in full: resting maker remainders, maker legs in flight and hedges in flight."""
     closing: dict[str, float] = field(default_factory=dict)       # Order 3 B: remaining size of resting REDUCING quotes per maker venue (not counted in buys / sells)
+    closable: dict[str, float] | None = None                     # F05 (close_reservation only): what a closing quote on each maker venue may close now (the OMS's per-pair closable quantity); None = Order 3 B rule
+    oldest_pair_ts: dict[str, float] | None = None               # F05: the opening time (s) of the oldest open pair per maker venue (the time stop)
     buys: dict[str, float] = field(default_factory=dict)
     sells: dict[str, float] = field(default_factory=dict)
 
@@ -375,6 +390,17 @@ class CrossVenueArbStrategy:
             raise ValueError("ArbConfig.close_pairs needs the maker-taker mode")
         if self.config.close_pairs != "off" and not self.config.count_pending_exposure:
             raise ValueError("ArbConfig.close_pairs needs count_pending_exposure (a resting closing quote is read from the pending exposure: without it every evaluation would quote the open size again)")
+        bad_triggers = set(self.config.close_triggers) - {"edge", "time_stop", "funding", "inventory_limit", "margin_limit", "end_of_session"}
+        if bad_triggers:
+            raise ValueError(f"ArbConfig.close_triggers has unknown triggers {sorted(bad_triggers)}")
+        if (self.config.close_reservation or tuple(self.config.close_triggers) != ("edge",) or self.config.close_unfilled_after_s) and self.config.close_pairs == "off":
+            raise ValueError("ArbConfig.close_reservation, close_triggers and close_unfilled_after_s need close_pairs reduce_only_quote")
+        if "time_stop" in self.config.close_triggers and not (self.config.close_reservation and self.config.max_pair_hold_s > 0):
+            raise ValueError("the time_stop close trigger needs close_reservation (pair ages) and max_pair_hold_s > 0")
+        if "funding" in self.config.close_triggers and not (self.config.funding_window_s > 0 or self.config.funding_close_lead_s > 0):
+            raise ValueError("the funding close trigger needs funding_window_s or funding_close_lead_s")
+        if "end_of_session" in self.config.close_triggers and not 0 <= self.config.end_of_session_utc_s < 86400:
+            raise ValueError("the end_of_session close trigger needs end_of_session_utc_s in [0, 86400)")
         if self.config.maker_passive_side not in ("bid", "ask", "both"):
             raise ValueError(f"ArbConfig.maker_passive_side must be 'bid', 'ask' or 'both', got {self.config.maker_passive_side!r}")
         if self.config.join_touch_on_tick_rounding and not self.config.round_quotes_to_tick:
@@ -833,14 +859,46 @@ class CrossVenueArbStrategy:
             position = inventory.base.get(maker, 0.0)
             already = (pending.closing.get(maker, 0.0) if pending is not None else 0.0)
             open_size = abs(position) - already
+            if pending is not None and pending.closable is not None:
+                open_size = pending.closable.get(maker, 0.0)                     # F05: the OMS's per-pair closable quantity (outstanding reservations already deducted)
             if open_size <= 1e-9:
                 continue
             taker = next(v for v in tradeable if v != maker)
-            sig = (self._evaluate_maker_taker_ask(maker, taker, books, states, inventory, now, pending, close_cap=open_size) if position > 0
-                   else self._evaluate_maker_taker(maker, taker, books, states, inventory, now, pending, close_cap=open_size))
+            evaluate = self._evaluate_maker_taker_ask if position > 0 else self._evaluate_maker_taker
+            sig = evaluate(maker, taker, books, states, inventory, now, pending, close_cap=open_size) if "edge" in cfg.close_triggers else None
+            if sig is None and tuple(cfg.close_triggers) != ("edge",):
+                trigger = self._close_trigger(maker, taker, position, inventory, now, pending)
+                if trigger is not None:
+                    sig = evaluate(maker, taker, books, states, inventory, now, pending, close_cap=open_size, force_close=trigger)
             if sig is not None and (best is None or sig.net_edge_bps > best.net_edge_bps):
                 best = sig
         return best
+
+    margin_limit_active: Any = None      # F05: a callable () -> bool the session sets (the A4 margin stop); None = never active
+
+    def _close_trigger(self, maker: str, taker: str, position: float, inventory: InventoryBook, now: float, pending: "PendingExposure | None") -> str | None:
+        """F05 (d): the first active non-edge close trigger for the open pair on `maker`, or None. Each only sends the closing quote at the touch (post-only); nothing aggressive."""
+        cfg = self.config
+        for trigger in cfg.close_triggers:
+            if trigger == "time_stop" and pending is not None and pending.oldest_pair_ts is not None:
+                t0 = pending.oldest_pair_ts.get(maker)
+                if t0 is not None and now - t0 >= cfg.max_pair_hold_s:
+                    return trigger
+            elif trigger == "funding":
+                lead = cfg.funding_window_s + cfg.funding_close_lead_s
+                if any(t is not None and 0 <= t - now <= lead for t in (self._next_funding.get(maker), self._next_funding.get(taker))):
+                    return trigger
+            elif trigger == "inventory_limit":
+                room = self._inventory_room(taker, maker, inventory, pending) if position < 0 else self._inventory_room(maker, taker, inventory, pending)
+                if room <= 1e-12:
+                    return trigger
+            elif trigger == "margin_limit":
+                if self.margin_limit_active is not None and self.margin_limit_active():
+                    return trigger
+            elif trigger == "end_of_session":
+                if now % 86400 >= cfg.end_of_session_utc_s:
+                    return trigger
+        return None
 
     def _evaluate_direction(
         self,
@@ -970,6 +1028,7 @@ class CrossVenueArbStrategy:
         now: float,
         pending: "PendingExposure | None" = None,
         close_cap: float | None = None,
+        force_close: str | None = None,
     ) -> ArbSignal | None:
         """Rest a passive bid on maker_venue, hedge by selling on taker_venue. `close_cap` (Order 3 B only): the open size this bid may CLOSE (a short on the maker venue): it sizes the quote instead of the inventory room."""
         cfg = self.config
@@ -997,7 +1056,9 @@ class CrossVenueArbStrategy:
         # Must be a real improvement on the maker venue's book, and never cross it.
         touch_bid, touch_ask = maker_book.best_bid, maker_book.best_ask
         joins_touch = False
-        if cfg.round_quotes_to_tick:
+        if force_close is not None:
+            max_bid, joins_touch = touch_bid, True                          # F05 (d): a non-edge close rests at the touch (ASSUMED), whatever the edge
+        elif cfg.round_quotes_to_tick:
             was_ok = touch_bid < max_bid < touch_ask
             max_bid = self._quote_to_tick(maker_venue, max_bid, "bid")
             on_touch = abs(max_bid - touch_bid) < 1e-6 * cfg.venue_ticks[maker_venue]
@@ -1034,8 +1095,9 @@ class CrossVenueArbStrategy:
             naive_bps, cond_bps, edge_ref = er.naive_bps, er.net_bps - cfg.safety_buffer_bps, er.ref_name
             net_bps = cond_bps
             est_inputs = (er, edge_book, edge_qty)
-        self.best_edge_seen_bps = max(self.best_edge_seen_bps, net_bps)
-        if net_bps < cfg.min_net_edge_bps:
+        if force_close is None:
+            self.best_edge_seen_bps = max(self.best_edge_seen_bps, net_bps)
+        if net_bps < cfg.min_net_edge_bps and force_close is None:
             if joins_touch:
                 self.rejects["tick_rounding_join_no_edge"] = self.rejects.get("tick_rounding_join_no_edge", 0) + 1
             else:
@@ -1102,7 +1164,7 @@ class CrossVenueArbStrategy:
                 self.rejects["low_fill_prob"] += 1
                 return None
 
-        if joins_touch:
+        if joins_touch and force_close is None:
             self.rejects["tick_rounding_joined_touch"] = self.rejects.get("tick_rounding_joined_touch", 0) + 1
         slack = hedge_px * cfg.max_walk_bps / 10_000.0
         return ArbSignal(
@@ -1113,6 +1175,7 @@ class CrossVenueArbStrategy:
             depth_limited=qty >= hedge_depth - 1e-12,
             inventory_limited=qty >= inv_cap - 1e-12,
             naive_edge_bps=naive_bps, conditional_edge_bps=cond_bps, edge_ref=edge_ref, close_pair=close_cap is not None,
+            close_trigger=(force_close or "edge") if close_cap is not None and self.config.close_reservation else None,
             estimate=self._decision_estimate("bid", est_inputs, maker_book, hedge_px, max_bid, gross_bps, net_bps, vwap_entry) if cfg.estimate_at_decision else None,
             legs=[
                 # Passive leg only. The hedge is fired on fill, not now — firing
@@ -1131,6 +1194,7 @@ class CrossVenueArbStrategy:
         now: float,
         pending: "PendingExposure | None" = None,
         close_cap: float | None = None,
+        force_close: str | None = None,
     ) -> ArbSignal | None:
         """Rest a passive ask on maker_venue, hedge by buying on taker_venue (mirror of _evaluate_maker_taker). `close_cap` (Order 3 B only): the open size this ask may CLOSE (a long on the maker venue)."""
         cfg = self.config
@@ -1157,7 +1221,9 @@ class CrossVenueArbStrategy:
 
         touch_bid, touch_ask = maker_book.best_bid, maker_book.best_ask
         joins_touch = False
-        if cfg.round_quotes_to_tick:
+        if force_close is not None:
+            min_ask, joins_touch = touch_ask, True                          # F05 (d): a non-edge close rests at the touch (ASSUMED), whatever the edge
+        elif cfg.round_quotes_to_tick:
             was_ok = touch_bid < min_ask < touch_ask
             min_ask = self._quote_to_tick(maker_venue, min_ask, "ask")
             on_touch = abs(min_ask - touch_ask) < 1e-6 * cfg.venue_ticks[maker_venue]
@@ -1193,8 +1259,9 @@ class CrossVenueArbStrategy:
             naive_bps, cond_bps, edge_ref = er.naive_bps, er.net_bps - cfg.safety_buffer_bps, er.ref_name
             net_bps = cond_bps
             est_inputs = (er, edge_book, edge_qty)
-        self.best_edge_seen_bps = max(self.best_edge_seen_bps, net_bps)
-        if net_bps < cfg.min_net_edge_bps:
+        if force_close is None:
+            self.best_edge_seen_bps = max(self.best_edge_seen_bps, net_bps)
+        if net_bps < cfg.min_net_edge_bps and force_close is None:
             if joins_touch:
                 self.rejects["tick_rounding_join_no_edge"] = self.rejects.get("tick_rounding_join_no_edge", 0) + 1
             else:
@@ -1249,7 +1316,7 @@ class CrossVenueArbStrategy:
                 self.rejects["low_fill_prob"] += 1
                 return None
 
-        if joins_touch:
+        if joins_touch and force_close is None:
             self.rejects["tick_rounding_joined_touch"] = self.rejects.get("tick_rounding_joined_touch", 0) + 1
         return ArbSignal(
             signal_id=next(self._ids), ts=now,
@@ -1259,6 +1326,7 @@ class CrossVenueArbStrategy:
             depth_limited=qty >= hedge_depth - 1e-12,
             inventory_limited=qty >= inv_cap - 1e-12,
             naive_edge_bps=naive_bps, conditional_edge_bps=cond_bps, edge_ref=edge_ref, close_pair=close_cap is not None,
+            close_trigger=(force_close or "edge") if close_cap is not None and self.config.close_reservation else None,
             estimate=self._decision_estimate("ask", est_inputs, maker_book, hedge_px, min_ask, gross_bps, net_bps, vwap_entry) if cfg.estimate_at_decision else None,
             legs=[
                 # Passive leg only; the buy hedge is fired on fill (see _evaluate_maker_taker).
@@ -1386,6 +1454,9 @@ class ArbSessionStrategy:
         self.close_pair_ids: set[str] = set()                                                 # Order 3 B: the opportunities that CLOSE a pair (the session passes close_pair to the OMS for them)
         self.close_pair_signals = 0
         self.grid_snaps = {"price": 0, "quantity": 0}                                         # how often the instrument grid changed a signal value (0 when the strategy already quotes on the grid)
+        self._close_unfilled_reported: set[str] = set()
+        if strategy.config.close_reservation:
+            oms.close_reservation = True                                                         # F05: the OMS reserves per pair for this strategy's closing quotes
         observer = getattr(oms, "observer", None)
         if strategy.config.estimate_at_decision and observer is not None and hasattr(observer, "estimate_fn"):
             observer.estimate_fn = self.estimate_for_plan                                       # W7 7.D: the layer writes the signal's estimate on the primary (maker) intent record
@@ -1423,7 +1494,38 @@ class ArbSessionStrategy:
                     continue
                 pending.add(self._feed_name[child.venue], child.side.value.lower(), remaining)
                 makers += int(child.post_only)
+        if getattr(getattr(getattr(self, "strategy", None), "config", None), "close_reservation", False):
+            # F05: what each maker venue may close now, from the OMS's pairs (outstanding reservations deducted), and the oldest open pair's opening time (the time stop)
+            pending.closable, pending.oldest_pair_ts = {}, {}
+            legs = self.oms.pair_positions(self.instrument_id)
+            for feed, core in self.venue_names.items():
+                hedge = next((c for c in self.venue_names.values() if c != core), None)
+                if hedge is None:
+                    continue
+                _, qty = self.oms.closable_quantity(core, hedge, self.instrument_id)
+                pending.closable[feed] = float(qty)
+                opened = [self.oms.plans[pid].opportunity.observed_ts_ns for pid, row in legs.items() if row.get(core)]
+                if opened:
+                    pending.oldest_pair_ts[feed] = min(opened) / 1_000_000_000
         return pending, makers
+
+    def report_unfilled_closes(self, now_ns: int) -> None:
+        """F05 (d): a closing quote resting longer than close_unfilled_after_s is reported ONCE as CLOSE_UNFILLED (aggregates on the ledger); nothing aggressive is sent and the quote is not touched."""
+        limit = self.strategy.config.close_unfilled_after_s
+        if limit <= 0:
+            return
+        for cid in self.oms._close_alloc:
+            plan = self.oms.plans.get(cid)
+            if plan is None or cid in self._close_unfilled_reported or plan.state.value == "CLOSED":
+                continue
+            maker = plan.children[0] if plan.children else None
+            if maker is None or maker.state not in _LIVE_CHILD_STATES or maker.filled_quantity >= maker.quantity:
+                continue
+            if now_ns - plan.opportunity.observed_ts_ns > int(limit * 1e9):
+                self._close_unfilled_reported.add(cid)
+                self.oms.close_stats["unfilled"] = self.oms.close_stats.get("unfilled", 0) + 1
+                self.ledger.record("CLOSE_UNFILLED", now_ns, parent_id=cid, venue=maker.venue, side=maker.side.value, quantity=str(maker.quantity), filled=str(maker.filled_quantity),
+                                   resting_s=(now_ns - plan.opportunity.observed_ts_ns) / 1e9, limit_s=limit, label="ASSUMED", action="reported only: no aggressive exit")
 
     def float_books(self, books: dict, now_s: float) -> dict[str, OrderBook] | None:
         out = {}
@@ -1524,6 +1626,8 @@ class ArbSessionStrategy:
         floats = self.view_books() if self.view_books is not None else self.float_books(books, now_s)
         if floats is None:
             return None
+        if getattr(self.strategy.config, "close_unfilled_after_s", 0) > 0:        # (a test may give a config stand-in without the F05 keys)
+            self.report_unfilled_closes(now_ns)
         pending, live_makers = self.pending_and_live_makers()
         signal = self.strategy.evaluate(
             floats, self.states, self.inventory(), now_s, live_maker_orders=live_makers,

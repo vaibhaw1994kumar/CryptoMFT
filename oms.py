@@ -345,6 +345,13 @@ class OMS:
         self._unwind_dust: dict[str, dict[str, Any]] = {}                   # owner 13 Nov: plans whose unwind remainder is below every venue's minimum: DUST, recorded once, never retried
         self._unwind_skip: dict[tuple[str, str], dict[str, Any]] = {}      # (plan, venue) -> the unavailable-venue state: reason, next retry time, delay (1 s doubling to 30 s)
         self._close_pair_plans: set[str] = set()                           # Order 3 B: plans whose maker quote CLOSES an open pair (reduce-only quote, reduce-only hedge); empty = off, byte-identical
+        # F05 (owner 20 Nov; arb.close_reservation, OFF by default: the strategy shim sets it, and with it off nothing below is read or written). A PAIR is an entry plan (an arb package with a hedge leg); its
+        # pair id is its parent id. A closing plan reserves quantity on named pairs (oldest first, ASSUMED) at its creation; the reservation holds until the closing plan is closed, then the unused part is
+        # released. Closable on a venue = the pair's own leg there minus outstanding reservations, never more than the ledger position minus every outstanding reservation on that venue.
+        self.close_reservation = False
+        self._close_alloc: dict[str, list[list[Any]]] = {}               # closing plan -> [[pair id, reserved quantity], ...] in allocation order
+        self._close_released: set[str] = set()
+        self.close_stats: dict[str, int] = {"reserved": 0, "capped": 0, "nothing_closable": 0, "released": 0, "reduce_only_by_position": 0, "not_reduce_only_by_position": 0}
         self._quote_plans: set[str] = set()                                # CR-MQ part 2 (owner 13 Nov): plans that are a market-making quote (one post-only child, no hedge); marked at creation, rebuilt from the plan store
         self._hedge_specs: dict[str, dict[str, Any]] = {}                  # FILL_TRIGGERED: the declared hedge leg of a plan (no ChildOrder until a maker fill)
         self.hedge_chains: dict[str, dict[str, HedgeLifecycle]] = {}       # parent_id -> chain_id -> chain
@@ -590,6 +597,8 @@ class OMS:
             )
         previous_state = plan.state.value
         plan.transition(state, ts_ns, reason)
+        if state == PlanState.CLOSED and plan.parent_id in self._close_alloc and plan.parent_id not in self._close_released:
+            self._close_release(plan, ts_ns)
         self.ledger.record(
             "PLAN_STATE_TRANSITION",
             ts_ns,
@@ -1608,7 +1617,7 @@ class OMS:
                 quantity=quantity,
                 limit_price=price or reference_price,
                 order_role="UNWIND",
-                reduce_only=True,
+                reduce_only=True if not self.close_reservation else self._reduces_position(venue, plan.opportunity.instrument_id, side, quantity),   # F05 (b): an unwind that re-opens (the reversal of a closing fill) is not reduce-only
                 unwind_attempt=plan.unwind_attempts,
                 order_type=order_type.value,
                 time_in_force=tif.value,
@@ -3295,6 +3304,17 @@ class OMS:
             self.order_owner_guard()
         if self.new_risk_guard is not None:
             self.new_risk_guard()
+        close_alloc = None
+        if close_pair and self.close_reservation and quote_side is None and maker_venue in (opportunity.buy_venue, opportunity.sell_venue):
+            # F05: the closing quantity is capped at what the pairs can close, and reserved on them, before anything is built
+            close_side = Side.BUY if maker_venue == opportunity.buy_venue else Side.SELL
+            hedge_venue = opportunity.sell_venue if close_side == Side.BUY else opportunity.buy_venue
+            requested = opportunity.quantity
+            close_alloc, close_caps = self._close_allocate(maker_venue, hedge_venue, opportunity.instrument_id, close_side, requested)
+            total = sum((q for _, q in close_alloc), Decimal("0"))
+            if Decimal("0") < total < requested:
+                opportunity = replace(opportunity, quantity=self.instruments.round_quantity(maker_venue, opportunity.instrument_id, total, opportunity.observed_ts_ns))
+                close_alloc = self._trim_alloc(close_alloc, opportunity.quantity)
         children = [
             ChildOrder(
                 order_id=stable_id("child", parent_id, opportunity.buy_venue, "BUY"),
@@ -3344,6 +3364,22 @@ class OMS:
         self.plans[parent_id] = plan
         now = opportunity.observed_ts_ns
         self._transition(plan, PlanState.CREATED, now, event_type="PLAN_CREATED")
+        if close_alloc is not None:
+            reserved_total = sum((q for _, q in close_alloc), Decimal("0"))
+            if reserved_total <= 0:
+                self.close_stats["nothing_closable"] += 1
+                self.ledger.record("CLOSE_NOTHING_CLOSABLE", now, parent_id=parent_id, venue=maker_venue, requested=str(requested), **close_caps)
+                return self._close_without_exposure(plan, now, PlanState.REJECTED, "close_nothing_closable")
+            self._close_alloc[parent_id] = [[pid, q] for pid, q in close_alloc]
+            self.close_stats["reserved"] += 1
+            if reserved_total < requested:
+                self.close_stats["capped"] += 1
+            maker_child = plan.children[0]
+            maker_child.reduce_only = self._reduces_position(maker_child.venue, maker_child.instrument_id, maker_child.side, maker_child.quantity)      # (b): by the venue position, not by the role
+            self._count_reduce_only(maker_child.reduce_only)
+            self.ledger.record("CLOSE_RESERVED", now, parent_id=parent_id, maker_venue=maker_venue, requested=str(requested), reserved=str(reserved_total), capped=reserved_total < requested,
+                               allocations=[[pid, str(q)] for pid, q in close_alloc], maker_reduce_only=maker_child.reduce_only, **close_caps)
+            self._persist(plan, now, "CLOSE_RESERVED", allocations=[[pid, str(q)] for pid, q in close_alloc])
         if parent_id in self._close_pair_plans:
             maker_child = plan.children[0]
             self.realism_counters["close_pair_quotes"] = self.realism_counters.get("close_pair_quotes", 0) + 1
@@ -3770,6 +3806,13 @@ class OMS:
             for ev in self.plan_store.events(parent_id):
                 if ev["event_type"] == "QUOTE_PLAN":
                     self._quote_plans.add(parent_id)
+                elif ev["event_type"] == "CLOSE_RESERVED":                          # F05: written only with arb.close_reservation on
+                    self._close_alloc[parent_id] = [[pid, Decimal(q)] for pid, q in ev["payload"]["allocations"]]
+                    self._close_pair_plans.add(parent_id)
+                    if self.plans[parent_id].state == PlanState.CLOSED:
+                        self._close_released.add(parent_id)
+                elif ev["event_type"] == "CLOSE_PAIR_ALARM" and spec is not None:
+                    spec["close_pair_alarmed"] = True
                 elif ev["event_type"] == "FLATTEN_SHADOW":
                     self._flatten_shadow.add(parent_id)
                 elif ev["event_type"] == "HEDGE_SPEC":
@@ -3781,6 +3824,8 @@ class OMS:
                         spec["requested_qty"], spec["chain_seq"] = pl["requested_qty"], pl["chain_seq"]
             if spec is None:
                 continue
+            if spec.get("close_pair"):
+                self._close_pair_plans.add(parent_id)                              # F05 (found 20 Nov): a closing plan is known as one after a restart too
             if self.dust_on:
                 for ev in self.plan_store.events(parent_id):
                     if ev["event_type"] == "DUST_ADJUST" and "requested_qty" in ev["payload"]:
@@ -3874,6 +3919,141 @@ class OMS:
                 self._hedge_child_changed(plan, spec, chain, order, ts_ns)
         self._fill_triggered_settle(plan, spec, ts_ns)
 
+    # ------------------------------------------------------------------------------------------------------------------
+    # F05 PER-PAIR CLOSE RESERVATION (owner 20 Nov; arb.close_reservation, off by default). Pair legs are computed from the fills (never stored), so a restart rebuilds them from the plan store; the only state
+    # kept is each closing plan's allocation (persisted CLOSE_RESERVED).
+    # ------------------------------------------------------------------------------------------------------------------
+    def _signed_fills(self, plan: ParentPlan, venue: str) -> Decimal:
+        return sum(((o.filled_quantity if o.side == Side.BUY else -o.filled_quantity) for o in plan.children if o.venue == venue), Decimal("0"))
+
+    def _is_entry_pair(self, plan: ParentPlan) -> bool:
+        pid = plan.parent_id
+        return (pid in self._hedge_specs and pid not in self._close_alloc and pid not in self._close_pair_plans and pid not in self._dust_host_plans
+                and pid not in self._quote_plans and not plan.inherited_base)
+
+    def _close_consumed(self, cid: str) -> dict[str, list[Decimal]]:
+        """How much of each allocation of closing plan `cid` its fills have used, per venue (allocation order): {venue: [used per allocation]}."""
+        plan = self.plans.get(cid)
+        alloc = self._close_alloc.get(cid, [])
+        out: dict[str, list[Decimal]] = {}
+        if plan is None:
+            return out
+        for venue in {o.venue for o in plan.children}:
+            left = abs(self._signed_fills(plan, venue))
+            used = []
+            for _, q in alloc:
+                take = min(left, q)
+                used.append(take)
+                left -= take
+            out[venue] = used
+        return out
+
+    def pair_positions(self, instrument_id: str) -> dict[str, dict[str, Decimal]]:
+        """F05: every open pair's signed leg per venue: its entry plan's own fills, less what closing plans have closed of it (their fills, allocated in order)."""
+        legs: dict[str, dict[str, Decimal]] = {}
+        for pid, plan in self.plans.items():
+            if plan.opportunity.instrument_id == instrument_id and self._is_entry_pair(plan):
+                row = {v: self._signed_fills(plan, v) for v in (plan.opportunity.buy_venue, plan.opportunity.sell_venue)}
+                if any(row.values()):
+                    legs[pid] = row
+        for cid, alloc in self._close_alloc.items():
+            cplan = self.plans.get(cid)
+            if cplan is None or cplan.opportunity.instrument_id != instrument_id:
+                continue
+            for venue, used in self._close_consumed(cid).items():
+                sign = Decimal("1") if self._signed_fills(cplan, venue) > 0 else Decimal("-1")
+                for (pid, _), take in zip(alloc, used):
+                    if take and pid in legs:
+                        legs[pid][venue] = legs[pid].get(venue, Decimal("0")) + sign * take
+        return {pid: row for pid, row in legs.items() if any(row.values())}          # a pair closed on both venues is gone
+
+    def close_outstanding(self) -> dict[tuple[str, str], Decimal]:
+        """F05: reserved and not yet used, per (pair id, venue), over the closing plans that are still open (a closed plan has released what it did not use)."""
+        out: dict[tuple[str, str], Decimal] = {}
+        for cid, alloc in self._close_alloc.items():
+            cplan = self.plans.get(cid)
+            if cplan is None or cplan.state == PlanState.CLOSED:
+                continue
+            consumed = self._close_consumed(cid)
+            for venue in (cplan.opportunity.buy_venue, cplan.opportunity.sell_venue):
+                used = consumed.get(venue, [Decimal("0")] * len(alloc))
+                for (pid, q), take in zip(alloc, used):
+                    out[(pid, venue)] = out.get((pid, venue), Decimal("0")) + max(Decimal("0"), q - take)
+        return out
+
+    def _close_allocate(self, maker_venue: str, hedge_venue: str, instrument_id: str, side: Side, requested: Decimal) -> tuple[list[tuple[str, Decimal]], dict[str, str]]:
+        """F05 (a): which pairs a closing quote of `side` on `maker_venue` closes, oldest first (ASSUMED), each at most its closable quantity on BOTH venues, in total at most the ledger position on each venue
+        less every outstanding reservation there (a manual close or any position the pairs do not know about caps it), and at most `requested`."""
+        legs = self.pair_positions(instrument_id)
+        out_res = self.close_outstanding()
+        want_m = Decimal("-1") if side == Side.BUY else Decimal("1")         # a BUY closes short maker legs
+        pos_m = self.ledger.positions.get((maker_venue, instrument_id), Decimal("0"))
+        pos_h = self.ledger.positions.get((hedge_venue, instrument_id), Decimal("0"))
+        res_m = sum((q for (pid, v), q in out_res.items() if v == maker_venue), Decimal("0"))
+        res_h = sum((q for (pid, v), q in out_res.items() if v == hedge_venue), Decimal("0"))
+        cap_m = max(Decimal("0"), abs(pos_m) - res_m) if pos_m * want_m > 0 else Decimal("0")
+        cap_h = max(Decimal("0"), abs(pos_h) - res_h) if pos_h * -want_m > 0 else Decimal("0")
+        left = min(requested, cap_m, cap_h)
+        order = sorted(legs, key=lambda pid: (self.plans[pid].opportunity.observed_ts_ns, pid))
+        alloc: list[tuple[str, Decimal]] = []
+        for pid in order:
+            if left <= 0:
+                break
+            lm, lh = legs[pid].get(maker_venue, Decimal("0")), legs[pid].get(hedge_venue, Decimal("0"))
+            if lm * want_m <= 0 or lh * -want_m <= 0:
+                continue
+            c = min(abs(lm) - out_res.get((pid, maker_venue), Decimal("0")), abs(lh) - out_res.get((pid, hedge_venue), Decimal("0")))
+            take = min(left, c)
+            if take > 0:
+                alloc.append((pid, take))
+                left -= take
+        caps = {"maker_position": str(pos_m), "hedge_position": str(pos_h), "maker_reserved": str(res_m), "hedge_reserved": str(res_h), "cap_maker": str(cap_m), "cap_hedge": str(cap_h)}
+        return alloc, caps
+
+    @staticmethod
+    def _trim_alloc(alloc: list[tuple[str, Decimal]], total: Decimal) -> list[tuple[str, Decimal]]:
+        out, left = [], total
+        for pid, q in alloc:
+            take = min(q, left)
+            if take > 0:
+                out.append((pid, take))
+            left -= take
+        return out
+
+    def closable_quantity(self, maker_venue: str, hedge_venue: str, instrument_id: str) -> tuple[str | None, Decimal]:
+        """F05: what a closing quote on `maker_venue` may close now: (its side, quantity) for the direction the maker venue's pairs hold; (None, 0) when nothing is closable."""
+        pos_m = self.ledger.positions.get((maker_venue, instrument_id), Decimal("0"))
+        if pos_m == 0:
+            return None, Decimal("0")
+        side = Side.SELL if pos_m > 0 else Side.BUY
+        alloc, _ = self._close_allocate(maker_venue, hedge_venue, instrument_id, side, abs(pos_m))
+        return side.value, sum((q for _, q in alloc), Decimal("0"))
+
+    def _close_release(self, plan: ParentPlan, ts_ns: int) -> None:
+        """F05: the closing plan reached its end: what it closed stays closed, the rest of its reservation is released (recorded once)."""
+        self._close_released.add(plan.parent_id)
+        self.close_stats["released"] += 1
+        alloc = self._close_alloc[plan.parent_id]
+        consumed = self._close_consumed(plan.parent_id)
+        rows = []
+        for i, (pid, q) in enumerate(alloc):
+            used = {v: str(c[i]) for v, c in sorted(consumed.items())}
+            rows.append({"pair_id": pid, "reserved": str(q), "closed": used})
+        self.ledger.record("CLOSE_RESERVATION_RELEASED", ts_ns, parent_id=plan.parent_id, pairs=rows, terminal_outcome=plan.terminal_outcome or "")
+
+    def _reduces_position(self, venue: str, instrument_id: str, side: Side, qty: Decimal) -> bool:
+        """F05 (b): does an order of `side` and `qty` reduce the ledger position on `venue` without taking it through flat?"""
+        pos = self.ledger.positions.get((venue, instrument_id), Decimal("0"))
+        return (side == Side.BUY and pos < 0 and qty <= -pos) or (side == Side.SELL and pos > 0 and qty <= pos)
+
+    def _count_reduce_only(self, flag: bool) -> None:
+        self.close_stats["reduce_only_by_position" if flag else "not_reduce_only_by_position"] += 1
+
+    def close_report(self) -> dict[str, Any]:
+        """F05 end-of-day block (aggregates only)."""
+        return {**self.close_stats, "open_reservations": {f"{pid}:{v}": str(q) for (pid, v), q in sorted(self.close_outstanding().items()) if q > 0},
+                "beyond_flat": self.realism_counters.get("close_pair_beyond_flat", 0)}
+
     def _close_pair_guard(self, plan: ParentPlan, spec: dict[str, Any], maker: ChildOrder, ts_ns: int) -> None:
         """Order 3 B: a CLOSING quote's fills may never increase |position| on the maker venue and never take it through flat. The quote is sized at the open size, so this should never fire; if the position moved
         underneath it (a flatten, another path) and a fill did, it is a persistent alarm on record, once per plan, and counted (a venue clips a reduce-only order; this platform's simulated venue does not)."""
@@ -3884,6 +4064,8 @@ class OMS:
         before = after + filled if maker.side == Side.SELL else after - filled
         if abs(after) > abs(before) or (before != 0 and after != 0 and (before > 0) != (after > 0)):
             spec["close_pair_alarmed"] = True
+            if self.close_reservation:
+                self._persist(plan, ts_ns, "CLOSE_PAIR_ALARM")                 # F05: once per plan across a restart too
             self.realism_counters["close_pair_beyond_flat"] = self.realism_counters.get("close_pair_beyond_flat", 0) + 1
             self.ledger.record("CLOSE_PAIR_BEYOND_FLAT", ts_ns, parent_id=plan.parent_id, venue=maker.venue, position_before=str(before), position_after=str(after), filled=str(filled), alarm=True, persistent=True)
 
@@ -4320,6 +4502,9 @@ class OMS:
         child = ChildOrder(
             order_id=stable_id("child", plan.parent_id, "HEDGE", chain.chain_id, attempt), parent_id=plan.parent_id, opportunity_id=spec["opportunity_id"],
             venue=spec["venue"], instrument_id=spec["instrument_id"], side=spec["side"], quantity=qty, limit_price=cap, order_role="HEDGE", reduce_only=bool(spec.get("close_pair")))
+        if self.close_reservation and spec.get("close_pair"):
+            child.reduce_only = self._reduces_position(child.venue, child.instrument_id, child.side, qty)      # F05 (b): a closing hedge is reduce-only only when it really reduces the hedge venue position
+            self._count_reduce_only(child.reduce_only)
         try:
             self.instruments.validate_order(child, ts_ns)
         except ValueError as exc:

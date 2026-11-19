@@ -414,6 +414,10 @@ class TradingSession:
                     self.alignment_policy,
                 ))
         self.strategies = list(strategies)
+        for strategy in self.strategies:                                    # F05 (d): the margin_limit close trigger reads the A4 margin stop (only a strategy with that trigger asks)
+            inner = getattr(strategy, "strategy", None)
+            if inner is not None and "margin_limit" in tuple(getattr(getattr(inner, "config", None), "close_triggers", ()) or ()):
+                inner.margin_limit_active = lambda: bool(getattr(self, "_margin_warn_active", False))
         self.strategy = self.strategies[0] if self.strategies else None
         self.books = books if books is not None else {
             (venue, cfg.instrument_id): cfg.book_sanity.new_book(venue, cfg.instrument_id)
