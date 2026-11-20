@@ -890,6 +890,8 @@ class SessionReplay:
             **({"_dislocation_episodes": [e.record() for e in s.dislocation.episodes]} if getattr(s, "dislocation", None) is not None else {}),
             **({"participation": {"cap_on": bool(self.config.maker.participation_cap), "prints_it_binds_on": self.executor.diag.get("participation_cap_would_bind", 0.0), "excess_fill_qty": self.executor.diag.get("participation_cap_excess_qty", 0.0)}}
                if self.executor.diag.get("participation_cap_would_bind") or self.config.maker.participation_cap else {}),        # E3: only when the cap is on or something would have bound, so every earlier run's manifest is unchanged
+            **({"captured_depth": captured_depth_block(self.executor.diag, getattr(self.config.maker, "captured_depth_action", "flag"))}
+               if getattr(self.config.maker, "captured_depth_action", "flag") != "flag" or any(self.executor.diag.get(k) for k in CAPTURED_DEPTH_KEYS) else {}),       # item 5: written when the switch is set or anything was counted
             "ledger_event_counts": dict(Counter(e["event_type"] for e in s.ledger.events)),
             "strategy_counters": {"evaluations": self.strategy.evaluations, "signals": self.strategy.signals, "best_edge_seen_bps": None if self.strategy.best_edge_seen_bps == float("-inf") else self.strategy.best_edge_seen_bps,
                                   "rejects": {k: v for k, v in self.strategy.rejects.items() if v}},
@@ -1035,6 +1037,18 @@ def input_file_rows(paths: Iterable, content_hash: bool = True) -> list[dict]:
             row["recorder_match"] = (row.get("content_sha256", row["sha256"]) == recorded) if content_hash or p.suffix != ".gz" else None
         rows.append(row)
     return rows
+
+
+CAPTURED_DEPTH_KEYS = ("captured_depth_quotes_outside", "captured_depth_quotes_refused", "captured_depth_fills_outside", "captured_depth_fill_qty_outside", "captured_depth_taker_walks_to_end",
+                       "captured_depth_taker_qty_at_edge")
+
+
+def captured_depth_block(diag: dict, action: str = "flag") -> dict:
+    """Item 5 (owner 20 Nov): the captured-depth counts of one run, every strategy: resting orders placed where the capture does not reach (absent level beyond the deepest captured level), those the
+    switch refused, fills booked on such orders (count and quantity), and taker walks that consumed the last captured level (with the quantity at that edge)."""
+    return {"action": action, **{k.removeprefix("captured_depth_"): diag.get(k, 0) for k in CAPTURED_DEPTH_KEYS},
+            "definition": "outside = the level is absent and beyond the deepest captured level (MakerExecutor._inside_captured_depth, the rule behind the outside_captured_depth fill flag); a taker walk reaches "
+                          "the end when it consumes every captured level of its side inside its limit; no depth is ever invented beyond the capture"}
 
 
 def write_run_record(out_dir: Path, replay: "SessionReplay | None" = None, *, input_paths: Iterable | None = None, content_hash: bool = True, notes: dict | None = None) -> dict:

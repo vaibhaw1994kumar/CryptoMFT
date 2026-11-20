@@ -335,7 +335,7 @@ class DepletionLedgerSwitch(unittest.TestCase):
         import dataclasses
         import hashlib
         import json
-        legacy = {k: v for k, v in dataclasses.asdict(off.config).items() if k not in ("depletion_ledger", "participation_cap", "exclude_rpi_trades", "postonly_amend_cross")}      # each is listed only when on (participation_cap: owner 12 Nov, E3; exclude_rpi_trades: 2i item 8, owner 17 Nov; postonly_amend_cross: owner 18 Nov, only when not reject_keep)
+        legacy = {k: v for k, v in dataclasses.asdict(off.config).items() if k not in ("depletion_ledger", "participation_cap", "exclude_rpi_trades", "postonly_amend_cross", "captured_depth_action")}      # each is listed only when on (captured_depth_action: item 5, owner 20 Nov, only when not flag) (participation_cap: owner 12 Nov, E3; exclude_rpi_trades: 2i item 8, owner 17 Nov; postonly_amend_cross: owner 18 Nov, only when not reject_keep)
         self.assertEqual(off._settings_sha(), hashlib.sha256(json.dumps(legacy, sort_keys=True, default=str).encode()).hexdigest())
 
     def test_print_first_is_not_changed_by_the_switch(self):

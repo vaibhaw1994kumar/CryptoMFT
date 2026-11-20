@@ -416,6 +416,7 @@ class PostOnlyAmendToACrossingPrice(unittest.TestCase):
         self.assertNotEqual(default._settings_sha(), on._settings_sha())
         settings = dataclasses.asdict(MakerConfig())
         settings.pop("postonly_amend_cross")
+        settings.pop("captured_depth_action")                     # item 5 (owner 20 Nov): left out at its default, like postonly_amend_cross
         for k in ("depletion_ledger", "participation_cap", "exclude_rpi_trades"):
             if not settings.get(k):
                 settings.pop(k, None)
@@ -423,3 +424,52 @@ class PostOnlyAmendToACrossingPrice(unittest.TestCase):
         self.assertEqual(default._settings_sha(), hashlib.sha256(json.dumps(settings, sort_keys=True, default=str).encode()).hexdigest())
         with self.assertRaises(ValueError):
             MakerConfig(postonly_amend_cross="cancel")
+
+
+class CapturedDepthCounter(unittest.TestCase):
+    """Item 5 (owner 20 Nov): resting orders placed where the capture does not reach (absent level beyond the deepest captured level: the one definition, MakerExecutor._inside_captured_depth), fills
+    booked on them, and taker walks that consumed the last captured level are counted; maker.captured_depth_action refuse (default flag) refuses such a resting order; a taker walk is never refused."""
+
+    def test_a_quote_beyond_the_capture_is_counted_and_its_fill_too_in_either_unknown_queue_model(self):
+        for model in ("legacy", "depth_aware"):
+            with self.subTest(model=model):
+                a, book = adapter(unknown_queue_model=model), core_book(BIDS, ASKS)
+                cbs = a.handle(request("deep", Side.BUY, "99.90", "1"), book)                    # below the deepest captured bid 99.99, absent: outside the capture
+                self.assertEqual(cbs[0].event_type, ExecutionEventType.ACKNOWLEDGED)          # flag (default): it rests
+                a.handle(request("near", Side.BUY, "100.00", "1"), book)                         # a captured level: not counted
+                self.assertEqual(a.executor.diag["captured_depth_quotes_outside"], 1)
+                fills = list(a.feed_trade(99.85, 500.0, -1, 3.0, 3.0))                          # a print through 99.90
+                self.assertTrue(any(cb.event_type in (ExecutionEventType.FILLED, ExecutionEventType.PARTIAL) for _req, cb in fills))
+                self.assertGreaterEqual(a.executor.diag["captured_depth_fills_outside"], 1)
+                self.assertGreater(a.executor.diag["captured_depth_fill_qty_outside"], 0.0)
+
+    def test_inside_the_capture_nothing_is_counted(self):
+        a, book = adapter(), core_book(BIDS, ASKS)
+        a.handle(request("in", Side.BUY, "99.995", "1"), book)                                   # absent but between captured levels: covered by the capture
+        a.handle(request("touch", Side.SELL, "100.02", "1"), book)
+        self.assertNotIn("captured_depth_quotes_outside", a.executor.diag)
+
+    def test_refuse_turns_the_flag_into_a_refusal_and_flag_stays_out_of_the_settings_hash(self):
+        a, book = adapter(captured_depth_action="refuse"), core_book(BIDS, ASKS)
+        (cb,) = a.handle(request("deep", Side.BUY, "99.90", "1"), book)
+        self.assertEqual((cb.event_type, cb.reason), (ExecutionEventType.REJECTED, "outside_captured_depth"))
+        self.assertEqual(a.executor.diag["captured_depth_quotes_refused"], 1)
+        self.assertEqual(a.handle(request("near", Side.BUY, "100.00", "1"), book)[0].event_type, ExecutionEventType.ACKNOWLEDGED)
+        self.assertEqual(adapter().executor._settings_sha(), adapter(captured_depth_action="flag").executor._settings_sha())
+        self.assertNotEqual(adapter().executor._settings_sha(), adapter(captured_depth_action="refuse").executor._settings_sha())
+        with self.assertRaises(ValueError):
+            MakerConfig(captured_depth_action="block")
+
+    def test_a_taker_walk_that_consumes_the_last_captured_level_is_counted_never_refused(self):
+        a, book = adapter(captured_depth_action="refuse"), core_book(BIDS, ASKS)
+        cbs = a.handle(request("t1", Side.BUY, "100.10", "200", tif=TimeInForce.IOC, post_only=False), book)      # 150 captured on the ask side: the walk takes all of it
+        self.assertTrue(any(cb.event_type in (ExecutionEventType.FILLED, ExecutionEventType.PARTIAL) for cb in cbs))
+        self.assertEqual(a.executor.diag["captured_depth_taker_walks_to_end"], 1)
+        b = adapter()
+        b.handle(request("t2", Side.BUY, "100.02", "200", tif=TimeInForce.IOC, post_only=False), core_book(BIDS, ASKS))    # the limit stops the walk before the capture ends
+        self.assertNotIn("captured_depth_taker_walks_to_end", b.executor.diag)
+
+    def test_the_manifest_block(self):
+        from new_backtest.session_replay import captured_depth_block
+        blk = captured_depth_block({"captured_depth_quotes_outside": 2, "captured_depth_taker_walks_to_end": 1}, "flag")
+        self.assertEqual((blk["action"], blk["quotes_outside"], blk["taker_walks_to_end"], blk["fills_outside"]), ("flag", 2, 1, 0))
