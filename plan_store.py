@@ -95,6 +95,9 @@ def restore_child(child: dict[str, Any]) -> ChildOrder:
         ),
         liquidity=str(child.get("liquidity", "")),
         fee_source=str(child.get("fee_source", "")),
+        intent_id=str(child.get("intent_id", "") or ""),                                     # N1 (owner 20 Nov): the amend lineage and its layer intent survive a restart (were dropped)
+        replaces_order_id=str(child.get("replaces_order_id", "") or ""),
+        amend_to_price=(Decimal(str(child["amend_to_price"])) if child.get("amend_to_price") is not None else None),
     )
 
 
