@@ -1,0 +1,137 @@
+{
+ "v1_5..v1_9 (v1_9, size 1, gross 5) | pause": {
+  "margin_events": {
+   "MARGIN_STATE_TRANSITION": 14,
+   "MARGIN_PRICE_PAUSE": 1,
+   "MARGIN_PRICE_RESUME": 1,
+   "MARGIN_BUFFER_ALERT": 1
+  },
+  "margin_state_transitions": 14,
+  "quotes_blocked_margin_price": 69,
+  "session_limit_blocks": null,
+  "kills": {
+   "KILL_SWITCH_ACTIVATED": 0,
+   "LIQUIDATION": 0,
+   "LIQUIDATION_EXECUTED": 0,
+   "MARGIN_LIQUIDATION": 0,
+   "FORCED_FLATTEN": 0
+  },
+  "liquidation_like_events": {},
+  "fills": 16,
+  "orders": 13
+ },
+ "v1_5..v1_9 (v1_9, size 1, gross 5) | breach": {
+  "margin_events": {
+   "MARGIN_STATE_TRANSITION": 9,
+   "MARGIN_PRICE_PAUSE": 0,
+   "MARGIN_PRICE_RESUME": 0,
+   "MARGIN_BUFFER_ALERT": 1
+  },
+  "margin_state_transitions": 9,
+  "quotes_blocked_margin_price": 0,
+  "session_limit_blocks": null,
+  "kills": {
+   "KILL_SWITCH_ACTIVATED": 0,
+   "LIQUIDATION": 0,
+   "LIQUIDATION_EXECUTED": 0,
+   "MARGIN_LIQUIDATION": 0,
+   "FORCED_FLATTEN": 0
+  },
+  "liquidation_like_events": {
+   "KILL_SWITCH_CANCEL_ALL_COMPLETE": 1,
+   "KILL_SWITCH_STATE_TRANSITION": 1
+  },
+  "fills": 16,
+  "orders": 13
+ },
+ "v1_10..v1_16 (v1_15, size 1, hedge min 5, regime file) | pause": {
+  "margin_events": {
+   "MARGIN_STATE_TRANSITION": 48,
+   "MARGIN_PRICE_PAUSE": 1,
+   "MARGIN_PRICE_RESUME": 1,
+   "MARGIN_BUFFER_ALERT": 1
+  },
+  "margin_state_transitions": 48,
+  "quotes_blocked_margin_price": 53,
+  "session_limit_blocks": {},
+  "kills": {
+   "KILL_SWITCH_ACTIVATED": 0,
+   "LIQUIDATION": 0,
+   "LIQUIDATION_EXECUTED": 0,
+   "MARGIN_LIQUIDATION": 0,
+   "FORCED_FLATTEN": 0
+  },
+  "liquidation_like_events": {},
+  "fills": 4,
+  "orders": 41
+ },
+ "v1_10..v1_16 (v1_15, size 1, hedge min 5, regime file) | breach": {
+  "margin_events": {
+   "MARGIN_STATE_TRANSITION": 26,
+   "MARGIN_PRICE_PAUSE": 0,
+   "MARGIN_PRICE_RESUME": 0,
+   "MARGIN_BUFFER_ALERT": 1
+  },
+  "margin_state_transitions": 26,
+  "quotes_blocked_margin_price": 0,
+  "session_limit_blocks": {},
+  "kills": {
+   "KILL_SWITCH_ACTIVATED": 0,
+   "LIQUIDATION": 0,
+   "LIQUIDATION_EXECUTED": 0,
+   "MARGIN_LIQUIDATION": 0,
+   "FORCED_FLATTEN": 0
+  },
+  "liquidation_like_events": {
+   "KILL_SWITCH_CANCEL_ALL_COMPLETE": 1,
+   "KILL_SWITCH_STATE_TRANSITION": 1
+  },
+  "fills": 4,
+  "orders": 41
+ },
+ "v1_17 (same arguments) | pause": {
+  "margin_events": {
+   "MARGIN_STATE_TRANSITION": 48,
+   "MARGIN_PRICE_PAUSE": 1,
+   "MARGIN_PRICE_RESUME": 1,
+   "MARGIN_BUFFER_ALERT": 1
+  },
+  "margin_state_transitions": 48,
+  "quotes_blocked_margin_price": 53,
+  "session_limit_blocks": {},
+  "kills": {
+   "KILL_SWITCH_ACTIVATED": 0,
+   "LIQUIDATION": 0,
+   "LIQUIDATION_EXECUTED": 0,
+   "MARGIN_LIQUIDATION": 0,
+   "FORCED_FLATTEN": 0
+  },
+  "liquidation_like_events": {},
+  "fills": 4,
+  "orders": 41
+ },
+ "v1_17 (same arguments) | breach": {
+  "margin_events": {
+   "MARGIN_STATE_TRANSITION": 26,
+   "MARGIN_PRICE_PAUSE": 0,
+   "MARGIN_PRICE_RESUME": 0,
+   "MARGIN_BUFFER_ALERT": 1
+  },
+  "margin_state_transitions": 26,
+  "quotes_blocked_margin_price": 0,
+  "session_limit_blocks": {},
+  "kills": {
+   "KILL_SWITCH_ACTIVATED": 0,
+   "LIQUIDATION": 0,
+   "LIQUIDATION_EXECUTED": 0,
+   "MARGIN_LIQUIDATION": 0,
+   "FORCED_FLATTEN": 0
+  },
+  "liquidation_like_events": {
+   "KILL_SWITCH_CANCEL_ALL_COMPLETE": 1,
+   "KILL_SWITCH_STATE_TRANSITION": 1
+  },
+  "fills": 4,
+  "orders": 41
+ }
+}

@@ -1,0 +1,83 @@
+{
+ "a": "out/integration/n_order/dense2_before",
+ "b": "out/integration/n_order/dense2_after",
+ "equal": true,
+ "files_compared": 17,
+ "different": [],
+ "skipped": [
+  "session_run_record.json"
+ ],
+ "files": {
+  "maker_observations.jsonl": {
+   "status": "EQUAL",
+   "bytes": 835957
+  },
+  "session_decision_events.jsonl": {
+   "status": "EQUAL",
+   "bytes": 182541
+  },
+  "session_ems_path_coverage.json": {
+   "status": "EQUAL",
+   "bytes": 2261
+  },
+  "session_fills.jsonl": {
+   "status": "EQUAL",
+   "bytes": 1681563
+  },
+  "session_injection.json": {
+   "status": "EQUAL",
+   "bytes": 27701
+  },
+  "session_intent_fills.jsonl": {
+   "status": "EQUAL",
+   "bytes": 147505
+  },
+  "session_intent_journal.jsonl": {
+   "status": "EQUAL",
+   "bytes": 557747
+  },
+  "session_lifecycle_report.json": {
+   "status": "EQUAL",
+   "bytes": 17960
+  },
+  "session_limits.json": {
+   "status": "EQUAL",
+   "bytes": 2639
+  },
+  "session_manifest.json": {
+   "status": "EQUAL_EXCEPT_EXCLUDED",
+   "excluded": [
+    "run",
+    "manifest.release_identity"
+   ]
+  },
+  "session_markouts_decomposed.jsonl": {
+   "status": "EQUAL",
+   "bytes": 551151
+  },
+  "session_orders.jsonl": {
+   "status": "EQUAL",
+   "bytes": 249257
+  },
+  "session_pair_economics.json": {
+   "status": "EQUAL",
+   "bytes": 2208
+  },
+  "session_pair_economics.jsonl": {
+   "status": "EQUAL",
+   "bytes": 202041
+  },
+  "session_s0_audit.json": {
+   "status": "EQUAL",
+   "bytes": 1074
+  },
+  "session_safety_events.jsonl": {
+   "status": "EQUAL",
+   "bytes": 2250
+  },
+  "session_signals.jsonl": {
+   "status": "EQUAL",
+   "bytes": 103853
+  }
+ }
+}
