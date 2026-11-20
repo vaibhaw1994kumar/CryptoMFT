@@ -213,6 +213,14 @@ class RpiPrintTests(unittest.TestCase):
         for flag, want in ((False, False), ("false", False), ("true", True), ("1", True), ("0", False), (None, False)):
             self.assertEqual(trade_is_rpi(dataclasses.replace(base, native={"rpi": flag})), want, flag)
 
+    def test_an_rpi_quality_flag_marks_the_print_as_rpi_too(self):
+        """Item 4 (owner 20 Nov): the MM session's marking (5201b34, the trade's quality flags carry "RPI") is upstreamed; native["rpi"] keeps working; no flag, no RPI."""
+        from crypto_stat_arb.simulation.queue_adapter import trade_is_rpi
+        base = sell_print("100", "1", S)
+        self.assertTrue(trade_is_rpi(dataclasses.replace(base, quality_flags=("RPI",))))
+        self.assertTrue(trade_is_rpi(dataclasses.replace(base, quality_flags=("OK", "RPI"), native={"rpi": False})))
+        self.assertFalse(trade_is_rpi(dataclasses.replace(base, quality_flags=("STALE",))))
+
     def test_the_drivers_feed_trade_passes_the_flag(self):
         a, book = adapter(exclude_rpi_trades=True), core_book(BIDS, ASKS)
         a.handle(request("m1", Side.BUY, "100.00", "10"), book)

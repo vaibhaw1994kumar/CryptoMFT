@@ -1538,6 +1538,7 @@ class RunRecordInterlockAndCompare(unittest.TestCase):
             self.assertGreater(record["data_span_s"], 6.0)
             self.assertGreater(record["speed_x"], 0.0)
             self.assertEqual(record["effective_seeds"], replay.config_notes["effective_seeds"])
+            self.assertEqual(record["resolved_switches"], {"maker.exclude_rpi_trades": False})      # item 4 (owner 20 Nov): listed in every run, on or off, outside the identity comparison
             self.assertNotIn("wall_s", json.dumps(result.get("manifest")))           # the wall time is in the run record only: the manifest is the same from run to run
             # a recording changed after it was made: the recorder's hash no longer matches, and the record says which file
             manifest = json.loads((part / "live_part_manifest.json").read_text())

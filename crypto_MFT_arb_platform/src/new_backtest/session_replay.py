@@ -1062,7 +1062,11 @@ def write_run_record(out_dir: Path, replay: "SessionReplay | None" = None, *, in
            "speed_x": (span / replay.wall_s) if span is not None and replay.wall_s else None,
            "effective_seeds": None if replay is None else replay.config_notes.get("effective_seeds"),
            "python_hash_seed": os.environ.get("PYTHONHASHSEED", "not set (str hashes differ per process; no output may depend on set or dict-of-str order, see the contract)"),
-           "python": platform.python_version(), **({"notes": notes} if notes else {})}
+           "python": platform.python_version(), **({"notes": notes} if notes else {}),
+           # item 4 (owner 20 Nov): the resolved value of the RPI switch in EVERY run, on or off. Here, in the run record, because the record is outside every identity comparison and every pinned
+           # hash (compare_sessions skips it; the fill-model settings hash lists the switch only when on, so earlier profiles' hashes are unchanged)
+           "resolved_switches": {"maker.exclude_rpi_trades": None if replay is None or getattr(getattr(replay, "config", None), "maker", None) is None
+                                 else bool(getattr(replay.config.maker, "exclude_rpi_trades", False))}}
     (out_dir / RUN_RECORD).write_text(json.dumps(doc, indent=1, default=str))
     return doc
 
