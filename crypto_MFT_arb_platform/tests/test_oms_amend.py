@@ -572,6 +572,204 @@ class MakerQuoteTests(unittest.TestCase):
             store.close()
 
 
+class N1N2PartAmendAndTimeout(unittest.TestCase):
+    """Owner order of 20 Nov (N1, N2; event sequences from the MM session's descriptions, scripted here without ids: the MM session's own sequences are not available to this lane). Both pairings: a
+    market-making quote (pairing none, MakerQuoteTests' harness) and an arb maker quote with its hedge (AmendTests' harness). Reproduced on core 776c2a9 before the fix: N1 and N2 on the pairing-none
+    quote (illegal PARTIAL -> ACKNOWLEDGED on the amend confirmation; TIMED_OUT -> HEDGE_UNWIND on an amend timeout); neither on the arb quote (N1 fixed there in 8879905; N2: the arb plan's state is
+    judged by the maker head, which an unconfirmed replacement is not, so the arb's timeout rule never fired)."""
+    T0 = 100 * MS
+
+    def make(self, pairing, mode):
+        if pairing == "mm":
+            h = MakerQuoteTests("test_a_quote_is_one_post_only_child_with_no_hedge_spec")
+            h.build(mode)
+            plan = h.quote()
+        else:
+            h = AmendTests("test_off_by_default_nothing_is_sent")
+            h.setUp()
+            h.build(mode)
+            plan = h.plan
+        self.h, self.oms, self.venue, self.plan, self.old = h, h.oms, h.bybit, plan, plan.children[0]
+        return self
+
+    def new(self):
+        return next(x for x in self.plan.children if x.replaces_order_id)
+
+    def upd(self, order, n, state, cum, dt, price="60060"):
+        self.oms.ingest_order_update(stream_update(self.plan, order, n, state, cum, self.T0 + dt, price=price))
+
+    def maker_fills(self):
+        return [e for e in self.oms.ledger.events if e["event_type"] == "FILL" and e.get("venue") == "BYBIT"]
+
+    def hedged(self):
+        return sum((o.filled_quantity for o in self.plan.children if o.order_role == "HEDGE"), Decimal("0"))
+
+    def never_unwind(self):
+        self.assertNotIn(PlanState.HEDGE_UNWIND.value, [t["state"] for t in self.plan.transitions])
+        self.assertEqual([o for o in self.plan.children if o.order_role == "UNWIND"], [])
+
+    # ---------------------------------------------------------------- N1
+    def test_n1_partial_then_price_amend_stays_partial_through_request_ack_and_completes(self):
+        for pairing in ("mm", "arb"):
+            with self.subTest(pairing=pairing):
+                self.make(pairing, "accept_only")
+                self.upd(self.old, 1, ExecutionEventType.PARTIAL, "0.004", MS)
+                self.assertEqual(self.plan.state, PlanState.PARTIAL)
+                self.assertEqual(self.oms.request_amend(self.old.order_id, Decimal("60070.0"), self.T0 + 2 * MS), "REQUESTED")
+                self.assertEqual(self.plan.state, PlanState.PARTIAL)                                  # through the request
+                new = self.new()
+                self.upd(new, 1, ExecutionEventType.ACKNOWLEDGED, "0", 3 * MS, price="60070")          # the replacement's ack never moves the plan back
+                self.assertEqual(self.plan.state, PlanState.PARTIAL)
+                self.upd(new, 2, ExecutionEventType.FILLED, "0.006", 4 * MS, price="60070")            # then the full fill
+                self.assertEqual(sum((Decimal(str(f["fill_quantity"])) for f in self.maker_fills()), Decimal("0")), Decimal("0.010"))
+                if pairing == "arb":
+                    self.assertEqual(self.hedged(), Decimal("0.010"))                                  # hedged = filled
+                self.assertIn(self.plan.state, (PlanState.FILLED, PlanState.CLOSED, PlanState.RECONCILED))
+                self.never_unwind()
+
+    def test_n1_partial_then_amend_reject_or_timeout_keeps_the_plan_partial(self):
+        for pairing in ("mm", "arb"):
+            for mode in ("reject", "silent"):
+                with self.subTest(pairing=pairing, mode=mode):
+                    self.make(pairing, mode)
+                    self.upd(self.old, 1, ExecutionEventType.PARTIAL, "0.004", MS)
+                    self.oms.request_amend(self.old.order_id, Decimal("60070.0"), self.T0 + 2 * MS)
+                    self.oms.check_order_deadlines(self.T0 + 60 * 1_000_000_000)
+                    self.assertEqual(self.plan.state, PlanState.PARTIAL)
+                    self.venue.status[self.old.order_id] = (ExecutionEventType.PARTIAL, "0.004", "60060")       # the query: still live at the old price
+                    self.oms.check_order_deadlines(self.T0 + 61 * 1_000_000_000)
+                    self.assertEqual((self.plan.state, self.old.state), (PlanState.PARTIAL, OrderState.PARTIAL))
+                    self.assertEqual(len(self.venue.submits), 1)                                       # never a second order
+                    self.never_unwind()
+
+    def test_n1_partial_then_quantity_amend_remaining_is_target_less_filled_never_enlarged(self):
+        for pairing in ("mm", "arb"):
+            with self.subTest(pairing=pairing):
+                self.make(pairing, "confirm")
+                self.upd(self.old, 1, ExecutionEventType.PARTIAL, "0.004", MS)
+                self.assertEqual(self.oms.request_amend(self.old.order_id, self.old.limit_price, self.T0 + 2 * MS, new_quantity=Decimal("0.012")), "REFUSED:quantity_enlarged")
+                self.assertEqual(self.oms.request_amend(self.old.order_id, self.old.limit_price, self.T0 + 2 * MS, new_quantity=Decimal("0.004")), "REFUSED:quantity_at_or_below_filled")
+                self.assertEqual(self.oms.request_amend(self.old.order_id, self.old.limit_price, self.T0 + 2 * MS, new_quantity=Decimal("0.008")), "REQUESTED")
+                new = self.new()
+                self.assertEqual(new.quantity, Decimal("0.004"))                                       # target 0.008 less 0.004 filled
+                self.assertEqual(self.venue.replaces[-1].quantity, Decimal("0.008"))                   # the REPLACE carries the new TOTAL
+                self.assertEqual(self.plan.state, PlanState.PARTIAL)
+                self.assertEqual(self.oms.lineage_remaining(new.order_id), Decimal("0.004"))
+                self.upd(new, 2, ExecutionEventType.FILLED, "0.004", 4 * MS)
+                self.assertEqual(sum((Decimal(str(f["fill_quantity"])) for f in self.maker_fills()), Decimal("0")), Decimal("0.008"))
+                if pairing == "arb":
+                    self.assertEqual(self.hedged(), Decimal("0.008"))
+                    self.assertEqual(self.oms._hedge_specs[self.plan.parent_id]["max_qty"], Decimal("0.008"))
+                    self.assertEqual(self.oms.carried_residual_base(), Decimal("0"))
+                self.assertIn(self.plan.state, (PlanState.FILLED, PlanState.CLOSED, PlanState.RECONCILED))
+                self.never_unwind()
+
+    def test_n1_a_rejected_quantity_amend_leaves_the_quote_its_size(self):
+        for pairing in ("mm", "arb"):
+            with self.subTest(pairing=pairing):
+                self.make(pairing, "reject")
+                self.upd(self.old, 1, ExecutionEventType.PARTIAL, "0.004", MS)
+                self.oms.request_amend(self.old.order_id, self.old.limit_price, self.T0 + 2 * MS, new_quantity=Decimal("0.006"))
+                self.assertEqual(self.oms.lineage_remaining(self.old.order_id), Decimal("0.006"))     # rejected: the quote keeps its 0.010
+
+    def test_n1_a_fill_while_the_amend_is_pending_is_booked_once(self):
+        for pairing in ("mm", "arb"):
+            with self.subTest(pairing=pairing):
+                self.make(pairing, "accept_only")
+                self.upd(self.old, 1, ExecutionEventType.PARTIAL, "0.004", MS)
+                self.oms.request_amend(self.old.order_id, Decimal("60070.0"), self.T0 + 2 * MS)
+                self.upd(self.old, 2, ExecutionEventType.PARTIAL, "0.007", 3 * MS)
+                self.upd(self.old, 3, ExecutionEventType.PARTIAL, "0.007", 4 * MS)                     # repeated report
+                self.assertEqual(sum((Decimal(str(f["fill_quantity"])) for f in self.maker_fills()), Decimal("0")), Decimal("0.007"))
+                self.assertEqual(self.plan.state, PlanState.PARTIAL)
+                self.assertEqual(self.oms.lineage_remaining(self.new().order_id), Decimal("0.003"))
+                if pairing == "arb":
+                    self.assertEqual(self.hedged(), Decimal("0.007"))
+
+    def test_n1_restart_in_the_middle_of_an_amend_keeps_the_lineage_and_the_state(self):
+        from crypto_stat_arb.plan_store import ParentPlanStore
+        for pairing in ("mm", "arb"):
+            with self.subTest(pairing=pairing), tempfile.TemporaryDirectory() as directory:
+                path = Path(directory) / "oms.sqlite"
+                inst = _ft_instruments()
+                bybit, binance = AmendVenue("BYBIT", "accept_only"), ScriptedVenue("BINANCE", ["fill"], price="60000")
+                store = ParentPlanStore(path)
+
+                def oms_with(store, bybit, binance):
+                    o = OMS(inst, risk(), Ledger(), plan_store=store, router=StrategyDirectedRouter(inst, adapters={"BYBIT": bybit, "BINANCE": binance}),
+                            dispatch_policy=DispatchPolicy.FILL_TRIGGERED, hedge_policy=HedgePolicy(retry_limit=1))
+                    o.amend_enabled = True
+                    if pairing == "mm":
+                        from crypto_stat_arb.ems.config import ExecutionConfig
+                        from crypto_stat_arb.ems.layer import ExecutionLayer, IntentObserver
+                        o.observer = IntentObserver(ExecutionLayer(ExecutionConfig(pairing="none", quote={"inventory_cap_base": "0.020"}), instrument=INSTR_FT))
+                    return o
+                oms = oms_with(store, bybit, binance)
+                plan = (oms.execute_quote(quote_id="q1", strategy_id="mm", instrument_id=INSTR_FT, venue="BYBIT", side=Side.BUY, price=Decimal("60050.0"), quantity=Decimal("0.010"), books=_ft_books(),
+                                          observed_ts_ns=self.T0) if pairing == "mm" else oms.execute(_ft_opportunity(), _ft_books(), maker_venue="BYBIT"))
+                old = plan.children[0]
+                oms.ingest_order_update(stream_update(plan, old, 1, ExecutionEventType.PARTIAL, "0.004", self.T0 + MS))
+                self.assertEqual(oms.request_amend(old.order_id, old.limit_price, self.T0 + 2 * MS, new_quantity=Decimal("0.008")), "REQUESTED")
+                new_id = next(x.order_id for x in plan.children if x.replaces_order_id)
+                store.close()
+                store = ParentPlanStore(path)
+                again = oms_with(store, AmendVenue("BYBIT", "accept_only"), ScriptedVenue("BINANCE", ["fill"], price="60000"))
+                restored = again.plans[plan.parent_id]
+                self.assertEqual(restored.state, PlanState.PARTIAL)
+                self.assertEqual(again._lineage_of.get(new_id), old.order_id)                          # the lineage came back
+                self.assertEqual(again.lineage_remaining(new_id), Decimal("0.004"))                    # and the pending quantity target with it
+                rnew = next(x for x in restored.children if x.order_id == new_id)
+                again.ingest_order_update(stream_update(restored, rnew, 1, ExecutionEventType.ACKNOWLEDGED, "0", self.T0 + 5 * MS))
+                self.assertEqual(restored.state, PlanState.PARTIAL)                                   # the confirmation after the restart does not move it back
+                store.close()
+
+    # ---------------------------------------------------------------- N2
+    def test_n2_pairing_none_timeout_then_query_live_the_quote_carries_on_and_keeps_its_reservation(self):
+        self.make("mm", "silent")
+        held = len(self.h.layer.reservations.held)
+        self.oms.request_amend(self.old.order_id, Decimal("60055.0"), self.T0 + 2 * MS)
+        self.oms.check_order_deadlines(self.T0 + 60 * 1_000_000_000)
+        self.assertEqual(len(self.h.events("AMEND_TIMEOUT")), 1)
+        self.venue.status[self.old.order_id] = (ExecutionEventType.ACKNOWLEDGED, "0", "60050")          # the owed query: live at the old price
+        self.oms.check_order_deadlines(self.T0 + 61 * 1_000_000_000)
+        self.assertEqual((self.plan.state, self.old.state), (PlanState.ACKNOWLEDGED, OrderState.ACKNOWLEDGED))
+        self.assertEqual(len(self.h.layer.reservations.held), held)                                    # live: the reservation is kept
+        self.never_unwind()
+        new = self.new()                                                                              # then live at the NEW price (a late success): the amend is confirmed, still one live order
+        self.upd(new, 1, ExecutionEventType.ACKNOWLEDGED, "0", 90 * 1_000_000_000, price="60055")
+        self.assertEqual((self.old.state, new.state, self.plan.state), (OrderState.CANCELLED, OrderState.ACKNOWLEDGED, PlanState.ACKNOWLEDGED))
+        self.assertEqual(len(self.h.layer.reservations.held), held)
+        self.never_unwind()
+
+    def test_n2_pairing_none_timeout_then_query_ended_the_plan_closes_and_releases_and_a_later_ask_is_not_refused(self):
+        self.make("mm", "silent")
+        self.oms.request_amend(self.old.order_id, Decimal("60055.0"), self.T0 + 2 * MS)
+        self.oms.check_order_deadlines(self.T0 + 60 * 1_000_000_000)
+        self.venue.status[self.old.order_id] = (ExecutionEventType.CANCELLED, "0", "60050")             # the owed query: ended (the replacement is unknown to the venue)
+        self.oms.check_order_deadlines(self.T0 + 61 * 1_000_000_000)
+        self.assertEqual(self.plan.state, PlanState.CLOSED)
+        self.assertEqual(len([e for e in self.h.events("VENUE_ORDER_QUERY") if e.get("purpose") == "amend_timeout_replacement"]), 1)
+        self.assertEqual(({k: v for k, v in self.oms.risk.reserved_position.items() if v}, self.oms.risk.reserved_gross, len(self.h.layer.reservations.held)), ({}, Decimal("0"), 0))     # released
+        self.never_unwind()
+        for side in (Side.BUY, Side.SELL):
+            later = self.h.quote(f"q-{side.value}", side=side, price="60050.0" if side == Side.BUY else "60070.0")
+            self.assertEqual(later.children[0].state, OrderState.ACKNOWLEDGED)                        # not refused (no "insufficient base", no stale reservation)
+
+    def test_n2_a_pairing_none_plan_cannot_enter_hedge_unwind(self):
+        self.make("mm", "confirm")
+        with self.assertRaisesRegex(ValueError, "never enters HEDGE_UNWIND"):
+            self.oms._transition(self.plan, PlanState.HEDGE_UNWIND, self.T0 + MS, "test")
+
+    def test_n2_the_arb_pairing_is_unchanged(self):
+        self.make("arb", "silent")
+        self.oms.request_amend(self.old.order_id, Decimal("60070.0"), self.T0 + 2 * MS)
+        self.oms.check_order_deadlines(self.T0 + 60 * 1_000_000_000)
+        self.venue.status[self.old.order_id] = (ExecutionEventType.CANCELLED, "0", "60060")
+        self.oms.check_order_deadlines(self.T0 + 61 * 1_000_000_000)
+        self.assertEqual([t["state"] for t in self.plan.transitions], ["CREATED", "RISK_RESERVED", "DISPATCHED", "ACKNOWLEDGED", "REJECTED"])     # as on 776c2a9
+        self.assertEqual([e for e in self.h.events("VENUE_ORDER_QUERY") if e.get("purpose") == "amend_timeout_replacement"], [])
+
+
 class QuoteBookStrategy:
     """A market-making strategy test double: scripted actions per call, every callback logged."""
     quote_book = True
