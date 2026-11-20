@@ -1,0 +1,71 @@
+{
+ "label": "ASSUMED tiers (v1_17: 2% to 50k, 5% to 500k), mark 97.3; A4 = free margin >= 10 x IM(hard cap); stressed (v1_17) = IM(hard cap + resting child) + its exit at 190 bps; capital per venue = max(IM used at the peak + A4 need, stressed need); funded on each venue, no transfer",
+ "rows": [
+  {
+   "rung": "i_01k",
+   "hard_cap_sol": 20.4,
+   "hard_cap_notional": 1985,
+   "a4_free_margin_need": 397,
+   "stressed_need": 116,
+   "peak_im_used": 40,
+   "capital_per_venue": 437,
+   "capital_two_venues": 873,
+   "capital_set_per_venue": 1000
+  },
+  {
+   "rung": "i_05k",
+   "hard_cap_sol": 102.0,
+   "hard_cap_notional": 9925,
+   "a4_free_margin_need": 1985,
+   "stressed_need": 581,
+   "peak_im_used": 198,
+   "capital_per_venue": 2183,
+   "capital_two_venues": 4367,
+   "capital_set_per_venue": 3000
+  },
+  {
+   "rung": "i_10k",
+   "hard_cap_sol": 204.0,
+   "hard_cap_notional": 19849,
+   "a4_free_margin_need": 3970,
+   "stressed_need": 1161,
+   "peak_im_used": 397,
+   "capital_per_venue": 4367,
+   "capital_two_venues": 8734,
+   "capital_set_per_venue": 6000
+  },
+  {
+   "rung": "i_20k",
+   "hard_cap_sol": 408.2,
+   "hard_cap_notional": 39718,
+   "a4_free_margin_need": 7944,
+   "stressed_need": 4111,
+   "peak_im_used": 795,
+   "capital_per_venue": 8739,
+   "capital_two_venues": 17477,
+   "capital_set_per_venue": 12000
+  },
+  {
+   "rung": "i_30k",
+   "hard_cap_sol": 612.2,
+   "hard_cap_notional": 59567,
+   "a4_free_margin_need": 29784,
+   "stressed_need": 5823,
+   "peak_im_used": 2980,
+   "capital_per_venue": 32763,
+   "capital_two_venues": 65526,
+   "capital_set_per_venue": 45000
+  },
+  {
+   "rung": "i_50k",
+   "hard_cap_sol": 1020.4,
+   "hard_cap_notional": 99285,
+   "a4_free_margin_need": 49642,
+   "stressed_need": 8563,
+   "peak_im_used": 4967,
+   "capital_per_venue": 54610,
+   "capital_two_venues": 109220,
+   "capital_set_per_venue": 75000
+  }
+ ]
+}

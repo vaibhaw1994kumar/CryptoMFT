@@ -1,0 +1,3345 @@
+{
+ "label": "Phase 2 F02 a size envelope (owner 20 Nov). Venue filters and Bybit tiers MEASURED from the public dump of 20 Nov 2026 (current rules); SOL market cells MEASURED on 29 Oct 2026 (EXPLORATORY).",
+ "symbols_listed": 30,
+ "owner_to_name": "10-15 more symbols (the target is 40-45)",
+ "rows": [
+  {
+   "symbol": "AAVEUSDT",
+   "spot22": true,
+   "listed_both_perp_venues": {
+    "value": true,
+    "label": "MEASURED",
+    "note": "public dump 20 Nov 2026"
+   },
+   "parent_max_usdt": {
+    "value": "20,000-30,000 (up to 50,000)",
+    "label": "APPROVED",
+    "note": "owner target 20 Nov"
+   },
+   "child_max": {
+    "value": {
+     "clip_cap_usdt": 25000,
+     "bybit_postonly_max_qty": "4600.00",
+     "binance_limit_max_qty": "78000",
+     "binance_market_max_qty": "9000",
+     "bybit_market_max_qty": "1150.00"
+    },
+    "label": "ASSUMED cap / MEASURED venue maxima",
+    "note": "child = min(25,000 USDT clip cap (arb.max_clip_notional, ASSUMED), the venue maxima in base); the USDT value of a venue maximum needs a price (not read)"
+   },
+   "venue_filters": {
+    "value": {
+     "BYBIT": {
+      "tick": "0.01",
+      "step": "0.01",
+      "min_qty": "0.01",
+      "min_notional": "5"
+     },
+     "BINANCE": {
+      "tick": "0.010",
+      "step": "0.1",
+      "min_qty": "0.1",
+      "min_notional": "5"
+     }
+    },
+    "label": "MEASURED",
+    "note": "public dump 20 Nov 2026 (current rules)"
+   },
+   "worst_outstanding_maker_fill_during_cancel": {
+    "value": "the whole resting child",
+    "label": "ASSUMED",
+    "note": "a cancel races the fill: the full child can fill before the cancel lands"
+   },
+   "caps": {
+    "value": {
+     "net_ceiling": "1.25 x parent",
+     "gross_per_venue": "2 x parent"
+    },
+    "label": "ASSUMED",
+    "note": "the v1_16 multiples (net_ceiling_multiple 1.0 + fill_headroom 0.25; gross 2 x clip with clip = parent)"
+   },
+   "hedge_deadline": {
+    "value": "hedge IOC; 2 retries at 0.25 s, then unwind (3 attempts, 15 bps band); maker ack deadline on",
+    "label": "ASSUMED",
+    "note": "hedge_faults of v1_17"
+   },
+   "margin_bybit": {
+    "value": {
+     "20000": {
+      "tier_id": 191,
+      "initial_usdt": 2000.0,
+      "maintenance_usdt": 150.0,
+      "tier_max_notional": "200000"
+     },
+     "30000": {
+      "tier_id": 191,
+      "initial_usdt": 3000.0,
+      "maintenance_usdt": 225.0,
+      "tier_max_notional": "200000"
+     },
+     "50000": {
+      "tier_id": 191,
+      "initial_usdt": 5000.0,
+      "maintenance_usdt": 375.0,
+      "tier_max_notional": "200000"
+     }
+    },
+    "label": "MEASURED tiers, ASSUMED leverage 10",
+    "note": "public /v5/market/risk-limit; initial rate raised to 1/10 (account leverage A8)"
+   },
+   "margin_binance": {
+    "value": null,
+    "label": "NO DATA",
+    "note": "Binance leverageBracket is a signed endpoint (account keys): not read"
+   },
+   "burst_throughput": {
+    "value": "2 new maker orders or amends per s per venue, burst 5; hedges, unwinds and cancels never refused",
+    "label": "APPROVED",
+    "note": "A1, owner 16 Nov"
+   },
+   "within_cap_arrival_depth_hedge_venue": {
+    "value": null,
+    "label": "NO DATA",
+    "note": "two-venue depth data exists only for SOLUSDT"
+   },
+   "exit_capacity": {
+    "value": null,
+    "label": "NO DATA",
+    "note": "two-venue depth data exists only for SOLUSDT"
+   }
+  },
+  {
+   "symbol": "ADAUSDT",
+   "spot22": true,
+   "listed_both_perp_venues": {
+    "value": true,
+    "label": "MEASURED",
+    "note": "public dump 20 Nov 2026"
+   },
+   "parent_max_usdt": {
+    "value": "20,000-30,000 (up to 50,000)",
+    "label": "APPROVED",
+    "note": "owner target 20 Nov"
+   },
+   "child_max": {
+    "value": {
+     "clip_cap_usdt": 25000,
+     "bybit_postonly_max_qty": "5920000",
+     "binance_limit_max_qty": "30000000",
+     "binance_market_max_qty": "3000000",
+     "bybit_market_max_qty": "1480000"
+    },
+    "label": "ASSUMED cap / MEASURED venue maxima",
+    "note": "child = min(25,000 USDT clip cap (arb.max_clip_notional, ASSUMED), the venue maxima in base); the USDT value of a venue maximum needs a price (not read)"
+   },
+   "venue_filters": {
+    "value": {
+     "BYBIT": {
+      "tick": "0.0001",
+      "step": "1",
+      "min_qty": "1",
+      "min_notional": "5"
+     },
+     "BINANCE": {
+      "tick": "0.00010",
+      "step": "1",
+      "min_qty": "1",
+      "min_notional": "5"
+     }
+    },
+    "label": "MEASURED",
+    "note": "public dump 20 Nov 2026 (current rules)"
+   },
+   "worst_outstanding_maker_fill_during_cancel": {
+    "value": "the whole resting child",
+    "label": "ASSUMED",
+    "note": "a cancel races the fill: the full child can fill before the cancel lands"
+   },
+   "caps": {
+    "value": {
+     "net_ceiling": "1.25 x parent",
+     "gross_per_venue": "2 x parent"
+    },
+    "label": "ASSUMED",
+    "note": "the v1_16 multiples (net_ceiling_multiple 1.0 + fill_headroom 0.25; gross 2 x clip with clip = parent)"
+   },
+   "hedge_deadline": {
+    "value": "hedge IOC; 2 retries at 0.25 s, then unwind (3 attempts, 15 bps band); maker ack deadline on",
+    "label": "ASSUMED",
+    "note": "hedge_faults of v1_17"
+   },
+   "margin_bybit": {
+    "value": {
+     "20000": {
+      "tier_id": 116,
+      "initial_usdt": 2000.0,
+      "maintenance_usdt": 150.0,
+      "tier_max_notional": "200000"
+     },
+     "30000": {
+      "tier_id": 116,
+      "initial_usdt": 3000.0,
+      "maintenance_usdt": 225.0,
+      "tier_max_notional": "200000"
+     },
+     "50000": {
+      "tier_id": 116,
+      "initial_usdt": 5000.0,
+      "maintenance_usdt": 375.0,
+      "tier_max_notional": "200000"
+     }
+    },
+    "label": "MEASURED tiers, ASSUMED leverage 10",
+    "note": "public /v5/market/risk-limit; initial rate raised to 1/10 (account leverage A8)"
+   },
+   "margin_binance": {
+    "value": null,
+    "label": "NO DATA",
+    "note": "Binance leverageBracket is a signed endpoint (account keys): not read"
+   },
+   "burst_throughput": {
+    "value": "2 new maker orders or amends per s per venue, burst 5; hedges, unwinds and cancels never refused",
+    "label": "APPROVED",
+    "note": "A1, owner 16 Nov"
+   },
+   "within_cap_arrival_depth_hedge_venue": {
+    "value": null,
+    "label": "NO DATA",
+    "note": "two-venue depth data exists only for SOLUSDT (ADAUSDT: about one hour of top-20, 15 Nov fillprobe capture: too short)"
+   },
+   "exit_capacity": {
+    "value": null,
+    "label": "NO DATA",
+    "note": "two-venue depth data exists only for SOLUSDT (ADAUSDT: about one hour of top-20, 15 Nov fillprobe capture: too short)"
+   }
+  },
+  {
+   "symbol": "APTUSDT",
+   "spot22": true,
+   "listed_both_perp_venues": {
+    "value": true,
+    "label": "MEASURED",
+    "note": "public dump 20 Nov 2026"
+   },
+   "parent_max_usdt": {
+    "value": "20,000-30,000 (up to 50,000)",
+    "label": "APPROVED",
+    "note": "owner target 20 Nov"
+   },
+   "child_max": {
+    "value": {
+     "clip_cap_usdt": 25000,
+     "bybit_postonly_max_qty": "800000.00",
+     "binance_limit_max_qty": "2000000",
+     "binance_market_max_qty": "200000",
+     "bybit_market_max_qty": "160000.00"
+    },
+    "label": "ASSUMED cap / MEASURED venue maxima",
+    "note": "child = min(25,000 USDT clip cap (arb.max_clip_notional, ASSUMED), the venue maxima in base); the USDT value of a venue maximum needs a price (not read)"
+   },
+   "venue_filters": {
+    "value": {
+     "BYBIT": {
+      "tick": "0.0001",
+      "step": "0.01",
+      "min_qty": "0.01",
+      "min_notional": "5"
+     },
+     "BINANCE": {
+      "tick": "0.00010",
+      "step": "0.1",
+      "min_qty": "0.1",
+      "min_notional": "5"
+     }
+    },
+    "label": "MEASURED",
+    "note": "public dump 20 Nov 2026 (current rules)"
+   },
+   "worst_outstanding_maker_fill_during_cancel": {
+    "value": "the whole resting child",
+    "label": "ASSUMED",
+    "note": "a cancel races the fill: the full child can fill before the cancel lands"
+   },
+   "caps": {
+    "value": {
+     "net_ceiling": "1.25 x parent",
+     "gross_per_venue": "2 x parent"
+    },
+    "label": "ASSUMED",
+    "note": "the v1_16 multiples (net_ceiling_multiple 1.0 + fill_headroom 0.25; gross 2 x clip with clip = parent)"
+   },
+   "hedge_deadline": {
+    "value": "hedge IOC; 2 retries at 0.25 s, then unwind (3 attempts, 15 bps band); maker ack deadline on",
+    "label": "ASSUMED",
+    "note": "hedge_faults of v1_17"
+   },
+   "margin_bybit": {
+    "value": {
+     "20000": {
+      "tier_id": 2,
+      "initial_usdt": 2000.0,
+      "maintenance_usdt": 190.0,
+      "tier_max_notional": "100000"
+     },
+     "30000": {
+      "tier_id": 2,
+      "initial_usdt": 3000.0,
+      "maintenance_usdt": 290.0,
+      "tier_max_notional": "100000"
+     },
+     "50000": {
+      "tier_id": 2,
+      "initial_usdt": 5000.0,
+      "maintenance_usdt": 490.0,
+      "tier_max_notional": "100000"
+     }
+    },
+    "label": "MEASURED tiers, ASSUMED leverage 10",
+    "note": "public /v5/market/risk-limit; initial rate raised to 1/10 (account leverage A8)"
+   },
+   "margin_binance": {
+    "value": null,
+    "label": "NO DATA",
+    "note": "Binance leverageBracket is a signed endpoint (account keys): not read"
+   },
+   "burst_throughput": {
+    "value": "2 new maker orders or amends per s per venue, burst 5; hedges, unwinds and cancels never refused",
+    "label": "APPROVED",
+    "note": "A1, owner 16 Nov"
+   },
+   "within_cap_arrival_depth_hedge_venue": {
+    "value": null,
+    "label": "NO DATA",
+    "note": "two-venue depth data exists only for SOLUSDT"
+   },
+   "exit_capacity": {
+    "value": null,
+    "label": "NO DATA",
+    "note": "two-venue depth data exists only for SOLUSDT"
+   }
+  },
+  {
+   "symbol": "ARBUSDT",
+   "spot22": true,
+   "listed_both_perp_venues": {
+    "value": true,
+    "label": "MEASURED",
+    "note": "public dump 20 Nov 2026"
+   },
+   "parent_max_usdt": {
+    "value": "20,000-30,000 (up to 50,000)",
+    "label": "APPROVED",
+    "note": "owner target 20 Nov"
+   },
+   "child_max": {
+    "value": {
+     "clip_cap_usdt": 25000,
+     "bybit_postonly_max_qty": "21500000.0",
+     "binance_limit_max_qty": "30000000",
+     "binance_market_max_qty": "6000000",
+     "bybit_market_max_qty": "4300000.0"
+    },
+    "label": "ASSUMED cap / MEASURED venue maxima",
+    "note": "child = min(25,000 USDT clip cap (arb.max_clip_notional, ASSUMED), the venue maxima in base); the USDT value of a venue maximum needs a price (not read)"
+   },
+   "venue_filters": {
+    "value": {
+     "BYBIT": {
+      "tick": "0.00001",
+      "step": "0.1",
+      "min_qty": "0.1",
+      "min_notional": "5"
+     },
+     "BINANCE": {
+      "tick": "0.000010",
+      "step": "0.1",
+      "min_qty": "0.1",
+      "min_notional": "5"
+     }
+    },
+    "label": "MEASURED",
+    "note": "public dump 20 Nov 2026 (current rules)"
+   },
+   "worst_outstanding_maker_fill_during_cancel": {
+    "value": "the whole resting child",
+    "label": "ASSUMED",
+    "note": "a cancel races the fill: the full child can fill before the cancel lands"
+   },
+   "caps": {
+    "value": {
+     "net_ceiling": "1.25 x parent",
+     "gross_per_venue": "2 x parent"
+    },
+    "label": "ASSUMED",
+    "note": "the v1_16 multiples (net_ceiling_multiple 1.0 + fill_headroom 0.25; gross 2 x clip with clip = parent)"
+   },
+   "hedge_deadline": {
+    "value": "hedge IOC; 2 retries at 0.25 s, then unwind (3 attempts, 15 bps band); maker ack deadline on",
+    "label": "ASSUMED",
+    "note": "hedge_faults of v1_17"
+   },
+   "margin_bybit": {
+    "value": {
+     "20000": {
+      "tier_id": 2,
+      "initial_usdt": 2000.0,
+      "maintenance_usdt": 195.0,
+      "tier_max_notional": "20000"
+     },
+     "30000": {
+      "tier_id": 4,
+      "initial_usdt": 3000.0,
+      "maintenance_usdt": 308.1,
+      "tier_max_notional": "41500"
+     },
+     "50000": {
+      "tier_id": 5,
+      "initial_usdt": 5000.0,
+      "maintenance_usdt": 573.4,
+      "tier_max_notional": "75500"
+     }
+    },
+    "label": "MEASURED tiers, ASSUMED leverage 10",
+    "note": "public /v5/market/risk-limit; initial rate raised to 1/10 (account leverage A8)"
+   },
+   "margin_binance": {
+    "value": null,
+    "label": "NO DATA",
+    "note": "Binance leverageBracket is a signed endpoint (account keys): not read"
+   },
+   "burst_throughput": {
+    "value": "2 new maker orders or amends per s per venue, burst 5; hedges, unwinds and cancels never refused",
+    "label": "APPROVED",
+    "note": "A1, owner 16 Nov"
+   },
+   "within_cap_arrival_depth_hedge_venue": {
+    "value": null,
+    "label": "NO DATA",
+    "note": "two-venue depth data exists only for SOLUSDT"
+   },
+   "exit_capacity": {
+    "value": null,
+    "label": "NO DATA",
+    "note": "two-venue depth data exists only for SOLUSDT"
+   }
+  },
+  {
+   "symbol": "ATOMUSDT",
+   "spot22": true,
+   "listed_both_perp_venues": {
+    "value": true,
+    "label": "MEASURED",
+    "note": "public dump 20 Nov 2026"
+   },
+   "parent_max_usdt": {
+    "value": "20,000-30,000 (up to 50,000)",
+    "label": "APPROVED",
+    "note": "owner target 20 Nov"
+   },
+   "child_max": {
+    "value": {
+     "clip_cap_usdt": 25000,
+     "bybit_postonly_max_qty": "139180.0",
+     "binance_limit_max_qty": "2000000",
+     "binance_market_max_qty": "200000",
+     "bybit_market_max_qty": "22100.0"
+    },
+    "label": "ASSUMED cap / MEASURED venue maxima",
+    "note": "child = min(25,000 USDT clip cap (arb.max_clip_notional, ASSUMED), the venue maxima in base); the USDT value of a venue maximum needs a price (not read)"
+   },
+   "venue_filters": {
+    "value": {
+     "BYBIT": {
+      "tick": "0.0010",
+      "step": "0.1",
+      "min_qty": "0.1",
+      "min_notional": "5"
+     },
+     "BINANCE": {
+      "tick": "0.001",
+      "step": "0.01",
+      "min_qty": "0.01",
+      "min_notional": "5"
+     }
+    },
+    "label": "MEASURED",
+    "note": "public dump 20 Nov 2026 (current rules)"
+   },
+   "worst_outstanding_maker_fill_during_cancel": {
+    "value": "the whole resting child",
+    "label": "ASSUMED",
+    "note": "a cancel races the fill: the full child can fill before the cancel lands"
+   },
+   "caps": {
+    "value": {
+     "net_ceiling": "1.25 x parent",
+     "gross_per_venue": "2 x parent"
+    },
+    "label": "ASSUMED",
+    "note": "the v1_16 multiples (net_ceiling_multiple 1.0 + fill_headroom 0.25; gross 2 x clip with clip = parent)"
+   },
+   "hedge_deadline": {
+    "value": "hedge IOC; 2 retries at 0.25 s, then unwind (3 attempts, 15 bps band); maker ack deadline on",
+    "label": "ASSUMED",
+    "note": "hedge_faults of v1_17"
+   },
+   "margin_bybit": {
+    "value": {
+     "20000": {
+      "tier_id": 432,
+      "initial_usdt": 2000.0,
+      "maintenance_usdt": 183.5,
+      "tier_max_notional": "25000"
+     },
+     "30000": {
+      "tier_id": 433,
+      "initial_usdt": 3000.0,
+      "maintenance_usdt": 289.0,
+      "tier_max_notional": "50000"
+     },
+     "50000": {
+      "tier_id": 433,
+      "initial_usdt": 5000.0,
+      "maintenance_usdt": 511.0,
+      "tier_max_notional": "50000"
+     }
+    },
+    "label": "MEASURED tiers, ASSUMED leverage 10",
+    "note": "public /v5/market/risk-limit; initial rate raised to 1/10 (account leverage A8)"
+   },
+   "margin_binance": {
+    "value": null,
+    "label": "NO DATA",
+    "note": "Binance leverageBracket is a signed endpoint (account keys): not read"
+   },
+   "burst_throughput": {
+    "value": "2 new maker orders or amends per s per venue, burst 5; hedges, unwinds and cancels never refused",
+    "label": "APPROVED",
+    "note": "A1, owner 16 Nov"
+   },
+   "within_cap_arrival_depth_hedge_venue": {
+    "value": null,
+    "label": "NO DATA",
+    "note": "two-venue depth data exists only for SOLUSDT"
+   },
+   "exit_capacity": {
+    "value": null,
+    "label": "NO DATA",
+    "note": "two-venue depth data exists only for SOLUSDT"
+   }
+  },
+  {
+   "symbol": "AVAXUSDT",
+   "spot22": true,
+   "listed_both_perp_venues": {
+    "value": true,
+    "label": "MEASURED",
+    "note": "public dump 20 Nov 2026"
+   },
+   "parent_max_usdt": {
+    "value": "20,000-30,000 (up to 50,000)",
+    "label": "APPROVED",
+    "note": "owner target 20 Nov"
+   },
+   "child_max": {
+    "value": {
+     "clip_cap_usdt": 25000,
+     "bybit_postonly_max_qty": "110000.0",
+     "binance_limit_max_qty": "500000",
+     "binance_market_max_qty": "50000",
+     "bybit_market_max_qty": "22000.0"
+    },
+    "label": "ASSUMED cap / MEASURED venue maxima",
+    "note": "child = min(25,000 USDT clip cap (arb.max_clip_notional, ASSUMED), the venue maxima in base); the USDT value of a venue maximum needs a price (not read)"
+   },
+   "venue_filters": {
+    "value": {
+     "BYBIT": {
+      "tick": "0.001",
+      "step": "0.1",
+      "min_qty": "0.1",
+      "min_notional": "5"
+     },
+     "BINANCE": {
+      "tick": "0.0010",
+      "step": "1",
+      "min_qty": "1",
+      "min_notional": "5"
+     }
+    },
+    "label": "MEASURED",
+    "note": "public dump 20 Nov 2026 (current rules)"
+   },
+   "worst_outstanding_maker_fill_during_cancel": {
+    "value": "the whole resting child",
+    "label": "ASSUMED",
+    "note": "a cancel races the fill: the full child can fill before the cancel lands"
+   },
+   "caps": {
+    "value": {
+     "net_ceiling": "1.25 x parent",
+     "gross_per_venue": "2 x parent"
+    },
+    "label": "ASSUMED",
+    "note": "the v1_16 multiples (net_ceiling_multiple 1.0 + fill_headroom 0.25; gross 2 x clip with clip = parent)"
+   },
+   "hedge_deadline": {
+    "value": "hedge IOC; 2 retries at 0.25 s, then unwind (3 attempts, 15 bps band); maker ack deadline on",
+    "label": "ASSUMED",
+    "note": "hedge_faults of v1_17"
+   },
+   "margin_bybit": {
+    "value": {
+     "20000": {
+      "tier_id": 448,
+      "initial_usdt": 2000.0,
+      "maintenance_usdt": 141.0,
+      "tier_max_notional": "20000"
+     },
+     "30000": {
+      "tier_id": 449,
+      "initial_usdt": 3000.0,
+      "maintenance_usdt": 232.0,
+      "tier_max_notional": "30000"
+     },
+     "50000": {
+      "tier_id": 450,
+      "initial_usdt": 5000.0,
+      "maintenance_usdt": 432.0,
+      "tier_max_notional": "50000"
+     }
+    },
+    "label": "MEASURED tiers, ASSUMED leverage 10",
+    "note": "public /v5/market/risk-limit; initial rate raised to 1/10 (account leverage A8)"
+   },
+   "margin_binance": {
+    "value": null,
+    "label": "NO DATA",
+    "note": "Binance leverageBracket is a signed endpoint (account keys): not read"
+   },
+   "burst_throughput": {
+    "value": "2 new maker orders or amends per s per venue, burst 5; hedges, unwinds and cancels never refused",
+    "label": "APPROVED",
+    "note": "A1, owner 16 Nov"
+   },
+   "within_cap_arrival_depth_hedge_venue": {
+    "value": null,
+    "label": "NO DATA",
+    "note": "two-venue depth data exists only for SOLUSDT"
+   },
+   "exit_capacity": {
+    "value": null,
+    "label": "NO DATA",
+    "note": "two-venue depth data exists only for SOLUSDT"
+   }
+  },
+  {
+   "symbol": "BNBUSDT",
+   "spot22": true,
+   "listed_both_perp_venues": {
+    "value": true,
+    "label": "MEASURED",
+    "note": "public dump 20 Nov 2026"
+   },
+   "parent_max_usdt": {
+    "value": "20,000-30,000 (up to 50,000)",
+    "label": "APPROVED",
+    "note": "owner target 20 Nov"
+   },
+   "child_max": {
+    "value": {
+     "clip_cap_usdt": 25000,
+     "bybit_postonly_max_qty": "940.00",
+     "binance_limit_max_qty": "100000",
+     "binance_market_max_qty": "2000",
+     "bybit_market_max_qty": "370.00"
+    },
+    "label": "ASSUMED cap / MEASURED venue maxima",
+    "note": "child = min(25,000 USDT clip cap (arb.max_clip_notional, ASSUMED), the venue maxima in base); the USDT value of a venue maximum needs a price (not read)"
+   },
+   "venue_filters": {
+    "value": {
+     "BYBIT": {
+      "tick": "0.01",
+      "step": "0.01",
+      "min_qty": "0.01",
+      "min_notional": "5"
+     },
+     "BINANCE": {
+      "tick": "0.010",
+      "step": "0.01",
+      "min_qty": "0.01",
+      "min_notional": "5"
+     }
+    },
+    "label": "MEASURED",
+    "note": "public dump 20 Nov 2026 (current rules)"
+   },
+   "worst_outstanding_maker_fill_during_cancel": {
+    "value": "the whole resting child",
+    "label": "ASSUMED",
+    "note": "a cancel races the fill: the full child can fill before the cancel lands"
+   },
+   "caps": {
+    "value": {
+     "net_ceiling": "1.25 x parent",
+     "gross_per_venue": "2 x parent"
+    },
+    "label": "ASSUMED",
+    "note": "the v1_16 multiples (net_ceiling_multiple 1.0 + fill_headroom 0.25; gross 2 x clip with clip = parent)"
+   },
+   "hedge_deadline": {
+    "value": "hedge IOC; 2 retries at 0.25 s, then unwind (3 attempts, 15 bps band); maker ack deadline on",
+    "label": "ASSUMED",
+    "note": "hedge_faults of v1_17"
+   },
+   "margin_bybit": {
+    "value": {
+     "20000": {
+      "tier_id": 252,
+      "initial_usdt": 2000.0,
+      "maintenance_usdt": 138.0,
+      "tier_max_notional": "50000"
+     },
+     "30000": {
+      "tier_id": 252,
+      "initial_usdt": 3000.0,
+      "maintenance_usdt": 209.0,
+      "tier_max_notional": "50000"
+     },
+     "50000": {
+      "tier_id": 252,
+      "initial_usdt": 5000.0,
+      "maintenance_usdt": 351.0,
+      "tier_max_notional": "50000"
+     }
+    },
+    "label": "MEASURED tiers, ASSUMED leverage 10",
+    "note": "public /v5/market/risk-limit; initial rate raised to 1/10 (account leverage A8)"
+   },
+   "margin_binance": {
+    "value": null,
+    "label": "NO DATA",
+    "note": "Binance leverageBracket is a signed endpoint (account keys): not read"
+   },
+   "burst_throughput": {
+    "value": "2 new maker orders or amends per s per venue, burst 5; hedges, unwinds and cancels never refused",
+    "label": "APPROVED",
+    "note": "A1, owner 16 Nov"
+   },
+   "within_cap_arrival_depth_hedge_venue": {
+    "value": null,
+    "label": "NO DATA",
+    "note": "two-venue depth data exists only for SOLUSDT"
+   },
+   "exit_capacity": {
+    "value": null,
+    "label": "NO DATA",
+    "note": "two-venue depth data exists only for SOLUSDT"
+   }
+  },
+  {
+   "symbol": "BTCUSDT",
+   "spot22": true,
+   "listed_both_perp_venues": {
+    "value": true,
+    "label": "MEASURED",
+    "note": "public dump 20 Nov 2026"
+   },
+   "parent_max_usdt": {
+    "value": "20,000-30,000 (up to 50,000)",
+    "label": "APPROVED",
+    "note": "owner target 20 Nov"
+   },
+   "child_max": {
+    "value": {
+     "clip_cap_usdt": 25000,
+     "bybit_postonly_max_qty": "1500.000",
+     "binance_limit_max_qty": "1000",
+     "binance_market_max_qty": "120",
+     "bybit_market_max_qty": "150.000"
+    },
+    "label": "ASSUMED cap / MEASURED venue maxima",
+    "note": "child = min(25,000 USDT clip cap (arb.max_clip_notional, ASSUMED), the venue maxima in base); the USDT value of a venue maximum needs a price (not read)"
+   },
+   "venue_filters": {
+    "value": {
+     "BYBIT": {
+      "tick": "0.10",
+      "step": "0.001",
+      "min_qty": "0.001",
+      "min_notional": "5"
+     },
+     "BINANCE": {
+      "tick": "0.10",
+      "step": "0.001",
+      "min_qty": "0.001",
+      "min_notional": "50"
+     }
+    },
+    "label": "MEASURED",
+    "note": "public dump 20 Nov 2026 (current rules)"
+   },
+   "worst_outstanding_maker_fill_during_cancel": {
+    "value": "the whole resting child",
+    "label": "ASSUMED",
+    "note": "a cancel races the fill: the full child can fill before the cancel lands"
+   },
+   "caps": {
+    "value": {
+     "net_ceiling": "1.25 x parent",
+     "gross_per_venue": "2 x parent"
+    },
+    "label": "ASSUMED",
+    "note": "the v1_16 multiples (net_ceiling_multiple 1.0 + fill_headroom 0.25; gross 2 x clip with clip = parent)"
+   },
+   "hedge_deadline": {
+    "value": "hedge IOC; 2 retries at 0.25 s, then unwind (3 attempts, 15 bps band); maker ack deadline on",
+    "label": "ASSUMED",
+    "note": "hedge_faults of v1_17"
+   },
+   "margin_bybit": {
+    "value": {
+     "20000": {
+      "tier_id": 1,
+      "initial_usdt": 2000.0,
+      "maintenance_usdt": 66.0,
+      "tier_max_notional": "300000"
+     },
+     "30000": {
+      "tier_id": 1,
+      "initial_usdt": 3000.0,
+      "maintenance_usdt": 99.0,
+      "tier_max_notional": "300000"
+     },
+     "50000": {
+      "tier_id": 1,
+      "initial_usdt": 5000.0,
+      "maintenance_usdt": 165.0,
+      "tier_max_notional": "300000"
+     }
+    },
+    "label": "MEASURED tiers, ASSUMED leverage 10",
+    "note": "public /v5/market/risk-limit; initial rate raised to 1/10 (account leverage A8)"
+   },
+   "margin_binance": {
+    "value": null,
+    "label": "NO DATA",
+    "note": "Binance leverageBracket is a signed endpoint (account keys): not read"
+   },
+   "burst_throughput": {
+    "value": "2 new maker orders or amends per s per venue, burst 5; hedges, unwinds and cancels never refused",
+    "label": "APPROVED",
+    "note": "A1, owner 16 Nov"
+   },
+   "within_cap_arrival_depth_hedge_venue": {
+    "value": null,
+    "label": "NO DATA",
+    "note": "two-venue depth data exists only for SOLUSDT"
+   },
+   "exit_capacity": {
+    "value": null,
+    "label": "NO DATA",
+    "note": "two-venue depth data exists only for SOLUSDT"
+   }
+  },
+  {
+   "symbol": "DOGEUSDT",
+   "spot22": true,
+   "listed_both_perp_venues": {
+    "value": true,
+    "label": "MEASURED",
+    "note": "public dump 20 Nov 2026"
+   },
+   "parent_max_usdt": {
+    "value": "20,000-30,000 (up to 50,000)",
+    "label": "APPROVED",
+    "note": "owner target 20 Nov"
+   },
+   "child_max": {
+    "value": {
+     "clip_cap_usdt": 25000,
+     "bybit_postonly_max_qty": "43678900",
+     "binance_limit_max_qty": "300000000",
+     "binance_market_max_qty": "30000000",
+     "bybit_market_max_qty": "5991100"
+    },
+    "label": "ASSUMED cap / MEASURED venue maxima",
+    "note": "child = min(25,000 USDT clip cap (arb.max_clip_notional, ASSUMED), the venue maxima in base); the USDT value of a venue maximum needs a price (not read)"
+   },
+   "venue_filters": {
+    "value": {
+     "BYBIT": {
+      "tick": "0.00001",
+      "step": "1",
+      "min_qty": "1",
+      "min_notional": "5"
+     },
+     "BINANCE": {
+      "tick": "0.000010",
+      "step": "1",
+      "min_qty": "1",
+      "min_notional": "5"
+     }
+    },
+    "label": "MEASURED",
+    "note": "public dump 20 Nov 2026 (current rules)"
+   },
+   "worst_outstanding_maker_fill_during_cancel": {
+    "value": "the whole resting child",
+    "label": "ASSUMED",
+    "note": "a cancel races the fill: the full child can fill before the cancel lands"
+   },
+   "caps": {
+    "value": {
+     "net_ceiling": "1.25 x parent",
+     "gross_per_venue": "2 x parent"
+    },
+    "label": "ASSUMED",
+    "note": "the v1_16 multiples (net_ceiling_multiple 1.0 + fill_headroom 0.25; gross 2 x clip with clip = parent)"
+   },
+   "hedge_deadline": {
+    "value": "hedge IOC; 2 retries at 0.25 s, then unwind (3 attempts, 15 bps band); maker ack deadline on",
+    "label": "ASSUMED",
+    "note": "hedge_faults of v1_17"
+   },
+   "margin_bybit": {
+    "value": {
+     "20000": {
+      "tier_id": 206,
+      "initial_usdt": 2000.0,
+      "maintenance_usdt": 150.0,
+      "tier_max_notional": "250000"
+     },
+     "30000": {
+      "tier_id": 206,
+      "initial_usdt": 3000.0,
+      "maintenance_usdt": 225.0,
+      "tier_max_notional": "250000"
+     },
+     "50000": {
+      "tier_id": 206,
+      "initial_usdt": 5000.0,
+      "maintenance_usdt": 375.0,
+      "tier_max_notional": "250000"
+     }
+    },
+    "label": "MEASURED tiers, ASSUMED leverage 10",
+    "note": "public /v5/market/risk-limit; initial rate raised to 1/10 (account leverage A8)"
+   },
+   "margin_binance": {
+    "value": null,
+    "label": "NO DATA",
+    "note": "Binance leverageBracket is a signed endpoint (account keys): not read"
+   },
+   "burst_throughput": {
+    "value": "2 new maker orders or amends per s per venue, burst 5; hedges, unwinds and cancels never refused",
+    "label": "APPROVED",
+    "note": "A1, owner 16 Nov"
+   },
+   "within_cap_arrival_depth_hedge_venue": {
+    "value": null,
+    "label": "NO DATA",
+    "note": "two-venue depth data exists only for SOLUSDT"
+   },
+   "exit_capacity": {
+    "value": null,
+    "label": "NO DATA",
+    "note": "two-venue depth data exists only for SOLUSDT"
+   }
+  },
+  {
+   "symbol": "DOTUSDT",
+   "spot22": true,
+   "listed_both_perp_venues": {
+    "value": true,
+    "label": "MEASURED",
+    "note": "public dump 20 Nov 2026"
+   },
+   "parent_max_usdt": {
+    "value": "20,000-30,000 (up to 50,000)",
+    "label": "APPROVED",
+    "note": "owner target 20 Nov"
+   },
+   "child_max": {
+    "value": {
+     "clip_cap_usdt": 25000,
+     "bybit_postonly_max_qty": "198890.0",
+     "binance_limit_max_qty": "3000000",
+     "binance_market_max_qty": "300000",
+     "bybit_market_max_qty": "32140.0"
+    },
+    "label": "ASSUMED cap / MEASURED venue maxima",
+    "note": "child = min(25,000 USDT clip cap (arb.max_clip_notional, ASSUMED), the venue maxima in base); the USDT value of a venue maximum needs a price (not read)"
+   },
+   "venue_filters": {
+    "value": {
+     "BYBIT": {
+      "tick": "0.0001",
+      "step": "0.1",
+      "min_qty": "0.1",
+      "min_notional": "5"
+     },
+     "BINANCE": {
+      "tick": "0.000100",
+      "step": "0.1",
+      "min_qty": "0.1",
+      "min_notional": "5"
+     }
+    },
+    "label": "MEASURED",
+    "note": "public dump 20 Nov 2026 (current rules)"
+   },
+   "worst_outstanding_maker_fill_during_cancel": {
+    "value": "the whole resting child",
+    "label": "ASSUMED",
+    "note": "a cancel races the fill: the full child can fill before the cancel lands"
+   },
+   "caps": {
+    "value": {
+     "net_ceiling": "1.25 x parent",
+     "gross_per_venue": "2 x parent"
+    },
+    "label": "ASSUMED",
+    "note": "the v1_16 multiples (net_ceiling_multiple 1.0 + fill_headroom 0.25; gross 2 x clip with clip = parent)"
+   },
+   "hedge_deadline": {
+    "value": "hedge IOC; 2 retries at 0.25 s, then unwind (3 attempts, 15 bps band); maker ack deadline on",
+    "label": "ASSUMED",
+    "note": "hedge_faults of v1_17"
+   },
+   "margin_bybit": {
+    "value": {
+     "20000": {
+      "tier_id": 133,
+      "initial_usdt": 2000.0,
+      "maintenance_usdt": 200.0,
+      "tier_max_notional": "20000"
+     },
+     "30000": {
+      "tier_id": 134,
+      "initial_usdt": 3000.0,
+      "maintenance_usdt": 300.0,
+      "tier_max_notional": "30000"
+     },
+     "50000": {
+      "tier_id": 135,
+      "initial_usdt": 5000.0,
+      "maintenance_usdt": 500.0,
+      "tier_max_notional": "50000"
+     }
+    },
+    "label": "MEASURED tiers, ASSUMED leverage 10",
+    "note": "public /v5/market/risk-limit; initial rate raised to 1/10 (account leverage A8)"
+   },
+   "margin_binance": {
+    "value": null,
+    "label": "NO DATA",
+    "note": "Binance leverageBracket is a signed endpoint (account keys): not read"
+   },
+   "burst_throughput": {
+    "value": "2 new maker orders or amends per s per venue, burst 5; hedges, unwinds and cancels never refused",
+    "label": "APPROVED",
+    "note": "A1, owner 16 Nov"
+   },
+   "within_cap_arrival_depth_hedge_venue": {
+    "value": null,
+    "label": "NO DATA",
+    "note": "two-venue depth data exists only for SOLUSDT"
+   },
+   "exit_capacity": {
+    "value": null,
+    "label": "NO DATA",
+    "note": "two-venue depth data exists only for SOLUSDT"
+   }
+  },
+  {
+   "symbol": "ENAUSDT",
+   "spot22": true,
+   "listed_both_perp_venues": {
+    "value": true,
+    "label": "MEASURED",
+    "note": "public dump 20 Nov 2026"
+   },
+   "parent_max_usdt": {
+    "value": "20,000-30,000 (up to 50,000)",
+    "label": "APPROVED",
+    "note": "owner target 20 Nov"
+   },
+   "child_max": {
+    "value": {
+     "clip_cap_usdt": 25000,
+     "bybit_postonly_max_qty": "5160000",
+     "binance_limit_max_qty": "20000000",
+     "binance_market_max_qty": "2000000",
+     "bybit_market_max_qty": "1290000"
+    },
+    "label": "ASSUMED cap / MEASURED venue maxima",
+    "note": "child = min(25,000 USDT clip cap (arb.max_clip_notional, ASSUMED), the venue maxima in base); the USDT value of a venue maximum needs a price (not read)"
+   },
+   "venue_filters": {
+    "value": {
+     "BYBIT": {
+      "tick": "0.00001",
+      "step": "1",
+      "min_qty": "1",
+      "min_notional": "5"
+     },
+     "BINANCE": {
+      "tick": "0.0000100",
+      "step": "1",
+      "min_qty": "1",
+      "min_notional": "5"
+     }
+    },
+    "label": "MEASURED",
+    "note": "public dump 20 Nov 2026 (current rules)"
+   },
+   "worst_outstanding_maker_fill_during_cancel": {
+    "value": "the whole resting child",
+    "label": "ASSUMED",
+    "note": "a cancel races the fill: the full child can fill before the cancel lands"
+   },
+   "caps": {
+    "value": {
+     "net_ceiling": "1.25 x parent",
+     "gross_per_venue": "2 x parent"
+    },
+    "label": "ASSUMED",
+    "note": "the v1_16 multiples (net_ceiling_multiple 1.0 + fill_headroom 0.25; gross 2 x clip with clip = parent)"
+   },
+   "hedge_deadline": {
+    "value": "hedge IOC; 2 retries at 0.25 s, then unwind (3 attempts, 15 bps band); maker ack deadline on",
+    "label": "ASSUMED",
+    "note": "hedge_faults of v1_17"
+   },
+   "margin_bybit": {
+    "value": {
+     "20000": {
+      "tier_id": 1,
+      "initial_usdt": 2000.0,
+      "maintenance_usdt": 180.0,
+      "tier_max_notional": "20000"
+     },
+     "30000": {
+      "tier_id": 2,
+      "initial_usdt": 3000.0,
+      "maintenance_usdt": 280.0,
+      "tier_max_notional": "200000"
+     },
+     "50000": {
+      "tier_id": 2,
+      "initial_usdt": 5000.0,
+      "maintenance_usdt": 480.0,
+      "tier_max_notional": "200000"
+     }
+    },
+    "label": "MEASURED tiers, ASSUMED leverage 10",
+    "note": "public /v5/market/risk-limit; initial rate raised to 1/10 (account leverage A8)"
+   },
+   "margin_binance": {
+    "value": null,
+    "label": "NO DATA",
+    "note": "Binance leverageBracket is a signed endpoint (account keys): not read"
+   },
+   "burst_throughput": {
+    "value": "2 new maker orders or amends per s per venue, burst 5; hedges, unwinds and cancels never refused",
+    "label": "APPROVED",
+    "note": "A1, owner 16 Nov"
+   },
+   "within_cap_arrival_depth_hedge_venue": {
+    "value": null,
+    "label": "NO DATA",
+    "note": "two-venue depth data exists only for SOLUSDT"
+   },
+   "exit_capacity": {
+    "value": null,
+    "label": "NO DATA",
+    "note": "two-venue depth data exists only for SOLUSDT"
+   }
+  },
+  {
+   "symbol": "ETHUSDT",
+   "spot22": true,
+   "listed_both_perp_venues": {
+    "value": true,
+    "label": "MEASURED",
+    "note": "public dump 20 Nov 2026"
+   },
+   "parent_max_usdt": {
+    "value": "20,000-30,000 (up to 50,000)",
+    "label": "APPROVED",
+    "note": "owner target 20 Nov"
+   },
+   "child_max": {
+    "value": {
+     "clip_cap_usdt": 25000,
+     "bybit_postonly_max_qty": "10000.00",
+     "binance_limit_max_qty": "10000",
+     "binance_market_max_qty": "2000",
+     "bybit_market_max_qty": "2000.00"
+    },
+    "label": "ASSUMED cap / MEASURED venue maxima",
+    "note": "child = min(25,000 USDT clip cap (arb.max_clip_notional, ASSUMED), the venue maxima in base); the USDT value of a venue maximum needs a price (not read)"
+   },
+   "venue_filters": {
+    "value": {
+     "BYBIT": {
+      "tick": "0.01",
+      "step": "0.01",
+      "min_qty": "0.01",
+      "min_notional": "5"
+     },
+     "BINANCE": {
+      "tick": "0.01",
+      "step": "0.001",
+      "min_qty": "0.001",
+      "min_notional": "20"
+     }
+    },
+    "label": "MEASURED",
+    "note": "public dump 20 Nov 2026 (current rules)"
+   },
+   "worst_outstanding_maker_fill_during_cancel": {
+    "value": "the whole resting child",
+    "label": "ASSUMED",
+    "note": "a cancel races the fill: the full child can fill before the cancel lands"
+   },
+   "caps": {
+    "value": {
+     "net_ceiling": "1.25 x parent",
+     "gross_per_venue": "2 x parent"
+    },
+    "label": "ASSUMED",
+    "note": "the v1_16 multiples (net_ceiling_multiple 1.0 + fill_headroom 0.25; gross 2 x clip with clip = parent)"
+   },
+   "hedge_deadline": {
+    "value": "hedge IOC; 2 retries at 0.25 s, then unwind (3 attempts, 15 bps band); maker ack deadline on",
+    "label": "ASSUMED",
+    "note": "hedge_faults of v1_17"
+   },
+   "margin_bybit": {
+    "value": {
+     "20000": {
+      "tier_id": 11,
+      "initial_usdt": 2000.0,
+      "maintenance_usdt": 66.0,
+      "tier_max_notional": "300000"
+     },
+     "30000": {
+      "tier_id": 11,
+      "initial_usdt": 3000.0,
+      "maintenance_usdt": 99.0,
+      "tier_max_notional": "300000"
+     },
+     "50000": {
+      "tier_id": 11,
+      "initial_usdt": 5000.0,
+      "maintenance_usdt": 165.0,
+      "tier_max_notional": "300000"
+     }
+    },
+    "label": "MEASURED tiers, ASSUMED leverage 10",
+    "note": "public /v5/market/risk-limit; initial rate raised to 1/10 (account leverage A8)"
+   },
+   "margin_binance": {
+    "value": null,
+    "label": "NO DATA",
+    "note": "Binance leverageBracket is a signed endpoint (account keys): not read"
+   },
+   "burst_throughput": {
+    "value": "2 new maker orders or amends per s per venue, burst 5; hedges, unwinds and cancels never refused",
+    "label": "APPROVED",
+    "note": "A1, owner 16 Nov"
+   },
+   "within_cap_arrival_depth_hedge_venue": {
+    "value": null,
+    "label": "NO DATA",
+    "note": "two-venue depth data exists only for SOLUSDT"
+   },
+   "exit_capacity": {
+    "value": null,
+    "label": "NO DATA",
+    "note": "two-venue depth data exists only for SOLUSDT"
+   }
+  },
+  {
+   "symbol": "FILUSDT",
+   "spot22": true,
+   "listed_both_perp_venues": {
+    "value": true,
+    "label": "MEASURED",
+    "note": "public dump 20 Nov 2026"
+   },
+   "parent_max_usdt": {
+    "value": "20,000-30,000 (up to 50,000)",
+    "label": "APPROVED",
+    "note": "owner target 20 Nov"
+   },
+   "child_max": {
+    "value": {
+     "clip_cap_usdt": 25000,
+     "bybit_postonly_max_qty": "295750.0",
+     "binance_limit_max_qty": "6000000",
+     "binance_market_max_qty": "600000",
+     "bybit_market_max_qty": "60730.0"
+    },
+    "label": "ASSUMED cap / MEASURED venue maxima",
+    "note": "child = min(25,000 USDT clip cap (arb.max_clip_notional, ASSUMED), the venue maxima in base); the USDT value of a venue maximum needs a price (not read)"
+   },
+   "venue_filters": {
+    "value": {
+     "BYBIT": {
+      "tick": "0.0001",
+      "step": "0.1",
+      "min_qty": "0.1",
+      "min_notional": "5"
+     },
+     "BINANCE": {
+      "tick": "0.000100",
+      "step": "0.1",
+      "min_qty": "0.1",
+      "min_notional": "5"
+     }
+    },
+    "label": "MEASURED",
+    "note": "public dump 20 Nov 2026 (current rules)"
+   },
+   "worst_outstanding_maker_fill_during_cancel": {
+    "value": "the whole resting child",
+    "label": "ASSUMED",
+    "note": "a cancel races the fill: the full child can fill before the cancel lands"
+   },
+   "caps": {
+    "value": {
+     "net_ceiling": "1.25 x parent",
+     "gross_per_venue": "2 x parent"
+    },
+    "label": "ASSUMED",
+    "note": "the v1_16 multiples (net_ceiling_multiple 1.0 + fill_headroom 0.25; gross 2 x clip with clip = parent)"
+   },
+   "hedge_deadline": {
+    "value": "hedge IOC; 2 retries at 0.25 s, then unwind (3 attempts, 15 bps band); maker ack deadline on",
+    "label": "ASSUMED",
+    "note": "hedge_faults of v1_17"
+   },
+   "margin_bybit": {
+    "value": {
+     "20000": {
+      "tier_id": 266,
+      "initial_usdt": 2000.0,
+      "maintenance_usdt": 400.0,
+      "tier_max_notional": "200000"
+     },
+     "30000": {
+      "tier_id": 266,
+      "initial_usdt": 3000.0,
+      "maintenance_usdt": 600.0,
+      "tier_max_notional": "200000"
+     },
+     "50000": {
+      "tier_id": 266,
+      "initial_usdt": 5000.0,
+      "maintenance_usdt": 1000.0,
+      "tier_max_notional": "200000"
+     }
+    },
+    "label": "MEASURED tiers, ASSUMED leverage 10",
+    "note": "public /v5/market/risk-limit; initial rate raised to 1/10 (account leverage A8)"
+   },
+   "margin_binance": {
+    "value": null,
+    "label": "NO DATA",
+    "note": "Binance leverageBracket is a signed endpoint (account keys): not read"
+   },
+   "burst_throughput": {
+    "value": "2 new maker orders or amends per s per venue, burst 5; hedges, unwinds and cancels never refused",
+    "label": "APPROVED",
+    "note": "A1, owner 16 Nov"
+   },
+   "within_cap_arrival_depth_hedge_venue": {
+    "value": null,
+    "label": "NO DATA",
+    "note": "two-venue depth data exists only for SOLUSDT"
+   },
+   "exit_capacity": {
+    "value": null,
+    "label": "NO DATA",
+    "note": "two-venue depth data exists only for SOLUSDT"
+   }
+  },
+  {
+   "symbol": "INJUSDT",
+   "spot22": true,
+   "listed_both_perp_venues": {
+    "value": true,
+    "label": "MEASURED",
+    "note": "public dump 20 Nov 2026"
+   },
+   "parent_max_usdt": {
+    "value": "20,000-30,000 (up to 50,000)",
+    "label": "APPROVED",
+    "note": "owner target 20 Nov"
+   },
+   "child_max": {
+    "value": {
+     "clip_cap_usdt": 25000,
+     "bybit_postonly_max_qty": "60140.0",
+     "binance_limit_max_qty": "500000",
+     "binance_market_max_qty": "40000",
+     "bybit_market_max_qty": "8400.0"
+    },
+    "label": "ASSUMED cap / MEASURED venue maxima",
+    "note": "child = min(25,000 USDT clip cap (arb.max_clip_notional, ASSUMED), the venue maxima in base); the USDT value of a venue maximum needs a price (not read)"
+   },
+   "venue_filters": {
+    "value": {
+     "BYBIT": {
+      "tick": "0.0010",
+      "step": "0.1",
+      "min_qty": "0.1",
+      "min_notional": "5"
+     },
+     "BINANCE": {
+      "tick": "0.001000",
+      "step": "0.1",
+      "min_qty": "0.1",
+      "min_notional": "5"
+     }
+    },
+    "label": "MEASURED",
+    "note": "public dump 20 Nov 2026 (current rules)"
+   },
+   "worst_outstanding_maker_fill_during_cancel": {
+    "value": "the whole resting child",
+    "label": "ASSUMED",
+    "note": "a cancel races the fill: the full child can fill before the cancel lands"
+   },
+   "caps": {
+    "value": {
+     "net_ceiling": "1.25 x parent",
+     "gross_per_venue": "2 x parent"
+    },
+    "label": "ASSUMED",
+    "note": "the v1_16 multiples (net_ceiling_multiple 1.0 + fill_headroom 0.25; gross 2 x clip with clip = parent)"
+   },
+   "hedge_deadline": {
+    "value": "hedge IOC; 2 retries at 0.25 s, then unwind (3 attempts, 15 bps band); maker ack deadline on",
+    "label": "ASSUMED",
+    "note": "hedge_faults of v1_17"
+   },
+   "margin_bybit": {
+    "value": {
+     "20000": {
+      "tier_id": 2,
+      "initial_usdt": 2000.0,
+      "maintenance_usdt": 190.0,
+      "tier_max_notional": "100000"
+     },
+     "30000": {
+      "tier_id": 2,
+      "initial_usdt": 3000.0,
+      "maintenance_usdt": 290.0,
+      "tier_max_notional": "100000"
+     },
+     "50000": {
+      "tier_id": 2,
+      "initial_usdt": 5000.0,
+      "maintenance_usdt": 490.0,
+      "tier_max_notional": "100000"
+     }
+    },
+    "label": "MEASURED tiers, ASSUMED leverage 10",
+    "note": "public /v5/market/risk-limit; initial rate raised to 1/10 (account leverage A8)"
+   },
+   "margin_binance": {
+    "value": null,
+    "label": "NO DATA",
+    "note": "Binance leverageBracket is a signed endpoint (account keys): not read"
+   },
+   "burst_throughput": {
+    "value": "2 new maker orders or amends per s per venue, burst 5; hedges, unwinds and cancels never refused",
+    "label": "APPROVED",
+    "note": "A1, owner 16 Nov"
+   },
+   "within_cap_arrival_depth_hedge_venue": {
+    "value": null,
+    "label": "NO DATA",
+    "note": "two-venue depth data exists only for SOLUSDT"
+   },
+   "exit_capacity": {
+    "value": null,
+    "label": "NO DATA",
+    "note": "two-venue depth data exists only for SOLUSDT"
+   }
+  },
+  {
+   "symbol": "LTCUSDT",
+   "spot22": true,
+   "listed_both_perp_venues": {
+    "value": true,
+    "label": "MEASURED",
+    "note": "public dump 20 Nov 2026"
+   },
+   "parent_max_usdt": {
+    "value": "20,000-30,000 (up to 50,000)",
+    "label": "APPROVED",
+    "note": "owner target 20 Nov"
+   },
+   "child_max": {
+    "value": {
+     "clip_cap_usdt": 25000,
+     "bybit_postonly_max_qty": "8800.0",
+     "binance_limit_max_qty": "170000",
+     "binance_market_max_qty": "100000",
+     "bybit_market_max_qty": "3000.0"
+    },
+    "label": "ASSUMED cap / MEASURED venue maxima",
+    "note": "child = min(25,000 USDT clip cap (arb.max_clip_notional, ASSUMED), the venue maxima in base); the USDT value of a venue maximum needs a price (not read)"
+   },
+   "venue_filters": {
+    "value": {
+     "BYBIT": {
+      "tick": "0.01",
+      "step": "0.1",
+      "min_qty": "0.1",
+      "min_notional": "5"
+     },
+     "BINANCE": {
+      "tick": "0.01",
+      "step": "0.001",
+      "min_qty": "0.001",
+      "min_notional": "20"
+     }
+    },
+    "label": "MEASURED",
+    "note": "public dump 20 Nov 2026 (current rules)"
+   },
+   "worst_outstanding_maker_fill_during_cancel": {
+    "value": "the whole resting child",
+    "label": "ASSUMED",
+    "note": "a cancel races the fill: the full child can fill before the cancel lands"
+   },
+   "caps": {
+    "value": {
+     "net_ceiling": "1.25 x parent",
+     "gross_per_venue": "2 x parent"
+    },
+    "label": "ASSUMED",
+    "note": "the v1_16 multiples (net_ceiling_multiple 1.0 + fill_headroom 0.25; gross 2 x clip with clip = parent)"
+   },
+   "hedge_deadline": {
+    "value": "hedge IOC; 2 retries at 0.25 s, then unwind (3 attempts, 15 bps band); maker ack deadline on",
+    "label": "ASSUMED",
+    "note": "hedge_faults of v1_17"
+   },
+   "margin_bybit": {
+    "value": {
+     "20000": {
+      "tier_id": 73,
+      "initial_usdt": 2000.0,
+      "maintenance_usdt": 141.0,
+      "tier_max_notional": "20000"
+     },
+     "30000": {
+      "tier_id": 74,
+      "initial_usdt": 3000.0,
+      "maintenance_usdt": 232.0,
+      "tier_max_notional": "30000"
+     },
+     "50000": {
+      "tier_id": 75,
+      "initial_usdt": 5000.0,
+      "maintenance_usdt": 432.0,
+      "tier_max_notional": "50000"
+     }
+    },
+    "label": "MEASURED tiers, ASSUMED leverage 10",
+    "note": "public /v5/market/risk-limit; initial rate raised to 1/10 (account leverage A8)"
+   },
+   "margin_binance": {
+    "value": null,
+    "label": "NO DATA",
+    "note": "Binance leverageBracket is a signed endpoint (account keys): not read"
+   },
+   "burst_throughput": {
+    "value": "2 new maker orders or amends per s per venue, burst 5; hedges, unwinds and cancels never refused",
+    "label": "APPROVED",
+    "note": "A1, owner 16 Nov"
+   },
+   "within_cap_arrival_depth_hedge_venue": {
+    "value": null,
+    "label": "NO DATA",
+    "note": "two-venue depth data exists only for SOLUSDT"
+   },
+   "exit_capacity": {
+    "value": null,
+    "label": "NO DATA",
+    "note": "two-venue depth data exists only for SOLUSDT"
+   }
+  },
+  {
+   "symbol": "MNTUSDT",
+   "spot22": true,
+   "listed_both_perp_venues": {
+    "value": false,
+    "label": "MEASURED",
+    "note": "public dump 20 Nov 2026"
+   },
+   "parent_max_usdt": {
+    "value": "20,000-30,000 (up to 50,000)",
+    "label": "APPROVED",
+    "note": "owner target 20 Nov"
+   },
+   "child_max": {
+    "value": null,
+    "label": "NO DATA",
+    "note": "not listed as a trading USDT perpetual on both venues"
+   },
+   "venue_filters": {
+    "value": {
+     "BYBIT": {
+      "tick": "0.00010",
+      "step": "0.1",
+      "min_qty": "0.1",
+      "min_notional": "5"
+     },
+     "BINANCE": null
+    },
+    "label": "MEASURED"
+   },
+   "worst_outstanding_maker_fill_during_cancel": {
+    "value": "the whole resting child",
+    "label": "ASSUMED",
+    "note": "a cancel races the fill: the full child can fill before the cancel lands"
+   },
+   "caps": {
+    "value": {
+     "net_ceiling": "1.25 x parent",
+     "gross_per_venue": "2 x parent"
+    },
+    "label": "ASSUMED",
+    "note": "the v1_16 multiples (net_ceiling_multiple 1.0 + fill_headroom 0.25; gross 2 x clip with clip = parent)"
+   },
+   "hedge_deadline": {
+    "value": "hedge IOC; 2 retries at 0.25 s, then unwind (3 attempts, 15 bps band); maker ack deadline on",
+    "label": "ASSUMED",
+    "note": "hedge_faults of v1_17"
+   },
+   "margin_bybit": {
+    "value": {
+     "20000": {
+      "tier_id": 1,
+      "initial_usdt": 2000.0,
+      "maintenance_usdt": 400.0,
+      "tier_max_notional": "200000"
+     },
+     "30000": {
+      "tier_id": 1,
+      "initial_usdt": 3000.0,
+      "maintenance_usdt": 600.0,
+      "tier_max_notional": "200000"
+     },
+     "50000": {
+      "tier_id": 1,
+      "initial_usdt": 5000.0,
+      "maintenance_usdt": 1000.0,
+      "tier_max_notional": "200000"
+     }
+    },
+    "label": "MEASURED tiers, ASSUMED leverage 10",
+    "note": "public /v5/market/risk-limit; initial rate raised to 1/10 (account leverage A8)"
+   },
+   "margin_binance": {
+    "value": null,
+    "label": "NO DATA",
+    "note": "Binance leverageBracket is a signed endpoint (account keys): not read"
+   },
+   "burst_throughput": {
+    "value": "2 new maker orders or amends per s per venue, burst 5; hedges, unwinds and cancels never refused",
+    "label": "APPROVED",
+    "note": "A1, owner 16 Nov"
+   },
+   "within_cap_arrival_depth_hedge_venue": {
+    "value": null,
+    "label": "NO DATA",
+    "note": "two-venue depth data exists only for SOLUSDT"
+   },
+   "exit_capacity": {
+    "value": null,
+    "label": "NO DATA",
+    "note": "two-venue depth data exists only for SOLUSDT"
+   }
+  },
+  {
+   "symbol": "NEARUSDT",
+   "spot22": true,
+   "listed_both_perp_venues": {
+    "value": true,
+    "label": "MEASURED",
+    "note": "public dump 20 Nov 2026"
+   },
+   "parent_max_usdt": {
+    "value": "20,000-30,000 (up to 50,000)",
+    "label": "APPROVED",
+    "note": "owner target 20 Nov"
+   },
+   "child_max": {
+    "value": {
+     "clip_cap_usdt": 25000,
+     "bybit_postonly_max_qty": "469060.0",
+     "binance_limit_max_qty": "5000000",
+     "binance_market_max_qty": "400000",
+     "bybit_market_max_qty": "66470.0"
+    },
+    "label": "ASSUMED cap / MEASURED venue maxima",
+    "note": "child = min(25,000 USDT clip cap (arb.max_clip_notional, ASSUMED), the venue maxima in base); the USDT value of a venue maximum needs a price (not read)"
+   },
+   "venue_filters": {
+    "value": {
+     "BYBIT": {
+      "tick": "0.0010",
+      "step": "0.1",
+      "min_qty": "0.1",
+      "min_notional": "5"
+     },
+     "BINANCE": {
+      "tick": "0.0010",
+      "step": "1",
+      "min_qty": "1",
+      "min_notional": "5"
+     }
+    },
+    "label": "MEASURED",
+    "note": "public dump 20 Nov 2026 (current rules)"
+   },
+   "worst_outstanding_maker_fill_during_cancel": {
+    "value": "the whole resting child",
+    "label": "ASSUMED",
+    "note": "a cancel races the fill: the full child can fill before the cancel lands"
+   },
+   "caps": {
+    "value": {
+     "net_ceiling": "1.25 x parent",
+     "gross_per_venue": "2 x parent"
+    },
+    "label": "ASSUMED",
+    "note": "the v1_16 multiples (net_ceiling_multiple 1.0 + fill_headroom 0.25; gross 2 x clip with clip = parent)"
+   },
+   "hedge_deadline": {
+    "value": "hedge IOC; 2 retries at 0.25 s, then unwind (3 attempts, 15 bps band); maker ack deadline on",
+    "label": "ASSUMED",
+    "note": "hedge_faults of v1_17"
+   },
+   "margin_bybit": {
+    "value": {
+     "20000": {
+      "tier_id": 627,
+      "initial_usdt": 2000.0,
+      "maintenance_usdt": 138.0,
+      "tier_max_notional": "50000"
+     },
+     "30000": {
+      "tier_id": 627,
+      "initial_usdt": 3000.0,
+      "maintenance_usdt": 209.0,
+      "tier_max_notional": "50000"
+     },
+     "50000": {
+      "tier_id": 627,
+      "initial_usdt": 5000.0,
+      "maintenance_usdt": 351.0,
+      "tier_max_notional": "50000"
+     }
+    },
+    "label": "MEASURED tiers, ASSUMED leverage 10",
+    "note": "public /v5/market/risk-limit; initial rate raised to 1/10 (account leverage A8)"
+   },
+   "margin_binance": {
+    "value": null,
+    "label": "NO DATA",
+    "note": "Binance leverageBracket is a signed endpoint (account keys): not read"
+   },
+   "burst_throughput": {
+    "value": "2 new maker orders or amends per s per venue, burst 5; hedges, unwinds and cancels never refused",
+    "label": "APPROVED",
+    "note": "A1, owner 16 Nov"
+   },
+   "within_cap_arrival_depth_hedge_venue": {
+    "value": null,
+    "label": "NO DATA",
+    "note": "two-venue depth data exists only for SOLUSDT"
+   },
+   "exit_capacity": {
+    "value": null,
+    "label": "NO DATA",
+    "note": "two-venue depth data exists only for SOLUSDT"
+   }
+  },
+  {
+   "symbol": "OPUSDT",
+   "spot22": true,
+   "listed_both_perp_venues": {
+    "value": true,
+    "label": "MEASURED",
+    "note": "public dump 20 Nov 2026"
+   },
+   "parent_max_usdt": {
+    "value": "20,000-30,000 (up to 50,000)",
+    "label": "APPROVED",
+    "note": "owner target 20 Nov"
+   },
+   "child_max": {
+    "value": {
+     "clip_cap_usdt": 25000,
+     "bybit_postonly_max_qty": "1080000.0",
+     "binance_limit_max_qty": "10000000",
+     "binance_market_max_qty": "1000000",
+     "bybit_market_max_qty": "540000.0"
+    },
+    "label": "ASSUMED cap / MEASURED venue maxima",
+    "note": "child = min(25,000 USDT clip cap (arb.max_clip_notional, ASSUMED), the venue maxima in base); the USDT value of a venue maximum needs a price (not read)"
+   },
+   "venue_filters": {
+    "value": {
+     "BYBIT": {
+      "tick": "0.00001",
+      "step": "0.1",
+      "min_qty": "0.1",
+      "min_notional": "5"
+     },
+     "BINANCE": {
+      "tick": "0.0000100",
+      "step": "0.1",
+      "min_qty": "0.1",
+      "min_notional": "5"
+     }
+    },
+    "label": "MEASURED",
+    "note": "public dump 20 Nov 2026 (current rules)"
+   },
+   "worst_outstanding_maker_fill_during_cancel": {
+    "value": "the whole resting child",
+    "label": "ASSUMED",
+    "note": "a cancel races the fill: the full child can fill before the cancel lands"
+   },
+   "caps": {
+    "value": {
+     "net_ceiling": "1.25 x parent",
+     "gross_per_venue": "2 x parent"
+    },
+    "label": "ASSUMED",
+    "note": "the v1_16 multiples (net_ceiling_multiple 1.0 + fill_headroom 0.25; gross 2 x clip with clip = parent)"
+   },
+   "hedge_deadline": {
+    "value": "hedge IOC; 2 retries at 0.25 s, then unwind (3 attempts, 15 bps band); maker ack deadline on",
+    "label": "ASSUMED",
+    "note": "hedge_faults of v1_17"
+   },
+   "margin_bybit": {
+    "value": {
+     "20000": {
+      "tier_id": 3,
+      "initial_usdt": 2000.0,
+      "maintenance_usdt": 200.0,
+      "tier_max_notional": "20000"
+     },
+     "30000": {
+      "tier_id": 4,
+      "initial_usdt": 3000.0,
+      "maintenance_usdt": 300.0,
+      "tier_max_notional": "30000"
+     },
+     "50000": {
+      "tier_id": 5,
+      "initial_usdt": 5000.0,
+      "maintenance_usdt": 500.0,
+      "tier_max_notional": "50000"
+     }
+    },
+    "label": "MEASURED tiers, ASSUMED leverage 10",
+    "note": "public /v5/market/risk-limit; initial rate raised to 1/10 (account leverage A8)"
+   },
+   "margin_binance": {
+    "value": null,
+    "label": "NO DATA",
+    "note": "Binance leverageBracket is a signed endpoint (account keys): not read"
+   },
+   "burst_throughput": {
+    "value": "2 new maker orders or amends per s per venue, burst 5; hedges, unwinds and cancels never refused",
+    "label": "APPROVED",
+    "note": "A1, owner 16 Nov"
+   },
+   "within_cap_arrival_depth_hedge_venue": {
+    "value": null,
+    "label": "NO DATA",
+    "note": "two-venue depth data exists only for SOLUSDT"
+   },
+   "exit_capacity": {
+    "value": null,
+    "label": "NO DATA",
+    "note": "two-venue depth data exists only for SOLUSDT"
+   }
+  },
+  {
+   "symbol": "SOLUSDT",
+   "spot22": true,
+   "listed_both_perp_venues": {
+    "value": true,
+    "label": "MEASURED",
+    "note": "public dump 20 Nov 2026"
+   },
+   "parent_max_usdt": {
+    "value": "20,000-30,000 (up to 50,000)",
+    "label": "APPROVED",
+    "note": "owner target 20 Nov"
+   },
+   "child_max": {
+    "value": {
+     "clip_cap_usdt": 25000,
+     "bybit_postonly_max_qty": "96000.0",
+     "binance_limit_max_qty": "1000000",
+     "binance_market_max_qty": "80000",
+     "bybit_market_max_qty": "12000.0"
+    },
+    "label": "ASSUMED cap / MEASURED venue maxima",
+    "note": "child = min(25,000 USDT clip cap (arb.max_clip_notional, ASSUMED), the venue maxima in base); the USDT value of a venue maximum needs a price (not read)"
+   },
+   "venue_filters": {
+    "value": {
+     "BYBIT": {
+      "tick": "0.010",
+      "step": "0.1",
+      "min_qty": "0.1",
+      "min_notional": "5"
+     },
+     "BINANCE": {
+      "tick": "0.0100",
+      "step": "0.01",
+      "min_qty": "0.01",
+      "min_notional": "5"
+     }
+    },
+    "label": "MEASURED",
+    "note": "public dump 20 Nov 2026 (current rules)"
+   },
+   "worst_outstanding_maker_fill_during_cancel": {
+    "value": "the whole resting child",
+    "label": "ASSUMED",
+    "note": "a cancel races the fill: the full child can fill before the cancel lands"
+   },
+   "caps": {
+    "value": {
+     "net_ceiling": "1.25 x parent",
+     "gross_per_venue": "2 x parent"
+    },
+    "label": "ASSUMED",
+    "note": "the v1_16 multiples (net_ceiling_multiple 1.0 + fill_headroom 0.25; gross 2 x clip with clip = parent)"
+   },
+   "hedge_deadline": {
+    "value": "hedge IOC; 2 retries at 0.25 s, then unwind (3 attempts, 15 bps band); maker ack deadline on",
+    "label": "ASSUMED",
+    "note": "hedge_faults of v1_17"
+   },
+   "margin_bybit": {
+    "value": {
+     "20000": {
+      "tier_id": 281,
+      "initial_usdt": 2000.0,
+      "maintenance_usdt": 100.0,
+      "tier_max_notional": "50000"
+     },
+     "30000": {
+      "tier_id": 281,
+      "initial_usdt": 3000.0,
+      "maintenance_usdt": 150.0,
+      "tier_max_notional": "50000"
+     },
+     "50000": {
+      "tier_id": 281,
+      "initial_usdt": 5000.0,
+      "maintenance_usdt": 250.0,
+      "tier_max_notional": "50000"
+     }
+    },
+    "label": "MEASURED tiers, ASSUMED leverage 10",
+    "note": "public /v5/market/risk-limit; initial rate raised to 1/10 (account leverage A8)"
+   },
+   "margin_binance": {
+    "value": "v1_17 tiers: 2% / 1% to 50k, 5% / 2.5% to 500k",
+    "label": "ASSUMED",
+    "note": "Binance leverageBracket is a signed endpoint (account keys): not read"
+   },
+   "burst_throughput": {
+    "value": "2 new maker orders or amends per s per venue, burst 5; hedges, unwinds and cancels never refused",
+    "label": "APPROVED",
+    "note": "A1, owner 16 Nov"
+   },
+   "within_cap_arrival_depth_hedge_venue": {
+    "value": {
+     "i_01k": {
+      "fully_hedged_share": 0.9167,
+      "unhedged_interval_s": {
+       "p1": 0.035,
+       "p10": 0.035,
+       "p50": 0.0386,
+       "p90": 0.0477,
+       "p99": 0.0494,
+       "n": 22,
+       "min": 0.035,
+       "max": 0.0526
+      },
+      "repeated_hedges": 0,
+      "hedge_children_max": 1,
+      "hedge_cost_bps": {
+       "p1": -2.058,
+       "p10": -2.058,
+       "p50": 0.0,
+       "p90": 2.0786,
+       "p99": 2.0786,
+       "n": 23,
+       "min": -2.058,
+       "max": 4.1571
+      }
+     },
+     "i_05k": {
+      "fully_hedged_share": 0.9375,
+      "unhedged_interval_s": {
+       "p1": 0.035,
+       "p10": 0.035,
+       "p50": 0.0398,
+       "p90": 0.0494,
+       "p99": 0.0646,
+       "n": 75,
+       "min": 0.035,
+       "max": 0.3522
+      },
+      "repeated_hedges": 1,
+      "hedge_children_max": 2,
+      "hedge_cost_bps": {
+       "p1": -5.144,
+       "p10": -4.1152,
+       "p50": -0.0,
+       "p90": 0.0,
+       "p99": 4.1571,
+       "n": 79,
+       "min": -5.144,
+       "max": 8.3516
+      }
+     },
+     "i_10k": {
+      "fully_hedged_share": 0.9459,
+      "unhedged_interval_s": {
+       "p1": 0.035,
+       "p10": 0.035,
+       "p50": 0.0393,
+       "p90": 0.0494,
+       "p99": 0.0646,
+       "n": 105,
+       "min": 0.035,
+       "max": 0.3508
+      },
+      "repeated_hedges": 1,
+      "hedge_children_max": 2,
+      "hedge_cost_bps": {
+       "p1": -4.1152,
+       "p10": -4.1123,
+       "p50": -0.0,
+       "p90": 7.2254,
+       "p99": 7.2254,
+       "n": 110,
+       "min": -5.144,
+       "max": 8.3516
+      }
+     },
+     "i_20k": {
+      "fully_hedged_share": 0.9489,
+      "unhedged_interval_s": {
+       "p1": 0.035,
+       "p10": 0.035,
+       "p50": 0.0398,
+       "p90": 0.0504,
+       "p99": 0.0646,
+       "n": 167,
+       "min": 0.035,
+       "max": 0.3633
+      },
+      "repeated_hedges": 1,
+      "hedge_children_max": 2,
+      "hedge_cost_bps": {
+       "p1": -4.1152,
+       "p10": -4.1093,
+       "p50": -2.0553,
+       "p90": 1.0267,
+       "p99": 2.0786,
+       "n": 174,
+       "min": -5.144,
+       "max": 8.3516
+      }
+     },
+     "i_30k": {
+      "fully_hedged_share": 0.9456,
+      "unhedged_interval_s": {
+       "p1": 0.035,
+       "p10": 0.035,
+       "p50": 0.0394,
+       "p90": 0.0511,
+       "p99": 0.064,
+       "n": 226,
+       "min": 0.035,
+       "max": 0.3633
+      },
+      "repeated_hedges": 1,
+      "hedge_children_max": 2,
+      "hedge_cost_bps": {
+       "p1": -4.1152,
+       "p10": -3.5064,
+       "p50": -1.0125,
+       "p90": 1.0267,
+       "p99": 2.0786,
+       "n": 237,
+       "min": -5.144,
+       "max": 8.3516
+      }
+     },
+     "i_50k": {
+      "fully_hedged_share": 0.9477,
+      "unhedged_interval_s": {
+       "p1": 0.035,
+       "p10": 0.035,
+       "p50": 0.0395,
+       "p90": 0.0504,
+       "p99": 0.064,
+       "n": 290,
+       "min": 0.035,
+       "max": 0.3633
+      },
+      "repeated_hedges": 1,
+      "hedge_children_max": 2,
+      "hedge_cost_bps": {
+       "p1": -4.1152,
+       "p10": -3.0852,
+       "p50": -0.0,
+       "p90": 1.0267,
+       "p99": 2.0786,
+       "n": 304,
+       "min": -5.144,
+       "max": 8.3516
+      }
+     }
+    },
+    "label": "MEASURED (29 Oct 2026, EXPLORATORY)",
+    "note": "from the size ladder"
+   },
+   "exit_capacity": {
+    "value": {
+     "i_01k": {
+      "closing_signals": 19,
+      "close_reservation": {
+       "reserved": 19,
+       "capped": 0,
+       "nothing_closable": 0,
+       "released": 19,
+       "reduce_only_by_position": 27,
+       "not_reduce_only_by_position": 0,
+       "open_reservations": {},
+       "beyond_flat": 0
+      },
+      "close_unfilled_events": 0
+     },
+     "i_05k": {
+      "closing_signals": 45,
+      "close_reservation": {
+       "reserved": 45,
+       "capped": 0,
+       "nothing_closable": 0,
+       "released": 45,
+       "reduce_only_by_position": 58,
+       "not_reduce_only_by_position": 0,
+       "open_reservations": {},
+       "beyond_flat": 0
+      },
+      "close_unfilled_events": 0
+     },
+     "i_10k": {
+      "closing_signals": 73,
+      "close_reservation": {
+       "reserved": 73,
+       "capped": 0,
+       "nothing_closable": 0,
+       "released": 73,
+       "reduce_only_by_position": 84,
+       "not_reduce_only_by_position": 0,
+       "open_reservations": {},
+       "beyond_flat": 0
+      },
+      "close_unfilled_events": 0
+     },
+     "i_20k": {
+      "closing_signals": 71,
+      "close_reservation": {
+       "reserved": 71,
+       "capped": 0,
+       "nothing_closable": 0,
+       "released": 71,
+       "reduce_only_by_position": 82,
+       "not_reduce_only_by_position": 0,
+       "open_reservations": {},
+       "beyond_flat": 0
+      },
+      "close_unfilled_events": 0
+     },
+     "i_30k": {
+      "closing_signals": 72,
+      "close_reservation": {
+       "reserved": 72,
+       "capped": 0,
+       "nothing_closable": 0,
+       "released": 72,
+       "reduce_only_by_position": 83,
+       "not_reduce_only_by_position": 0,
+       "open_reservations": {},
+       "beyond_flat": 0
+      },
+      "close_unfilled_events": 0
+     },
+     "i_50k": {
+      "closing_signals": 72,
+      "close_reservation": {
+       "reserved": 72,
+       "capped": 0,
+       "nothing_closable": 0,
+       "released": 72,
+       "reduce_only_by_position": 83,
+       "not_reduce_only_by_position": 0,
+       "open_reservations": {},
+       "beyond_flat": 0
+      },
+      "close_unfilled_events": 0
+     }
+    },
+    "label": "MEASURED (29 Oct 2026, EXPLORATORY)",
+    "note": "from the size ladder (pair close on)"
+   }
+  },
+  {
+   "symbol": "SUIUSDT",
+   "spot22": true,
+   "listed_both_perp_venues": {
+    "value": true,
+    "label": "MEASURED",
+    "note": "public dump 20 Nov 2026"
+   },
+   "parent_max_usdt": {
+    "value": "20,000-30,000 (up to 50,000)",
+    "label": "APPROVED",
+    "note": "owner target 20 Nov"
+   },
+   "child_max": {
+    "value": {
+     "clip_cap_usdt": 25000,
+     "bybit_postonly_max_qty": "1160000",
+     "binance_limit_max_qty": "10000000",
+     "binance_market_max_qty": "600000",
+     "bybit_market_max_qty": "290000"
+    },
+    "label": "ASSUMED cap / MEASURED venue maxima",
+    "note": "child = min(25,000 USDT clip cap (arb.max_clip_notional, ASSUMED), the venue maxima in base); the USDT value of a venue maximum needs a price (not read)"
+   },
+   "venue_filters": {
+    "value": {
+     "BYBIT": {
+      "tick": "0.00010",
+      "step": "10",
+      "min_qty": "10",
+      "min_notional": "5"
+     },
+     "BINANCE": {
+      "tick": "0.000100",
+      "step": "0.1",
+      "min_qty": "0.1",
+      "min_notional": "5"
+     }
+    },
+    "label": "MEASURED",
+    "note": "public dump 20 Nov 2026 (current rules)"
+   },
+   "worst_outstanding_maker_fill_during_cancel": {
+    "value": "the whole resting child",
+    "label": "ASSUMED",
+    "note": "a cancel races the fill: the full child can fill before the cancel lands"
+   },
+   "caps": {
+    "value": {
+     "net_ceiling": "1.25 x parent",
+     "gross_per_venue": "2 x parent"
+    },
+    "label": "ASSUMED",
+    "note": "the v1_16 multiples (net_ceiling_multiple 1.0 + fill_headroom 0.25; gross 2 x clip with clip = parent)"
+   },
+   "hedge_deadline": {
+    "value": "hedge IOC; 2 retries at 0.25 s, then unwind (3 attempts, 15 bps band); maker ack deadline on",
+    "label": "ASSUMED",
+    "note": "hedge_faults of v1_17"
+   },
+   "margin_bybit": {
+    "value": {
+     "20000": {
+      "tier_id": 1,
+      "initial_usdt": 2000.0,
+      "maintenance_usdt": 180.0,
+      "tier_max_notional": "20000"
+     },
+     "30000": {
+      "tier_id": 2,
+      "initial_usdt": 3000.0,
+      "maintenance_usdt": 280.0,
+      "tier_max_notional": "200000"
+     },
+     "50000": {
+      "tier_id": 2,
+      "initial_usdt": 5000.0,
+      "maintenance_usdt": 480.0,
+      "tier_max_notional": "200000"
+     }
+    },
+    "label": "MEASURED tiers, ASSUMED leverage 10",
+    "note": "public /v5/market/risk-limit; initial rate raised to 1/10 (account leverage A8)"
+   },
+   "margin_binance": {
+    "value": null,
+    "label": "NO DATA",
+    "note": "Binance leverageBracket is a signed endpoint (account keys): not read"
+   },
+   "burst_throughput": {
+    "value": "2 new maker orders or amends per s per venue, burst 5; hedges, unwinds and cancels never refused",
+    "label": "APPROVED",
+    "note": "A1, owner 16 Nov"
+   },
+   "within_cap_arrival_depth_hedge_venue": {
+    "value": null,
+    "label": "NO DATA",
+    "note": "two-venue depth data exists only for SOLUSDT"
+   },
+   "exit_capacity": {
+    "value": null,
+    "label": "NO DATA",
+    "note": "two-venue depth data exists only for SOLUSDT"
+   }
+  },
+  {
+   "symbol": "UNIUSDT",
+   "spot22": true,
+   "listed_both_perp_venues": {
+    "value": true,
+    "label": "MEASURED",
+    "note": "public dump 20 Nov 2026"
+   },
+   "parent_max_usdt": {
+    "value": "20,000-30,000 (up to 50,000)",
+    "label": "APPROVED",
+    "note": "owner target 20 Nov"
+   },
+   "child_max": {
+    "value": {
+     "clip_cap_usdt": 25000,
+     "bybit_postonly_max_qty": "62400.0",
+     "binance_limit_max_qty": "2000000",
+     "binance_market_max_qty": "100000",
+     "bybit_market_max_qty": "15600.0"
+    },
+    "label": "ASSUMED cap / MEASURED venue maxima",
+    "note": "child = min(25,000 USDT clip cap (arb.max_clip_notional, ASSUMED), the venue maxima in base); the USDT value of a venue maximum needs a price (not read)"
+   },
+   "venue_filters": {
+    "value": {
+     "BYBIT": {
+      "tick": "0.001",
+      "step": "0.1",
+      "min_qty": "0.1",
+      "min_notional": "5"
+     },
+     "BINANCE": {
+      "tick": "0.0010",
+      "step": "1",
+      "min_qty": "1",
+      "min_notional": "5"
+     }
+    },
+    "label": "MEASURED",
+    "note": "public dump 20 Nov 2026 (current rules)"
+   },
+   "worst_outstanding_maker_fill_during_cancel": {
+    "value": "the whole resting child",
+    "label": "ASSUMED",
+    "note": "a cancel races the fill: the full child can fill before the cancel lands"
+   },
+   "caps": {
+    "value": {
+     "net_ceiling": "1.25 x parent",
+     "gross_per_venue": "2 x parent"
+    },
+    "label": "ASSUMED",
+    "note": "the v1_16 multiples (net_ceiling_multiple 1.0 + fill_headroom 0.25; gross 2 x clip with clip = parent)"
+   },
+   "hedge_deadline": {
+    "value": "hedge IOC; 2 retries at 0.25 s, then unwind (3 attempts, 15 bps band); maker ack deadline on",
+    "label": "ASSUMED",
+    "note": "hedge_faults of v1_17"
+   },
+   "margin_bybit": {
+    "value": {
+     "20000": {
+      "tier_id": 148,
+      "initial_usdt": 2000.0,
+      "maintenance_usdt": 141.0,
+      "tier_max_notional": "20000"
+     },
+     "30000": {
+      "tier_id": 149,
+      "initial_usdt": 3000.0,
+      "maintenance_usdt": 232.0,
+      "tier_max_notional": "30000"
+     },
+     "50000": {
+      "tier_id": 150,
+      "initial_usdt": 5000.0,
+      "maintenance_usdt": 432.0,
+      "tier_max_notional": "50000"
+     }
+    },
+    "label": "MEASURED tiers, ASSUMED leverage 10",
+    "note": "public /v5/market/risk-limit; initial rate raised to 1/10 (account leverage A8)"
+   },
+   "margin_binance": {
+    "value": null,
+    "label": "NO DATA",
+    "note": "Binance leverageBracket is a signed endpoint (account keys): not read"
+   },
+   "burst_throughput": {
+    "value": "2 new maker orders or amends per s per venue, burst 5; hedges, unwinds and cancels never refused",
+    "label": "APPROVED",
+    "note": "A1, owner 16 Nov"
+   },
+   "within_cap_arrival_depth_hedge_venue": {
+    "value": null,
+    "label": "NO DATA",
+    "note": "two-venue depth data exists only for SOLUSDT"
+   },
+   "exit_capacity": {
+    "value": null,
+    "label": "NO DATA",
+    "note": "two-venue depth data exists only for SOLUSDT"
+   }
+  },
+  {
+   "symbol": "XRPUSDT",
+   "spot22": true,
+   "listed_both_perp_venues": {
+    "value": true,
+    "label": "MEASURED",
+    "note": "public dump 20 Nov 2026"
+   },
+   "parent_max_usdt": {
+    "value": "20,000-30,000 (up to 50,000)",
+    "label": "APPROVED",
+    "note": "owner target 20 Nov"
+   },
+   "child_max": {
+    "value": {
+     "clip_cap_usdt": 25000,
+     "bybit_postonly_max_qty": "7500000.0",
+     "binance_limit_max_qty": "10000000",
+     "binance_market_max_qty": "2000000",
+     "bybit_market_max_qty": "1500000.0"
+    },
+    "label": "ASSUMED cap / MEASURED venue maxima",
+    "note": "child = min(25,000 USDT clip cap (arb.max_clip_notional, ASSUMED), the venue maxima in base); the USDT value of a venue maximum needs a price (not read)"
+   },
+   "venue_filters": {
+    "value": {
+     "BYBIT": {
+      "tick": "0.0001",
+      "step": "0.1",
+      "min_qty": "0.1",
+      "min_notional": "5"
+     },
+     "BINANCE": {
+      "tick": "0.0001",
+      "step": "0.1",
+      "min_qty": "0.1",
+      "min_notional": "5"
+     }
+    },
+    "label": "MEASURED",
+    "note": "public dump 20 Nov 2026 (current rules)"
+   },
+   "worst_outstanding_maker_fill_during_cancel": {
+    "value": "the whole resting child",
+    "label": "ASSUMED",
+    "note": "a cancel races the fill: the full child can fill before the cancel lands"
+   },
+   "caps": {
+    "value": {
+     "net_ceiling": "1.25 x parent",
+     "gross_per_venue": "2 x parent"
+    },
+    "label": "ASSUMED",
+    "note": "the v1_16 multiples (net_ceiling_multiple 1.0 + fill_headroom 0.25; gross 2 x clip with clip = parent)"
+   },
+   "hedge_deadline": {
+    "value": "hedge IOC; 2 retries at 0.25 s, then unwind (3 attempts, 15 bps band); maker ack deadline on",
+    "label": "ASSUMED",
+    "note": "hedge_faults of v1_17"
+   },
+   "margin_bybit": {
+    "value": {
+     "20000": {
+      "tier_id": 41,
+      "initial_usdt": 2000.0,
+      "maintenance_usdt": 100.0,
+      "tier_max_notional": "50000"
+     },
+     "30000": {
+      "tier_id": 41,
+      "initial_usdt": 3000.0,
+      "maintenance_usdt": 150.0,
+      "tier_max_notional": "50000"
+     },
+     "50000": {
+      "tier_id": 41,
+      "initial_usdt": 5000.0,
+      "maintenance_usdt": 250.0,
+      "tier_max_notional": "50000"
+     }
+    },
+    "label": "MEASURED tiers, ASSUMED leverage 10",
+    "note": "public /v5/market/risk-limit; initial rate raised to 1/10 (account leverage A8)"
+   },
+   "margin_binance": {
+    "value": null,
+    "label": "NO DATA",
+    "note": "Binance leverageBracket is a signed endpoint (account keys): not read"
+   },
+   "burst_throughput": {
+    "value": "2 new maker orders or amends per s per venue, burst 5; hedges, unwinds and cancels never refused",
+    "label": "APPROVED",
+    "note": "A1, owner 16 Nov"
+   },
+   "within_cap_arrival_depth_hedge_venue": {
+    "value": null,
+    "label": "NO DATA",
+    "note": "two-venue depth data exists only for SOLUSDT"
+   },
+   "exit_capacity": {
+    "value": null,
+    "label": "NO DATA",
+    "note": "two-venue depth data exists only for SOLUSDT"
+   }
+  },
+  {
+   "symbol": "LDOUSDT",
+   "spot22": false,
+   "listed_both_perp_venues": {
+    "value": true,
+    "label": "MEASURED",
+    "note": "public dump 20 Nov 2026"
+   },
+   "parent_max_usdt": {
+    "value": "20,000-30,000 (up to 50,000)",
+    "label": "APPROVED",
+    "note": "owner target 20 Nov"
+   },
+   "child_max": {
+    "value": {
+     "clip_cap_usdt": 25000,
+     "bybit_postonly_max_qty": "436640.0",
+     "binance_limit_max_qty": "3000000",
+     "binance_market_max_qty": "300000",
+     "bybit_market_max_qty": "59020.0"
+    },
+    "label": "ASSUMED cap / MEASURED venue maxima",
+    "note": "child = min(25,000 USDT clip cap (arb.max_clip_notional, ASSUMED), the venue maxima in base); the USDT value of a venue maximum needs a price (not read)"
+   },
+   "venue_filters": {
+    "value": {
+     "BYBIT": {
+      "tick": "0.0001",
+      "step": "0.1",
+      "min_qty": "0.1",
+      "min_notional": "5"
+     },
+     "BINANCE": {
+      "tick": "0.000100",
+      "step": "1",
+      "min_qty": "1",
+      "min_notional": "5"
+     }
+    },
+    "label": "MEASURED",
+    "note": "public dump 20 Nov 2026 (current rules)"
+   },
+   "worst_outstanding_maker_fill_during_cancel": {
+    "value": "the whole resting child",
+    "label": "ASSUMED",
+    "note": "a cancel races the fill: the full child can fill before the cancel lands"
+   },
+   "caps": {
+    "value": {
+     "net_ceiling": "1.25 x parent",
+     "gross_per_venue": "2 x parent"
+    },
+    "label": "ASSUMED",
+    "note": "the v1_16 multiples (net_ceiling_multiple 1.0 + fill_headroom 0.25; gross 2 x clip with clip = parent)"
+   },
+   "hedge_deadline": {
+    "value": "hedge IOC; 2 retries at 0.25 s, then unwind (3 attempts, 15 bps band); maker ack deadline on",
+    "label": "ASSUMED",
+    "note": "hedge_faults of v1_17"
+   },
+   "margin_bybit": {
+    "value": {
+     "20000": {
+      "tier_id": 2,
+      "initial_usdt": 2000.0,
+      "maintenance_usdt": 206.5,
+      "tier_max_notional": "25000"
+     },
+     "30000": {
+      "tier_id": 3,
+      "initial_usdt": 3000.0,
+      "maintenance_usdt": 324.5,
+      "tier_max_notional": "50000"
+     },
+     "50000": {
+      "tier_id": 3,
+      "initial_usdt": 5000.0,
+      "maintenance_usdt": 574.5,
+      "tier_max_notional": "50000"
+     }
+    },
+    "label": "MEASURED tiers, ASSUMED leverage 10",
+    "note": "public /v5/market/risk-limit; initial rate raised to 1/10 (account leverage A8)"
+   },
+   "margin_binance": {
+    "value": null,
+    "label": "NO DATA",
+    "note": "Binance leverageBracket is a signed endpoint (account keys): not read"
+   },
+   "burst_throughput": {
+    "value": "2 new maker orders or amends per s per venue, burst 5; hedges, unwinds and cancels never refused",
+    "label": "APPROVED",
+    "note": "A1, owner 16 Nov"
+   },
+   "within_cap_arrival_depth_hedge_venue": {
+    "value": null,
+    "label": "NO DATA",
+    "note": "two-venue depth data exists only for SOLUSDT"
+   },
+   "exit_capacity": {
+    "value": null,
+    "label": "NO DATA",
+    "note": "two-venue depth data exists only for SOLUSDT"
+   }
+  },
+  {
+   "symbol": "LINKUSDT",
+   "spot22": false,
+   "listed_both_perp_venues": {
+    "value": true,
+    "label": "MEASURED",
+    "note": "public dump 20 Nov 2026"
+   },
+   "parent_max_usdt": {
+    "value": "20,000-30,000 (up to 50,000)",
+    "label": "APPROVED",
+    "note": "owner target 20 Nov"
+   },
+   "child_max": {
+    "value": {
+     "clip_cap_usdt": 25000,
+     "bybit_postonly_max_qty": "41000.0",
+     "binance_limit_max_qty": "700000",
+     "binance_market_max_qty": "50000",
+     "bybit_market_max_qty": "15000.0"
+    },
+    "label": "ASSUMED cap / MEASURED venue maxima",
+    "note": "child = min(25,000 USDT clip cap (arb.max_clip_notional, ASSUMED), the venue maxima in base); the USDT value of a venue maximum needs a price (not read)"
+   },
+   "venue_filters": {
+    "value": {
+     "BYBIT": {
+      "tick": "0.001",
+      "step": "0.1",
+      "min_qty": "0.1",
+      "min_notional": "5"
+     },
+     "BINANCE": {
+      "tick": "0.001",
+      "step": "0.01",
+      "min_qty": "0.01",
+      "min_notional": "20"
+     }
+    },
+    "label": "MEASURED",
+    "note": "public dump 20 Nov 2026 (current rules)"
+   },
+   "worst_outstanding_maker_fill_during_cancel": {
+    "value": "the whole resting child",
+    "label": "ASSUMED",
+    "note": "a cancel races the fill: the full child can fill before the cancel lands"
+   },
+   "caps": {
+    "value": {
+     "net_ceiling": "1.25 x parent",
+     "gross_per_venue": "2 x parent"
+    },
+    "label": "ASSUMED",
+    "note": "the v1_16 multiples (net_ceiling_multiple 1.0 + fill_headroom 0.25; gross 2 x clip with clip = parent)"
+   },
+   "hedge_deadline": {
+    "value": "hedge IOC; 2 retries at 0.25 s, then unwind (3 attempts, 15 bps band); maker ack deadline on",
+    "label": "ASSUMED",
+    "note": "hedge_faults of v1_17"
+   },
+   "margin_bybit": {
+    "value": {
+     "20000": {
+      "tier_id": 102,
+      "initial_usdt": 2000.0,
+      "maintenance_usdt": 138.0,
+      "tier_max_notional": "50000"
+     },
+     "30000": {
+      "tier_id": 102,
+      "initial_usdt": 3000.0,
+      "maintenance_usdt": 209.0,
+      "tier_max_notional": "50000"
+     },
+     "50000": {
+      "tier_id": 102,
+      "initial_usdt": 5000.0,
+      "maintenance_usdt": 351.0,
+      "tier_max_notional": "50000"
+     }
+    },
+    "label": "MEASURED tiers, ASSUMED leverage 10",
+    "note": "public /v5/market/risk-limit; initial rate raised to 1/10 (account leverage A8)"
+   },
+   "margin_binance": {
+    "value": null,
+    "label": "NO DATA",
+    "note": "Binance leverageBracket is a signed endpoint (account keys): not read"
+   },
+   "burst_throughput": {
+    "value": "2 new maker orders or amends per s per venue, burst 5; hedges, unwinds and cancels never refused",
+    "label": "APPROVED",
+    "note": "A1, owner 16 Nov"
+   },
+   "within_cap_arrival_depth_hedge_venue": {
+    "value": null,
+    "label": "NO DATA",
+    "note": "two-venue depth data exists only for SOLUSDT"
+   },
+   "exit_capacity": {
+    "value": null,
+    "label": "NO DATA",
+    "note": "two-venue depth data exists only for SOLUSDT"
+   }
+  },
+  {
+   "symbol": "LITUSDT",
+   "spot22": false,
+   "listed_both_perp_venues": {
+    "value": true,
+    "label": "MEASURED",
+    "note": "public dump 20 Nov 2026"
+   },
+   "parent_max_usdt": {
+    "value": "20,000-30,000 (up to 50,000)",
+    "label": "APPROVED",
+    "note": "owner target 20 Nov"
+   },
+   "child_max": {
+    "value": {
+     "clip_cap_usdt": 25000,
+     "bybit_postonly_max_qty": "200000.0",
+     "binance_limit_max_qty": "300000",
+     "binance_market_max_qty": "70000",
+     "bybit_market_max_qty": "40000.0"
+    },
+    "label": "ASSUMED cap / MEASURED venue maxima",
+    "note": "child = min(25,000 USDT clip cap (arb.max_clip_notional, ASSUMED), the venue maxima in base); the USDT value of a venue maximum needs a price (not read)"
+   },
+   "venue_filters": {
+    "value": {
+     "BYBIT": {
+      "tick": "0.0001",
+      "step": "0.1",
+      "min_qty": "0.1",
+      "min_notional": "5"
+     },
+     "BINANCE": {
+      "tick": "0.000100",
+      "step": "0.1",
+      "min_qty": "0.1",
+      "min_notional": "5"
+     }
+    },
+    "label": "MEASURED",
+    "note": "public dump 20 Nov 2026 (current rules)"
+   },
+   "worst_outstanding_maker_fill_during_cancel": {
+    "value": "the whole resting child",
+    "label": "ASSUMED",
+    "note": "a cancel races the fill: the full child can fill before the cancel lands"
+   },
+   "caps": {
+    "value": {
+     "net_ceiling": "1.25 x parent",
+     "gross_per_venue": "2 x parent"
+    },
+    "label": "ASSUMED",
+    "note": "the v1_16 multiples (net_ceiling_multiple 1.0 + fill_headroom 0.25; gross 2 x clip with clip = parent)"
+   },
+   "hedge_deadline": {
+    "value": "hedge IOC; 2 retries at 0.25 s, then unwind (3 attempts, 15 bps band); maker ack deadline on",
+    "label": "ASSUMED",
+    "note": "hedge_faults of v1_17"
+   },
+   "margin_bybit": {
+    "value": {
+     "20000": {
+      "tier_id": 1339,
+      "initial_usdt": 2000.0,
+      "maintenance_usdt": 266.8,
+      "tier_max_notional": "20000"
+     },
+     "30000": {
+      "tier_id": 1341,
+      "initial_usdt": 3000.0,
+      "maintenance_usdt": 491.8,
+      "tier_max_notional": "30000"
+     },
+     "50000": {
+      "tier_id": 1346,
+      "initial_usdt": 5000.0,
+      "maintenance_usdt": 1097.8,
+      "tier_max_notional": "50000"
+     }
+    },
+    "label": "MEASURED tiers, ASSUMED leverage 10",
+    "note": "public /v5/market/risk-limit; initial rate raised to 1/10 (account leverage A8)"
+   },
+   "margin_binance": {
+    "value": null,
+    "label": "NO DATA",
+    "note": "Binance leverageBracket is a signed endpoint (account keys): not read"
+   },
+   "burst_throughput": {
+    "value": "2 new maker orders or amends per s per venue, burst 5; hedges, unwinds and cancels never refused",
+    "label": "APPROVED",
+    "note": "A1, owner 16 Nov"
+   },
+   "within_cap_arrival_depth_hedge_venue": {
+    "value": null,
+    "label": "NO DATA",
+    "note": "two-venue depth data exists only for SOLUSDT"
+   },
+   "exit_capacity": {
+    "value": null,
+    "label": "NO DATA",
+    "note": "two-venue depth data exists only for SOLUSDT"
+   }
+  },
+  {
+   "symbol": "TONUSDT",
+   "spot22": false,
+   "listed_both_perp_venues": {
+    "value": false,
+    "label": "MEASURED",
+    "note": "public dump 20 Nov 2026"
+   },
+   "parent_max_usdt": {
+    "value": "20,000-30,000 (up to 50,000)",
+    "label": "APPROVED",
+    "note": "owner target 20 Nov"
+   },
+   "child_max": {
+    "value": null,
+    "label": "NO DATA",
+    "note": "not listed as a trading USDT perpetual on both venues"
+   },
+   "venue_filters": {
+    "value": {
+     "BYBIT": null,
+     "BINANCE": null
+    },
+    "label": "MEASURED"
+   },
+   "worst_outstanding_maker_fill_during_cancel": {
+    "value": "the whole resting child",
+    "label": "ASSUMED",
+    "note": "a cancel races the fill: the full child can fill before the cancel lands"
+   },
+   "caps": {
+    "value": {
+     "net_ceiling": "1.25 x parent",
+     "gross_per_venue": "2 x parent"
+    },
+    "label": "ASSUMED",
+    "note": "the v1_16 multiples (net_ceiling_multiple 1.0 + fill_headroom 0.25; gross 2 x clip with clip = parent)"
+   },
+   "hedge_deadline": {
+    "value": "hedge IOC; 2 retries at 0.25 s, then unwind (3 attempts, 15 bps band); maker ack deadline on",
+    "label": "ASSUMED",
+    "note": "hedge_faults of v1_17"
+   },
+   "margin_bybit": {
+    "value": null,
+    "label": "NO DATA",
+    "note": "public /v5/market/risk-limit; initial rate raised to 1/10 (account leverage A8)"
+   },
+   "margin_binance": {
+    "value": null,
+    "label": "NO DATA",
+    "note": "Binance leverageBracket is a signed endpoint (account keys): not read"
+   },
+   "burst_throughput": {
+    "value": "2 new maker orders or amends per s per venue, burst 5; hedges, unwinds and cancels never refused",
+    "label": "APPROVED",
+    "note": "A1, owner 16 Nov"
+   },
+   "within_cap_arrival_depth_hedge_venue": {
+    "value": null,
+    "label": "NO DATA",
+    "note": "two-venue depth data exists only for SOLUSDT"
+   },
+   "exit_capacity": {
+    "value": null,
+    "label": "NO DATA",
+    "note": "two-venue depth data exists only for SOLUSDT"
+   }
+  },
+  {
+   "symbol": "TRXUSDT",
+   "spot22": false,
+   "listed_both_perp_venues": {
+    "value": true,
+    "label": "MEASURED",
+    "note": "public dump 20 Nov 2026"
+   },
+   "parent_max_usdt": {
+    "value": "20,000-30,000 (up to 50,000)",
+    "label": "APPROVED",
+    "note": "owner target 20 Nov"
+   },
+   "child_max": {
+    "value": {
+     "clip_cap_usdt": 25000,
+     "bybit_postonly_max_qty": "1500000",
+     "binance_limit_max_qty": "20000000",
+     "binance_market_max_qty": "5000000",
+     "bybit_market_max_qty": "460000"
+    },
+    "label": "ASSUMED cap / MEASURED venue maxima",
+    "note": "child = min(25,000 USDT clip cap (arb.max_clip_notional, ASSUMED), the venue maxima in base); the USDT value of a venue maximum needs a price (not read)"
+   },
+   "venue_filters": {
+    "value": {
+     "BYBIT": {
+      "tick": "0.00010",
+      "step": "1",
+      "min_qty": "1",
+      "min_notional": "5"
+     },
+     "BINANCE": {
+      "tick": "0.00001",
+      "step": "1",
+      "min_qty": "1",
+      "min_notional": "5"
+     }
+    },
+    "label": "MEASURED",
+    "note": "public dump 20 Nov 2026 (current rules)"
+   },
+   "worst_outstanding_maker_fill_during_cancel": {
+    "value": "the whole resting child",
+    "label": "ASSUMED",
+    "note": "a cancel races the fill: the full child can fill before the cancel lands"
+   },
+   "caps": {
+    "value": {
+     "net_ceiling": "1.25 x parent",
+     "gross_per_venue": "2 x parent"
+    },
+    "label": "ASSUMED",
+    "note": "the v1_16 multiples (net_ceiling_multiple 1.0 + fill_headroom 0.25; gross 2 x clip with clip = parent)"
+   },
+   "hedge_deadline": {
+    "value": "hedge IOC; 2 retries at 0.25 s, then unwind (3 attempts, 15 bps band); maker ack deadline on",
+    "label": "ASSUMED",
+    "note": "hedge_faults of v1_17"
+   },
+   "margin_bybit": {
+    "value": {
+     "20000": {
+      "tier_id": 311,
+      "initial_usdt": 2000.0,
+      "maintenance_usdt": 150.0,
+      "tier_max_notional": "200000"
+     },
+     "30000": {
+      "tier_id": 311,
+      "initial_usdt": 3000.0,
+      "maintenance_usdt": 225.0,
+      "tier_max_notional": "200000"
+     },
+     "50000": {
+      "tier_id": 311,
+      "initial_usdt": 5000.0,
+      "maintenance_usdt": 375.0,
+      "tier_max_notional": "200000"
+     }
+    },
+    "label": "MEASURED tiers, ASSUMED leverage 10",
+    "note": "public /v5/market/risk-limit; initial rate raised to 1/10 (account leverage A8)"
+   },
+   "margin_binance": {
+    "value": null,
+    "label": "NO DATA",
+    "note": "Binance leverageBracket is a signed endpoint (account keys): not read"
+   },
+   "burst_throughput": {
+    "value": "2 new maker orders or amends per s per venue, burst 5; hedges, unwinds and cancels never refused",
+    "label": "APPROVED",
+    "note": "A1, owner 16 Nov"
+   },
+   "within_cap_arrival_depth_hedge_venue": {
+    "value": null,
+    "label": "NO DATA",
+    "note": "two-venue depth data exists only for SOLUSDT"
+   },
+   "exit_capacity": {
+    "value": null,
+    "label": "NO DATA",
+    "note": "two-venue depth data exists only for SOLUSDT"
+   }
+  },
+  {
+   "symbol": "VVVUSDT",
+   "spot22": false,
+   "listed_both_perp_venues": {
+    "value": true,
+    "label": "MEASURED",
+    "note": "public dump 20 Nov 2026"
+   },
+   "parent_max_usdt": {
+    "value": "20,000-30,000 (up to 50,000)",
+    "label": "APPROVED",
+    "note": "owner target 20 Nov"
+   },
+   "child_max": {
+    "value": {
+     "clip_cap_usdt": 25000,
+     "bybit_postonly_max_qty": "50000.00",
+     "binance_limit_max_qty": "50000",
+     "binance_market_max_qty": "20000",
+     "bybit_market_max_qty": "10000.00"
+    },
+    "label": "ASSUMED cap / MEASURED venue maxima",
+    "note": "child = min(25,000 USDT clip cap (arb.max_clip_notional, ASSUMED), the venue maxima in base); the USDT value of a venue maximum needs a price (not read)"
+   },
+   "venue_filters": {
+    "value": {
+     "BYBIT": {
+      "tick": "0.0010",
+      "step": "0.01",
+      "min_qty": "0.01",
+      "min_notional": "5"
+     },
+     "BINANCE": {
+      "tick": "0.001000",
+      "step": "0.01",
+      "min_qty": "0.01",
+      "min_notional": "5"
+     }
+    },
+    "label": "MEASURED",
+    "note": "public dump 20 Nov 2026 (current rules)"
+   },
+   "worst_outstanding_maker_fill_during_cancel": {
+    "value": "the whole resting child",
+    "label": "ASSUMED",
+    "note": "a cancel races the fill: the full child can fill before the cancel lands"
+   },
+   "caps": {
+    "value": {
+     "net_ceiling": "1.25 x parent",
+     "gross_per_venue": "2 x parent"
+    },
+    "label": "ASSUMED",
+    "note": "the v1_16 multiples (net_ceiling_multiple 1.0 + fill_headroom 0.25; gross 2 x clip with clip = parent)"
+   },
+   "hedge_deadline": {
+    "value": "hedge IOC; 2 retries at 0.25 s, then unwind (3 attempts, 15 bps band); maker ack deadline on",
+    "label": "ASSUMED",
+    "note": "hedge_faults of v1_17"
+   },
+   "margin_bybit": {
+    "value": {
+     "20000": {
+      "tier_id": 2,
+      "initial_usdt": 2000.0,
+      "maintenance_usdt": 624.5,
+      "tier_max_notional": "25000"
+     },
+     "30000": {
+      "tier_id": 3,
+      "initial_usdt": 3000.0,
+      "maintenance_usdt": 1041.0,
+      "tier_max_notional": "100000"
+     },
+     "50000": {
+      "tier_id": 3,
+      "initial_usdt": 5000.0,
+      "maintenance_usdt": 2041.0,
+      "tier_max_notional": "100000"
+     }
+    },
+    "label": "MEASURED tiers, ASSUMED leverage 10",
+    "note": "public /v5/market/risk-limit; initial rate raised to 1/10 (account leverage A8)"
+   },
+   "margin_binance": {
+    "value": null,
+    "label": "NO DATA",
+    "note": "Binance leverageBracket is a signed endpoint (account keys): not read"
+   },
+   "burst_throughput": {
+    "value": "2 new maker orders or amends per s per venue, burst 5; hedges, unwinds and cancels never refused",
+    "label": "APPROVED",
+    "note": "A1, owner 16 Nov"
+   },
+   "within_cap_arrival_depth_hedge_venue": {
+    "value": null,
+    "label": "NO DATA",
+    "note": "two-venue depth data exists only for SOLUSDT"
+   },
+   "exit_capacity": {
+    "value": null,
+    "label": "NO DATA",
+    "note": "two-venue depth data exists only for SOLUSDT"
+   }
+  },
+  {
+   "symbol": "WLDUSDT",
+   "spot22": false,
+   "listed_both_perp_venues": {
+    "value": true,
+    "label": "MEASURED",
+    "note": "public dump 20 Nov 2026"
+   },
+   "parent_max_usdt": {
+    "value": "20,000-30,000 (up to 50,000)",
+    "label": "APPROVED",
+    "note": "owner target 20 Nov"
+   },
+   "child_max": {
+    "value": {
+     "clip_cap_usdt": 25000,
+     "bybit_postonly_max_qty": "2800000.0",
+     "binance_limit_max_qty": "20000000",
+     "binance_market_max_qty": "700000",
+     "bybit_market_max_qty": "700000.0"
+    },
+    "label": "ASSUMED cap / MEASURED venue maxima",
+    "note": "child = min(25,000 USDT clip cap (arb.max_clip_notional, ASSUMED), the venue maxima in base); the USDT value of a venue maximum needs a price (not read)"
+   },
+   "venue_filters": {
+    "value": {
+     "BYBIT": {
+      "tick": "0.0001",
+      "step": "0.1",
+      "min_qty": "0.1",
+      "min_notional": "5"
+     },
+     "BINANCE": {
+      "tick": "0.0001000",
+      "step": "1",
+      "min_qty": "1",
+      "min_notional": "5"
+     }
+    },
+    "label": "MEASURED",
+    "note": "public dump 20 Nov 2026 (current rules)"
+   },
+   "worst_outstanding_maker_fill_during_cancel": {
+    "value": "the whole resting child",
+    "label": "ASSUMED",
+    "note": "a cancel races the fill: the full child can fill before the cancel lands"
+   },
+   "caps": {
+    "value": {
+     "net_ceiling": "1.25 x parent",
+     "gross_per_venue": "2 x parent"
+    },
+    "label": "ASSUMED",
+    "note": "the v1_16 multiples (net_ceiling_multiple 1.0 + fill_headroom 0.25; gross 2 x clip with clip = parent)"
+   },
+   "hedge_deadline": {
+    "value": "hedge IOC; 2 retries at 0.25 s, then unwind (3 attempts, 15 bps band); maker ack deadline on",
+    "label": "ASSUMED",
+    "note": "hedge_faults of v1_17"
+   },
+   "margin_bybit": {
+    "value": {
+     "20000": {
+      "tier_id": 1,
+      "initial_usdt": 2000.0,
+      "maintenance_usdt": 180.0,
+      "tier_max_notional": "20000"
+     },
+     "30000": {
+      "tier_id": 2,
+      "initial_usdt": 3000.0,
+      "maintenance_usdt": 280.0,
+      "tier_max_notional": "200000"
+     },
+     "50000": {
+      "tier_id": 2,
+      "initial_usdt": 5000.0,
+      "maintenance_usdt": 480.0,
+      "tier_max_notional": "200000"
+     }
+    },
+    "label": "MEASURED tiers, ASSUMED leverage 10",
+    "note": "public /v5/market/risk-limit; initial rate raised to 1/10 (account leverage A8)"
+   },
+   "margin_binance": {
+    "value": null,
+    "label": "NO DATA",
+    "note": "Binance leverageBracket is a signed endpoint (account keys): not read"
+   },
+   "burst_throughput": {
+    "value": "2 new maker orders or amends per s per venue, burst 5; hedges, unwinds and cancels never refused",
+    "label": "APPROVED",
+    "note": "A1, owner 16 Nov"
+   },
+   "within_cap_arrival_depth_hedge_venue": {
+    "value": null,
+    "label": "NO DATA",
+    "note": "two-venue depth data exists only for SOLUSDT"
+   },
+   "exit_capacity": {
+    "value": null,
+    "label": "NO DATA",
+    "note": "two-venue depth data exists only for SOLUSDT"
+   }
+  },
+  {
+   "symbol": "ONDOUSDT",
+   "spot22": false,
+   "listed_both_perp_venues": {
+    "value": true,
+    "label": "MEASURED",
+    "note": "public dump 20 Nov 2026"
+   },
+   "parent_max_usdt": {
+    "value": "20,000-30,000 (up to 50,000)",
+    "label": "APPROVED",
+    "note": "owner target 20 Nov"
+   },
+   "child_max": {
+    "value": {
+     "clip_cap_usdt": 25000,
+     "bybit_postonly_max_qty": "4500000",
+     "binance_limit_max_qty": "9000000",
+     "binance_market_max_qty": "900000",
+     "bybit_market_max_qty": "900000"
+    },
+    "label": "ASSUMED cap / MEASURED venue maxima",
+    "note": "child = min(25,000 USDT clip cap (arb.max_clip_notional, ASSUMED), the venue maxima in base); the USDT value of a venue maximum needs a price (not read)"
+   },
+   "venue_filters": {
+    "value": {
+     "BYBIT": {
+      "tick": "0.0001",
+      "step": "1",
+      "min_qty": "1",
+      "min_notional": "5"
+     },
+     "BINANCE": {
+      "tick": "0.0001000",
+      "step": "0.1",
+      "min_qty": "0.1",
+      "min_notional": "5"
+     }
+    },
+    "label": "MEASURED",
+    "note": "public dump 20 Nov 2026 (current rules)"
+   },
+   "worst_outstanding_maker_fill_during_cancel": {
+    "value": "the whole resting child",
+    "label": "ASSUMED",
+    "note": "a cancel races the fill: the full child can fill before the cancel lands"
+   },
+   "caps": {
+    "value": {
+     "net_ceiling": "1.25 x parent",
+     "gross_per_venue": "2 x parent"
+    },
+    "label": "ASSUMED",
+    "note": "the v1_16 multiples (net_ceiling_multiple 1.0 + fill_headroom 0.25; gross 2 x clip with clip = parent)"
+   },
+   "hedge_deadline": {
+    "value": "hedge IOC; 2 retries at 0.25 s, then unwind (3 attempts, 15 bps band); maker ack deadline on",
+    "label": "ASSUMED",
+    "note": "hedge_faults of v1_17"
+   },
+   "margin_bybit": {
+    "value": {
+     "20000": {
+      "tier_id": 3,
+      "initial_usdt": 2000.0,
+      "maintenance_usdt": 198.0,
+      "tier_max_notional": "20500"
+     },
+     "30000": {
+      "tier_id": 5,
+      "initial_usdt": 3000.0,
+      "maintenance_usdt": 325.0,
+      "tier_max_notional": "39000"
+     },
+     "50000": {
+      "tier_id": 6,
+      "initial_usdt": 5000.0,
+      "maintenance_usdt": 637.4,
+      "tier_max_notional": "54000"
+     }
+    },
+    "label": "MEASURED tiers, ASSUMED leverage 10",
+    "note": "public /v5/market/risk-limit; initial rate raised to 1/10 (account leverage A8)"
+   },
+   "margin_binance": {
+    "value": null,
+    "label": "NO DATA",
+    "note": "Binance leverageBracket is a signed endpoint (account keys): not read"
+   },
+   "burst_throughput": {
+    "value": "2 new maker orders or amends per s per venue, burst 5; hedges, unwinds and cancels never refused",
+    "label": "APPROVED",
+    "note": "A1, owner 16 Nov"
+   },
+   "within_cap_arrival_depth_hedge_venue": {
+    "value": null,
+    "label": "NO DATA",
+    "note": "two-venue depth data exists only for SOLUSDT"
+   },
+   "exit_capacity": {
+    "value": null,
+    "label": "NO DATA",
+    "note": "two-venue depth data exists only for SOLUSDT"
+   }
+  }
+ ]
+}

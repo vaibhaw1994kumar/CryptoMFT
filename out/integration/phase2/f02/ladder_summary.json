@@ -1,0 +1,1273 @@
+{
+ "label": "EXPLORATORY: SOLUSDT size ladder, series i (child = parent, capped at the 25,000 USDT clip cap), 29 Oct 2026 capture (REJECTED / CRITICAL: mechanics only), v1_17, pair close on, singapore latency (ASSUMED, pre-migration), the profile's fees; capital per venue = max(1000, 15 x IM(2 x parent)) at the ASSUMED tiers",
+ "series_ii": "NOT RUN (owner follow-up 20 Nov: series i only)",
+ "rungs": {
+  "i_01k": {
+   "parent_usdt": 1000,
+   "parent_sol": 10.2,
+   "child_sol": 10.2,
+   "verdict": "PASS",
+   "failed_because": [],
+   "plan_shortfalls_sol": {},
+   "limits_that_bound": {},
+   "participation_or_legging_bound": {
+    "LEGGING_LIMIT_BOUND": 7,
+    "PARTICIPATION_LIMIT_BOUND": 0,
+    "PACKAGE_DISPATCH_THROTTLED": 72
+   },
+   "metrics": {
+    "maker_fills": 24,
+    "maker_fills_by_direction": {
+     "buy": 15,
+     "sell": 9
+    },
+    "maker_qty": 43.0,
+    "cost": {
+     "pair_gross_bps": {
+      "p1": 4.1537,
+      "p10": 4.1545,
+      "p50": 6.0778,
+      "p90": 8.2372,
+      "p99": 8.2372,
+      "n": 23,
+      "min": 4.1537,
+      "max": 8.2372
+     },
+     "pair_net_bps": {
+      "p1": 1.428,
+      "p10": 1.4553,
+      "p50": 3.3768,
+      "p90": 5.5358,
+      "p99": 5.5358,
+      "n": 22,
+      "min": 1.428,
+      "max": 5.5358
+     },
+     "hedge_cost_vs_decision_touch_bps": {
+      "p1": -2.058,
+      "p10": -2.058,
+      "p50": 0.0,
+      "p90": 2.0786,
+      "p99": 2.0786,
+      "n": 23,
+      "min": -2.058,
+      "max": 4.1571
+     }
+    },
+    "completion": {
+     "fully_hedged_share": 0.9167,
+     "unhedged_interval_s": {
+      "p1": 0.035,
+      "p10": 0.035,
+      "p50": 0.0386,
+      "p90": 0.0477,
+      "p99": 0.0494,
+      "n": 22,
+      "min": 0.035,
+      "max": 0.0526
+     },
+     "repeated_hedges": 0,
+     "hedge_children_max": 1
+    },
+    "burst_fills": {
+     "window_s": 0.05,
+     "fills_within_window_of_previous": 17,
+     "longest_burst": 9
+    },
+    "residual": {
+     "peak_net_base": 10.2,
+     "end_positions": {
+      "BINANCE": -20.4,
+      "BYBIT": 20.4
+     },
+     "dust_end_base": "0E-12"
+    },
+    "margin": {
+     "peak_notional_usdt": {
+      "BINANCE": 1982.88,
+      "BYBIT": 1981.25
+     },
+     "peak_initial_margin_usdt_at_assumed_tiers": {
+      "BINANCE": 39.66,
+      "BYBIT": 39.62
+     },
+     "tiers": [
+      [
+       50000.0,
+       0.02
+      ],
+      [
+       500000.0,
+       0.05
+      ]
+     ],
+     "tiers_label": "ASSUMED (v1_17)"
+    },
+    "throughput": {
+     "maker_orders": 75,
+     "max_maker_orders_ending_in_1s": 3,
+     "order_rate": {
+      "BYBIT": {
+       "per_s": 2.0,
+       "burst": 5,
+       "taken": 75,
+       "skipped": 0,
+       "tokens_now": 4.0
+      }
+     }
+    },
+    "exits": {
+     "closing_signals": 19,
+     "close_reservation": {
+      "reserved": 19,
+      "capped": 0,
+      "nothing_closable": 0,
+      "released": 19,
+      "reduce_only_by_position": 27,
+      "not_reduce_only_by_position": 0,
+      "open_reservations": {},
+      "beyond_flat": 0
+     },
+     "close_unfilled_events": 0
+    },
+    "stops": {
+     "signals_blocked_by_breaker": 0,
+     "signals_blocked_by_margin_price": 53,
+     "session_limits_blocks": {},
+     "dust_bound": {
+      "max_notional_usdt": 50.0,
+      "max_age_s": 300.0,
+      "label": "ASSUMED",
+      "episodes": 0,
+      "active_at_end": false,
+      "signals_blocked": 0,
+      "quotes_withdrawn": 0,
+      "remedy_hedges_sent": 0,
+      "unsent_reports": 0,
+      "max_long_usdt": "0.9590985701736550",
+      "max_short_usdt": "3.0866309243932050",
+      "end_long_usdt": "0",
+      "end_short_usdt": "0",
+      "counted_in": "strategy net and gross exposure (risk, from fills), margin (from fills), A2 daily-loss equity (ledger positions), residual totals (carried_dust_base): the carried dust is an unhedged maker fill; the breaker's net-exposure timer is exempt",
+      "rule": "aggregate",
+      "age_rule": "alarm only (DUST_AGE_REACHED), no stop",
+      "age_alarms": 0,
+      "loop_passes_while_active": 0,
+      "opportunities_blocked": 0,
+      "dust_reducing_allowed": 0,
+      "resting_reducing_kept": 0,
+      "state_changes": 0,
+      "max_aggregate_usdt": "3.0866309243932050",
+      "open_items_at_end": []
+     }
+    },
+    "risk_events": {
+     "KILL_SWITCH_ACTIVATED": 0,
+     "RESIDUAL_BREACH": 0,
+     "HEDGE_UNWIND_SENT": 0,
+     "UNWIND_SUBMIT": 0,
+     "DUST_BOUND_REACHED": 0,
+     "LIMIT_STATE": 0,
+     "LEGGING_LIMIT_BOUND": 7,
+     "PARTICIPATION_LIMIT_BOUND": 0
+    }
+   }
+  },
+  "i_05k": {
+   "parent_usdt": 5000,
+   "parent_sol": 51.0,
+   "child_sol": 51.0,
+   "verdict": "PASS",
+   "failed_because": [],
+   "plan_shortfalls_sol": {},
+   "limits_that_bound": {},
+   "participation_or_legging_bound": {
+    "LEGGING_LIMIT_BOUND": 13,
+    "PARTICIPATION_LIMIT_BOUND": 0,
+    "PACKAGE_DISPATCH_THROTTLED": 101
+   },
+   "metrics": {
+    "maker_fills": 80,
+    "maker_fills_by_direction": {
+     "buy": 67,
+     "sell": 13
+    },
+    "maker_qty": 204.0,
+    "cost": {
+     "pair_gross_bps": {
+      "p1": -3.1302,
+      "p10": 4.1545,
+      "p50": 6.1741,
+      "p90": 10.2944,
+      "p99": 10.2944,
+      "n": 79,
+      "min": -3.1302,
+      "max": 11.3239
+     },
+     "pair_net_bps": {
+      "p1": -5.8307,
+      "p10": 1.4553,
+      "p50": 3.4731,
+      "p90": 7.5853,
+      "p99": 7.5927,
+      "n": 75,
+      "min": -5.8307,
+      "max": 8.6202
+     },
+     "hedge_cost_vs_decision_touch_bps": {
+      "p1": -5.144,
+      "p10": -4.1152,
+      "p50": -0.0,
+      "p90": 0.0,
+      "p99": 4.1571,
+      "n": 79,
+      "min": -5.144,
+      "max": 8.3516
+     }
+    },
+    "completion": {
+     "fully_hedged_share": 0.9375,
+     "unhedged_interval_s": {
+      "p1": 0.035,
+      "p10": 0.035,
+      "p50": 0.0398,
+      "p90": 0.0494,
+      "p99": 0.0646,
+      "n": 75,
+      "min": 0.035,
+      "max": 0.3522
+     },
+     "repeated_hedges": 1,
+     "hedge_children_max": 2
+    },
+    "burst_fills": {
+     "window_s": 0.05,
+     "fills_within_window_of_previous": 68,
+     "longest_burst": 20
+    },
+    "residual": {
+     "peak_net_base": 51.0,
+     "end_positions": {
+      "BINANCE": -102.0,
+      "BYBIT": 102.0
+     },
+     "dust_end_base": "0E-12"
+    },
+    "margin": {
+     "peak_notional_usdt": {
+      "BINANCE": 9924.6,
+      "BYBIT": 9915.42
+     },
+     "peak_initial_margin_usdt_at_assumed_tiers": {
+      "BINANCE": 198.49,
+      "BYBIT": 198.31
+     },
+     "tiers": [
+      [
+       50000.0,
+       0.02
+      ],
+      [
+       500000.0,
+       0.05
+      ]
+     ],
+     "tiers_label": "ASSUMED (v1_17)"
+    },
+    "throughput": {
+     "maker_orders": 105,
+     "max_maker_orders_ending_in_1s": 5,
+     "order_rate": {
+      "BYBIT": {
+       "per_s": 2.0,
+       "burst": 5,
+       "taken": 105,
+       "skipped": 4,
+       "tokens_now": 4.0
+      }
+     }
+    },
+    "exits": {
+     "closing_signals": 45,
+     "close_reservation": {
+      "reserved": 45,
+      "capped": 0,
+      "nothing_closable": 0,
+      "released": 45,
+      "reduce_only_by_position": 58,
+      "not_reduce_only_by_position": 0,
+      "open_reservations": {},
+      "beyond_flat": 0
+     },
+     "close_unfilled_events": 0
+    },
+    "stops": {
+     "signals_blocked_by_breaker": 0,
+     "signals_blocked_by_margin_price": 53,
+     "session_limits_blocks": {},
+     "dust_bound": {
+      "max_notional_usdt": 50.0,
+      "max_age_s": 300.0,
+      "label": "ASSUMED",
+      "episodes": 0,
+      "active_at_end": false,
+      "signals_blocked": 0,
+      "quotes_withdrawn": 0,
+      "remedy_hedges_sent": 0,
+      "unsent_reports": 0,
+      "max_long_usdt": "0.9697944051312050",
+      "max_short_usdt": "0.3979618487864100",
+      "end_long_usdt": "0",
+      "end_short_usdt": "0",
+      "counted_in": "strategy net and gross exposure (risk, from fills), margin (from fills), A2 daily-loss equity (ledger positions), residual totals (carried_dust_base): the carried dust is an unhedged maker fill; the breaker's net-exposure timer is exempt",
+      "rule": "aggregate",
+      "age_rule": "alarm only (DUST_AGE_REACHED), no stop",
+      "age_alarms": 0,
+      "loop_passes_while_active": 0,
+      "opportunities_blocked": 0,
+      "dust_reducing_allowed": 0,
+      "resting_reducing_kept": 0,
+      "state_changes": 0,
+      "max_aggregate_usdt": "0.9697944051312050",
+      "open_items_at_end": []
+     }
+    },
+    "risk_events": {
+     "KILL_SWITCH_ACTIVATED": 0,
+     "RESIDUAL_BREACH": 0,
+     "HEDGE_UNWIND_SENT": 0,
+     "UNWIND_SUBMIT": 0,
+     "DUST_BOUND_REACHED": 0,
+     "LIMIT_STATE": 2,
+     "LEGGING_LIMIT_BOUND": 13,
+     "PARTICIPATION_LIMIT_BOUND": 0
+    }
+   }
+  },
+  "i_10k": {
+   "parent_usdt": 10000,
+   "parent_sol": 102.0,
+   "child_sol": 102.0,
+   "verdict": "PASS",
+   "failed_because": [],
+   "plan_shortfalls_sol": {},
+   "limits_that_bound": {},
+   "participation_or_legging_bound": {
+    "LEGGING_LIMIT_BOUND": 14,
+    "PARTICIPATION_LIMIT_BOUND": 0,
+    "PACKAGE_DISPATCH_THROTTLED": 129
+   },
+   "metrics": {
+    "maker_fills": 111,
+    "maker_fills_by_direction": {
+     "buy": 100,
+     "sell": 11
+    },
+    "maker_qty": 421.9,
+    "cost": {
+     "pair_gross_bps": {
+      "p1": -2.0655,
+      "p10": -2.0655,
+      "p50": 6.1741,
+      "p90": 10.287,
+      "p99": 10.2944,
+      "n": 110,
+      "min": -3.1302,
+      "max": 11.3239
+     },
+     "pair_net_bps": {
+      "p1": -4.7651,
+      "p10": -4.7651,
+      "p50": 3.4731,
+      "p90": 7.5853,
+      "p99": 7.5927,
+      "n": 105,
+      "min": -5.8307,
+      "max": 8.6217
+     },
+     "hedge_cost_vs_decision_touch_bps": {
+      "p1": -4.1152,
+      "p10": -4.1123,
+      "p50": -0.0,
+      "p90": 7.2254,
+      "p99": 7.2254,
+      "n": 110,
+      "min": -5.144,
+      "max": 8.3516
+     }
+    },
+    "completion": {
+     "fully_hedged_share": 0.9459,
+     "unhedged_interval_s": {
+      "p1": 0.035,
+      "p10": 0.035,
+      "p50": 0.0393,
+      "p90": 0.0494,
+      "p99": 0.0646,
+      "n": 105,
+      "min": 0.035,
+      "max": 0.3508
+     },
+     "repeated_hedges": 1,
+     "hedge_children_max": 2
+    },
+    "burst_fills": {
+     "window_s": 0.05,
+     "fills_within_window_of_previous": 97,
+     "longest_burst": 29
+    },
+    "residual": {
+     "peak_net_base": 102.0,
+     "end_positions": {
+      "BINANCE": -203.9,
+      "BYBIT": 203.9
+     },
+     "dust_end_base": "0E-12"
+    },
+    "margin": {
+     "peak_notional_usdt": {
+      "BINANCE": 19845.59,
+      "BYBIT": 19829.27
+     },
+     "peak_initial_margin_usdt_at_assumed_tiers": {
+      "BINANCE": 396.91,
+      "BYBIT": 396.59
+     },
+     "tiers": [
+      [
+       50000.0,
+       0.02
+      ],
+      [
+       500000.0,
+       0.05
+      ]
+     ],
+     "tiers_label": "ASSUMED (v1_17)"
+    },
+    "throughput": {
+     "maker_orders": 133,
+     "max_maker_orders_ending_in_1s": 5,
+     "order_rate": {
+      "BYBIT": {
+       "per_s": 2.0,
+       "burst": 5,
+       "taken": 133,
+       "skipped": 12,
+       "tokens_now": 4.0
+      }
+     }
+    },
+    "exits": {
+     "closing_signals": 73,
+     "close_reservation": {
+      "reserved": 73,
+      "capped": 0,
+      "nothing_closable": 0,
+      "released": 73,
+      "reduce_only_by_position": 84,
+      "not_reduce_only_by_position": 0,
+      "open_reservations": {},
+      "beyond_flat": 0
+     },
+     "close_unfilled_events": 0
+    },
+    "stops": {
+     "signals_blocked_by_breaker": 0,
+     "signals_blocked_by_margin_price": 53,
+     "session_limits_blocks": {},
+     "dust_bound": {
+      "max_notional_usdt": 50.0,
+      "max_age_s": 300.0,
+      "label": "ASSUMED",
+      "episodes": 0,
+      "active_at_end": false,
+      "signals_blocked": 0,
+      "quotes_withdrawn": 0,
+      "remedy_hedges_sent": 0,
+      "unsent_reports": 0,
+      "max_long_usdt": "0.9733499999026650",
+      "max_short_usdt": "3.0866309243932050",
+      "end_long_usdt": "0",
+      "end_short_usdt": "0",
+      "counted_in": "strategy net and gross exposure (risk, from fills), margin (from fills), A2 daily-loss equity (ledger positions), residual totals (carried_dust_base): the carried dust is an unhedged maker fill; the breaker's net-exposure timer is exempt",
+      "rule": "aggregate",
+      "age_rule": "alarm only (DUST_AGE_REACHED), no stop",
+      "age_alarms": 0,
+      "loop_passes_while_active": 0,
+      "opportunities_blocked": 0,
+      "dust_reducing_allowed": 0,
+      "resting_reducing_kept": 0,
+      "state_changes": 0,
+      "max_aggregate_usdt": "3.0866309243932050",
+      "open_items_at_end": []
+     }
+    },
+    "risk_events": {
+     "KILL_SWITCH_ACTIVATED": 0,
+     "RESIDUAL_BREACH": 0,
+     "HEDGE_UNWIND_SENT": 0,
+     "UNWIND_SUBMIT": 0,
+     "DUST_BOUND_REACHED": 0,
+     "LIMIT_STATE": 2,
+     "LEGGING_LIMIT_BOUND": 14,
+     "PARTICIPATION_LIMIT_BOUND": 0
+    }
+   }
+  },
+  "i_20k": {
+   "parent_usdt": 20000,
+   "parent_sol": 204.1,
+   "child_sol": 204.1,
+   "verdict": "PASS",
+   "failed_because": [],
+   "plan_shortfalls_sol": {},
+   "limits_that_bound": {},
+   "participation_or_legging_bound": {
+    "LEGGING_LIMIT_BOUND": 18,
+    "PARTICIPATION_LIMIT_BOUND": 0,
+    "PACKAGE_DISPATCH_THROTTLED": 129
+   },
+   "metrics": {
+    "maker_fills": 176,
+    "maker_fills_by_direction": {
+     "buy": 165,
+     "sell": 11
+    },
+    "maker_qty": 628.4,
+    "cost": {
+     "pair_gross_bps": {
+      "p1": 4.1089,
+      "p10": 4.1089,
+      "p50": 8.2262,
+      "p90": 10.2796,
+      "p99": 10.2944,
+      "n": 174,
+      "min": -3.1302,
+      "max": 11.3239
+     },
+     "pair_net_bps": {
+      "p1": -5.8307,
+      "p10": 1.4082,
+      "p50": 5.5248,
+      "p90": 7.5779,
+      "p99": 7.5927,
+      "n": 167,
+      "min": -160.701,
+      "max": 8.6217
+     },
+     "hedge_cost_vs_decision_touch_bps": {
+      "p1": -4.1152,
+      "p10": -4.1093,
+      "p50": -2.0553,
+      "p90": 1.0267,
+      "p99": 2.0786,
+      "n": 174,
+      "min": -5.144,
+      "max": 8.3516
+     }
+    },
+    "completion": {
+     "fully_hedged_share": 0.9489,
+     "unhedged_interval_s": {
+      "p1": 0.035,
+      "p10": 0.035,
+      "p50": 0.0398,
+      "p90": 0.0504,
+      "p99": 0.0646,
+      "n": 167,
+      "min": 0.035,
+      "max": 0.3633
+     },
+     "repeated_hedges": 1,
+     "hedge_children_max": 2
+    },
+    "burst_fills": {
+     "window_s": 0.05,
+     "fills_within_window_of_previous": 158,
+     "longest_burst": 29
+    },
+    "residual": {
+     "peak_net_base": 109.0,
+     "end_positions": {
+      "BINANCE": -408.2,
+      "BYBIT": 408.2
+     },
+     "dust_end_base": "0E-12"
+    },
+    "margin": {
+     "peak_notional_usdt": {
+      "BINANCE": 39754.6,
+      "BYBIT": 39738.27
+     },
+     "peak_initial_margin_usdt_at_assumed_tiers": {
+      "BINANCE": 795.09,
+      "BYBIT": 794.77
+     },
+     "tiers": [
+      [
+       50000.0,
+       0.02
+      ],
+      [
+       500000.0,
+       0.05
+      ]
+     ],
+     "tiers_label": "ASSUMED (v1_17)"
+    },
+    "throughput": {
+     "maker_orders": 133,
+     "max_maker_orders_ending_in_1s": 5,
+     "order_rate": {
+      "BYBIT": {
+       "per_s": 2.0,
+       "burst": 5,
+       "taken": 133,
+       "skipped": 12,
+       "tokens_now": 4.0
+      }
+     }
+    },
+    "exits": {
+     "closing_signals": 71,
+     "close_reservation": {
+      "reserved": 71,
+      "capped": 0,
+      "nothing_closable": 0,
+      "released": 71,
+      "reduce_only_by_position": 82,
+      "not_reduce_only_by_position": 0,
+      "open_reservations": {},
+      "beyond_flat": 0
+     },
+     "close_unfilled_events": 0
+    },
+    "stops": {
+     "signals_blocked_by_breaker": 0,
+     "signals_blocked_by_margin_price": 53,
+     "session_limits_blocks": {},
+     "dust_bound": {
+      "max_notional_usdt": 50.0,
+      "max_age_s": 300.0,
+      "label": "ASSUMED",
+      "episodes": 0,
+      "active_at_end": false,
+      "signals_blocked": 0,
+      "quotes_withdrawn": 0,
+      "remedy_hedges_sent": 0,
+      "unsent_reports": 0,
+      "max_long_usdt": "1.6881030730547100",
+      "max_short_usdt": "3.0866309243932050",
+      "end_long_usdt": "0",
+      "end_short_usdt": "0",
+      "counted_in": "strategy net and gross exposure (risk, from fills), margin (from fills), A2 daily-loss equity (ledger positions), residual totals (carried_dust_base): the carried dust is an unhedged maker fill; the breaker's net-exposure timer is exempt",
+      "rule": "aggregate",
+      "age_rule": "alarm only (DUST_AGE_REACHED), no stop",
+      "age_alarms": 0,
+      "loop_passes_while_active": 0,
+      "opportunities_blocked": 0,
+      "dust_reducing_allowed": 0,
+      "resting_reducing_kept": 0,
+      "state_changes": 0,
+      "max_aggregate_usdt": "3.0866309243932050",
+      "open_items_at_end": [],
+      "open_items_age_at": "the session end (last event)"
+     }
+    },
+    "risk_events": {
+     "KILL_SWITCH_ACTIVATED": 0,
+     "RESIDUAL_BREACH": 0,
+     "HEDGE_UNWIND_SENT": 0,
+     "UNWIND_SUBMIT": 0,
+     "DUST_BOUND_REACHED": 0,
+     "LIMIT_STATE": 2,
+     "LEGGING_LIMIT_BOUND": 18,
+     "PARTICIPATION_LIMIT_BOUND": 0
+    }
+   }
+  },
+  "i_30k": {
+   "parent_usdt": 30000,
+   "parent_sol": 306.1,
+   "child_sol": 255.1,
+   "verdict": "PASS",
+   "failed_because": [],
+   "plan_shortfalls_sol": {},
+   "limits_that_bound": {},
+   "participation_or_legging_bound": {
+    "LEGGING_LIMIT_BOUND": 23,
+    "PARTICIPATION_LIMIT_BOUND": 0,
+    "PACKAGE_DISPATCH_THROTTLED": 134
+   },
+   "metrics": {
+    "maker_fills": 239,
+    "maker_fills_by_direction": {
+     "buy": 228,
+     "sell": 11
+    },
+    "maker_qty": 832.4,
+    "cost": {
+     "pair_gross_bps": {
+      "p1": 4.1089,
+      "p10": 4.1089,
+      "p50": 6.1741,
+      "p90": 9.2612,
+      "p99": 10.2944,
+      "n": 237,
+      "min": -3.1302,
+      "max": 11.3239
+     },
+     "pair_net_bps": {
+      "p1": -3.5608,
+      "p10": 1.4082,
+      "p50": 3.4718,
+      "p90": 6.5596,
+      "p99": 7.5927,
+      "n": 226,
+      "min": -160.701,
+      "max": 8.6217
+     },
+     "hedge_cost_vs_decision_touch_bps": {
+      "p1": -4.1152,
+      "p10": -3.5064,
+      "p50": -1.0125,
+      "p90": 1.0267,
+      "p99": 2.0786,
+      "n": 237,
+      "min": -5.144,
+      "max": 8.3516
+     }
+    },
+    "completion": {
+     "fully_hedged_share": 0.9456,
+     "unhedged_interval_s": {
+      "p1": 0.035,
+      "p10": 0.035,
+      "p50": 0.0394,
+      "p90": 0.0511,
+      "p99": 0.064,
+      "n": 226,
+      "min": 0.035,
+      "max": 0.3633
+     },
+     "repeated_hedges": 1,
+     "hedge_children_max": 2
+    },
+    "burst_fills": {
+     "window_s": 0.05,
+     "fills_within_window_of_previous": 216,
+     "longest_burst": 29
+    },
+    "residual": {
+     "peak_net_base": 109.0,
+     "end_positions": {
+      "BINANCE": -612.2,
+      "BYBIT": 612.2
+     },
+     "dust_end_base": "0E-12"
+    },
+    "margin": {
+     "peak_notional_usdt": {
+      "BINANCE": 59591.55,
+      "BYBIT": 59554.82
+     },
+     "peak_initial_margin_usdt_at_assumed_tiers": {
+      "BINANCE": 2979.58,
+      "BYBIT": 2977.74
+     },
+     "tiers": [
+      [
+       50000.0,
+       0.02
+      ],
+      [
+       500000.0,
+       0.05
+      ]
+     ],
+     "tiers_label": "ASSUMED (v1_17)"
+    },
+    "throughput": {
+     "maker_orders": 138,
+     "max_maker_orders_ending_in_1s": 5,
+     "order_rate": {
+      "BYBIT": {
+       "per_s": 2.0,
+       "burst": 5,
+       "taken": 138,
+       "skipped": 12,
+       "tokens_now": 4.0
+      }
+     }
+    },
+    "exits": {
+     "closing_signals": 72,
+     "close_reservation": {
+      "reserved": 72,
+      "capped": 0,
+      "nothing_closable": 0,
+      "released": 72,
+      "reduce_only_by_position": 83,
+      "not_reduce_only_by_position": 0,
+      "open_reservations": {},
+      "beyond_flat": 0
+     },
+     "close_unfilled_events": 0
+    },
+    "stops": {
+     "signals_blocked_by_breaker": 0,
+     "signals_blocked_by_margin_price": 53,
+     "session_limits_blocks": {},
+     "dust_bound": {
+      "max_notional_usdt": 50.0,
+      "max_age_s": 300.0,
+      "label": "ASSUMED",
+      "episodes": 0,
+      "active_at_end": false,
+      "signals_blocked": 0,
+      "quotes_withdrawn": 0,
+      "remedy_hedges_sent": 0,
+      "unsent_reports": 0,
+      "max_long_usdt": "1.6881030730547100",
+      "max_short_usdt": "3.0866309243932050",
+      "end_long_usdt": "0",
+      "end_short_usdt": "0",
+      "counted_in": "strategy net and gross exposure (risk, from fills), margin (from fills), A2 daily-loss equity (ledger positions), residual totals (carried_dust_base): the carried dust is an unhedged maker fill; the breaker's net-exposure timer is exempt",
+      "rule": "aggregate",
+      "age_rule": "alarm only (DUST_AGE_REACHED), no stop",
+      "age_alarms": 0,
+      "loop_passes_while_active": 0,
+      "opportunities_blocked": 0,
+      "dust_reducing_allowed": 0,
+      "resting_reducing_kept": 0,
+      "state_changes": 0,
+      "max_aggregate_usdt": "3.0866309243932050",
+      "open_items_at_end": [],
+      "open_items_age_at": "the session end (last event)"
+     }
+    },
+    "risk_events": {
+     "KILL_SWITCH_ACTIVATED": 0,
+     "RESIDUAL_BREACH": 0,
+     "HEDGE_UNWIND_SENT": 0,
+     "UNWIND_SUBMIT": 0,
+     "DUST_BOUND_REACHED": 0,
+     "LIMIT_STATE": 2,
+     "LEGGING_LIMIT_BOUND": 23,
+     "PARTICIPATION_LIMIT_BOUND": 0
+    }
+   }
+  },
+  "i_50k": {
+   "parent_usdt": 50000,
+   "parent_sol": 510.2,
+   "child_sol": 255.1,
+   "verdict": "PASS",
+   "failed_because": [],
+   "plan_shortfalls_sol": {},
+   "limits_that_bound": {},
+   "participation_or_legging_bound": {
+    "LEGGING_LIMIT_BOUND": 27,
+    "PARTICIPATION_LIMIT_BOUND": 0,
+    "PACKAGE_DISPATCH_THROTTLED": 139
+   },
+   "metrics": {
+    "maker_fills": 306,
+    "maker_fills_by_direction": {
+     "buy": 295,
+     "sell": 11
+    },
+    "maker_qty": 1240.6,
+    "cost": {
+     "pair_gross_bps": {
+      "p1": 4.1089,
+      "p10": 5.1372,
+      "p50": 6.1678,
+      "p90": 9.2612,
+      "p99": 10.2944,
+      "n": 304,
+      "min": -3.1302,
+      "max": 11.3239
+     },
+     "pair_net_bps": {
+      "p1": -3.5608,
+      "p10": 1.4381,
+      "p50": 3.4667,
+      "p90": 6.5596,
+      "p99": 7.5927,
+      "n": 290,
+      "min": -160.701,
+      "max": 8.6217
+     },
+     "hedge_cost_vs_decision_touch_bps": {
+      "p1": -4.1152,
+      "p10": -3.0852,
+      "p50": -0.0,
+      "p90": 1.0267,
+      "p99": 2.0786,
+      "n": 304,
+      "min": -5.144,
+      "max": 8.3516
+     }
+    },
+    "completion": {
+     "fully_hedged_share": 0.9477,
+     "unhedged_interval_s": {
+      "p1": 0.035,
+      "p10": 0.035,
+      "p50": 0.0395,
+      "p90": 0.0504,
+      "p99": 0.064,
+      "n": 290,
+      "min": 0.035,
+      "max": 0.3633
+     },
+     "repeated_hedges": 1,
+     "hedge_children_max": 2
+    },
+    "burst_fills": {
+     "window_s": 0.05,
+     "fills_within_window_of_previous": 279,
+     "longest_burst": 40
+    },
+    "residual": {
+     "peak_net_base": 139.5,
+     "end_positions": {
+      "BINANCE": -1020.4,
+      "BYBIT": 1020.4
+     },
+     "dust_end_base": "0E-12"
+    },
+    "margin": {
+     "peak_notional_usdt": {
+      "BINANCE": 99346.14,
+      "BYBIT": 99295.12
+     },
+     "peak_initial_margin_usdt_at_assumed_tiers": {
+      "BINANCE": 4967.31,
+      "BYBIT": 4964.76
+     },
+     "tiers": [
+      [
+       50000.0,
+       0.02
+      ],
+      [
+       500000.0,
+       0.05
+      ]
+     ],
+     "tiers_label": "ASSUMED (v1_17)"
+    },
+    "throughput": {
+     "maker_orders": 143,
+     "max_maker_orders_ending_in_1s": 5,
+     "order_rate": {
+      "BYBIT": {
+       "per_s": 2.0,
+       "burst": 5,
+       "taken": 143,
+       "skipped": 12,
+       "tokens_now": 4.0
+      }
+     }
+    },
+    "exits": {
+     "closing_signals": 72,
+     "close_reservation": {
+      "reserved": 72,
+      "capped": 0,
+      "nothing_closable": 0,
+      "released": 72,
+      "reduce_only_by_position": 83,
+      "not_reduce_only_by_position": 0,
+      "open_reservations": {},
+      "beyond_flat": 0
+     },
+     "close_unfilled_events": 0
+    },
+    "stops": {
+     "signals_blocked_by_breaker": 0,
+     "signals_blocked_by_margin_price": 53,
+     "session_limits_blocks": {},
+     "dust_bound": {
+      "max_notional_usdt": 50.0,
+      "max_age_s": 300.0,
+      "label": "ASSUMED",
+      "episodes": 0,
+      "active_at_end": false,
+      "signals_blocked": 0,
+      "quotes_withdrawn": 0,
+      "remedy_hedges_sent": 0,
+      "unsent_reports": 0,
+      "max_long_usdt": "1.6881030730547100",
+      "max_short_usdt": "3.0866309243932050",
+      "end_long_usdt": "0",
+      "end_short_usdt": "0",
+      "counted_in": "strategy net and gross exposure (risk, from fills), margin (from fills), A2 daily-loss equity (ledger positions), residual totals (carried_dust_base): the carried dust is an unhedged maker fill; the breaker's net-exposure timer is exempt",
+      "rule": "aggregate",
+      "age_rule": "alarm only (DUST_AGE_REACHED), no stop",
+      "age_alarms": 0,
+      "loop_passes_while_active": 0,
+      "opportunities_blocked": 0,
+      "dust_reducing_allowed": 0,
+      "resting_reducing_kept": 0,
+      "state_changes": 0,
+      "max_aggregate_usdt": "3.0866309243932050",
+      "open_items_at_end": [],
+      "open_items_age_at": "the session end (last event)"
+     }
+    },
+    "risk_events": {
+     "KILL_SWITCH_ACTIVATED": 0,
+     "RESIDUAL_BREACH": 0,
+     "HEDGE_UNWIND_SENT": 0,
+     "UNWIND_SUBMIT": 0,
+     "DUST_BOUND_REACHED": 0,
+     "LIMIT_STATE": 2,
+     "LEGGING_LIMIT_BOUND": 27,
+     "PARTICIPATION_LIMIT_BOUND": 0
+    }
+   }
+  }
+ },
+ "hedge_depth_by_rung": {
+  "i_01k": {
+   "fully_hedged_share": 0.9167,
+   "unhedged_interval_s": {
+    "p1": 0.035,
+    "p10": 0.035,
+    "p50": 0.0386,
+    "p90": 0.0477,
+    "p99": 0.0494,
+    "n": 22,
+    "min": 0.035,
+    "max": 0.0526
+   },
+   "repeated_hedges": 0,
+   "hedge_children_max": 1,
+   "hedge_cost_bps": {
+    "p1": -2.058,
+    "p10": -2.058,
+    "p50": 0.0,
+    "p90": 2.0786,
+    "p99": 2.0786,
+    "n": 23,
+    "min": -2.058,
+    "max": 4.1571
+   }
+  },
+  "i_05k": {
+   "fully_hedged_share": 0.9375,
+   "unhedged_interval_s": {
+    "p1": 0.035,
+    "p10": 0.035,
+    "p50": 0.0398,
+    "p90": 0.0494,
+    "p99": 0.0646,
+    "n": 75,
+    "min": 0.035,
+    "max": 0.3522
+   },
+   "repeated_hedges": 1,
+   "hedge_children_max": 2,
+   "hedge_cost_bps": {
+    "p1": -5.144,
+    "p10": -4.1152,
+    "p50": -0.0,
+    "p90": 0.0,
+    "p99": 4.1571,
+    "n": 79,
+    "min": -5.144,
+    "max": 8.3516
+   }
+  },
+  "i_10k": {
+   "fully_hedged_share": 0.9459,
+   "unhedged_interval_s": {
+    "p1": 0.035,
+    "p10": 0.035,
+    "p50": 0.0393,
+    "p90": 0.0494,
+    "p99": 0.0646,
+    "n": 105,
+    "min": 0.035,
+    "max": 0.3508
+   },
+   "repeated_hedges": 1,
+   "hedge_children_max": 2,
+   "hedge_cost_bps": {
+    "p1": -4.1152,
+    "p10": -4.1123,
+    "p50": -0.0,
+    "p90": 7.2254,
+    "p99": 7.2254,
+    "n": 110,
+    "min": -5.144,
+    "max": 8.3516
+   }
+  },
+  "i_20k": {
+   "fully_hedged_share": 0.9489,
+   "unhedged_interval_s": {
+    "p1": 0.035,
+    "p10": 0.035,
+    "p50": 0.0398,
+    "p90": 0.0504,
+    "p99": 0.0646,
+    "n": 167,
+    "min": 0.035,
+    "max": 0.3633
+   },
+   "repeated_hedges": 1,
+   "hedge_children_max": 2,
+   "hedge_cost_bps": {
+    "p1": -4.1152,
+    "p10": -4.1093,
+    "p50": -2.0553,
+    "p90": 1.0267,
+    "p99": 2.0786,
+    "n": 174,
+    "min": -5.144,
+    "max": 8.3516
+   }
+  },
+  "i_30k": {
+   "fully_hedged_share": 0.9456,
+   "unhedged_interval_s": {
+    "p1": 0.035,
+    "p10": 0.035,
+    "p50": 0.0394,
+    "p90": 0.0511,
+    "p99": 0.064,
+    "n": 226,
+    "min": 0.035,
+    "max": 0.3633
+   },
+   "repeated_hedges": 1,
+   "hedge_children_max": 2,
+   "hedge_cost_bps": {
+    "p1": -4.1152,
+    "p10": -3.5064,
+    "p50": -1.0125,
+    "p90": 1.0267,
+    "p99": 2.0786,
+    "n": 237,
+    "min": -5.144,
+    "max": 8.3516
+   }
+  },
+  "i_50k": {
+   "fully_hedged_share": 0.9477,
+   "unhedged_interval_s": {
+    "p1": 0.035,
+    "p10": 0.035,
+    "p50": 0.0395,
+    "p90": 0.0504,
+    "p99": 0.064,
+    "n": 290,
+    "min": 0.035,
+    "max": 0.3633
+   },
+   "repeated_hedges": 1,
+   "hedge_children_max": 2,
+   "hedge_cost_bps": {
+    "p1": -4.1152,
+    "p10": -3.0852,
+    "p50": -0.0,
+    "p90": 1.0267,
+    "p99": 2.0786,
+    "n": 304,
+    "min": -5.144,
+    "max": 8.3516
+   }
+  }
+ },
+ "exit_by_rung": {
+  "i_01k": {
+   "closing_signals": 19,
+   "close_reservation": {
+    "reserved": 19,
+    "capped": 0,
+    "nothing_closable": 0,
+    "released": 19,
+    "reduce_only_by_position": 27,
+    "not_reduce_only_by_position": 0,
+    "open_reservations": {},
+    "beyond_flat": 0
+   },
+   "close_unfilled_events": 0
+  },
+  "i_05k": {
+   "closing_signals": 45,
+   "close_reservation": {
+    "reserved": 45,
+    "capped": 0,
+    "nothing_closable": 0,
+    "released": 45,
+    "reduce_only_by_position": 58,
+    "not_reduce_only_by_position": 0,
+    "open_reservations": {},
+    "beyond_flat": 0
+   },
+   "close_unfilled_events": 0
+  },
+  "i_10k": {
+   "closing_signals": 73,
+   "close_reservation": {
+    "reserved": 73,
+    "capped": 0,
+    "nothing_closable": 0,
+    "released": 73,
+    "reduce_only_by_position": 84,
+    "not_reduce_only_by_position": 0,
+    "open_reservations": {},
+    "beyond_flat": 0
+   },
+   "close_unfilled_events": 0
+  },
+  "i_20k": {
+   "closing_signals": 71,
+   "close_reservation": {
+    "reserved": 71,
+    "capped": 0,
+    "nothing_closable": 0,
+    "released": 71,
+    "reduce_only_by_position": 82,
+    "not_reduce_only_by_position": 0,
+    "open_reservations": {},
+    "beyond_flat": 0
+   },
+   "close_unfilled_events": 0
+  },
+  "i_30k": {
+   "closing_signals": 72,
+   "close_reservation": {
+    "reserved": 72,
+    "capped": 0,
+    "nothing_closable": 0,
+    "released": 72,
+    "reduce_only_by_position": 83,
+    "not_reduce_only_by_position": 0,
+    "open_reservations": {},
+    "beyond_flat": 0
+   },
+   "close_unfilled_events": 0
+  },
+  "i_50k": {
+   "closing_signals": 72,
+   "close_reservation": {
+    "reserved": 72,
+    "capped": 0,
+    "nothing_closable": 0,
+    "released": 72,
+    "reduce_only_by_position": 83,
+    "not_reduce_only_by_position": 0,
+    "open_reservations": {},
+    "beyond_flat": 0
+   },
+   "close_unfilled_events": 0
+  }
+ }
+}
