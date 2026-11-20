@@ -42,6 +42,8 @@ _EPS = 1e-12
 
 def trade_is_rpi(trade) -> bool:
     """True when a canonical trade print is flagged as a Retail Price Improvement print: `native["rpi"]` (True, or the text "true" / "1" of a CSV column). A print with no flag is not RPI, so every existing feed is unaffected."""
+    if "RPI" in (getattr(trade, "quality_flags", None) or ()):
+        return True                                      # item 4 (owner 20 Nov), upstreamed from the MM session (5201b34): a print whose quality flags carry "RPI" (the MM spot feed's marking) is RPI too
     flag = (getattr(trade, "native", None) or {}).get("rpi", False)
     return flag is True or str(flag).strip().lower() in ("true", "1")
 
