@@ -19,7 +19,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 from crypto_stat_arb.execution import (DispatchPolicy, ExecutionEventType, OrderTimeoutPolicy, StrategyDirectedRouter, VenueOrderStatus)
 from crypto_stat_arb.hedge_lifecycle import HedgePolicy, HedgeState as H
 from crypto_stat_arb.ledger import Ledger
-from crypto_stat_arb.models import OrderState
+from crypto_stat_arb.models import OrderState, Side
 from crypto_stat_arb.oms import OMS
 
 from test_fill_triggered import INSTR, MS, S, Venue, book_at, cb, maker_update
@@ -1300,6 +1300,75 @@ class DustBound(HedgeDustCarry):
         net_for_breaker = sum(self.ledger.positions.values(), Decimal(0)) - self.oms.dust_balance_total()
         self.assertEqual(net_for_breaker, Decimal("0"))                            # session._net_abs: the breaker's net-exposure timer is exempt (kept)
         self.assertIn("breaker", self.oms.dust_bound_report(6 * S)["counted_in"])
+
+
+class DustBoundAggregate(HedgeDustCarry):
+    """Phase 2 F06 change (owner 20 Nov), hedge_faults.dust_bound_rule "aggregate" (v1_17): (1) the age bound is an alarm only: one DUST_AGE_REACHED, the balance in the end-of-day report and the
+    operator summary, nothing else; (2) only the aggregate notional bound stops new risk, and a quote whose hedge REDUCES the carried dust still goes out (a resting one is kept); it clears by itself, one
+    event per state change; (3) every balance left at the end is an open item (venue, symbol, signed base, USDT, age), no automatic order. The default "latch" is the Phase 1 rule (DustBound above)."""
+
+    def agg_policy(self, **kw):
+        return self.dust_policy(**{"dust_max_notional_usdt": 50.0, "dust_max_age_s": 300.0, "dust_bound_rule": "aggregate", **kw})
+
+    def test_the_rule_key_is_parsed_and_needs_the_dust_carry(self):
+        from crypto_stat_arb.config import hedge_dust_fields
+        self.assertEqual(hedge_dust_fields({"hedge_faults": {"dust_carry": "next_hedge", "dust_bound_rule": "aggregate"}})["dust_bound_rule"], "aggregate")
+        with self.assertRaises(ValueError):
+            hedge_dust_fields({"hedge_faults": {"dust_carry": "next_hedge", "dust_bound_rule": "sometimes"}})
+        with self.assertRaises(ValueError):
+            hedge_dust_fields({"hedge_faults": {"dust_bound_rule": "aggregate"}})
+        self.assertEqual(HedgePolicy().dust_bound_rule, "latch")                    # the default: the Phase 1 rule, v1_16 unchanged
+
+    def test_an_aged_1_usdt_balance_does_not_block_one_age_alarm_and_an_open_item_at_the_end(self):
+        self.build(qty="1.0", policy=self.agg_policy(), hedge=[("fill", None)])
+        self.maker_fill("0.01", 5 * S)                                            # 0.01 x 100 = 1 USDT: below the Binance minimum, carried
+        self.oms.advance_time(200 * S, self.books)
+        self.oms.advance_time(306 * S, self.books)
+        self.oms.advance_time(900 * S, self.books)
+        (age,) = self.events_of("DUST_AGE_REACHED")                               # once, not once per timer
+        self.assertEqual((age["venue"], age["balance"], age["alarm"], age["label"]), ("BINANCE", "0.01", True, "ASSUMED"))
+        self.assertEqual(Decimal(age["usdt"]), Decimal("1.00"))
+        self.assertIsNone(self.oms.dust_bound)                                    # no stop
+        self.assertEqual(self.events_of("DUST_BOUND_REACHED", "DUST_BOUND_UNSENT"), [])
+        self.assertEqual(self.bybit.cancels, 0)                                   # the resting quote is not withdrawn
+        rep = self.oms.dust_report(900 * S)["bound"]
+        self.assertEqual((rep["rule"], rep["age_alarms"], rep["episodes"], rep["active_at_end"]), ("aggregate", 1, 0, False))
+        (item,) = rep["open_items_at_end"]
+        self.assertEqual((item["venue"], item["instrument_id"], item["signed_base"]), ("BINANCE", INSTR, "0.01"))
+        self.assertAlmostEqual(item["age_s"], 895.0, places=3)
+        self.assertEqual(Decimal(item["usdt"]), Decimal("1.00"))
+        self.assertIn("no automatic order", item["action"])
+        self.assertEqual(self.binance.submits, [])                                # no automatic order
+
+    def test_above_the_bound_only_dust_reducing_quotes_pass_the_resting_reducing_quote_is_kept_and_it_clears_by_itself(self):
+        self.build(qty="1.0", policy=self.agg_policy(dust_max_notional_usdt=4.0), hedge=[("fill", None)])   # test cap (one instrument holds less than one minimum order)
+        self.maker_fill("0.04", 5 * S)                                            # long 0.04 x 100 = 4 USDT: at the bound
+        self.oms.advance_time(6 * S, self.books)
+        (ev,) = self.events_of("DUST_BOUND_REACHED")
+        self.assertEqual((ev["reasons"], ev["rule"]), ("notional_long", "aggregate"))
+        self.assertTrue(self.oms.dust_reduces(INSTR, Side.SELL))                  # long dust owes a SELL hedge: a maker BUY quote (hedged by a SELL) passes
+        self.assertFalse(self.oms.dust_reduces(INSTR, Side.BUY))                  # a maker SELL quote is blocked
+        self.assertFalse(self.oms.dust_reduces("OTHER-PERP", Side.SELL))          # only the quote's own instrument counts
+        self.assertEqual(self.bybit.cancels, 0)                                   # the resting maker BUY reduces the dust: kept
+        self.assertEqual(self.oms.dust_agg_stats["resting_reducing_kept"], 1)
+        plan2, maker2 = self.second_plan("1.0")                                   # a dust-reducing quote's fill takes the dust in
+        self.fill_plan(plan2, maker2, "0.10", 10 * S, 1)
+        self.assertEqual(self.oms.dust_balance_total(), Decimal("0"))
+        self.oms.advance_time(11 * S, self.books)
+        self.oms.advance_time(12 * S, self.books)
+        self.assertIsNone(self.oms.dust_bound)
+        self.assertEqual(len(self.events_of("DUST_BOUND_REACHED")), 1)
+        self.assertEqual(len(self.events_of("DUST_BOUND_CLEARED")), 1)          # one event per state change
+        self.assertEqual(self.oms.dust_agg_stats["state_changes"], 2)
+        self.assertEqual(self.oms.dust_report(12 * S)["bound"]["open_items_at_end"], [])
+
+    def test_a_resting_quote_that_would_add_to_the_dust_is_withdrawn(self):
+        self.build(qty="1.0", policy=self.agg_policy(dust_max_notional_usdt=4.0), hedge=[("fill", None)])
+        self.oms._dust[("BINANCE", INSTR)] = {"exposure": Decimal("-0.04"), "since_ns": 1 * S, "alarmed": False, "host": None}   # SHORT dust: owes a BUY hedge; the resting maker BUY is hedged by a SELL
+        self.oms.advance_time(2 * S, self.books)
+        (ev,) = self.events_of("DUST_BOUND_REACHED")
+        self.assertEqual(ev["reasons"], "notional_short")
+        self.assertEqual(self.bybit.cancels, 1)
 
 
 class _CancelInFlightBybit(Venue):

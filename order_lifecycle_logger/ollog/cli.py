@@ -69,6 +69,11 @@ def _parser() -> argparse.ArgumentParser:
     cb = sub.add_parser("calibrate", help="convert a fillprobe run (real orders + capture) into the backtester's fill_events.jsonl")
     from . import calibrate as _cb
     _cb.add_arguments(cb)
+    from . import hostmeasure as _hm
+    hm = sub.add_parser("hostmeasure", help="production-host measurement (PUBLIC mainnet data, no keys, no orders): chrony, REST and websocket latency, lead-lag, book publication interval")
+    _hm.add_arguments(hm)
+    hd = sub.add_parser("hostmeasure-derive", help="figures of a hostmeasure run -> <run>/hostmeasure_summary.json")
+    _hm.add_derive_arguments(hd)
     z = sub.add_parser("summarize", help="rebuild summary.json for a finished run directory")
     z.add_argument("dir")
     return p
@@ -203,6 +208,14 @@ def main(argv=None) -> int:
     if args.cmd == "fillprobe":
         from .fillprobe import run_fillprobe
         return asyncio.run(run_fillprobe(args))
+    if args.cmd == "hostmeasure":
+        from .hostmeasure import run_hostmeasure
+        return asyncio.run(run_hostmeasure(args))
+    if args.cmd == "hostmeasure-derive":
+        from .hostmeasure import derive
+        s = derive(Path(args.dir), args.src, args.min_move_bps, args.window_ms)
+        print(json.dumps(s, indent=1)[:6000])
+        return 0
     if args.cmd == "replay":
         from .replay import main as replay_main
         return replay_main(args)

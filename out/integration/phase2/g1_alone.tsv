@@ -1,0 +1,12 @@
+tests/platform_kit/test_minreq_execution.py::test_performance_limits_are_enforced_on_the_target_platform_only[Darwin-True]	1	PASS	1 passed in 13.96s
+tests/platform_kit/test_minreq_execution.py::test_performance_limits_are_enforced_on_the_target_platform_only[Darwin-True]	2	PASS	1 passed in 13.76s
+tests/platform_kit/test_minreq_execution.py::test_performance_limits_are_enforced_on_the_target_platform_only[Darwin-True]	3	PASS	1 passed in 13.88s
+tests/platform_kit/test_minreq_execution.py::test_performance_limits_are_enforced_on_the_target_platform_only[Linux-False]	1	PASS	1 passed in 13.86s
+tests/platform_kit/test_minreq_execution.py::test_performance_limits_are_enforced_on_the_target_platform_only[Linux-False]	2	PASS	1 passed in 14.04s
+tests/platform_kit/test_minreq_execution.py::test_performance_limits_are_enforced_on_the_target_platform_only[Linux-False]	3	PASS	1 passed in 14.09s
+tests/platform_kit/test_minreq_execution.py::test_performance_limits_are_enforced_on_the_target_platform_only[Windows-True]	1	PASS	1 passed in 13.87s
+tests/platform_kit/test_minreq_execution.py::test_performance_limits_are_enforced_on_the_target_platform_only[Windows-True]	2	PASS	1 passed in 14.17s
+tests/platform_kit/test_minreq_execution.py::test_performance_limits_are_enforced_on_the_target_platform_only[Windows-True]	3	PASS	1 passed in 14.24s
+tests/test_live_feed_a9.py::ArrivalStamp::test_a_processor_that_keeps_up_changes_nothing	1	PASS	1 passed in 3.19s
+tests/test_live_feed_a9.py::ArrivalStamp::test_a_processor_that_keeps_up_changes_nothing	2	PASS	1 passed in 3.15s
+tests/test_live_feed_a9.py::ArrivalStamp::test_a_processor_that_keeps_up_changes_nothing	3	PASS	1 passed in 3.13s

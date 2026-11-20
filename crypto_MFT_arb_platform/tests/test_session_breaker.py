@@ -615,6 +615,49 @@ class F06DustBoundStopsNewQuotes(unittest.TestCase):
         self.assertIsNone(s._quote_new_risk_block(3 * S))
 
 
+class F06AggregateDustLetsOnlyReducingQuotesThrough(unittest.TestCase):
+    """Phase 2 F06 change (owner 20 Nov, dust_bound_rule "aggregate"): the strategy IS asked while the bound is active; its opportunity goes out only when its maker fill's hedge reduces the carried dust."""
+
+    class Opp:
+        strategy_id = "fake"
+
+        def __init__(self, buy, sell):
+            self.calls, self.buy, self.sell = 0, buy, sell
+
+        def evaluate(self, books, now):
+            from dataclasses import replace as _r
+            self.calls += 1
+            from crypto_stat_arb.models import Opportunity
+            return Opportunity(opportunity_id=f"o{self.calls}", strategy_id="fake", instrument_id=INSTR, observed_ts_ns=now, buy_venue=self.buy, sell_venue=self.sell, buy_price=Decimal("100"),
+                               sell_price=Decimal("101"), quantity=Decimal("1"), gross_edge_bps=Decimal("1"), estimated_net_edge_bps=Decimal("1"), source_event_ids=("x",))
+
+    def run_one(self, buy, sell, dust):
+        strat = self.Opp(buy, sell)
+        s = session(strategies=[strat], maker_venues=(A,))
+        with_books(s)
+        s.oms.dust_bound_on = s.oms.dust_aggregate = True
+        s.oms._dust[(B, INSTR)] = {"exposure": Decimal(dust), "since_ns": 1 * S, "alarmed": False, "host": None}
+        s.oms.dust_bound = {"since_ns": 1 * S, "reasons": ["notional_long" if Decimal(dust) > 0 else "notional_short"]}
+        dispatched = []
+        s._dispatch = lambda strategy, opp, now, decided, event=None: dispatched.append(opp)
+        s.on_event(snapshot(A, 2 * S), gate_allowed=True)
+        return strat, s, dispatched
+
+    def test_long_dust_a_maker_buy_goes_out_a_maker_sell_is_blocked(self):
+        strat, s, sent = self.run_one(A, B, "0.04")                           # maker BUYS on A: hedged by a SELL on B: reduces long dust
+        self.assertEqual((strat.calls, len(sent)), (1, 1))
+        self.assertEqual(s.oms.dust_agg_stats["dust_reducing_allowed"], 1)
+        strat, s, sent = self.run_one(B, A, "0.04")                           # maker SELLS on A: hedged by a BUY: adds to it
+        self.assertEqual((strat.calls, len(sent)), (1, 0))
+        self.assertEqual((s.oms.dust_agg_stats["opportunities_blocked"], s.oms.dust_agg_stats["loop_passes_while_active"], s.oms.dust_bound_stats["signals_blocked"]), (1, 1, 0))
+
+    def test_short_dust_the_other_way_round(self):
+        _, _, sent = self.run_one(B, A, "-0.04")
+        self.assertEqual(len(sent), 1)
+        _, _, sent = self.run_one(A, B, "-0.04")
+        self.assertEqual(len(sent), 0)
+
+
 class A2DailyLossStop(unittest.TestCase):
     def loss_session(self, limit="-5.0", clip=1.0):
         s = session(session_limits=limits(clip_base=clip, daily_loss_stop={"usdt_per_sol_of_clip": float(limit) / clip, "limit_usdt": float(limit)}))
@@ -717,6 +760,76 @@ class A3ClockGate(unittest.TestCase):
         self.assertEqual(s.signals_blocked_by_limits, 1)
 
 
+class F03ClockOffsetLimit(unittest.TestCase):
+    """Phase 2 F03 (owner 20 Nov): the gate checks the offset and the uncertainty SEPARATELY (max_offset_ms, ASSUMED, the owner sets it; the 5 ms uncertainty and the 900 s age stay). States: ok, unknown,
+    uncertain, and "offset" (|offset| above its limit). The offset is checked first (the chrony uncertainty contains |offset|). Both numbers are recorded with every evaluation (counters per state, the newest
+    in `last`, and on every state change). With the host-offset correction on, the limit applies to the residual after it, and the report says so."""
+
+    def gated(self, max_offset_ms=5.0, correct=False):
+        from dataclasses import replace
+        cfg = replace(CFG, time_policy=replace(CFG.time_policy, correct_host_offset=correct))
+        lim = limits(clock_offset={"max_uncertainty_ms": 5.0, "max_age_s": 900.0, "max_offset_ms": max_offset_ms})
+        return TradingSession(cfg, execution_mode=ExecutionMode.INTERNAL_PAPER, live_data=True, session_limits=lim)
+
+    def m(self, off_ms, unc_ms, ts):
+        from crypto_stat_arb.time_integrity import ClockMeasurement
+        return ClockMeasurement(offset_ns=int(off_ms * 1e6), uncertainty_ns=int(unc_ms * 1e6), measured_ts_ns=ts, source="t")
+
+    def test_a_tight_measurement_with_a_large_offset_is_blocked_as_offset(self):
+        s = self.gated()
+        s.clock_gate.update(self.m(20.0, 1.0, S))
+        self.assertEqual(s._new_quote_stop(2 * S), "clock_offset")
+        (ev,) = [e for e in events(s, "LIMIT_STATE") if e["limit"] == "clock_offset"]
+        self.assertEqual((ev["state"], ev["offset_ms"], ev["uncertainty_ms"]), ("ACTIVE", 20.0, 1.0))      # both numbers on the state change
+        self.assertIn("offset 20.00 ms", ev["detail"])
+
+    def test_a_small_offset_with_a_wide_uncertainty_is_blocked_as_uncertain(self):
+        s = self.gated()
+        s.clock_gate.update(self.m(1.0, 20.0, S))
+        self.assertEqual(s._new_quote_stop(2 * S), "clock_uncertain")
+
+    def test_offset_wins_when_both_are_above_and_every_evaluation_is_counted_with_both_numbers(self):
+        s = self.gated()
+        s.clock_gate.update(self.m(-30.0, 40.0, S))
+        self.assertEqual(s._new_quote_stop(2 * S), "clock_offset")
+        s.clock_gate.update(self.m(1.0, 2.0, 3 * S))
+        self.assertIsNone(s._new_quote_stop(4 * S))
+        self.assertIsNone(s._new_quote_stop(5 * S))
+        ev = s.clock_gate.report()["evaluations"]
+        self.assertEqual((ev["offset"]["n"], ev["offset"]["max_abs_offset_ms"], ev["offset"]["max_uncertainty_ms"], ev["ok"]["n"]), (1, 30.0, 40.0, 2))
+        self.assertEqual(s.clock_gate.report()["last"], {"state": "ok", "offset_ms": 1.0, "uncertainty_ms": 2.0})
+        self.assertEqual(s.limits_report()["clock_gate"]["offset_limit"]["max_offset_label"], "ASSUMED (owner to set)")
+
+    def test_with_the_host_offset_correction_the_limit_applies_to_the_residual_and_the_report_says_so(self):
+        s = self.gated(correct=True)
+        s.time_monitor.clock_offset_estimate_ns = -18_000_000                       # the correction in force: -18 ms
+        s.clock_gate.update(self.m(-20.0, 1.0, S))                                  # measured -20 ms: residual -2 ms
+        self.assertIsNone(s._new_quote_stop(2 * S))
+        self.assertEqual(s.clock_gate.last["offset_ms"], -2.0)
+        self.assertIn("residual after the host-offset correction", s.clock_gate.report()["offset_checked"])
+        s.time_monitor.clock_offset_estimate_ns = None                              # no estimate yet: nothing is subtracted
+        self.assertEqual(s._new_quote_stop(3 * S), "clock_offset")
+        self.assertNotIn("residual", self.gated().clock_gate.report()["offset_checked"])
+
+    def test_without_the_offset_limit_the_a3_gate_is_unchanged(self):
+        lim = limits(clock_offset={"max_uncertainty_ms": 5.0, "max_age_s": 900.0})
+        s = TradingSession(CFG, execution_mode=ExecutionMode.INTERNAL_PAPER, live_data=True, session_limits=lim)
+        s.clock_gate.update(self.m(500.0, 1.0, S))
+        self.assertIsNone(s._new_quote_stop(2 * S))                                 # A3 alone does not look at the offset
+        self.assertEqual(s.clock_gate.evaluations, {})
+        self.assertNotIn("offset_limit", s.limits_report()["clock_gate"])
+
+    def test_an_invalidated_source_is_unknown_at_once_and_a_session_clock_gap_counts_as_offset(self):
+        s = self.gated()
+        s.clock_gate.update(self.m(1.0, 1.0, S))
+        s.clock_gate.invalidate("chrony: not synchronised")
+        state, detail = s.clock_gate.evaluate(2 * S)
+        self.assertEqual((state, detail), ("unknown", "chrony: not synchronised"))
+        s.clock_gate.update(self.m(1.0, 1.0, 3 * S))
+        s.clock_gate.session_gap_of = lambda: 10_000_000                            # the wall clock stepped back 10 ms under the monotonic session clock
+        self.assertEqual(s.clock_gate.evaluate(4 * S)[0], "offset")
+
+
 class A4MarginWarningStop(unittest.TestCase):
     def warn_session(self, capital):
         from dataclasses import replace
@@ -758,6 +871,39 @@ class A4MarginWarningStop(unittest.TestCase):
         s2 = self.warn_session(1000)
         s2._margin_warning_step(self.report("HEALTHY", available=str(need)), {(A, INSTR): Decimal("100")}, 10 * S)
         self.assertIsNone(s2._new_quote_stop(10 * S))                                                # exactly 10x is enough
+
+
+class F02StressedHeadroom(A4MarginWarningStop):
+    """Phase 2 F02 c (owner 20 Nov): margin_warning.stressed_move_bps: no new entry unless EACH venue funds, without a transfer, the initial margin of the hard cap plus every resting maker quote filling,
+    and its exit at the stressed move (ASSUMED). The need per venue is reported. Off (absent key): A4 as before."""
+
+    def stressed(self, move=190.0):
+        return session(session_limits=limits(margin_warning={"free_margin_multiple": 1.0, "resume_hysteresis_s": 5.0, "stressed_move_bps": move}))
+
+    def test_below_the_stressed_need_stops_new_entries_and_at_it_they_go_on(self):
+        s = self.stressed()
+        with_books(s)
+        cap = Decimal(str(s._gate_limits().venue_cap))
+        sched = s.margin_config.venues[A].tiers[INSTR]
+        notional = cap * Decimal("100")
+        need = sched.initial(notional) + notional * Decimal("190") / Decimal("10000")
+        s._margin_warning_step(self.report("HEALTHY", available=str(need - Decimal("0.01"))), {(A, INSTR): Decimal("100")}, 10 * S)
+        self.assertEqual(s._new_quote_stop(10 * S), "margin_warning")
+        self.assertIn("stressed_headroom", s.limit_events[0]["venues"])
+        self.assertEqual(Decimal(s.limits_report()["stressed_headroom_need_usdt"][A]), need)
+        s2 = self.stressed()
+        with_books(s2)
+        s2._margin_warning_step(self.report("HEALTHY", available=str(need)), {(A, INSTR): Decimal("100")}, 10 * S)
+        self.assertIsNone(s2._new_quote_stop(10 * S))
+
+    def test_the_key_parses_and_is_absent_from_earlier_profiles(self):
+        from crypto_stat_arb.config import session_limits_from_profile
+        out = session_limits_from_profile({"oms": {"session_limits": {"margin_warning": {"free_margin_multiple": 10.0, "stressed_move_bps": 190}}}})
+        self.assertEqual(out["margin_warning"]["stressed_move_bps"], 190.0)
+        self.assertNotIn("stressed_move_bps", session_limits_from_profile({"oms": {"session_limits": {"margin_warning": {"free_margin_multiple": 10.0}}}})["margin_warning"])
+        with self.assertRaises(ValueError):
+            session_limits_from_profile({"oms": {"session_limits": {"margin_warning": {"free_margin_multiple": 10.0, "stressed_move_bps": 0}}}})
+        self.assertNotIn("stressed_headroom_need_usdt", self.warn_session(1000).limits_report())
 
 
 class A5MissingMarks(unittest.TestCase):

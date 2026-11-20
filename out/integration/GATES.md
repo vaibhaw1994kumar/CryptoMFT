@@ -39,6 +39,7 @@ Computed by me on 17 Nov 2026 from the working copy `crypto_MFT_arb_platform/pro
 | v1_14 | PINNED (owner, 18 Nov) | a793b756ef014d45d7ba6b58f61c34aad7c2bbd805b61708932a825e32eb54d0 | W7 7.D (core ce48595, outer 92c35e2): v1_13 + cost_records.estimate_at_decision |
 | v1_15 | PINNED (owner, 18 Nov) | 6b7dd81cbfb028033f1f09f90f35076b4ba4512f90e57ccc970f1e4b28bed314 | go-live stage 1 (core 9de0c40, outer f82f9ca): v1_14 + maker.postonly_amend_cross cancel_order (a post-only amend to a crossing price ends the order, as both testnets showed) |
 | v1_16 | NOT FROZEN (Phase 1, 20 Nov) | 209b3e28bd6dff3a5dba80df29cc91b1eed7f5eb01d3d8179624aa16df7e185f | Phase 1 real-order correctness (core 4eeb9b6, dafb82e, 255816e, b00d80e; outer 379662a, 1f2688e, d1a6a72, 67c9ab5): v1_15 + F06 dust bound and late fills, F05 pair close and reservation written OFF, F07 account_tier_check; observed hash, never pinned until the owner freezes it |
+| v1_17 | NOT FROZEN (Phase 2, 20 Nov) | 08199ed5900ad785ccbeb7a19f391632ed07278adfddf8155da13a0121b8f965 | Phase 2: v1_16 + F06 change (dust_bound_rule aggregate: age alarm only, directional notional stop, end-of-session open items), F03 (clock_offset max_offset_ms 5 ASSUMED, source chrony, monotonic_clock), F02 c (margin_warning.stressed_move_bps 190 ASSUMED). Latency ASSUMED pre-migration. Results: out/integration/phase2/PHASE2_RESULTS.md |
 
 Not in the "v1_3 .. v1_15" group, covered elsewhere: legacy_v0, v1, v1_1, v1_2 and `v1_2.freeze.json` are in the 14 inputs (section 4); the two spot profiles (spot_perp_basis_v1, spot_spot_maker_taker_v1) are in no pin group (A6 listed their prefixes 1de39a19 and 45a4d11b; not pinned here, owner to say if they should be).
 
@@ -112,6 +113,7 @@ profiles | PINNED | 01e56b2c78e734e07376b2f495005c75b9cb19e73f28d2b33e8a08296f09
 profiles | PINNED | a793b756ef014d45d7ba6b58f61c34aad7c2bbd805b61708932a825e32eb54d0 | crypto_MFT_arb_platform/profiles/perp_perp_maker_taker_v1_14.yaml
 profiles | PINNED | 6b7dd81cbfb028033f1f09f90f35076b4ba4512f90e57ccc970f1e4b28bed314 | crypto_MFT_arb_platform/profiles/perp_perp_maker_taker_v1_15.yaml
 profiles | NOT_FROZEN | 209b3e28bd6dff3a5dba80df29cc91b1eed7f5eb01d3d8179624aa16df7e185f | crypto_MFT_arb_platform/profiles/perp_perp_maker_taker_v1_16.yaml
+profiles | NOT_FROZEN | 08199ed5900ad785ccbeb7a19f391632ed07278adfddf8155da13a0121b8f965 | crypto_MFT_arb_platform/profiles/perp_perp_maker_taker_v1_17.yaml
 
 # group 3: freeze files (v1_2 freeze file is in group 1)
 freeze | PINNED | c452f37087a72f1a8e04e9c00a87cdd9f0e3b33473e973a2fc1ff6301e9b4624 | crypto_MFT_arb_platform/profiles/perp_perp_maker_taker_v1_9.freeze.json

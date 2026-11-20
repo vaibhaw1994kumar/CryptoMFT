@@ -329,8 +329,6 @@ class W1PaperSide(unittest.IsolatedAsyncioTestCase):
             paper._timestamps.close()
 
 
-if __name__ == "__main__":
-    unittest.main()
 
 
 class F07AccountRules(unittest.TestCase):
@@ -448,3 +446,154 @@ class F07RecordedFixtures(unittest.TestCase):
             self.assertNotEqual(rules[k], "UNKNOWN", k)
         self.assertTrue(rules["maintenance_ladder"])
 
+
+CHRONY_OK = """Reference ID    : A9FEA97B (169.254.169.123)
+Stratum         : 4
+Ref time (UTC)  : Fri Nov 20 08:00:00 2026
+System time     : 0.000250000 seconds fast of NTP time
+Last offset     : -0.000001234 seconds
+RMS offset      : 0.000004321 seconds
+Frequency       : 12.345 ppm slow
+Residual freq   : +0.001 ppm
+Skew            : 0.012 ppm
+Root delay      : 0.000600000 seconds
+Root dispersion : 0.000300000 seconds
+Update interval : 64.5 seconds
+Leap status     : Normal
+"""                                     # CONSTRUCTED from the documented `chronyc tracking` format: UNVERIFIED until ollog hostmeasure records real output on the production host
+CHRONY_UNSYNC = """Reference ID    : 00000000 ()
+Stratum         : 0
+Ref time (UTC)  : Thu Jan 01 00:00:00 1970
+System time     : 0.000000000 seconds slow of NTP time
+Last offset     : +0.000000000 seconds
+RMS offset      : 0.000000000 seconds
+Frequency       : 0.000 ppm slow
+Residual freq   : +0.000 ppm
+Skew            : 0.000 ppm
+Root delay      : 1.000000000 seconds
+Root dispersion : 1.000000000 seconds
+Update interval : 0.0 seconds
+Leap status     : Not synchronised
+"""
+REF_NS = 1_795_161_600 * 1_000_000_000          # Fri Nov 20 08:00:00 2026 UTC
+
+
+class F03Chrony(unittest.TestCase):
+    """Phase 2 F03 a / c (owner 20 Nov): the chrony clock source. offset = local minus NTP (fast = +); uncertainty = |system offset| + root dispersion + root delay / 2; measured at chrony's Ref time.
+    Unsynchronised, absent or failing: no measurement (the gate goes unknown); no fallback."""
+
+    def test_the_tracking_fields_parse_with_the_sign_from_the_words(self):
+        from crypto_stat_arb.time_integrity import parse_chronyc_tracking
+        f = parse_chronyc_tracking(CHRONY_OK)
+        self.assertEqual((f["reference_id"], f["reference_name"], f["stratum"], f["ref_time_ns"]), ("A9FEA97B", "169.254.169.123", 4, REF_NS))
+        self.assertEqual((f["system_offset_ns"], f["root_delay_ns"], f["root_dispersion_ns"], f["update_interval_s"], f["leap_status"]), (250_000, 600_000, 300_000, 64.5, "Normal"))
+        self.assertEqual(f["frequency_ppm"], -12.345)
+        self.assertEqual(parse_chronyc_tracking(CHRONY_OK.replace("fast of NTP", "slow of NTP"))["system_offset_ns"], -250_000)
+
+    def test_the_measurement_follows_the_owners_uncertainty_rule(self):
+        from crypto_stat_arb.time_integrity import chrony_measurement, parse_chronyc_tracking
+        m = chrony_measurement(parse_chronyc_tracking(CHRONY_OK))
+        self.assertEqual((m.offset_ns, m.uncertainty_ns, m.measured_ts_ns), (250_000, 250_000 + 300_000 + 300_000, REF_NS))
+        self.assertTrue(m.source.startswith("chrony:169.254.169.123"))
+        self.assertEqual(m.fields["stratum"], 4)
+
+    def test_unsynchronised_absent_or_failing_chrony_gives_no_measurement(self):
+        from crypto_stat_arb.time_integrity import read_chrony
+        m, fields, why = read_chrony(runner=lambda: (0, CHRONY_UNSYNC, ""))
+        self.assertIsNone(m)
+        self.assertIn("not synchronised", why)
+        m, _, why = read_chrony(binary="/nonexistent/chronyc")
+        self.assertIsNone(m)
+        self.assertIn("could not be run", why)
+        m, _, why = read_chrony(runner=lambda: (1, "", "506 Cannot talk to daemon"))
+        self.assertIsNone(m)
+        self.assertIn("exited 1", why)
+        m, _, why = read_chrony(runner=lambda: (0, CHRONY_OK.replace("Root dispersion : 0.000300000 seconds\n", ""), ""))
+        self.assertIsNone(m)                                                                         # a needed field missing: nothing is defaulted
+        self.assertIn("root_dispersion_ns", why)
+
+    def test_a_chrony_that_stopped_updating_is_unknown_by_age_and_the_limits_stay(self):
+        from crypto_stat_arb.time_integrity import ClockGate, read_chrony
+        m, _, _ = read_chrony(runner=lambda: (0, CHRONY_OK, ""))
+        gate = ClockGate(5_000_000, 900_000_000_000, max_offset_ns=5_000_000)
+        gate.update(m)
+        self.assertEqual(gate.evaluate(REF_NS + 899 * 10**9)[0], "ok")
+        self.assertEqual(gate.evaluate(REF_NS + 901 * 10**9)[0], "unknown")
+
+    def test_the_profile_keys_parse(self):
+        from crypto_stat_arb.config import session_limits_from_profile
+        out = session_limits_from_profile({"oms": {"session_limits": {"clock_offset": {"max_uncertainty_ms": 5.0, "max_age_s": 900, "max_offset_ms": 5.0, "source": "chrony",
+                                                                                       "monotonic_clock": {"step_threshold_ms": 50}}}}})["clock_offset"]
+        self.assertEqual(out, {"max_uncertainty_ms": 5.0, "max_age_s": 900.0, "max_offset_ms": 5.0, "source": "chrony", "monotonic_clock": {"step_threshold_ms": 50.0}})
+        old = session_limits_from_profile({"oms": {"session_limits": {"clock_offset": {"max_uncertainty_ms": 5.0, "max_age_s": 900}}}})["clock_offset"]
+        self.assertEqual(old, {"max_uncertainty_ms": 5.0, "max_age_s": 900.0})                       # an earlier profile's block is unchanged
+        for bad in ({"max_offset_ms": 0}, {"source": "ntp"}):
+            with self.assertRaises(ValueError):
+                session_limits_from_profile({"oms": {"session_limits": {"clock_offset": {"max_uncertainty_ms": 5.0, **bad}}}})
+
+
+class F03MonotonicSessionClock(unittest.TestCase):
+    """Phase 2 F03 b: intervals and deadlines on the monotonic clock; a wall-clock step is detected and recorded; the session clock never steps."""
+
+    def test_a_wall_step_does_not_move_the_session_clock_and_is_recorded_once(self):
+        from crypto_stat_arb.time_integrity import MonotonicSessionClock
+        t = {"wall": 1_000_000_000_000, "mono": 5_000}
+        c = MonotonicSessionClock(wall=lambda: t["wall"], mono=lambda: t["mono"], step_threshold_ns=50_000_000)
+        t["wall"] += 1_000_000; t["mono"] += 1_000_000
+        self.assertEqual(c(), 1_000_001_000_000)
+        self.assertIsNone(c.check_step())
+        t["wall"] += 1_000_000 - 2_000_000_000                                                        # 1 ms passes and the wall clock is stepped back 2 s
+        t["mono"] += 1_000_000
+        self.assertEqual(c(), 1_000_002_000_000)                                                      # the session clock went on
+        ev = c.check_step()
+        self.assertEqual((ev["step_ns"], ev["gap_after_ns"]), (-2_000_000_000, 2_000_000_000))
+        self.assertIsNone(c.check_step())                                                             # once
+        self.assertEqual(c.gap_ns(), 2_000_000_000)
+        t["wall"] += 10_000_000; t["mono"] += 10_000_000
+        self.assertIsNone(c.check_step())                                                             # ordinary time: no step
+
+    def test_the_paper_session_uses_it_only_when_the_profile_asks_and_no_clock_is_injected(self):
+        lim = {"clock_offset": {"max_uncertainty_ms": 5.0, "max_age_s": 900.0, "max_offset_ms": 5.0, "monotonic_clock": {"step_threshold_ms": 50.0}}}
+        paper = StartUp().make(lim, None)
+        self.assertIsNotNone(paper.session_clock)
+        self.assertIs(paper.clock_ns, paper.session_clock)
+        self.assertIsNotNone(paper.session.clock_gate.session_gap_of)
+        self.assertIsNone(StartUp().make({"clock_offset": {"max_uncertainty_ms": 5.0, "max_age_s": 900.0}}, None).session_clock)
+
+
+class F03PaperChrony(W1PaperSide):
+    """Phase 2 F03 a / c in the paper session: chrony feeds the gate; an unusable chrony invalidates it at once; the venues' server time is a cross-check with one alarm per episode."""
+
+    async def test_chrony_feeds_the_gate_an_unusable_one_invalidates_it_and_the_server_time_cross_checks(self):
+        import json
+        import tempfile
+        from crypto_stat_arb.time_integrity import ClockGate
+        with tempfile.TemporaryDirectory() as d:
+            paper, clock = self.paper(d, clock_source="chrony")
+            rows = []
+            paper._write_row = rows.append
+            gate = paper.session.clock_gate = ClockGate(5_000_000, 900_000_000_000, max_offset_ns=5_000_000)
+            ok = (0, CHRONY_OK.replace("Fri Nov 20 08:00:00 2026", __import__("datetime").datetime.fromtimestamp(clock() // 10**9, __import__("datetime").timezone.utc).strftime("%a %b %d %H:%M:%S %Y")), "")
+            with mock.patch("crypto_stat_arb.paper_live.read_chrony", lambda: __import__("crypto_stat_arb.time_integrity", fromlist=["read_chrony"]).read_chrony(runner=lambda: ok)):
+                await paper._read_chrony(clock())
+            self.assertEqual(rows[-1]["record_type"], "CLOCK_MEASUREMENT")
+            self.assertEqual((rows[-1]["offset_ms"], rows[-1]["uncertainty_ms"], rows[-1]["gate_state"]), (0.25, 0.85, "ok"))
+            self.assertTrue(paper.session.time_monitor.host_clock.source.startswith("chrony:"))
+
+            async def time_getter(url, timeout):                                                     # the venues read 20 ms behind chrony's view: disagreement beyond the probe's uncertainty
+                now_ms = clock() // 1_000_000 + 20
+                return (json.dumps({"serverTime": now_ms}) if "binance" in url else json.dumps({"retCode": 0, "result": {"timeNano": str(now_ms * 1_000_000)}, "time": now_ms})), clock()
+            paper.service.http_getter = time_getter
+            await paper._probe_clock(clock())
+            await paper._probe_clock(clock())
+            alarms = [e for e in paper.session.ledger.events if e["event_type"] == "CLOCK_CROSS_CHECK_DISAGREE"]
+            self.assertEqual(len(alarms), 1)                                                         # once per episode
+            self.assertIs(gate.measurement.source.startswith("chrony:"), True)                       # the server time never replaces chrony
+            with mock.patch("crypto_stat_arb.paper_live.read_chrony", lambda: (None, {}, "chronyc could not be run (FileNotFoundError)")):
+                await paper._read_chrony(clock())
+            self.assertEqual(rows[-1]["record_type"], "CLOCK_SOURCE_UNAVAILABLE")
+            self.assertEqual(gate.evaluate(clock())[0], "unknown")                                  # no fallback: quoting stops
+            paper._timestamps.close()
+
+if __name__ == "__main__":
+    unittest.main()

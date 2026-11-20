@@ -123,3 +123,26 @@ class ContractMasterTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def test_perp_envelope_filters_read_the_venue_maxima_and_the_bybit_tiers(tmp_path):
+    """Phase 2 F02 a (owner 20 Nov): the size-envelope filters from one public dump (constructed here in the documented shapes); a symbol not trading on a venue is None there, nothing defaulted."""
+    import json
+    from crypto_stat_arb.contract_master import perp_envelope_filters
+    (tmp_path / "binance_usd_m_futures.json").write_text(json.dumps({"symbols": [{"symbol": "SOLUSDT", "contractType": "PERPETUAL", "quoteAsset": "USDT", "status": "TRADING", "filters": [
+        {"filterType": "PRICE_FILTER", "tickSize": "0.0100"}, {"filterType": "LOT_SIZE", "stepSize": "0.01", "minQty": "0.01", "maxQty": "1000000"},
+        {"filterType": "MARKET_LOT_SIZE", "stepSize": "0.01", "minQty": "0.01", "maxQty": "80000"}, {"filterType": "MIN_NOTIONAL", "notional": "5"}, {"filterType": "MAX_NUM_ORDERS", "limit": 200}]}]}))
+    (tmp_path / "bybit_linear.json").write_text(json.dumps([{"result": {"list": [
+        {"symbol": "SOLUSDT", "quoteCoin": "USDT", "contractType": "LinearPerpetual", "status": "Trading", "priceFilter": {"tickSize": "0.010"}, "leverageFilter": {"maxLeverage": "100.00"},
+         "lotSizeFilter": {"qtyStep": "0.1", "minOrderQty": "0.1", "maxOrderQty": "96000.0", "postOnlyMaxOrderQty": "96000.0", "maxMktOrderQty": "12000.0", "minNotionalValue": "5"}},
+        {"symbol": "MNTUSDT", "quoteCoin": "USDT", "contractType": "LinearPerpetual", "status": "Trading", "priceFilter": {"tickSize": "0.0001"}, "leverageFilter": {"maxLeverage": "25"},
+         "lotSizeFilter": {"qtyStep": "0.1", "minOrderQty": "0.1", "maxOrderQty": "250000", "postOnlyMaxOrderQty": "250000", "maxMktOrderQty": "50000", "minNotionalValue": "5"}}]}}]))
+    (tmp_path / "bybit_linear_risk_limit.json").write_text(json.dumps([{"result": {"list": [
+        {"id": 282, "symbol": "SOLUSDT", "riskLimitValue": "100000", "maintenanceMargin": "0.0056", "initialMargin": "0.0111", "mmDeduction": "30", "maxLeverage": "90.00"},
+        {"id": 281, "symbol": "SOLUSDT", "riskLimitValue": "50000", "maintenanceMargin": "0.005", "initialMargin": "0.01", "mmDeduction": "", "maxLeverage": "100.00"}]}}]))
+    out = perp_envelope_filters(tmp_path, ["SOLUSDT", "MNTUSDT", "XYZUSDT"])
+    sol = out["SOLUSDT"]
+    assert (sol["BINANCE"]["max_market_qty"], sol["BINANCE"]["max_limit_qty"], sol["BYBIT"]["max_market_qty"], sol["BYBIT"]["max_postonly_qty"]) == ("80000", "1000000", "12000.0", "96000.0")
+    assert [t["id"] for t in sol["bybit_risk_tiers"]] == [281, 282] and sol["bybit_risk_tiers"][0]["mm_deduction"] == "0"
+    assert out["MNTUSDT"]["BINANCE"] is None and out["MNTUSDT"]["BYBIT"]["step"] == "0.1"
+    assert out["XYZUSDT"] == {"BINANCE": None, "BYBIT": None, "bybit_risk_tiers": None}

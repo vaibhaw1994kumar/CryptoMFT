@@ -69,3 +69,26 @@ need `--confirm-mainnet I-ACCEPT-REAL-ORDERS`, `OLLOG_MAINNET=1`, mainnet creden
 BINANCE_FUT_MAINNET_KEY/SECRET; never the testnet names), the perpetual markets only, symbols BTCUSDT/SOLUSDT only, at most 200 orders and
 150 quote per order and per net position (see `ollog/mainnet.py`). Mainnet uses its own host allow-list; the testnet guard is unchanged and
 refuses mainnet hosts. Binance USD-M mainnet serves depth on `/public/` and aggTrade on `/market/`, so the capture opens two connections.
+
+## Production-host measurement: `hostmeasure` (owner 20 Nov 2026, Phase 2 F03 d)
+
+PUBLIC mainnet market data only: no credentials, no orders. It is meant for the owner to run on the production host. It replaces the `singapore` latency preset and the pre-12 Nov measurements, which stay ASSUMED (pre-migration) until a run of this exists.
+
+    python3.12 -m ollog hostmeasure --hours 24 --coins-list SOLUSDT
+    python3.12 -m ollog hostmeasure-derive hostmeasure_runs/hostmeasure_<stamp>
+
+One process records on the same clocks (wall and monotonic, taken back to back):
+
+- `clock.jsonl`: `chronyc tracking` every 60 s. The raw text, exit code and read stamps are kept. A host without a working chronyc records the failure.
+- `rest_latency.jsonl`: one GET of each venue's server-time endpoint every 10 s. This gives the REST round trip and the venue clock against the host.
+- `fillprobe_mainnet_*/`: the public book, trade and top-of-book capture (`fillprobe --network mainnet --capture-only --fast-streams`).
+
+The derive step parses the chrony text with the platform's own parser (`crypto_stat_arb.time_integrity.parse_chronyc_tracking`, `--src` points at it). This checks the parser on real output. It writes `hostmeasure_summary.json` with:
+
+- **chrony:** offset, uncertainty (|offset| + root dispersion + root delay / 2), stratum, last-update age and synchronised share.
+- **REST round trip per venue:** with the venue clock against the host and against NTP.
+- **Websocket latency per venue and stream:** receive minus the venue's event time, raw and corrected by the chrony offset in force.
+- **Book publication interval per venue:** the gaps between the venue's own event times.
+- **Cross-venue lead-lag of the top-of-book mid:** which venue moves first and by how much. It is computed on local receive time, where the host clock offset cancels, and on venue event time.
+
+Tests: `tests/test_hostmeasure.py`, offline. The chrony text in them is constructed from the documented format.

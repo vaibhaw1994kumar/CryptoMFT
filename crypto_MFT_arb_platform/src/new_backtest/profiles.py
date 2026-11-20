@@ -182,6 +182,7 @@ SWITCHES: tuple[Switch, ...] = (
     Switch("hedge_faults.dust_alarm_after_s", "LEGACY_COMPAT", note="ASSUMED 60 s (owner 16 Nov): carried dust older than this raises HEDGE_DUST_ALARM once; read only with dust_carry on"),
     Switch("hedge_faults.dust_max_notional_usdt", "LEGACY_COMPAT", note="F06 (owner 20 Nov) aggregate dust bound, USDT per direction over every venue and instrument (same instrument netted across venues); absent = no bound (every profile before v1_16); v1_16: 50 ASSUMED placeholder; needs dust_carry next_hedge"),
     Switch("hedge_faults.late_fill_after_close", "LEGACY_COMPAT", note="F06 c (owner 20 Nov): refuse (default, every profile before v1_16: a fill reported for an order of a closed plan is refused and raised) | reopen (v1_16: booked, the plan reopens and the ordinary hedge runs)"),
+    Switch("hedge_faults.dust_bound_rule", "LEGACY_COMPAT", note="Phase 2 F06 change (owner 20 Nov): latch (default, v1_16: the age bound stops quoting too) | aggregate (v1_17: the age bound is an alarm only; only the aggregate notional bound stops new risk; a quote whose hedge reduces the carried dust still goes out; carried dust at the end is an operator open item); needs dust_carry next_hedge"),
     Switch("hedge_faults.dust_max_age_s", "LEGACY_COMPAT", note="F06 (owner 20 Nov) carried dust older than this reaches the dust bound too; absent = no age bound; v1_16: 300 ASSUMED placeholder; needs dust_carry next_hedge"),
     Switch("hedge_faults.silent_carry_bound", "LEGACY_COMPAT", note="position_size in every profile up to v1_8 (a residual under the position size is carried with no action); v1_9 (owner 13 Nov) below_one_lot: a failed hedge unwinds whatever its size, only a sub-lot remainder is carried. REQUIRED for any profile used with real orders"),
     Switch("execution.price_cap_required", "CALIBRATED", note="execution layer: every non-unwind intent carries a worst price and every child stays inside it; true in both profiles (today's behaviour), CALIBRATED until the cap decision (brief step 11) is made"),
@@ -302,7 +303,7 @@ def apply_profile(doc: dict, dataset: str | None = None, **overrides):
             raise ProfileError(f"profile {doc.get('name')}: execution.pairing none is a market-making quote (no hedge leg), never an arb profile's pairing: this is an arb profile")
     hf = cfg_kw.pop("hedge_faults", None)
     if isinstance(hf, dict):
-        cfg_kw["hedge_faults"] = HedgeFaultConfig(**{k: v for k, v in hf.items() if k not in ("silent_carry_bound", "dust_carry", "dust_alarm_after_s", "dust_max_notional_usdt", "dust_max_age_s", "late_fill_after_close")})      # the session runtime's residual bound (core config); the backtester's own loop has no such rule
+        cfg_kw["hedge_faults"] = HedgeFaultConfig(**{k: v for k, v in hf.items() if k not in ("silent_carry_bound", "dust_carry", "dust_alarm_after_s", "dust_max_notional_usdt", "dust_max_age_s", "late_fill_after_close", "dust_bound_rule")})      # the session runtime's residual bound (core config); the backtester's own loop has no such rule
     cal = doc.get("calibration")
     if cal:
         path = resolve_calibration(doc, cal)

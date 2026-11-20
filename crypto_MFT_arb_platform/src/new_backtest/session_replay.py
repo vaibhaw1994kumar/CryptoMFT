@@ -1513,3 +1513,91 @@ def feed_health_config_table(profile_names: Iterable[str]) -> dict:
             row = {"runtime": str(profile.get("runtime", "backtester")), "not_resolvable_through_the_core_loader": f"{type(exc).__name__}: {exc}"[:200]}
         out[name] = row
     return out
+
+
+def size_rung_metrics(run_dir, *, tiers=((50_000.0, 0.02), (500_000.0, 0.05)), burst_window_s: float = 0.05) -> dict:
+    """Phase 2 F02 b (owner 20 Nov): the figures of ONE size-ladder rung, read from a replay's output directory (nothing is re-simulated). Cost: pair gross / net bps and the hedge's cost against the
+    hedge-venue touch at the decision (signal estimate), as quantiles. Completion: fully hedged share, unhedged interval, hedge children per fill (a repeat is a second child). Burst: maker fills
+    within `burst_window_s` (about one hedge round trip) of the previous one. Residual: the peak net position over the run (sum over venues, from the fills). Margin: the peak notional per venue and
+    its initial margin at `tiers` ((max_notional, initial_rate), ASSUMED: the v1_17 table). Throughput: maker orders per second (max over 1 s windows, by order end time) and the A1 order-rate
+    tokens taken / skipped. Exits: closing signals, the reservation counts, CLOSE_UNFILLED. Stops: what blocked signals. Directions: maker buys and sells apart."""
+    from bisect import bisect_left as _bl
+    d = Path(run_dir)
+
+    def rows(name):
+        p = d / name
+        return [json.loads(x) for x in p.read_text().splitlines() if x.strip()] if p.exists() else []
+
+    def q(values, qs=(0.01, 0.1, 0.5, 0.9, 0.99)):
+        if not values:
+            return None
+        v = sorted(values)
+        return {**{f"p{round(x * 100)}": round(v[min(len(v) - 1, int((len(v) - 1) * x))], 4) for x in qs}, "n": len(v), "min": round(v[0], 4), "max": round(v[-1], 4)}
+
+    signals = rows("session_signals.jsonl")
+    pairs = rows("session_pair_economics.jsonl")
+    fills = rows("session_fills.jsonl")
+    orders = rows("session_orders.jsonl")
+    stops = json.loads((d / "session_limits_and_stops.json").read_text()) if (d / "session_limits_and_stops.json").exists() else {}
+    hedge_cost, by_dir = [], {"buy": 0, "sell": 0}
+    for p in pairs:
+        by_dir[p.get("maker_side", "?")] = by_dir.get(p.get("maker_side", "?"), 0) + 1
+        try:
+            sig = signals[int(str(p["maker_intent_id"]).split("-")[0][3:]) - 1]
+        except (ValueError, IndexError, KeyError):
+            continue
+        touch = (sig.get("estimate") or {}).get("hedge_touch")
+        if touch and p.get("hedge_avg_price"):
+            sgn = 1 if p["maker_side"] == "buy" else -1                     # maker buy: the hedge SELLS: a price below the touch is a cost
+            hedge_cost.append(sgn * (touch - p["hedge_avg_price"]) / touch * 1e4)
+    makers = sorted(float(p["maker_fill_ts"]) for p in pairs)
+    bursts, run, longest = 0, 1, 1
+    for a, b in zip(makers, makers[1:]):
+        if b - a <= burst_window_s:
+            bursts += 1
+            run += 1
+            longest = max(longest, run)
+        else:
+            run = 1
+    pos: dict = {}
+    peak_net, peak_venue = 0.0, {}
+    last_px = None
+    for f in sorted(fills, key=lambda r: r["ts_ns"]):
+        q_ = float(f["fill_quantity"]) * (1 if f["side"] == "BUY" else -1)
+        pos[f["venue"]] = pos.get(f["venue"], 0.0) + q_
+        last_px = float(f["fill_price"])
+        peak_net = max(peak_net, abs(sum(pos.values())))
+        peak_venue[f["venue"]] = max(peak_venue.get(f["venue"], 0.0), abs(pos[f["venue"]]) * last_px)
+
+    def im(notional):
+        for cap, rate in tiers:
+            if notional <= cap:
+                return notional * rate
+        return None
+    ends = sorted(int(o["terminal_ts_ns"]) for o in orders if o.get("post_only") and o.get("terminal_ts_ns"))
+    max_per_s = 0
+    for i, t in enumerate(ends):
+        max_per_s = max(max_per_s, i - _bl(ends, t - 1_000_000_000) + 1)
+    sq = stops.get("stop_quoting") or {}
+    counts = stops.get("ledger_event_type_counts") or {}
+    closing = [s for s in signals if s.get("close_trigger")]
+    return {
+        "maker_fills": len(pairs), "maker_fills_by_direction": by_dir, "maker_qty": round(sum(float(p["qty"]) for p in pairs), 6),
+        "cost": {"pair_gross_bps": q([p["pair_gross_bps"] for p in pairs if p.get("pair_gross_bps") is not None]),
+                 "pair_net_bps": q([p["pair_net_bps"] for p in pairs if p.get("pair_net_bps") is not None]),
+                 "hedge_cost_vs_decision_touch_bps": q(hedge_cost)},
+        "completion": {"fully_hedged_share": round(sum(1 for p in pairs if p.get("fully_hedged")) / len(pairs), 4) if pairs else None,
+                       "unhedged_interval_s": q([p["unhedged_interval_s"] for p in pairs if p.get("unhedged_interval_s") is not None]),
+                       "repeated_hedges": sum(1 for p in pairs if (p.get("hedge_children") or 0) > 1), "hedge_children_max": max([p.get("hedge_children") or 0 for p in pairs] or [0])},
+        "burst_fills": {"window_s": burst_window_s, "fills_within_window_of_previous": bursts, "longest_burst": longest if makers else 0},
+        "residual": {"peak_net_base": round(peak_net, 6), "end_positions": {v: round(x, 6) for v, x in sorted(pos.items())},
+                     "dust_end_base": ((sq.get("hedge_dust_carry") or {}).get("balance_end"))},
+        "margin": {"peak_notional_usdt": {v: round(x, 2) for v, x in sorted(peak_venue.items())}, "peak_initial_margin_usdt_at_assumed_tiers": {v: (None if im(x) is None else round(im(x), 2)) for v, x in sorted(peak_venue.items())},
+                   "tiers": [list(t) for t in tiers], "tiers_label": "ASSUMED (v1_17)"},
+        "throughput": {"maker_orders": len(ends), "max_maker_orders_ending_in_1s": max_per_s, "order_rate": ((sq.get("session_limits") or {}).get("order_rate"))},
+        "exits": {"closing_signals": len(closing), "close_reservation": sq.get("close_reservation"), "close_unfilled_events": counts.get("CLOSE_UNFILLED", 0)},
+        "stops": {k: sq.get(k) for k in ("signals_blocked_by_breaker", "signals_blocked_by_margin_price") if k in sq} | {"session_limits_blocks": (sq.get("session_limits") or {}).get("stop_quoting_reasons"),
+                  "dust_bound": ((sq.get("hedge_dust_carry") or {}).get("bound"))},
+        "risk_events": {k: counts.get(k, 0) for k in ("KILL_SWITCH_ACTIVATED", "RESIDUAL_BREACH", "HEDGE_UNWIND_SENT", "UNWIND_SUBMIT", "DUST_BOUND_REACHED", "LIMIT_STATE", "LEGGING_LIMIT_BOUND", "PARTICIPATION_LIMIT_BOUND")},
+        "ledger_event_type_counts": counts,
+    }
