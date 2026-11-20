@@ -349,6 +349,7 @@ class ClockMeasurement:
     measured_ts_ns: int                 # local time at which it was taken
     source: str                         # "server_time:<venue>" or "ntp:<server>" or an injected label
     samples: int = 1
+    fields: dict | None = None          # Phase 2 F03 a: the chrony fields it was built from (reference, stratum, root delay / dispersion, ...); None for the server-time probe
 
 
 def best_probe(probes: list[tuple[int, int, int]], *, source: str) -> ClockMeasurement | None:
@@ -363,28 +364,222 @@ def best_probe(probes: list[tuple[int, int, int]], *, source: str) -> ClockMeasu
 @dataclass(slots=True)
 class ClockGate:
     """The A3 decision. `evaluate` returns (state, detail) with state "ok", "unknown" (no measurement, or one older than `max_age_ns`) or "uncertain" (uncertainty above the limit). Replays with no measured clock use
-    `replay=True`: the answer is "not_evaluable", which the session counts and never blocks on. Real-order modes (replay=False) block new quotes on "unknown" and "uncertain"; hedges continue."""
+    `replay=True`: the answer is "not_evaluable", which the session counts and never blocks on. Real-order modes (replay=False) block new quotes on "unknown" and "uncertain"; hedges continue.
+
+    Phase 2 F03 (owner 20 Nov): with `max_offset_ns` set (ASSUMED, the owner sets it) the offset is checked SEPARATELY and FIRST: |offset| above it is the state "offset" (it wins over "uncertain": the
+    chrony uncertainty contains |offset|, so a large offset raises both). The offset checked is the measurement's offset plus `session_gap_of()` (the session clock minus the wall clock: a wall-clock step
+    the monotonic session clock did not follow) minus `correction_of()` when the host-offset correction is on (the residual after the correction; `residual` True says so in the report). Every evaluation
+    is counted per state with the largest |offset| and uncertainty seen; `last` holds the newest evaluation's numbers. Without `max_offset_ns` the details and states are the A3 ones."""
     max_uncertainty_ns: int
     max_age_ns: int
     replay: bool = False
     measurement: ClockMeasurement | None = None
     history: list = field(default_factory=list)
+    max_offset_ns: int | None = None
+    correction_of: Any = None            # () -> the host-offset correction in force (ns, or None): set only when the profile applies it
+    session_gap_of: Any = None           # () -> session clock minus wall clock (ns): set only with the monotonic session clock
+    evaluations: dict = field(default_factory=dict)
+    last: dict | None = None
+    invalid_reason: str | None = None
+
+    @property
+    def residual(self) -> bool:
+        return self.correction_of is not None
 
     def update(self, measurement: ClockMeasurement | None) -> None:
         if measurement is not None:
             self.measurement = measurement
+            self.invalid_reason = None
             if len(self.history) < 200:
                 self.history.append({"measured_ts_ns": measurement.measured_ts_ns, "offset_ms": measurement.offset_ns / 1e6, "uncertainty_ms": measurement.uncertainty_ns / 1e6, "source": measurement.source})
 
-    def evaluate(self, now_ns: int) -> tuple[str, str]:
+    def invalidate(self, reason: str) -> None:
+        """Phase 2 F03 c: the source says the clock is not trustworthy NOW (chrony unsynchronised, absent or failing): the old measurement is dropped, so the gate is "unknown" at once instead of
+        passing on a stale reading until it ages out. No fallback."""
+        self.measurement = None
+        self.invalid_reason = reason
+
+    def checked_offset_ns(self) -> int | None:
         m = self.measurement
         if m is None:
+            return None
+        off = m.offset_ns + (int(self.session_gap_of() or 0) if self.session_gap_of is not None else 0)
+        if self.correction_of is not None:
+            off -= int(self.correction_of() or 0)
+        return off
+
+    def _count(self, state: str, offset_ns: int | None, unc_ns: int | None) -> None:
+        row = self.evaluations.setdefault(state, {"n": 0, "max_abs_offset_ms": None, "max_uncertainty_ms": None})
+        row["n"] += 1
+        if offset_ns is not None:
+            row["max_abs_offset_ms"] = max(row["max_abs_offset_ms"] or 0.0, abs(offset_ns) / 1e6)
+        if unc_ns is not None:
+            row["max_uncertainty_ms"] = max(row["max_uncertainty_ms"] or 0.0, unc_ns / 1e6)
+        self.last = {"state": state, "offset_ms": None if offset_ns is None else offset_ns / 1e6, "uncertainty_ms": None if unc_ns is None else unc_ns / 1e6}
+
+    def evaluate(self, now_ns: int) -> tuple[str, str]:
+        state, detail = self._evaluate(now_ns)
+        if self.max_offset_ns is not None:
+            m = self.measurement
+            self._count(state, self.checked_offset_ns(), None if m is None else m.uncertainty_ns)
+        return state, detail
+
+    def _evaluate(self, now_ns: int) -> tuple[str, str]:
+        m = self.measurement
+        if m is None:
+            if self.invalid_reason is not None and not self.replay:
+                return "unknown", self.invalid_reason
             return ("not_evaluable", "no measured clock in a replay") if self.replay else ("unknown", "no clock measurement")
         if now_ns - m.measured_ts_ns > self.max_age_ns:
             return ("not_evaluable", "measurement older than max_age in a replay") if self.replay else ("unknown", f"measurement {(now_ns - m.measured_ts_ns) / 1e9:.0f} s old")
+        if self.max_offset_ns is not None:
+            off = self.checked_offset_ns()
+            numbers = f"offset {off / 1e6:.2f} ms{' (residual after the host-offset correction)' if self.residual else ''}, uncertainty {m.uncertainty_ns / 1e6:.2f} ms"
+            if abs(off) > self.max_offset_ns:
+                return "offset", f"{numbers}: offset above {self.max_offset_ns / 1e6:.2f} ms"
+            if m.uncertainty_ns > self.max_uncertainty_ns:
+                return "uncertain", f"{numbers}: uncertainty above {self.max_uncertainty_ns / 1e6:.2f} ms"
+            return "ok", numbers
         if m.uncertainty_ns > self.max_uncertainty_ns:
             return "uncertain", f"uncertainty {m.uncertainty_ns / 1e6:.2f} ms above {self.max_uncertainty_ns / 1e6:.2f} ms"
         return "ok", f"uncertainty {m.uncertainty_ns / 1e6:.2f} ms"
+
+    def report(self) -> dict:
+        return {"max_offset_ms": None if self.max_offset_ns is None else self.max_offset_ns / 1e6, "max_offset_label": "ASSUMED (owner to set)",
+                "offset_checked": ("the residual after the host-offset correction" if self.residual else "the measured offset") + (" plus the session-clock gap" if self.session_gap_of is not None else ""),
+                "evaluations": {k: dict(v) for k, v in sorted(self.evaluations.items())}, "last": self.last, "invalid_reason": self.invalid_reason}
+
+
+# ---------------------------------------------------------------------------------------------------------------------------------------------------
+# Phase 2 F03 a (owner 20 Nov): the production clock source is the host's chrony. `chronyc tracking` (human-readable form: its "seconds fast/slow of NTP time" carries the sign in words) is parsed;
+# offset = local minus NTP (fast = positive), uncertainty = |system offset| + root dispersion + root delay / 2 (the owner's rule), measured at chrony's Ref time (its last update), so the 900 s age rule
+# also catches a chrony that stopped updating. Unsynchronised (leap status "Not synchronised", reference id 00000000, or stratum 0) or a failing chronyc gives NO measurement: the gate goes "unknown".
+# The format is the documented one; the parser is UNVERIFIED against this platform's production host until `ollog hostmeasure` records real output there (this Mac's chronyc does not start).
+# ---------------------------------------------------------------------------------------------------------------------------------------------------
+def _chrony_seconds(value: str) -> float:
+    return float(value.split()[0])
+
+
+def parse_chronyc_tracking(text: str) -> dict:
+    """The fields of `chronyc tracking` (human-readable). Keys present only when the line was there: reference_id, reference_name, stratum, ref_time_ns, system_offset_ns (local minus NTP: fast = +),
+    last_offset_ns, rms_offset_ns, frequency_ppm, root_delay_ns, root_dispersion_ns, update_interval_s, leap_status. Unknown lines are ignored; nothing is defaulted."""
+    from datetime import datetime, timezone
+
+    out: dict = {}
+    for line in text.splitlines():
+        if ":" not in line:
+            continue
+        name, value = (x.strip() for x in line.split(":", 1))
+        key = name.lower()
+        try:
+            if key == "reference id":
+                parts = value.split(None, 1)
+                out["reference_id"] = parts[0]
+                if len(parts) > 1:
+                    out["reference_name"] = parts[1].strip("()")
+            elif key == "stratum":
+                out["stratum"] = int(value)
+            elif key == "ref time (utc)":
+                out["ref_time_ns"] = int(datetime.strptime(value, "%a %b %d %H:%M:%S %Y").replace(tzinfo=timezone.utc).timestamp()) * 1_000_000_000
+            elif key == "system time":
+                words = value.split()
+                sign = 1 if "fast" in words else (-1 if "slow" in words else None)
+                if sign is not None:
+                    out["system_offset_ns"] = sign * round(float(words[0]) * 1e9)
+            elif key in ("last offset", "rms offset"):
+                out[key.replace(" ", "_") + "_ns"] = round(_chrony_seconds(value) * 1e9)
+            elif key == "frequency":
+                words = value.split()
+                out["frequency_ppm"] = float(words[0]) * (-1 if "slow" in words else 1)
+            elif key == "root delay":
+                out["root_delay_ns"] = round(_chrony_seconds(value) * 1e9)
+            elif key == "root dispersion":
+                out["root_dispersion_ns"] = round(_chrony_seconds(value) * 1e9)
+            elif key == "update interval":
+                out["update_interval_s"] = _chrony_seconds(value)
+            elif key == "leap status":
+                out["leap_status"] = value
+        except (ValueError, IndexError):
+            out.setdefault("unparsed", []).append(name)
+    return out
+
+
+def chrony_synchronised(fields: dict) -> tuple[bool, str]:
+    if not fields:
+        return False, "chronyc gave no tracking fields"
+    if fields.get("leap_status", "").lower().startswith("not synchronised"):
+        return False, "chrony is not synchronised (leap status)"
+    if fields.get("reference_id", "").strip("0") == "" or fields.get("stratum", 0) == 0:
+        return False, "chrony has no reference (reference id 00000000 / stratum 0)"
+    for key in ("system_offset_ns", "root_delay_ns", "root_dispersion_ns", "ref_time_ns"):
+        if key not in fields:
+            return False, f"chronyc output lacks {key}"
+    return True, ""
+
+
+def chrony_measurement(fields: dict) -> ClockMeasurement | None:
+    """The ClockMeasurement of one chrony reading, or None when chrony is not synchronised or a needed field is missing (the gate then goes "unknown")."""
+    ok, _ = chrony_synchronised(fields)
+    if not ok:
+        return None
+    off = fields["system_offset_ns"]
+    unc = abs(off) + fields["root_dispersion_ns"] + fields["root_delay_ns"] // 2
+    return ClockMeasurement(offset_ns=off, uncertainty_ns=unc, measured_ts_ns=fields["ref_time_ns"], source=f"chrony:{fields.get('reference_name') or fields.get('reference_id')}:stratum{fields.get('stratum')}",
+                            samples=1, fields=dict(fields))
+
+
+def read_chrony(binary: str = "chronyc", runner=None, timeout_s: float = 5.0) -> tuple[ClockMeasurement | None, dict, str]:
+    """Run `chronyc tracking` (or `runner()` -> (exit code, stdout, stderr), for tests) and return (measurement or None, the parsed fields, why there is none). A chronyc that is absent, fails or times out
+    is no measurement: there is no fallback."""
+    import subprocess
+
+    try:
+        if runner is not None:
+            rc, text, err = runner()
+        else:
+            r = subprocess.run([binary, "tracking"], capture_output=True, text=True, timeout=timeout_s)
+            rc, text, err = r.returncode, r.stdout, r.stderr
+    except (OSError, subprocess.SubprocessError) as exc:
+        return None, {}, f"chronyc could not be run ({type(exc).__name__})"
+    if rc != 0:
+        return None, {}, f"chronyc exited {rc}: {(err or '').strip()[:200]}"
+    fields = parse_chronyc_tracking(text)
+    ok, why = chrony_synchronised(fields)
+    return (chrony_measurement(fields), fields, "") if ok else (None, fields, why)
+
+
+class MonotonicSessionClock:
+    """Phase 2 F03 b (owner 20 Nov): the live session's clock. Anchored ONCE to the wall clock and advanced by the monotonic clock, so every interval and deadline (OMS, session, feed) is immune to a
+    wall-clock step. `check_step()` compares the wall clock with it; a change of their gap above `step_threshold_ns` (ASSUMED 50 ms) is a WALL_CLOCK_STEP, returned once and kept in `steps`. There is no
+    re-anchoring (that would itself step the session timeline); `gap_ns()` (session minus wall) is added to the clock gate's offset, so a step that leaves the session clock wrong is caught there."""
+
+    def __init__(self, wall=None, mono=None, step_threshold_ns: int = 50_000_000):
+        import time as _time
+
+        self._wall, self._mono = wall or _time.time_ns, mono or _time.monotonic_ns
+        self.anchor_wall_ns, self.anchor_mono_ns = self._wall(), self._mono()
+        self.step_threshold_ns = int(step_threshold_ns)
+        self._last_gap_ns = 0
+        self.steps: list[dict] = []
+
+    def __call__(self) -> int:
+        return self.anchor_wall_ns + (self._mono() - self.anchor_mono_ns)
+
+    def gap_ns(self) -> int:
+        """Session clock minus wall clock now."""
+        return self() - self._wall()
+
+    def check_step(self) -> dict | None:
+        now_session, now_wall = self(), self._wall()
+        gap = now_session - now_wall
+        step = gap - self._last_gap_ns
+        if abs(step) <= self.step_threshold_ns:
+            return None
+        event = {"session_ts_ns": now_session, "wall_ts_ns": now_wall, "step_ns": -step, "gap_before_ns": self._last_gap_ns, "gap_after_ns": gap, "threshold_ns": self.step_threshold_ns}
+        self._last_gap_ns = gap
+        if len(self.steps) < 200:
+            self.steps.append(event)
+        return event
 
 
 SERVER_TIME_URLS = {"BINANCE": "https://fapi.binance.com/fapi/v1/time", "BYBIT": "https://api.bybit.com/v5/market/time"}

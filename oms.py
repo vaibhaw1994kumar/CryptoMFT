@@ -329,6 +329,11 @@ class OMS:
         self.dust_bound: dict[str, Any] | None = None
         self.dust_bound_stats: dict[str, Any] = {"episodes": 0, "signals_blocked": 0, "quotes_withdrawn": 0, "remedy_hedges_sent": 0, "unsent_reports": 0,
                                                  "max_long_usdt": Decimal("0"), "max_short_usdt": Decimal("0")}
+        # Phase 2 F06 change (owner 20 Nov, hedge_faults.dust_bound_rule "aggregate"; the default "latch" leaves everything above as it was): the age bound is an alarm only, only the aggregate notional
+        # bound stops new risk, a quote whose hedge reduces the carried dust still goes out. Its own counters, reported only under "aggregate" (v1_16's report keys are unchanged).
+        self.dust_aggregate = self.dust_bound_on and self.hedge_policy.dust_bound_rule == "aggregate"
+        self.dust_agg_stats: dict[str, Any] = {"age_alarms": 0, "loop_passes_while_active": 0, "opportunities_blocked": 0, "dust_reducing_allowed": 0, "resting_reducing_kept": 0,
+                                               "max_aggregate_usdt": Decimal("0"), "state_changes": 0}
         self.expired_at_release: list[dict[str, Any]] = []
         self.route_mode = "count"             # E0 step (d): "count" counts a layer decision that differs from the order's venue and sends the order's own venue; "enforce" rejects the order back instead
         self.lot_residual_alarm: dict[str, Any] | None = None          # owner 12 Nov (a): a carried sub-lot residual that reaches one full hedge lot raises this PERSISTENT alarm (it stays set; there is no auto-clear)
@@ -635,7 +640,7 @@ class OMS:
 
     def _cancel_orders(
         self, reason: str, now_ns: int, *, venue: str | None,
-        preserve_risk_reducing: bool, ledger_event: str,
+        preserve_risk_reducing: bool, ledger_event: str, keep: Any = None,
     ) -> int:
         if self.order_owner_guard is not None:
             self.order_owner_guard()
@@ -650,6 +655,8 @@ class OMS:
                     order.reduce_only or self._order_reduces_residual(plan, order)
                 ):
                     continue
+                if keep is not None and keep(plan, order):
+                    continue                                         # Phase 2 F06 (aggregate): a dust-reducing resting quote stays
                 if order.state in LIVE_ORDER_STATES:
                     pending = self.router.cancel_pending_order(
                         order.order_id, now_ns=now_ns, reason=reason
@@ -4183,6 +4190,7 @@ class OMS:
                 self._persist(plan, ts_ns, "DUST_ALARM_CLEARED", key=list(key))
             self.ledger.record("HEDGE_DUST_CLEARED", ts_ns, parent_id=plan.parent_id, venue=key[0], instrument_id=key[1], age_s=age_s)
             row["since_ns"], row["alarmed"] = None, False
+            row.pop("age_reached", None)                             # Phase 2 F06 (aggregate): the next balance of this row gets its own DUST_AGE_REACHED
         self._persist(plan, ts_ns, "DUST_ADJUST", key=list(key), adj_delta=str(adj_delta), balance_after=str(after), since_ns=row["since_ns"], kind=kind,
                       **({"requested_qty": str(spec["requested_qty"])} if spec is not None else {}))
         return before, after
@@ -4284,6 +4292,9 @@ class OMS:
         st = self.dust_bound_stats
         st["max_long_usdt"] = max(st["max_long_usdt"], x["long_usdt"])
         st["max_short_usdt"] = max(st["max_short_usdt"], x["short_usdt"])
+        if self.dust_aggregate:
+            self._dust_aggregate_check(now_ns, x)
+            return
         reasons = []
         if pol.dust_max_notional_usdt is not None:
             cap = Decimal(str(pol.dust_max_notional_usdt))
@@ -4317,6 +4328,97 @@ class OMS:
         elif not reasons and self.dust_bound is not None:
             self.ledger.record("DUST_BOUND_CLEARED", now_ns, since_ns=self.dust_bound["since_ns"], **figures)
             self.dust_bound = None
+
+    def _dust_mark(self, venue: str, instrument_id: str, row: dict[str, Any]) -> Decimal | None:
+        """The USDT mark of a carried balance: the mid of a valid book of the instrument (this venue's first), else the price it was last carried or sent at; None when neither exists."""
+        for key in [(venue, instrument_id)] + [k for k in sorted(self._books) if k[1] == instrument_id and k[0] != venue]:
+            book = self._books.get(key)
+            if book is not None and book.state == BookState.VALID and book.bids and book.asks:
+                return (book.best_bid + book.best_ask) / Decimal("2")
+        return row.get("px")
+
+    def _dust_aggregate_check(self, now_ns: int, x: dict[str, Any]) -> None:
+        """Phase 2 F06 change (owner 20 Nov), rule "aggregate". (1) At dust_max_age_s a balance gets ONE DUST_AGE_REACHED alarm (per balance episode) and nothing else: no stop. (2) Only the aggregate notional
+        bound (per direction, every venue and instrument, the same instrument netted across venues) stops new risk: one DUST_BOUND_REACHED when either direction reaches it, the resting opening quotes are
+        withdrawn once EXCEPT those whose hedge would reduce the carried dust, the sendable dust is hedged at once; while it is active the session lets through only a quote whose hedge reduces the
+        dust (`dust_reduces`). It clears by itself (DUST_BOUND_CLEARED) when both directions are back under the bound: one event per state change."""
+        pol = self.hedge_policy
+        ag = self.dust_agg_stats
+        ag["max_aggregate_usdt"] = max(ag["max_aggregate_usdt"], x["long_usdt"], x["short_usdt"])
+        if pol.dust_max_age_s is not None:
+            for key, row in sorted(self._dust.items()):
+                if row["exposure"] == 0 or row["since_ns"] is None or row.get("age_reached"):
+                    continue
+                age_s = (now_ns - row["since_ns"]) / 1e9
+                if age_s > pol.dust_max_age_s:
+                    row["age_reached"] = True
+                    ag["age_alarms"] += 1
+                    mark = self._dust_mark(key[0], key[1], row)
+                    self.ledger.record("DUST_AGE_REACHED", now_ns, alarm=True, venue=key[0], instrument_id=key[1], balance=str(row["exposure"]),
+                                       usdt=None if mark is None else str(abs(row["exposure"]) * mark), age_s=age_s, max_age_s=pol.dust_max_age_s, label="ASSUMED",
+                                       action="alarm only: shown in the end-of-day report and the operator summary; no stop", **self.alert_context(now_ns))
+        reasons = []
+        if pol.dust_max_notional_usdt is not None:
+            cap = Decimal(str(pol.dust_max_notional_usdt))
+            if x["long_usdt"] >= cap:
+                reasons.append("notional_long")
+            if x["short_usdt"] >= cap:
+                reasons.append("notional_short")
+        figures = {"long_usdt": str(x["long_usdt"]), "short_usdt": str(x["short_usdt"]), "max_notional_usdt": pol.dust_max_notional_usdt, "label": "ASSUMED", "rule": "aggregate"}
+        st = self.dust_bound_stats
+        if reasons and self.dust_bound is None:
+            self.dust_bound = {"since_ns": now_ns, "reasons": reasons}
+            st["episodes"] += 1
+            ag["state_changes"] += 1
+            self.ledger.record("DUST_BOUND_REACHED", now_ns, alarm=True, reasons=",".join(reasons), by_instrument=x["by_instrument"], **figures, **self.alert_context(now_ns))
+            kept_before = ag["resting_reducing_kept"]
+            withdrawn = self._cancel_orders("dust bound reached", now_ns, venue=None, preserve_risk_reducing=True, ledger_event="DUST_BOUND_CANCEL", keep=self._dust_keeps_resting)
+            st["quotes_withdrawn"] += withdrawn
+            hosts = self.dust_stats["host_plans"]
+            for key, row in sorted(self._dust.items()):
+                if row["exposure"] != 0:
+                    self._dust_try_host(key, row, now_ns)
+            st["remedy_hedges_sent"] += self.dust_stats["host_plans"] - hosts
+            self.ledger.record("DUST_BOUND_REMEDY", now_ns, quotes_withdrawn=withdrawn, dust_reducing_quotes_kept=ag["resting_reducing_kept"] - kept_before,
+                               hedges_sent=self.dust_stats["host_plans"] - hosts)
+        elif reasons:
+            self.dust_bound["reasons"] = reasons                         # a direction that joins or leaves while it stays active (no event: the state did not change)
+        elif self.dust_bound is not None:
+            ag["state_changes"] += 1
+            self.ledger.record("DUST_BOUND_CLEARED", now_ns, since_ns=self.dust_bound["since_ns"], **figures)
+            self.dust_bound = None
+
+    def _dust_net(self, instrument_id: str) -> Decimal:
+        return sum((row["exposure"] for (v, i), row in self._dust.items() if i == instrument_id), Decimal("0"))
+
+    def dust_reduces(self, instrument_id: str, hedge_side: Side) -> bool:
+        """Phase 2 F06 (aggregate): would a hedge of `hedge_side` on `instrument_id` reduce the carried dust of a direction that is at the bound? Carried dust > 0 (long) owes a SELL hedge: the quote let
+        through is the one whose fill is hedged by a SELL (a maker BUY). Only the quote's own instrument counts. True when the bound is not active."""
+        if self.dust_bound is None:
+            return True
+        net = self._dust_net(instrument_id)
+        reasons = self.dust_bound.get("reasons", ())
+        return (hedge_side == Side.SELL and net > 0 and "notional_long" in reasons) or (hedge_side == Side.BUY and net < 0 and "notional_short" in reasons)
+
+    def _dust_keeps_resting(self, plan: ParentPlan, order: ChildOrder) -> bool:
+        """At the bound (aggregate): a resting maker quote whose fill's hedge would reduce the carried dust is kept (not withdrawn and sent again)."""
+        if order.order_role != "PRIMARY" or not order.post_only or order.state not in LIVE_ORDER_STATES:
+            return False
+        if self.dust_reduces(order.instrument_id, Side.SELL if order.side == Side.BUY else Side.BUY):
+            self.dust_agg_stats["resting_reducing_kept"] += 1
+            return True
+        return False
+
+    def dust_open_items(self, now_ns: int | None) -> list[dict[str, Any]]:
+        """Phase 2 F06 (3): every carried balance at the end of the session, as an open item for the operator (venue, symbol, signed base, USDT, age). No automatic order."""
+        out = []
+        for (venue, instrument_id), row in sorted(self._dust.items()):
+            if row["exposure"] == 0:
+                continue
+            mark = self._dust_mark(venue, instrument_id, row)
+            out.append({"venue": venue, "instrument_id": instrument_id, "signed_base": str(row["exposure"]), "usdt": None if mark is None else str(abs(row["exposure"]) * mark),
+                        "age_s": None if (now_ns is None or row["since_ns"] is None) else (now_ns - row["since_ns"]) / 1e9, "action": "OPEN ITEM for the operator: no automatic order"})
+        return out
 
     def _dust_try_host(self, key: tuple[str, str], row: dict[str, Any], now_ns: int) -> None:
         host = row.get("host")
@@ -4364,7 +4466,7 @@ class OMS:
                            balance_after=str(after))
         self._hedge_open_chain(plan, spec, None, send, now_ns, dust_included=before)
 
-    def dust_report(self, now_ns: int | None = None) -> dict[str, Any]:
+    def dust_report(self, now_ns: int | None = None, end_ns: int | None = None) -> dict[str, Any]:
         """End-of-day figures of the dust carry: how often dust was carried, the largest balance, the oldest age (closed episodes and the one still open), and the balance at the end."""
         oldest = self.dust_stats["oldest_age_s"]
         if now_ns is not None:
@@ -4374,9 +4476,9 @@ class OMS:
         return {"mode": self.hedge_policy.dust_carry, "alarm_after_s": self.hedge_policy.dust_alarm_after_s, "alarm_after_label": "ASSUMED", "carried_events": self.dust_stats["carried_events"],
                 "max_abs_base": str(self.dust_stats["max_abs_base"]), "oldest_age_s": oldest, "hedges_with_dust": self.dust_stats["hedges_with_dust"], "host_hedges": self.dust_stats["host_plans"],
                 "alarms": self.dust_stats["alarms"], "balance_end": str(self.dust_balance_total()),
-                **({"bound": self.dust_bound_report(now_ns)} if self.dust_bound_on else {})}
+                **({"bound": self.dust_bound_report(now_ns, end_ns)} if self.dust_bound_on else {})}
 
-    def dust_bound_report(self, now_ns: int | None = None) -> dict[str, Any]:
+    def dust_bound_report(self, now_ns: int | None = None, end_ns: int | None = None) -> dict[str, Any]:
         """F06 end-of-day block: the bound's settings (ASSUMED), its episodes, what the remedy did, the largest dust per direction, and where the carried dust is counted."""
         st = self.dust_bound_stats
         end = self.dust_exposure_usdt(now_ns) if now_ns is not None else None
@@ -4385,7 +4487,13 @@ class OMS:
                 "unsent_reports": st["unsent_reports"], "max_long_usdt": str(st["max_long_usdt"]), "max_short_usdt": str(st["max_short_usdt"]),
                 **({"end_long_usdt": str(end["long_usdt"]), "end_short_usdt": str(end["short_usdt"])} if end is not None else {}),
                 "counted_in": "strategy net and gross exposure (risk, from fills), margin (from fills), A2 daily-loss equity (ledger positions), residual totals (carried_dust_base): the carried dust is an "
-                              "unhedged maker fill; the breaker's net-exposure timer is exempt"}
+                              "unhedged maker fill; the breaker's net-exposure timer is exempt",
+                **({"rule": "aggregate", "age_rule": "alarm only (DUST_AGE_REACHED), no stop", "age_alarms": self.dust_agg_stats["age_alarms"],
+                    "loop_passes_while_active": self.dust_agg_stats["loop_passes_while_active"], "opportunities_blocked": self.dust_agg_stats["opportunities_blocked"],
+                    "dust_reducing_allowed": self.dust_agg_stats["dust_reducing_allowed"], "resting_reducing_kept": self.dust_agg_stats["resting_reducing_kept"],
+                    "state_changes": self.dust_agg_stats["state_changes"], "max_aggregate_usdt": str(self.dust_agg_stats["max_aggregate_usdt"]),
+                    "open_items_at_end": self.dust_open_items(end_ns if end_ns is not None else now_ns), "open_items_age_at": "the session end (last event)" if end_ns is not None else "the last execution"}
+                   if self.dust_aggregate else {})}
 
     def _recover_dust_state(self) -> None:
         """After a restart: the balance, every plan's adjustment, the clock and the alarm flag from the DUST_* plan events (the sum of the deltas does not depend on the order; the clock and the flag follow the
@@ -4655,8 +4763,9 @@ class OMS:
         if self.dust_on:
             out += [row["since_ns"] + int(self.hedge_policy.dust_alarm_after_s * 1e9) + 1 for row in self._dust.values()
                     if row["exposure"] != 0 and row["since_ns"] is not None and not row["alarmed"]]          # the age alarm fires on time, not at the next event
-            if self.dust_bound_on and self.dust_bound is None and self.hedge_policy.dust_max_age_s is not None:
-                out += [row["since_ns"] + int(self.hedge_policy.dust_max_age_s * 1e9) + 1 for row in self._dust.values() if row["exposure"] != 0 and row["since_ns"] is not None]
+            if self.dust_bound_on and (self.dust_bound is None or self.dust_aggregate) and self.hedge_policy.dust_max_age_s is not None:
+                out += [row["since_ns"] + int(self.hedge_policy.dust_max_age_s * 1e9) + 1 for row in self._dust.values()
+                        if row["exposure"] != 0 and row["since_ns"] is not None and not row.get("age_reached")]          # Phase 2 (aggregate): once a balance's age alarm is raised its timer is done
         for parent_id, chains in self.hedge_chains.items():
             for c in chains.values():
                 if c.max_residual_age_s is not None and c.state in self._CHAIN_OPEN and c.exposure_closed_ts is None:

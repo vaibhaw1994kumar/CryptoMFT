@@ -531,11 +531,28 @@ def session_limits_from_profile(profile: dict, clip_base: float | None = None) -
         if float(clock["max_uncertainty_ms"]) <= 0:
             raise ValueError("oms.session_limits.clock_offset.max_uncertainty_ms must be positive")
         out["clock_offset"] = {"max_uncertainty_ms": float(clock["max_uncertainty_ms"]), "max_age_s": float(clock.get("max_age_s", 900.0))}
+        if clock.get("max_offset_ms") is not None:                       # Phase 2 F03 (owner 20 Nov): the offset limit, checked apart from the uncertainty (ASSUMED, the owner sets it); absent = A3 as before
+            if float(clock["max_offset_ms"]) <= 0:
+                raise ValueError("oms.session_limits.clock_offset.max_offset_ms must be positive")
+            out["clock_offset"]["max_offset_ms"] = float(clock["max_offset_ms"])
+        if clock.get("source") is not None:                              # Phase 2 F03 a: the production clock source; server_time stays the cross-check under chrony
+            if clock["source"] not in ("server_time", "chrony"):
+                raise ValueError("oms.session_limits.clock_offset.source must be server_time or chrony")
+            out["clock_offset"]["source"] = str(clock["source"])
+            if clock.get("chrony_every_s") is not None:
+                out["clock_offset"]["chrony_every_s"] = float(clock["chrony_every_s"])
+        mono = clock.get("monotonic_clock")
+        if mono is not None:                                             # Phase 2 F03 b: the live session runs on a monotonic-anchored clock; a wall-clock step above the threshold is recorded
+            out["clock_offset"]["monotonic_clock"] = {"step_threshold_ms": float((mono or {}).get("step_threshold_ms", 50.0))}
     warn = block.get("margin_warning")
     if warn is not None:
         if float(warn["free_margin_multiple"]) <= 0:
             raise ValueError("oms.session_limits.margin_warning.free_margin_multiple must be positive")
         out["margin_warning"] = {"free_margin_multiple": float(warn["free_margin_multiple"]), "resume_hysteresis_s": float(warn.get("resume_hysteresis_s", 5.0))}
+        if warn.get("stressed_move_bps") is not None:                    # Phase 2 F02 c (owner 20 Nov): per-venue headroom for a stressed fill and its exit, funded on each venue without a transfer
+            if float(warn["stressed_move_bps"]) <= 0:
+                raise ValueError("oms.session_limits.margin_warning.stressed_move_bps must be positive")
+            out["margin_warning"]["stressed_move_bps"] = float(warn["stressed_move_bps"])
     if block.get("missing_marks_kill_s") is not None:
         if float(block["missing_marks_kill_s"]) <= 0:
             raise ValueError("oms.session_limits.missing_marks_kill_s must be positive")
@@ -663,6 +680,13 @@ def hedge_dust_fields(profile: dict) -> dict:
         if mode not in ("refuse", "reopen"):
             raise ValueError(f"hedge_faults.late_fill_after_close must be refuse or reopen, got {mode!r}")
         out["late_fill_after_close"] = mode
+    if "dust_bound_rule" in hf:                                            # Phase 2 F06 change (owner 20 Nov): latch (v1_16) or aggregate (v1_17)
+        rule = str(hf["dust_bound_rule"])
+        if rule not in ("latch", "aggregate"):
+            raise ValueError(f"hedge_faults.dust_bound_rule must be latch or aggregate, got {rule!r}")
+        if out.get("dust_carry", "off") != "next_hedge":
+            raise ValueError("hedge_faults.dust_bound_rule needs hedge_faults.dust_carry next_hedge")
+        out["dust_bound_rule"] = rule
     for key in ("dust_max_notional_usdt", "dust_max_age_s"):               # F06 (owner 20 Nov): the aggregate dust bound; absent = no bound (every earlier profile)
         if hf.get(key) is not None:
             value = float(hf[key])

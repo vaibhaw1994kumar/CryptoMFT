@@ -618,7 +618,8 @@ class TradingSession:
             if self.margin_price_paused and not hasattr(strategy, "force_exit"):
                 self.signals_blocked_by_margin_price += 1       # no price for the margin check: no new risk until it is back
                 continue
-            if getattr(self.oms, "dust_bound", None) is not None and not hasattr(strategy, "force_exit"):
+            dust_gate = getattr(self.oms, "dust_bound", None) is not None and not hasattr(strategy, "force_exit")
+            if dust_gate and not getattr(self.oms, "dust_aggregate", False):
                 self.oms.dust_bound_stats["signals_blocked"] += 1     # F06 (owner 20 Nov): the aggregate dust bound is reached: no new risk; hedges, unwinds and closing quotes continue
                 continue
             if self.feed_health is not None and not hasattr(strategy, "force_exit") and self._feed_health_blocks(now):
@@ -630,6 +631,15 @@ class TradingSession:
             opportunity = strategy.evaluate(self.books, now)
             decided = self.wall_ns()
             self.stage_timer.add("strategy_eval_ns", decided - started)
+            if dust_gate:                                          # Phase 2 F06 (aggregate): only a quote whose hedge reduces the carried dust goes out while the notional bound is active
+                agg = self.oms.dust_agg_stats
+                agg["loop_passes_while_active"] += 1
+                if opportunity is not None:
+                    if self._dust_reducing(opportunity):
+                        agg["dust_reducing_allowed"] += 1
+                    else:
+                        agg["opportunities_blocked"] += 1
+                        continue
             if opportunity is None:
                 continue
             self._dispatch(strategy, opportunity, now, decided, event)
@@ -801,6 +811,14 @@ class TradingSession:
         fn = getattr(rec["strategy"], name, None)
         if fn is not None:
             fn(*args)
+
+    def _dust_reducing(self, opportunity: Opportunity) -> bool:
+        """Phase 2 F06 (aggregate): the hedge of this opportunity's maker fill (maker = the first of maker_venues it trades on; it buys there, so the hedge SELLS, and the other way round) reduces the
+        carried dust of a direction at the bound. No maker venue (both legs taker): not a dust-reducing quote."""
+        maker = next((v for v in self.maker_venues if v in (opportunity.buy_venue, opportunity.sell_venue)), None)
+        if maker is None:
+            return False
+        return self.oms.dust_reduces(opportunity.instrument_id, Side.SELL if maker == opportunity.buy_venue else Side.BUY)
 
     def _quote_new_risk_block(self, now: int) -> str | None:
         """Why a NEW quote may not go out now (the stops an arb strategy honours): flattening, a paused or tripped breaker, a missing margin price. Cancels, amends and exits are never blocked by these."""
@@ -1193,12 +1211,17 @@ class TradingSession:
         self._price_pause_since: int | None = None
         self._margin_warn_active = False
         self._margin_warn_ok_since: int | None = None
+        self._stressed_need: dict[str, str | None] = {}         # Phase 2 F02 c: the stressed headroom each venue needed at the last check (USDT)
         self.clock_gate: ClockGate | None = None
         if limits is None:
             return
         c = limits.get("clock_offset")
         if c is not None:
             self.clock_gate = ClockGate(int(c["max_uncertainty_ms"] * 1e6), int(c["max_age_s"] * 1e9), replay=not live_data, measurement=clock_measurement)
+            if c.get("max_offset_ms") is not None:                  # Phase 2 F03: the offset limit; with the host-offset correction on, it applies to the residual after it (the manifest says so)
+                self.clock_gate.max_offset_ns = int(c["max_offset_ms"] * 1e6)
+                if self.cfg.time_policy.correct_host_offset:
+                    self.clock_gate.correction_of = lambda: getattr(getattr(self, "time_monitor", None), "clock_offset_estimate_ns", None)
 
     def _limit_count(self, key: str, n: int = 1) -> None:
         self.limit_counters[key] = self.limit_counters.get(key, 0) + n
@@ -1239,7 +1262,8 @@ class TradingSession:
                 self._limit_count("clock_not_evaluable")               # a replay with no measured clock: counted, never blocked
             elif state != "ok":
                 reason = "clock_" + state
-            self._limit_edge("clock_offset", reason is not None, now, detail=detail)
+            numbers = {} if gate.max_offset_ns is None or gate.last is None else {"offset_ms": gate.last["offset_ms"], "uncertainty_ms": gate.last["uncertainty_ms"]}
+            self._limit_edge("clock_offset", reason is not None, now, detail=detail, **numbers)
         if reason is None and self._margin_warn_active:
             reason = "margin_warning"
         if reason is not None:
@@ -1318,6 +1342,18 @@ class TradingSession:
             initial_at_cap = schedule.initial(cap * mark)
             if initial_at_cap is None or row.available_margin < Decimal(str(cfg["free_margin_multiple"])) * initial_at_cap:
                 bad.append(f"{row.venue}:free_margin")
+                continue
+            if cfg.get("stressed_move_bps") is not None:
+                # Phase 2 F02 c: the stressed case funded on THIS venue without a transfer: the hard cap plus every resting maker quote filling during a cancel (the worst outstanding fill), at the
+                # initial margin of that notional, plus its exit at the stressed move (ASSUMED: the largest 60 s move of the reference day). Below it: no new entry (the A4 stop).
+                resting = sum((o.quantity - o.filled_quantity for p in self.oms.plans.values() for o in p.children
+                               if o.order_role == "PRIMARY" and o.post_only and o.state in LIVE_ORDER_STATES), Decimal("0"))
+                notional = (cap + resting) * mark
+                need = schedule.initial(notional)
+                need = None if need is None else need + notional * Decimal(str(cfg["stressed_move_bps"])) / Decimal("10000")
+                self._stressed_need[row.venue] = None if need is None else str(need)
+                if need is None or row.available_margin < need:
+                    bad.append(f"{row.venue}:stressed_headroom")
         if bad:
             self._margin_warn_ok_since = None
             if not self._margin_warn_active:
@@ -1342,8 +1378,11 @@ class TradingSession:
             "signals_blocked_by_limits": self.signals_blocked_by_limits,
             "daily_loss": {"limit_usdt": (L.get("daily_loss_stop") or {}).get("limit_usdt"), "min_pnl_usdt": None if self._loss_min_pnl is None else str(self._loss_min_pnl), "min_pnl_at": self._loss_min_at},
             "kills": {k: dict(v) for k, v in self._limit_kills.items()},
+            **({"stressed_headroom_need_usdt": dict(sorted(self._stressed_need.items())), "stressed_move_bps": (L.get("margin_warning") or {}).get("stressed_move_bps"), "stressed_label": "ASSUMED"}
+               if (L.get("margin_warning") or {}).get("stressed_move_bps") is not None else {}),
             "clock_gate": None if self.clock_gate is None else {"replay": self.clock_gate.replay, "measurement": None if self.clock_gate.measurement is None else {
-                "offset_ms": self.clock_gate.measurement.offset_ns / 1e6, "uncertainty_ms": self.clock_gate.measurement.uncertainty_ns / 1e6, "source": self.clock_gate.measurement.source}},
+                "offset_ms": self.clock_gate.measurement.offset_ns / 1e6, "uncertainty_ms": self.clock_gate.measurement.uncertainty_ns / 1e6, "source": self.clock_gate.measurement.source},
+                **({"offset_limit": self.clock_gate.report()} if self.clock_gate.max_offset_ns is not None else {})},
             "state_changes": list(self.limit_events),
         }
 
@@ -1607,7 +1646,8 @@ class TradingSession:
                 **({"amend_guard": dict(self.amend_guard_state)} if self.amend_guard_state is not None else {}),
                 **({"session_limits": self.limits_report()} if self._limits is not None else {}),
                 **({"feed_health": self.feed_health_report(getattr(self, "last_event_ts_ns", None) or None)} if self.feed_health is not None else {}),
-                **({"hedge_dust_carry": self.oms.dust_report(getattr(self.oms, "_last_execution_ts_ns", None))} if self.oms.dust_on else {}),
+                **({"hedge_dust_carry": self.oms.dust_report(getattr(self.oms, "_last_execution_ts_ns", None),
+                                                             **({"end_ns": getattr(self, "last_event_ts_ns", None) or None} if getattr(self.oms, "dust_aggregate", False) else {}))} if self.oms.dust_on else {}),
                 **({"breaker_flatten": {"counters": dict(self.breaker_flatten_counters), "dust_events": list(self.breaker_dust_events), "dust_now": None if self._breaker_dust is None else {k: str(v) for k, v in self._breaker_dust.items()}}}
                    if (self.breaker_flatten_counters["dust_recorded"] or self.breaker_flatten_counters["unavailable_retries"]) else {}),
                 "margin_price_paused": self.margin_price_paused, "signals_blocked_by_margin_price": self.signals_blocked_by_margin_price,

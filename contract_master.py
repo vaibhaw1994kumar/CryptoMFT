@@ -593,3 +593,44 @@ def dump_contract_master(
     }
     _write_json(output_dir / f"contract_master_{dump_id}.manifest.json", manifest)
     return manifest
+
+
+# ---------------------------------------------------------------------------------------------------------------------------------------------------
+# Phase 2 F02 a (owner 20 Nov): the per-symbol venue filters the size envelope is built from, read from one public dump (raw/<stamp>/ of `dump_contract_master`, or the Phase 2 fetch): Binance USD-M
+# exchangeInfo (LOT_SIZE = the limit-order maximum, MARKET_LOT_SIZE = the market-order maximum, MIN_NOTIONAL, PRICE_FILTER, MAX_NUM_ORDERS) and Bybit linear instruments-info (qtyStep, maxOrderQty,
+# postOnlyMaxOrderQty, maxMktOrderQty, minNotionalValue, tickSize, maxLeverage), plus Bybit's public risk-limit tiers. Every value is the venue's own (MEASURED at the dump time: current rules, not
+# historical). A symbol not trading on a venue is None for that venue: nothing is defaulted.
+# ---------------------------------------------------------------------------------------------------------------------------------------------------
+def perp_envelope_filters(raw_dir: Path, symbols: Iterable[str]) -> dict[str, dict[str, Any]]:
+    raw_dir = Path(raw_dir)
+    binance = json.loads((raw_dir / "binance_usd_m_futures.json").read_text())
+    bybit_pages = json.loads((raw_dir / "bybit_linear.json").read_text())
+    risk_path = raw_dir / "bybit_linear_risk_limit.json"
+    risk_pages = json.loads(risk_path.read_text()) if risk_path.exists() else []
+    bn = {x["symbol"]: x for x in binance.get("symbols", []) if x.get("contractType") == "PERPETUAL" and x.get("quoteAsset") == "USDT"}
+    by = {x["symbol"]: x for page in bybit_pages for x in (page.get("result") or {}).get("list", []) if x.get("quoteCoin") == "USDT" and "Perpetual" in x.get("contractType", "")}
+    tiers: dict[str, list] = {}
+    for page in risk_pages:
+        for row in (page.get("result") or {}).get("list", []):
+            tiers.setdefault(row["symbol"], []).append(row)
+    out: dict[str, dict[str, Any]] = {}
+    for symbol in symbols:
+        row: dict[str, Any] = {"BINANCE": None, "BYBIT": None, "bybit_risk_tiers": None}
+        b = bn.get(symbol)
+        if b is not None and b.get("status") == "TRADING":
+            f = {x["filterType"]: x for x in b.get("filters", [])}
+            row["BINANCE"] = {"tick": f.get("PRICE_FILTER", {}).get("tickSize"), "step": f.get("LOT_SIZE", {}).get("stepSize"), "min_qty": f.get("LOT_SIZE", {}).get("minQty"),
+                              "max_limit_qty": f.get("LOT_SIZE", {}).get("maxQty"), "max_market_qty": f.get("MARKET_LOT_SIZE", {}).get("maxQty"),
+                              "min_notional": (f.get("MIN_NOTIONAL") or f.get("NOTIONAL") or {}).get("notional"), "max_open_orders": f.get("MAX_NUM_ORDERS", {}).get("limit"),
+                              "risk_tiers": "NO DATA (Binance leverageBracket is a signed endpoint: account keys)"}
+        y = by.get(symbol)
+        if y is not None and y.get("status") == "Trading":
+            lot, price, lev = y.get("lotSizeFilter", {}), y.get("priceFilter", {}), y.get("leverageFilter", {})
+            row["BYBIT"] = {"tick": price.get("tickSize"), "step": lot.get("qtyStep"), "min_qty": lot.get("minOrderQty"), "max_limit_qty": lot.get("maxOrderQty"),
+                            "max_postonly_qty": lot.get("postOnlyMaxOrderQty"), "max_market_qty": lot.get("maxMktOrderQty"), "min_notional": lot.get("minNotionalValue"),
+                            "max_leverage": lev.get("maxLeverage")}
+            if symbol in tiers:
+                row["bybit_risk_tiers"] = sorted(({"id": t["id"], "max_notional": t["riskLimitValue"], "initial_rate": t["initialMargin"], "maintenance_rate": t["maintenanceMargin"],
+                                                   "mm_deduction": t.get("mmDeduction") or "0", "max_leverage": t["maxLeverage"]} for t in tiers[symbol]), key=lambda t: float(t["max_notional"]))
+        out[symbol] = row
+    return out

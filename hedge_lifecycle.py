@@ -102,6 +102,7 @@ class HedgePolicy:
     dust_max_notional_usdt: float | None = None   # F06 (owner 20 Nov): aggregate dust cap, USDT per direction over every venue and instrument (same instrument netted across venues); None = no cap (ASSUMED placeholder 50)
     late_fill_after_close: str = "refuse"     # F06 c (owner 20 Nov): "reopen" = a fill reported for an order of a CLOSED plan (cumulative above what was booked; a cancel confirmed at a lower fill, then the fill) is booked, the plan reopens and the ordinary hedge runs; "refuse" (default) = the old CLOSED_PLAN_UPDATE_REJECTED and raise
     dust_max_age_s: float | None = None       # F06 (owner 20 Nov): carried dust older than this reaches the bound too; None = no age bound (ASSUMED placeholder 300)
+    dust_bound_rule: str = "latch"            # Phase 2 F06 change (owner 20 Nov): "latch" (default, v1_16) = the age bound stops new quotes like the notional bound; "aggregate" = the age bound is an alarm only (DUST_AGE_REACHED), only the aggregate notional bound stops new risk, a quote whose hedge REDUCES the carried dust still goes out, carried dust is an end-of-session open item
     calibration_label: str = "DECISION_PENDING_CALIBRATION"
 
 

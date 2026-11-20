@@ -32,7 +32,7 @@ from .execution import VenueExecutionAdapter
 from .fees import verify_account_fee_rates
 from .margin import apply_account_tiers, read_account_tiers
 from .testnet import verify_accounts_for_start
-from .time_integrity import ClockMeasurement, probe_server_clock
+from .time_integrity import ClockMeasurement, MonotonicSessionClock, probe_server_clock, read_chrony
 from .instrument_status import InstrumentStatusPoller
 from .live_feed import (
     LiveFeedSettings,
@@ -124,7 +124,15 @@ class LivePaperSession:
         if (session_kwargs or {}).get("feed_health") and (session_kwargs or {})["feed_health"].get("recorder_health_block"):
             settings = _dc_replace(settings, feed_health_block=True)      # W1: the recorder's part manifests carry the feed-health block
         self.account_checks: dict[str, Any] = {}
-        self.clock_source = clock_source
+        co = (session_limits or {}).get("clock_offset") or {}
+        self.clock_source = clock_source or co.get("source")           # Phase 2 F03 a: the profile's source ("chrony" in v1_17) unless the caller names one
+        clock_source = self.clock_source
+        self.chrony_every_ns = int(float(co.get("chrony_every_s", 60.0)) * 1e9)     # ASSUMED: chrony read every 60 s (a local read, no network)
+        self.session_clock: MonotonicSessionClock | None = None
+        if co.get("monotonic_clock") is not None and clock_ns is time.time_ns:
+            # Phase 2 F03 b: intervals and deadlines on the monotonic clock (anchored once to the wall clock); an injected clock (tests) is left as it is
+            self.session_clock = MonotonicSessionClock(step_threshold_ns=int(co["monotonic_clock"]["step_threshold_ms"] * 1e6))
+            clock_ns = self.session_clock
         if session_limits is not None:
             real = readers is not None or execution_mode != ExecutionMode.INTERNAL_PAPER
             va = session_limits.get("verify_account")
@@ -164,7 +172,7 @@ class LivePaperSession:
                 if problems:
                     raise ValueError("the account's effective risk tier does not match the margin engine's tier table: " + "; ".join(problems))
             if session_limits.get("clock_offset") is not None and real and clock_source is None:
-                raise ValueError("a session that sends real orders needs a clock source for the clock-offset gate (clock_source='server_time'); it refuses to start without one")
+                raise ValueError("a session that sends real orders needs a clock source for the clock-offset gate (clock_source 'server_time' or 'chrony'); it refuses to start without one")
         self.clock_ns = clock_ns
         self.service = LiveOrderBookService(
             Path(config_path), Path(output_dir), session_id, settings,
@@ -235,6 +243,10 @@ class LivePaperSession:
         self.status_poll_ns = int(status_poll_seconds * 1_000_000_000)
         self._next_status_poll_ns = 0
         self._next_clock_probe_ns = 0
+        self._next_chrony_ns = 0
+        self.clock_cross_check_alarm = False
+        if self.session.clock_gate is not None and self.session_clock is not None:
+            self.session.clock_gate.session_gap_of = self.session_clock.gap_ns
         self.tick_seconds = tick_seconds
         self.started_ts_ns: int | None = None
         self.settings = settings
@@ -392,7 +404,11 @@ class LivePaperSession:
                 self._write_row({
                     "record_type": "FLATTEN_STARTED", "ts_ns": now, "exit_intents": sent,
                 })
-            if self.clock_source == "server_time" and now >= self._next_clock_probe_ns:
+            if self.session_clock is not None:
+                self._check_wall_step()
+            if self.clock_source == "chrony" and now >= self._next_chrony_ns:
+                await self._read_chrony(now)
+            if self.clock_source in ("server_time", "chrony") and now >= self._next_clock_probe_ns:
                 await self._probe_clock(now)
             if self.status_poller is None or now < self._next_status_poll_ns:
                 continue
@@ -419,6 +435,9 @@ class LivePaperSession:
             self._write_row({"record_type": "CLOCK_PROBE_FAILED", "ts_ns": now, "venues": [v for v, m in zip(self.cfg.venues, found) if m is None]})
             return
         worst = max(found, key=lambda m: m.uncertainty_ns)
+        if self.clock_source == "chrony":
+            self._cross_check(now, found)                             # Phase 2 F03 a: under chrony the venues' server time is the cross-check only
+            return
         # W1 (audit A1 1.6): the same measurement is the host clock monitors' independent reference (session and service), which until now were fed only by their own estimate
         self.session.time_monitor.record_clock_reference(worst)
         self.service.time_monitor.record_clock_reference(worst)
@@ -426,9 +445,57 @@ class LivePaperSession:
             return
         gate.update(ClockMeasurement(offset_ns=worst.offset_ns, uncertainty_ns=worst.uncertainty_ns, measured_ts_ns=max(m.measured_ts_ns for m in found), source="+".join(m.source for m in found), samples=sum(m.samples for m in found)))
 
+    def _check_wall_step(self) -> None:
+        """Phase 2 F03 b: a wall-clock step under the monotonic session clock is detected and recorded (row + ledger); the gate's offset carries the gap from then on."""
+        ev = self.session_clock.check_step()
+        if ev is not None:
+            self._write_row({"record_type": "WALL_CLOCK_STEP", "ts_ns": ev["session_ts_ns"], **ev})
+            self.session.ledger.record("WALL_CLOCK_STEP", ev["session_ts_ns"], alarm=True, step_ms=ev["step_ns"] / 1e6, gap_after_ms=ev["gap_after_ns"] / 1e6, threshold_ms=ev["threshold_ns"] / 1e6)
+
+    async def _read_chrony(self, now: int) -> None:
+        """Phase 2 F03 a / c: read chrony; a synchronised reading updates the gate (and the host clock monitors' reference); an absent, failing or unsynchronised chrony INVALIDATES the gate ("unknown",
+        quoting stops): no fallback. One CLOCK_MEASUREMENT row per reading, with both numbers and every chrony field."""
+        self._next_chrony_ns = now + self.chrony_every_ns
+        m, fields, why = await asyncio.to_thread(read_chrony)
+        gate = self.session.clock_gate
+        if m is None:
+            self._write_row({"record_type": "CLOCK_SOURCE_UNAVAILABLE", "ts_ns": now, "source": "chrony", "reason": why, "fields": fields})
+            if gate is not None:
+                gate.invalidate(f"chrony: {why}")
+            return
+        self.session.time_monitor.record_clock_reference(m)
+        self.service.time_monitor.record_clock_reference(m)
+        if gate is not None:
+            gate.update(m)
+        state = gate.evaluate(now)[0] if gate is not None else None
+        self._write_row({"record_type": "CLOCK_MEASUREMENT", "ts_ns": now, "source": m.source, "offset_ms": m.offset_ns / 1e6, "uncertainty_ms": m.uncertainty_ns / 1e6,
+                         "checked_offset_ms": None if gate is None or gate.checked_offset_ns() is None else gate.checked_offset_ns() / 1e6, "gate_state": state, "fields": fields})
+
+    def _cross_check(self, now: int, found: list) -> None:
+        """Phase 2 F03 a: the venues' server time against chrony. A venue whose offset differs from chrony's by more than its own probe uncertainty (half its round trip) raises ONE
+        CLOCK_CROSS_CHECK_DISAGREE alarm per episode (cleared when every venue agrees again). It does not stop quoting."""
+        gate = self.session.clock_gate
+        ref = None if gate is None else gate.measurement
+        rows = [{"venue": v, "server_offset_ms": m.offset_ns / 1e6, "server_uncertainty_ms": m.uncertainty_ns / 1e6} for v, m in zip(self.cfg.venues, found)]
+        if ref is None:
+            self._write_row({"record_type": "CLOCK_CROSS_CHECK", "ts_ns": now, "chrony": None, "venues": rows})
+            return
+        bad = [r["venue"] for r, m in zip(rows, found) if abs(m.offset_ns - ref.offset_ns) > m.uncertainty_ns]
+        for r, m in zip(rows, found):
+            r["minus_chrony_ms"] = (m.offset_ns - ref.offset_ns) / 1e6
+        self._write_row({"record_type": "CLOCK_CROSS_CHECK", "ts_ns": now, "chrony_offset_ms": ref.offset_ns / 1e6, "venues": rows, "disagree": bad})
+        if bad and not self.clock_cross_check_alarm:
+            self.clock_cross_check_alarm = True
+            self.session.ledger.record("CLOCK_CROSS_CHECK_DISAGREE", now, alarm=True, venues=",".join(bad), rows=rows)
+        elif not bad and self.clock_cross_check_alarm:
+            self.clock_cross_check_alarm = False
+            self.session.ledger.record("CLOCK_CROSS_CHECK_AGREE", now)
+
     async def run(self) -> dict[str, Any]:
         self.started_ts_ns = self.clock_ns()
-        if self.clock_source == "server_time":
+        if self.clock_source == "chrony":
+            await self._read_chrony(self.started_ts_ns)          # quoting starts only after a measurement exists (chrony absent: "unknown", no quote)
+        if self.clock_source in ("server_time", "chrony"):
             await self._probe_clock(self.started_ts_ns)         # quoting starts only after a measurement exists
         ticker = asyncio.create_task(self._ticker())
         try:
@@ -525,6 +592,11 @@ class LivePaperSession:
             # F04 item 5 (owner 20 Nov): every real-order session ends with the amend journal audit; a non-zero two-live-orders / booked-twice / overfill count is one REAL_ORDER_AUDIT_ALARM
             from .session_audit import real_order_audit
             summary["real_order_audit"] = real_order_audit(self.session.ledger, self.session.oms.plans, stopped, self.session.oms.alert_context(stopped))
+        if getattr(self.session.oms, "dust_aggregate", False):
+            # Phase 2 F06 (owner 20 Nov): the operator's end-of-session view of the carried dust: every balance left is an OPEN ITEM (venue, symbol, signed base, USDT, age); no automatic order
+            ag = self.session.oms.dust_agg_stats
+            summary["operator_open_items"] = {"carried_dust": self.session.oms.dust_open_items(stopped), "dust_age_alarms": ag["age_alarms"],
+                                              "dust_bound_active_at_end": self.session.oms.dust_bound is not None, "max_aggregate_dust_usdt": str(ag["max_aggregate_usdt"])}
         if self.account_fee_check is not None:
             summary["account_fee_snapshot"] = self.account_fee_check            # F07 (owner 20 Nov): the fee-rate snapshot and the risk-tier snapshot are kept apart
         if self.account_checks:
