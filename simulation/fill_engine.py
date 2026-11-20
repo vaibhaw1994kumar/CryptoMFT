@@ -186,6 +186,7 @@ class MakerOrder:
     # WP4: the level was absent AND outside the captured depth, so the queue ahead is UNKNOWN and was drawn from
     # MakerConfig.unknown_queue_* (a flag on the order and in the diagnostics), not observed.
     queue_unknown: bool = False
+    outside_captured_depth: bool = False   # item 5 (owner 20 Nov): placed where the capture does not reach (absent level beyond the deepest captured level), whatever the unknown-queue model
     filled_qty: float = 0.0
     first_fill_ts: float | None = None
     first_fill_is_synthetic: bool = False  # True when the very first fill came from synthetic flow
@@ -410,6 +411,8 @@ class MakerConfig:
                 warnings.warn(f"cohort_age='hazard' uses cohort_hazard_theta={self.cohort_hazard_theta}, {HAZARD_THETA_PROVENANCE}: not a perp fit, keep it out of the perp sensitivity range", RuntimeWarning, stacklevel=2)
         if self.postonly_amend_cross not in ("reject_keep", "cancel_order"):
             raise ValueError(f"postonly_amend_cross must be 'reject_keep' or 'cancel_order', got {self.postonly_amend_cross!r}")
+        if self.captured_depth_action not in ("flag", "refuse"):
+            raise ValueError(f"captured_depth_action must be 'flag' or 'refuse', got {self.captured_depth_action!r}")
         if not (self.opposite_cross_confirm_ms >= 0.0):
             raise ValueError(f"opposite_cross_confirm_ms must be >= 0, got {self.opposite_cross_confirm_ms!r}")
         if self.opposite_cross_confirm_ms > 0.0 and not self.opposite_cross_fills:
@@ -449,6 +452,11 @@ class MakerConfig:
     # RPI prints (Bybit Retail Price Improvement, owner 13 Nov, upstreamed from the MM session): a print flagged `rpi` executed against RPI liquidity, not the displayed book. True: such a print never fills our orders and is not
     # matched against a book decrease or counted as queue drain (it is counted in diag["rpi_trades_excluded"]). False (default, every arb profile): every print is treated alike, byte-identical to before.
     exclude_rpi_trades: bool = False
+    # Item 5 (owner 20 Nov), the captured-depth counter, every strategy. A resting order placed at a price the capture does not cover (the level is absent AND beyond the deepest captured level: the one
+    # definition, _inside_captured_depth, the same rule as the fill flag "outside_captured_depth"), a taker walk that consumed the last captured level, and a fill booked on such an order are COUNTED
+    # always (diag "captured_depth_*", the manifest's captured_depth block). "flag" (default): counted only, nothing changes. "refuse": such a resting order is refused at placement (reason
+    # outside_captured_depth); a taker walk is never refused (a hedge or an unwind must not be), it is counted and no depth is ever invented beyond the capture.
+    captured_depth_action: str = "flag"
     # Owner 18 Nov (go-live stage 1, from the 17 Nov testnet drill): what the simulated venue does with an amend of a resting PostOnly order to a price that would cross the book. "reject_keep" (default,
     # every profile up to v1_14): the amend is rejected and the order rests unchanged (the 2i item 1b assumption). "cancel_order": the amend is rejected AND the order ends (cancelled), nothing rests: what
     # both testnets did (Bybit and Binance, post-only amend to a crossing price). ASSUMED: the venue's reply to the amend itself (the drill's REST path saw no reply and timed out; the end state is proven).
@@ -589,7 +597,9 @@ class MakerExecutor:
             if not settings.get("exclude_rpi_trades"):
                 settings.pop("exclude_rpi_trades", None)        # 2i item 8 (owner 17 Nov): listed only when on (core 1509601 added it to every hash): earlier profiles' hashes match again
             if settings.get("postonly_amend_cross") == "reject_keep":
-                settings.pop("postonly_amend_cross", None)      # owner 18 Nov: listed only when it is not the default, so every earlier profile's settings hash is unchanged
+                settings.pop("postonly_amend_cross", None)
+            if settings.get("captured_depth_action") == "flag":
+                settings.pop("captured_depth_action", None)     # item 5 (owner 20 Nov): listed only when not the default: every earlier profile's settings hash is unchanged      # owner 18 Nov: listed only when it is not the default, so every earlier profile's settings hash is unchanged
             self._settings_hash = hashlib.sha256(json.dumps(settings, sort_keys=True, default=str).encode()).hexdigest()
         return self._settings_hash
 
@@ -819,13 +829,16 @@ class MakerExecutor:
                 initial_q = self._unknown_queue_draw(venue, price, touch, tick_size)
                 self.diag["absent_level_outside_depth_unknown"] = self.diag.get("absent_level_outside_depth_unknown", 0) + 1
                 self.diag["unknown_queue_assigned_total"] = self.diag.get("unknown_queue_assigned_total", 0) + initial_q
+        outside = queue_unknown or (level_was_absent and self.config.unknown_queue_model == "legacy" and not self._inside_captured_depth(book, side, price))
+        if outside:
+            self.diag["captured_depth_quotes_outside"] = self.diag.get("captured_depth_quotes_outside", 0) + 1      # item 5: present only when it happened
         order = MakerOrder(
             order_id=next(self._ids), venue=venue, pair=pair, symbol=symbol,
             side=side, price=price, size=size, remaining=size,
             queue_ahead=initial_q, initial_queue_ahead=initial_q,
             placed_ts=now, active_ts=active_ts, signal_id=signal_id,
             arrival_ts=active_ts if arrival_ts is None else arrival_ts,
-            level_was_absent=level_was_absent, queue_unknown=queue_unknown,
+            level_was_absent=level_was_absent, queue_unknown=queue_unknown, outside_captured_depth=outside,
             relative_to_touch_ticks=rel_ticks,
             local_depth=state.top_depth,
             local_depth_baseline=state.top_depth_baseline,
@@ -850,6 +863,10 @@ class MakerExecutor:
             order.queue_ahead = order.initial_queue_ahead = lq.join(order.order_id, size)
         self._settle_queue(order)
         return order
+
+    def outside_captured_depth(self, book: OrderBook, side: Side, price: float, tick_size: float) -> bool:
+        """Item 5: would an order resting at `price` sit where the capture does not reach? The level is absent and the price lies beyond the deepest captured level (_inside_captured_depth)."""
+        return self._level_size(book, side, price, tick_size) == 0.0 and not self._inside_captured_depth(book, side, price)
 
     @staticmethod
     def _inside_captured_depth(book: OrderBook, side: Side, price: float) -> bool:
@@ -1743,6 +1760,9 @@ class MakerExecutor:
 
         notional = order.price * qty
         fee = notional * (fee_bps / 10_000.0)
+        if order.outside_captured_depth:                                       # item 5: a fill booked at a level the capture does not cover
+            self.diag["captured_depth_fills_outside"] = self.diag.get("captured_depth_fills_outside", 0) + 1
+            self.diag["captured_depth_fill_qty_outside"] = self.diag.get("captured_depth_fill_qty_outside", 0.0) + qty
         fill = Fill(
             ts=now, venue=order.venue, side=order.side_str, qty=qty, price=order.price,
             fee=fee, is_taker=False, order_id=order.order_id, signal_id=order.signal_id,

@@ -282,6 +282,8 @@ class QueueAwareVenueAdapter(DeterministicVenueAdapter):
         if self.impact is not None and taker_book is not None:
             taker_book = self._impact_shifted(taker_book)             # level 3: the walk reads the world the feed carries (our own earlier orders have moved this venue's prices)
         callbacks = super().handle(request, taker_book)      # IOC / FOK / market: a taker fill, the deterministic walk
+        if taker_book is not None:
+            self._count_walk_to_capture_end(request, taker_book, callbacks)
         if self.impact is not None:
             self._impact_record(request, callbacks)
         if self.own_ledger is not None and own_book is not None:
@@ -293,6 +295,23 @@ class QueueAwareVenueAdapter(DeterministicVenueAdapter):
             callbacks = (self._callback(request, ExecutionEventType.CANCELLED, reason="IOC expired unfilled"),)
             self._remember(callbacks)
         return callbacks
+
+    def _count_walk_to_capture_end(self, request: CanonicalOrderRequest, book: CoreBook, callbacks) -> None:
+        """Item 5 (owner 20 Nov): a taker walk that consumed the LAST captured level of its side (the book ran out inside the order's limit) reached the end of the captured depth: counted (a fill there
+        is the fill at the capture's edge; nothing beyond it is ever filled). Never refused: a hedge or an unwind must go out."""
+        buy = request.side == CoreSide.BUY
+        levels = sorted(book.asks.items()) if buy else sorted(book.bids.items(), reverse=True)
+        if not levels:
+            return
+        limit = request.price
+        inside = [(p, q) for p, q in levels if limit is None or (p <= limit if buy else p >= limit)]
+        if not inside or len(inside) != len(levels):
+            return                                                                         # the limit stops the walk before the capture ends
+        filled = max((cb.cumulative_filled_quantity for cb in callbacks if cb.event_type in (ExecutionEventType.FILLED, ExecutionEventType.PARTIAL)), default=Decimal("0"))
+        if filled >= sum((q for _p, q in inside), Decimal("0")) and filled > 0:
+            d = self.executor.diag
+            d["captured_depth_taker_walks_to_end"] = d.get("captured_depth_taker_walks_to_end", 0) + 1
+            d["captured_depth_taker_qty_at_edge"] = d.get("captured_depth_taker_qty_at_edge", 0.0) + float(inside[-1][1])
 
     def _own_consumed(self, book: CoreBook, now_s: float) -> CoreBook:
         """A copy of the core book with our own takes that have not refilled yet removed (OwnTakeLedger.missing_by_price at `now_s`); a level whose size falls to zero is dropped. The real core book is never touched; no copy when nothing is missing."""
@@ -429,6 +448,9 @@ class QueueAwareVenueAdapter(DeterministicVenueAdapter):
         side = "buy" if request.side == CoreSide.BUY else "sell"
         now = self._at(request)
         mirror = self._view(book, now)
+        if getattr(self.executor.config, "captured_depth_action", "flag") == "refuse" and self.executor.outside_captured_depth(mirror, SimSide.BID if side == "buy" else SimSide.ASK, float(request.price), self.tick_size):
+            self.executor.diag["captured_depth_quotes_refused"] = self.executor.diag.get("captured_depth_quotes_refused", 0) + 1      # item 5: the profile turned the flag into a refusal
+            return (self._callback(request, ExecutionEventType.REJECTED, reason="outside_captured_depth"),)
         order = self.executor.place(
             venue=self.venue, pair=self.pair or request.instrument_id, symbol=self.pair or request.instrument_id,
             side=SimSide.BID if side == "buy" else SimSide.ASK, price=float(request.price), size=float(request.quantity),
